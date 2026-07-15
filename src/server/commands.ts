@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type {
   AgentTreeNode,
@@ -71,10 +71,16 @@ function handleDownloadLogs(agentId: string | undefined, ctx: CommandContext): C
 
   const dir = ctx.logger.logDir;
   const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".jsonl")) : [];
-  const entries = files.map((file) => ({
-    name: file,
-    data: Uint8Array.from(readFileSync(join(dir, file))),
-  }));
+  const entries = files.map((file) => {
+    const path = join(dir, file);
+    return {
+      name: file,
+      data: Uint8Array.from(readFileSync(path)),
+      // DH-0021: real per-file mtime, not the archive's build time, so the exported
+      // bundle retains diagnostic value (when each agent's log was last written).
+      mtimeSeconds: Math.floor(statSync(path).mtimeMs / 1000),
+    };
+  });
   return {
     kind: "binary",
     status: 200,

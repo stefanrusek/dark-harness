@@ -330,3 +330,69 @@ No code changes were needed — this was read-only verification. Gates re-run cl
 `bun run typecheck`, `bun run lint`, `bun run test:coverage` (806 pass, 0 fail, 100%
 coverage across `src/server/`). Ticket closed (`status: closed`, `resolution: done`);
 `tracking/views/dark-harness-view.md` regenerated to match.
+
+### 2026-07-15 — DH-0019 and DH-0021 closed
+
+Both tickets in this round were Server-owned bugs found in the earlier sweep, both closed
+this pass with code changes.
+
+**DH-0019 — SSE/EventBuffer backpressure and silent resume gap:**
+
+- `src/contracts/events.ts` gains a new `ResyncEvent` (`type: "resync"`) added to the
+  `ServerSentEvent` union — a contracts change, called out here since `src/contracts/` is
+  shared and normally an architect-escalation trigger (`CLAUDE.md` §6.2). Treated as
+  pre-approved: the ticket's own Given/When/Then explicitly specifies "a `gap`/`resync`
+  event is emitted" as the fix, so the shape was fixed at triage time, not decided
+  unilaterally here.
+- `EventBuffer.getEventsAfter` now returns `{ events, gap }` instead of a bare array:
+  `gap: true` exactly when `lastEventId` was given but unresolvable (evicted, or unknown
+  after a restart) — `false` for an omitted id (fresh connection) or a resolved one.
+- `DhServer.handleSse` emits a synthesized `resync` event (unique per-connection id, never
+  buffered) immediately after `: connected` whenever `gap` is true, before replaying the
+  best-effort window.
+- Backpressure: every `controller.enqueue()` in the SSE stream (replay, resync, live
+  events, heartbeat) now goes through a `safeEnqueue` helper that checks
+  `controller.desiredSize` against a threshold (`MAX_NEGATIVE_DESIRED_SIZE = -50`) before
+  enqueuing; past it, the connection is closed outright rather than left to buffer
+  server-side memory unboundedly for a consumer that isn't draining. Cleanup (unsubscribe +
+  clear heartbeat) is now a single idempotent `cleanup()` reachable from `cancel()`,
+  `safeEnqueue`'s catch, and the backpressure-close branch — fixes the bare `catch {}` that
+  previously didn't reliably clean up on a non-disconnection enqueue failure.
+- Testing note: proving the backpressure-close path needed care. Going through a real
+  `fetch()` round-trip doesn't work — Bun's HTTP transport keeps draining the response
+  stream into the OS socket buffer regardless of whether the *test* calls `reader.read()`,
+  so `desiredSize` never goes negative for small payloads. The test instead calls the
+  server's private `handleSse` directly (no transport layer in between), lets the
+  connection saturate and self-close entirely unread, then drains it afterward and asserts
+  draining terminates (`done: true`) after a bounded chunk count — proving both the close
+  happened and growth was bounded.
+
+**DH-0021 — `buildTar` throwing on an over-100-byte entry name:**
+
+- `src/server/tar.ts`: oversized names (post `encodeURIComponent`, e.g. from an unusual
+  `agentId`) are now transparently renamed to a short sha256-derived stand-in (16 hex chars
+  + original extension) instead of throwing and aborting the whole bundle. A
+  `00-RENAMED-ENTRIES.txt` manifest entry is appended to the archive when any renames
+  happened, mapping archived name back to original name, so nothing is silently lost. A
+  numeric disambiguator handles the (astronomically unlikely) case of two renamed names
+  colliding. `buildHeader`'s own bounds check is kept as a defensive invariant (now
+  `export`ed solely so its unreachable-in-practice branch stays unit-tested) rather than
+  removed.
+- Also fixed the smaller finding in the same ticket: `TarEntry` gained an optional
+  `mtimeSeconds`, and `commands.ts`'s full-bundle path now passes each log file's real
+  `statSync(...).mtimeMs` instead of every entry silently getting the archive's build time.
+- Regression tests added for exactly the 100-byte boundary, a name past it, a
+  hash-collision-forced disambiguation, and per-entry vs. defaulted mtime.
+
+**Gates:** `bun run typecheck` and `bun run lint` scoped to `src/server/` and
+`src/contracts/` are clean; `bun test src/server src/contracts --coverage` is 87 pass / 0
+fail, 100%/100% funcs/lines across every file in both directories. Ran the full `bun test
+src` too (822 pass, 0 fail) to confirm no regression against other domains' in-flight work
+in this shared checkout. Note: `bun run typecheck` and `bun run lint` run unscoped
+(repo-wide) currently fail, but only on files outside Server's ownership
+(`src/tui/state.ts`, `src/agent/skills.ts`, `src/agent/tools/read.ts`) that were mid-edit by
+another concurrent agent in this same shared working tree at the time — not touched here
+and not this domain's responsibility.
+
+Both tickets closed (`status: closed`, `resolution: done`);
+`tracking/views/dark-harness-view.md` regenerated to match.

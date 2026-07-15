@@ -316,6 +316,88 @@ describe("DhServer", () => {
       // the bun test process's event loop alive past the suite's own end — the CI gate
       // failing to exit cleanly is the regression this guards against.
     });
+
+    test("DH-0019: emits a resync event before replay when Last-Event-ID is unknown/evicted", async () => {
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      loop.emitEvent(outputEvent("1"));
+      loop.emitEvent(outputEvent("2"));
+
+      const res = await fetch(`http://localhost:${port}/api/events`, {
+        headers: { "Last-Event-ID": "never-seen" },
+      });
+      const events = (await readSseEvents(res, 3)) as Array<{ type: string }>;
+      expect(events[0]?.type).toBe("resync");
+      expect(events.slice(1)).toEqual([outputEvent("1"), outputEvent("2")]);
+    });
+
+    test("DH-0019: does not emit a resync event when Last-Event-ID is known or omitted", async () => {
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      loop.emitEvent(outputEvent("1"));
+      loop.emitEvent(outputEvent("2"));
+
+      const known = await fetch(`http://localhost:${port}/api/events`, {
+        headers: { "Last-Event-ID": "1" },
+      });
+      const knownEvents = (await readSseEvents(known, 1)) as Array<{ type: string }>;
+      expect(knownEvents.map((e) => e.type)).not.toContain("resync");
+
+      const fresh = await fetch(`http://localhost:${port}/api/events`);
+      const readPromise = readSseEvents(fresh, 1);
+      loop.emitEvent(outputEvent("3"));
+      const freshEvents = (await readPromise) as Array<{ type: string }>;
+      expect(freshEvents.map((e) => e.type)).not.toContain("resync");
+    });
+
+    test("DH-0019: closes an unresponsive connection instead of buffering unboundedly", async () => {
+      // Going through a real HTTP round-trip (fetch to a bound port) doesn't reliably
+      // exercise this path: Bun's transport keeps draining the response stream into the OS
+      // socket buffer regardless of whether *this test* calls `reader.read()`, so
+      // `controller.desiredSize` never actually goes negative for the tiny payloads used
+      // here. Calling the server's private SSE handler directly gets the real
+      // `ReadableStreamDefaultController` with no transport layer between it and this
+      // test's reader.
+      //
+      // Note `reader.closed` alone doesn't prove closure either: per the streams spec,
+      // `controller.close()` only stops future enqueues — a reader whose queue still has
+      // unread chunks doesn't observe `closed` resolve until it actually drains them. So
+      // this test lets the connection saturate and self-close *unread* first, then drains
+      // it afterward and asserts draining terminates (`done: true`) after a bounded number
+      // of chunks — proving both that the close happened and that growth was bounded, not
+      // unbounded.
+      server = new DhServer({
+        agentLoop: loop,
+        sessionId: "s1",
+        logDir: dir,
+        port: 0,
+        heartbeatIntervalMs: 1,
+      });
+      server.start();
+      // Reaching a private method deliberately, for the reason explained above.
+      const handleSse = (
+        server as unknown as { handleSse: (req: Request) => Response }
+      ).handleSse.bind(server);
+      const res: Response = handleSse(new Request("http://localhost/api/events"));
+
+      // Let the unread connection saturate past the backpressure threshold and self-close,
+      // entirely without draining it.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("no response body");
+      let count = 0;
+      let done = false;
+      while (!done) {
+        const result = await reader.read();
+        done = result.done;
+        if (!done) count++;
+        // Bail out rather than hang the suite if this regresses to unbounded growth.
+        if (count > 10_000) break;
+      }
+      expect(done).toBe(true);
+      expect(count).toBeLessThan(10_000);
+    });
   });
 
   describe("bearer token auth (ADR 0004)", () => {

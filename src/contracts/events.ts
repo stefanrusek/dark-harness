@@ -41,9 +41,23 @@ export interface SessionEndedEvent extends SseEventBase {
   exitCode: number;
 }
 
+/**
+ * Emitted once, immediately after a client's SSE resume (`Last-Event-ID`) could not be
+ * satisfied precisely — the id was unknown (evicted from `EventBuffer`'s retention window,
+ * or never seen because the server restarted). The replay that follows is still
+ * best-effort (the current buffered window), but this event lets a client positively
+ * detect the gap and surface "history may be incomplete" instead of rendering a
+ * clean-looking resume. Never emitted on a fresh connection (no `Last-Event-ID` given) or
+ * when the id resolved successfully.
+ */
+export interface ResyncEvent extends SseEventBase {
+  type: "resync";
+}
+
 export type ServerSentEvent =
   | AgentOutputEvent
   | AgentStatusEvent
   | AgentSpawnedEvent
   | TokenUsageEvent
-  | SessionEndedEvent;
+  | SessionEndedEvent
+  | ResyncEvent;

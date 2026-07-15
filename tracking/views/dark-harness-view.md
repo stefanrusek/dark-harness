@@ -80,8 +80,6 @@ source: tracking/
 | [DH-0016](../DH-0016-skill-system-loading-and-discovery-gaps.md) | The bundled `cli-tools` skill is unreachable via the `Skill` tool, plus several other skill-system gaps | bug | stefan |
 | [DH-0017](../DH-0017-error-swallowing-and-status-inconsistencies.md) | Harness-level errors are silently discarded in one path, and "stopped" vs "failed" agent status can flip depending on event ordering | bug | stefan |
 | [DH-0018](../DH-0018-system-prompt-discipline-gaps.md) | `systemPrompt` override silently drops the `TASK_FAILED`/logging/discipline contract, and the prompt lacks guidance for unattended dead-ends | bug | stefan |
-| [DH-0019](../DH-0019-sse-event-buffer-robustness.md) | SSE/EventBuffer has no backpressure handling and silently serves a gap when `Last-Event-ID` was evicted | bug | stefan |
-| [DH-0021](../DH-0021-tar-bundle-name-length-limit-breaks-download.md) | `buildTar` throws and kills the entire session-bundle download if any single agent's encoded id exceeds 100 bytes | bug | stefan |
 | [DH-0024](../DH-0024-sse-reconnect-lacks-backoff-and-gap-indication.md) | Both TUI and Web SSE clients reconnect on a fixed delay with no backoff, and give no indication of a missed-event gap or session restart | bug | stefan |
 | [DH-0026](../DH-0026-tui-input-editing-gaps.md) | TUI's input box has no cursor movement, no bracketed-paste support, and two dead keys | bug | stefan |
 | [DH-0027](../DH-0027-tui-tree-view-scroll-follows-selection-bug.md) | TUI's agent tree view doesn't scroll to follow selection — the highlighted entry can scroll off-screen with no way to see it | bug | stefan |
@@ -100,6 +98,8 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0021](../DH-0021-tar-bundle-name-length-limit-breaks-download.md) | `buildTar` throws and kills the entire session-bundle download if any single agent's encoded id exceeds 100 bytes | done |
+| [DH-0019](../DH-0019-sse-event-buffer-robustness.md) | SSE/EventBuffer has no backpressure handling and silently serves a gap when `Last-Event-ID` was evicted | done |
 | [DH-0008](../DH-0008-adopt-spile-ops-skill.md) | Adopt (or build) a `spile-ops` skill for mechanical ticket operations | done |
 | [DH-0007](../DH-0007-server-round1-open-threads-verification.md) | Server's three Round-1 open threads — likely stale, never explicitly verified and closed | done |
 | [DH-0006](../DH-0006-e2e-multiturn-conversation-coverage.md) | No dedicated e2e test proves plain multi-turn conversation continuity over real HTTP | done |

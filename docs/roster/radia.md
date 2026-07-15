@@ -109,3 +109,43 @@ against current code and closed the ticket (`status: closed`, `resolution: done`
 
 Nothing here needed a fix — this was pure confirmation that the integration risk noted at
 handoff time paid off cleanly. No new open threads from this pass.
+
+### 2026-07-15 — DH-0019 and DH-0021: SSE backpressure/gap detection, tar long-name fix
+
+Full detail in `docs/handoffs/server.md`'s new status entry — durable bits worth
+remembering here:
+
+- Added `ResyncEvent` to `src/contracts/events.ts` (a shared-contracts change) without
+  escalating to the architect: the ticket's own acceptance criteria specified the fix
+  ("a `gap`/`resync` event is emitted") at triage time, so I treated the shape as already
+  decided rather than mine to design. Worth double-checking with the coordinator/architect
+  after the fact if that judgment call turns out to be wrong.
+- `EventBuffer.getEventsAfter` changed its return shape from a bare array to
+  `{ events, gap }` — a breaking change to that method's signature, but it's Server-internal
+  (not a `src/contracts/` type), so no cross-domain contract implications.
+- New convention: `DhServer`'s SSE stream now funnels every `controller.enqueue()` through
+  one `safeEnqueue` helper with a single idempotent `cleanup()` — if a future change adds
+  another thing to write to the stream, route it through `safeEnqueue`, don't call
+  `controller.enqueue` directly, or it'll bypass both the backpressure check and reliable
+  cleanup-on-failure.
+- Testing gotcha worth remembering for any future SSE test: a real `fetch()` round-trip to
+  a bound port cannot be used to test backpressure/desiredSize-based logic — Bun's HTTP
+  transport drains the response stream into the OS socket buffer independently of whether
+  the test's own reader calls `.read()`. Had to call the server's private `handleSse`
+  directly to get the real, undrained `ReadableStreamDefaultController`. Also: don't trust
+  `reader.closed` as a "did it close" check when the reader never drained anything —
+  `controller.close()` only stops future enqueues; `closed` doesn't resolve until existing
+  queued chunks are actually read out. Had to saturate-then-drain to prove it.
+- `buildTar`'s long-name fix uses a content-derived (sha256-based) rename rather than the
+  ustar `prefix` field: the prefix field only helps when a long path can be split at a `/`
+  directory boundary, which doesn't apply to a single long filename with no separators (the
+  actual shape of an over-limit `agentId`-derived entry name).
+- Observed, but did not touch: this shared checkout had another agent's uncommitted,
+  in-progress work on `src/tui/state.ts`, `src/agent/skills.ts`, and
+  `src/agent/tools/read.ts` at the same time (one of which has a pre-existing typecheck
+  error, unrelated to Server). Scoped my own gate runs to `src/server/` + `src/contracts/`
+  to avoid being blocked by or interfering with that other domain's WIP; ran the full
+  `bun test src` once to confirm no cross-domain regression from my changes specifically.
+
+Both DH-0019 and DH-0021 closed (`status: closed`, `resolution: done`); view regenerated.
+No new open threads from this round.

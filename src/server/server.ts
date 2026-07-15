@@ -28,6 +28,10 @@ const COMMANDS_PATH = "/api/commands";
 // idle-timeout defaults (many L7 proxies/load balancers default around 60s), without being
 // so frequent it's meaningful overhead on an otherwise-quiet connection.
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000;
+// Backpressure threshold (DH-0019): once a stream controller's `desiredSize` (bytes still
+// wanted under the queue's high-water mark) drops below this, the consumer isn't draining
+// fast enough and the connection is closed rather than left to buffer unboundedly.
+const MAX_NEGATIVE_DESIRED_SIZE = -50;
 
 // Permissive CORS: `dh --connect <host> --web` runs the web UI as a separate local
 // process/origin talking to a remote `--server` (ADR 0003), so cross-origin browser
@@ -76,6 +80,7 @@ export class DhServer {
   private bunServer: ReturnType<typeof Bun.serve> | undefined;
   private unsubscribeEvent: (() => void) | undefined;
   private unsubscribeLog: (() => void) | undefined;
+  private resyncSeq = 0;
 
   constructor(options: DhServerOptions) {
     this.agentLoop = options.agentLoop;
@@ -155,45 +160,82 @@ export class DhServer {
 
   private handleSse(req: Request): Response {
     const lastEventId = req.headers.get("Last-Event-ID");
-    const replay = this.eventBuffer.getEventsAfter(lastEventId);
+    const { events: replay, gap } = this.eventBuffer.getEventsAfter(lastEventId);
     const encoder = new TextEncoder();
     let unsubscribe: (() => void) | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let closed = false;
+
+    // Cleanup is idempotent and reachable from three places: `cancel()` (client-initiated
+    // disconnect, the common case), and both `safeEnqueue`'s catch and the backpressure
+    // check below (server-initiated close of an unresponsive consumer) — see the
+    // DH-0019 notes on the bare `catch {}` not reliably unsubscribing.
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      unsubscribe?.();
+      clearInterval(heartbeat);
+    };
 
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
+        // A backpressure-aware enqueue: `desiredSize` goes negative once the stream's
+        // internal queue has more already-enqueued bytes than its high-water mark wants.
+        // A slow consumer (bad network, paused/backgrounded browser tab) that never drains
+        // would otherwise let that queue grow unbounded, since `controller.enqueue` itself
+        // doesn't block or reject on backpressure. Past a generous negative threshold we
+        // treat the connection as unresponsive and close it outright rather than keep
+        // buffering server-side memory for it — the client's own SSE reconnect (with
+        // `Last-Event-ID`) is the recovery path, same as any other disconnect.
+        const safeEnqueue = (bytes: Uint8Array): void => {
+          if (closed) return;
+          const desiredSize = controller.desiredSize;
+          if (desiredSize !== null && desiredSize < MAX_NEGATIVE_DESIRED_SIZE) {
+            try {
+              controller.close();
+            } catch {
+              // Already closing/closed; fall through to cleanup regardless.
+            }
+            cleanup();
+            return;
+          }
+          try {
+            controller.enqueue(bytes);
+          } catch {
+            // Enqueue failed for any reason (closed controller, or otherwise) — treat it
+            // as a disconnect and clean up here rather than relying solely on `cancel()`,
+            // which some Bun/runtime paths don't reliably invoke after an enqueue throw.
+            cleanup();
+          }
+        };
+
         // A leading SSE comment (lines starting with ':' are ignored by any conforming
         // client, per the SSE spec) forces an immediate flush of the response headers and
         // first bytes. Without it, a connection with nothing yet to replay never sends a
         // byte until the first live event — which leaves the client's `fetch()`/
         // `EventSource` connection promise unresolved (and the underlying socket
         // indistinguishable from a hang) until then.
-        controller.enqueue(encoder.encode(": connected\n\n"));
+        safeEnqueue(encoder.encode(": connected\n\n"));
+        if (gap) {
+          // `lastEventId` was given but unknown (evicted, or the server restarted) — tell
+          // the client its resume is best-effort so it can surface "history may be
+          // incomplete" instead of looking like a clean resume (DH-0019).
+          safeEnqueue(encoder.encode(formatSseEvent(this.buildResyncEvent())));
+        }
         for (const event of replay) {
-          controller.enqueue(encoder.encode(formatSseEvent(event)));
+          safeEnqueue(encoder.encode(formatSseEvent(event)));
         }
         unsubscribe = this.agentLoop.onEvent((event: ServerSentEvent) => {
-          try {
-            controller.enqueue(encoder.encode(formatSseEvent(event)));
-          } catch {
-            // Controller already closed (client disconnected); cancel() below unsubscribes.
-          }
+          safeEnqueue(encoder.encode(formatSseEvent(event)));
         });
         // Periodic keep-alive so idle connections don't get dropped (see Round 2 notes on
         // DEFAULT_HEARTBEAT_INTERVAL_MS above). A comment line — no `id:` field — so it
         // never touches `Last-Event-ID`/`EventBuffer` resume semantics.
         heartbeat = setInterval(() => {
-          try {
-            controller.enqueue(encoder.encode(": ping\n\n"));
-          } catch {
-            // Controller already closed (client disconnected); cancel() below clears the timer.
-          }
+          safeEnqueue(encoder.encode(": ping\n\n"));
         }, this.heartbeatIntervalMs);
       },
-      cancel: () => {
-        unsubscribe?.();
-        clearInterval(heartbeat);
-      },
+      cancel: cleanup,
     });
 
     return new Response(stream, {
@@ -205,6 +247,19 @@ export class DhServer {
         connection: "keep-alive",
       },
     });
+  }
+
+  /** Synthesizes a `resync` event with a unique id, distinct from any real event's id so it
+   * can never collide in `EventBuffer`/`Last-Event-ID` bookkeeping (it is never itself
+   * buffered — it's constructed fresh per connection and only ever written to the wire). */
+  private buildResyncEvent(): ServerSentEvent {
+    this.resyncSeq++;
+    return {
+      version: 1,
+      id: `resync-${Date.now()}-${this.resyncSeq}`,
+      timestamp: new Date().toISOString(),
+      type: "resync",
+    };
   }
 
   private async handleCommandRequest(req: Request): Promise<Response> {

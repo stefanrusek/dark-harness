@@ -38,17 +38,22 @@ export class EventBuffer {
   }
 
   /**
-   * Events strictly after `lastEventId`, oldest first. Returns the full buffered window
-   * when `lastEventId` is omitted/null, or when it is unknown (already evicted, or never
-   * seen by this buffer) — see the class doc for why "unknown" resolves to best-effort
-   * replay rather than an error.
+   * Events strictly after `lastEventId`, oldest first, plus a `gap` flag. Returns the full
+   * buffered window (with `gap: true`) when `lastEventId` is given but unknown (already
+   * evicted, or never seen — e.g. after a process restart) — see the class doc for why
+   * "unknown" resolves to best-effort replay rather than an error. `gap` is always `false`
+   * when `lastEventId` is omitted/null (a fresh connection has nothing to have missed) or
+   * when it resolved to a known position.
    */
-  getEventsAfter(lastEventId: string | undefined | null): ServerSentEvent[] {
-    if (!lastEventId) return [...this.events];
+  getEventsAfter(lastEventId: string | undefined | null): {
+    events: ServerSentEvent[];
+    gap: boolean;
+  } {
+    if (!lastEventId) return { events: [...this.events], gap: false };
     const seq = this.idToSeq.get(lastEventId);
-    if (seq === undefined) return [...this.events];
+    if (seq === undefined) return { events: [...this.events], gap: true };
     const offset = seq - this.firstSeq + 1;
-    return this.events.slice(offset);
+    return { events: this.events.slice(offset), gap: false };
   }
 
   get size(): number {
