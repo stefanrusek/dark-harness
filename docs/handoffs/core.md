@@ -272,6 +272,51 @@ start without crashing — full PTY/browser-driven verification is still the E2E
 job). Anything you can't finish this round, name explicitly in a new dated status entry
 below.
 
+---
+
+## Round 3 — OPEN — real cancellation (stopAgent should actually stop something)
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+The owner is about to test `dh` interactively for the first time. Right now `stopAgent` is
+a documented no-op for the root agent and only does task-registry bookkeeping (marks
+status, calls `controller.abort()`) for sub-agents — it never actually reaches
+`runAgentLoop`, so a "stopped" agent keeps running its current turn to completion
+regardless. Confirmed by reading the code: `AgentLoopParams` (`src/agent/loop.ts`) has no
+`signal` field at all; `AgentRuntime.spawnAgent()` (`runtime.ts` ~line 170) has the
+`TaskRunHandle`'s `AbortSignal` sitting right there in scope and never passes it to
+`runAgentLoop`; `runRoot()` (~line 211) has no `AbortController` at all — the root agent
+isn't tracked in `tasks`, so there's genuinely nothing to abort yet. `src/cli.ts`'s
+`stopAgent` (~line 224) documents exactly this gap.
+
+**Scope, minimum viable (cooperative cancellation is fine — a full mid-provider-call abort
+is a nice-to-have, not required):**
+1. Add `signal?: AbortSignal` to `AgentLoopParams` (`loop.ts`). Check it between turns at
+   least (stop starting a new turn once aborted); if it's not much more work, also pass it
+   through to the provider call and tool invocations that already accept one (`Bash`
+   already does, per `tools/bash.ts`) so an in-flight turn can actually be interrupted, not
+   just the *next* one prevented. Your call on how deep to go — document exactly what "stop"
+   does and doesn't interrupt, so the TUI/Web status the operator sees isn't misleading.
+2. `spawnAgent()`: pass `handle.signal` into its `runAgentLoop({...})` call.
+3. `runRoot()`: give `AgentRuntime` its own root-level `AbortController` (instance field),
+   pass its `.signal` into `runAgentLoop`, and expose a way to trigger it (e.g.
+   `stopRoot(): void`) that `src/cli.ts`'s `AgentLoopHandle` adapter's `stopAgent` calls for
+   `ROOT_AGENT_ID` instead of the current no-op.
+4. Decide (and document) what an aborted turn reports: presumably `AgentLoopResult.success:
+   false` with a clear `finalOutput`/reason, mapped the same way a self-reported task
+   failure already is — no new `ExitCode`/contracts change needed unless you find you
+   genuinely need one (that'd be a request, not a fork, per usual).
+
+**Gates:** same four commands, plus re-run `bun run e2e` — consider (your call, and this may
+mean a request to Hedy/E2E rather than you touching `e2e/`) whether a real stop-a-running-
+agent scenario belongs in the e2e suite now that it'd have real behavior to verify.
+
+**Definition of done:** a regression test proves that calling `stop` on a running agent
+(root or sub-agent) actually changes its trajectory — it doesn't run to natural completion
+as if nothing happened. State exactly what's covered vs. still a known gap (e.g. if you
+scope to "stops before the next turn" rather than "interrupts an in-flight model call,"
+say so explicitly). Append a dated status entry here and update `docs/roster/grace.md`.
+
 ### 2026-07-15 — Grace, Round 2 (integration: wire cli.ts to the real Server/TUI/Web)
 
 Worked in a fresh worktree (`grace-round2`, branched from `origin/claude/coordinator-onboarding-kab9ls`
