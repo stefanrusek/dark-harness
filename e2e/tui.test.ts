@@ -3,23 +3,13 @@
 // binary under a real pseudo-terminal via `tmux` (see support/tmux-pty.ts's header comment
 // for why tmux, not node-pty).
 //
-// IMPORTANT — documents a confirmed cross-domain defect, doesn't work around it silently:
-// a fresh interactive session's root agent cannot currently be started from the TUI's own
-// input box. `src/tui/state.ts`'s `handleRootKey` only ever sends `send_message` once
-// `state.rootAgentId` is non-null, and `rootAgentId` is only populated by an `agent_spawned`
-// SSE event (state.ts `handleSseEvent`) — which itself only fires once the root agent's
-// `runAgentLoop` starts, which only happens once `send_message` is sent. Pressing left-arrow
-// to open the tree view issues `request_agent_tree` (which *does* return a synthesized root
-// node even pre-start — verified directly in e2e/server-protocol.test.ts's first test) but
-// `applyTreeResponse` never feeds that back into `rootAgentId`, so there is no path back to
-// the root view that unblocks sending. Confirmed live below: typing a message and pressing
-// Enter shows "No root agent yet — please wait." forever. The same gap exists in the Web
-// client (`src/web/client/app.ts` never calls `request_agent_tree` at all) — see
-// e2e/web.test.ts's header comment for how that suite works around it for its own coverage.
-// This needs a fix in the TUI/Web domains (e.g. seed `rootAgentId` from the
-// `request_agent_tree` response, or issue it automatically on boot) — flagged in
-// docs/handoffs/e2e.md's status log as a cross-domain request, not fixed here (out of e2e/'s
-// ownership per CLAUDE.md §3).
+// FIXED DEFECT (originally found by this test): a fresh interactive session's root agent
+// could not be started from the TUI's own input box — `applyTreeResponse` never seeded
+// `rootAgentId` from a `request_agent_tree` response, and nothing issued that request on
+// startup, so `rootAgentId` stayed null until an `agent_spawned` event that could never
+// fire. Fixed in `src/tui/state.ts`/`app.ts` (TUI round 3, docs/handoffs/tui.md). The first
+// test below now exercises the real fix: typing a message and pressing Enter with no
+// `agent_spawned` event ever having fired actually sends it and renders the real response.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { ensureBuilt } from "./support/build.ts";
@@ -36,7 +26,7 @@ afterEach(() => {
 
 describe("local TUI (dh, no flags) under a real PTY", () => {
   test("boots, renders the alt-screen shell, and responds to real keystrokes", async () => {
-    const provider = startMockAnthropicProvider([successTurn("unused in this scenario")]);
+    const provider = startMockAnthropicProvider([successTurn("Hello from the fixed TUI!")]);
     cleanups.push(provider.stop);
     const ws = createWorkspace();
     cleanups.push(ws.cleanup);
@@ -70,10 +60,12 @@ describe("local TUI (dh, no flags) under a real PTY", () => {
     expect(withInput).toContain("[Enter] send");
 
     session.sendKeys("Enter");
-    // Documented defect (see file header): this never actually sends, and the footer says so
-    // instead of a real agent_output ever appearing.
-    await session.waitFor((screen) => screen.includes("No root agent yet"));
-  }, 20_000);
+    // Real fix, not a workaround: rootAgentId came from the tree-response bootstrap above
+    // (no agent_spawned event has fired yet), so this actually sends and the real turn
+    // completes end to end.
+    await session.waitFor((screen) => screen.includes("Hello from the fixed TUI!"), 15_000);
+    await session.waitFor((screen) => screen.includes("session ended"), 15_000);
+  }, 30_000);
 });
 
 describe("--connect: a real second dh process against a real dh --server", () => {
@@ -110,9 +102,9 @@ describe("--connect: a real second dh process against a real dh --server", () =>
     await session.waitFor((screen) => screen.includes("Dark Harness"));
 
     // Kick off the root agent's only turn via a direct API call against the real remote
-    // server (working around the TUI-side defect documented at the top of this file) — the
-    // point of this test is proving the real second `dh --connect` process renders it live
-    // over the wire, not exercising the (currently broken) input-box send path.
+    // server — this test's point is proving the real second `dh --connect` process renders
+    // it live over the wire (the input-box send path itself is covered by the local-TUI
+    // test above).
     const postRes = await fetch(`http://localhost:${port}/api/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
