@@ -12,6 +12,10 @@
 // Usage:
 //   bun scripts/build.ts [--target <t>] [--outfile <path>] [--release-tag <tag>]
 //
+// Each flag accepts either the space-separated form (`--target <t>`) or the `--flag=value`
+// form (`--target=<t>`). Any argument that isn't a recognized flag (in either form) is a
+// hard error (exit 2) — no silent fallback to defaults.
+//
 // --target <t>          Passed through to `bun build --target <t>` (cross-compile). Omitted
 //                        entirely when not given, matching bun's own "build for this host"
 //                        default.
@@ -31,21 +35,42 @@ function parseArgs(argv: string[]): {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--target") {
-      i += 1;
-      target = argv[i];
+    const eqIndex = arg.startsWith("--") ? arg.indexOf("=") : -1;
+    const flag = eqIndex === -1 ? arg : arg.slice(0, eqIndex);
+    const inlineValue = eqIndex === -1 ? undefined : arg.slice(eqIndex + 1);
+
+    if (flag === "--target") {
+      if (inlineValue !== undefined) {
+        target = inlineValue;
+      } else {
+        i += 1;
+        target = argv[i];
+      }
       continue;
     }
-    if (arg === "--outfile") {
-      i += 1;
-      const value = argv[i];
+    if (flag === "--outfile") {
+      let value: string | undefined;
+      if (inlineValue !== undefined) {
+        value = inlineValue;
+      } else {
+        i += 1;
+        value = argv[i];
+      }
       if (value !== undefined) outfile = value;
       continue;
     }
-    if (arg === "--release-tag") {
-      i += 1;
-      releaseTag = argv[i];
+    if (flag === "--release-tag") {
+      if (inlineValue !== undefined) {
+        releaseTag = inlineValue;
+      } else {
+        i += 1;
+        releaseTag = argv[i];
+      }
+      continue;
     }
+
+    console.error(`scripts/build.ts: unrecognized argument "${arg}"`);
+    process.exit(2);
   }
 
   return { target, outfile, releaseTag };

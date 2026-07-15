@@ -1339,3 +1339,35 @@ a test or a documented manual verification either way). Confirm by hand: `bun sc
 build.ts --target=bun-linux-x64 --outfile /tmp/dh-test` actually produces a Linux ELF binary
 (check with `file`), and an actually-unrecognized flag exits non-zero with a clear message.
 Append a dated status entry here and update `docs/roster/grace.md` when done.
+
+### 2026-07-15 — Round 9 closed — Grace (resumed)
+
+Fixed `scripts/build.ts`'s `parseArgs()`: each recognized flag (`--target`, `--outfile`,
+`--release-tag`) now accepts both the space-separated form (`--flag value`) and the
+`--flag=value` form — the `=` form is detected by splitting on the first `=` in any token
+starting with `--`, falling back to consuming the next argv element when no inline value is
+present. Any argument that doesn't match a recognized flag (in either form) now prints
+`scripts/build.ts: unrecognized argument "<arg>"` to stderr and exits 2 immediately, instead
+of being silently dropped. Updated the file's header usage comment to document both forms
+and the reject-unknown-args behavior.
+
+`src/cli.ts`'s own `parseArgs` doesn't support the `=` form either and has no
+reject-unknown-args behavior of its own to mirror — left that file untouched since it's out
+of this round's scope (the handoff only asked me to check it for an existing convention, not
+change it); `scripts/build.ts` now sets its own local convention, matching what the round
+description asked for from the release-pipeline-safety angle.
+
+**Gates:** `bun run typecheck` and `bun run lint` both green. `scripts/` isn't part of the
+100% coverage gate (Round 8's note, still true) so no unit test added — verified entirely by
+hand, live, with the real script:
+- `bun scripts/build.ts --target=bun-linux-x64 --outfile /tmp/dh-test` → `file /tmp/dh-test`
+  reports `ELF 64-bit LSB executable, x86-64, ... for GNU/Linux`, i.e. a real Linux binary
+  produced from this host (arm64 macOS), confirming the `=` form is now honored for
+  cross-compilation instead of silently falling back to the host arch.
+- `bun scripts/build.ts --target bun-linux-x64 --outfile /tmp/dh-test2` (space form) →
+  same ELF Linux output, confirming the pre-existing form still works unchanged.
+- `bun scripts/build.ts --bogus-flag foo` → prints
+  `scripts/build.ts: unrecognized argument "--bogus-flag"` to stderr and exits 2, no binary
+  produced.
+
+Both test binaries deleted after verification (not committed). No other files touched.

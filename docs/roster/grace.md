@@ -482,3 +482,47 @@ not new assertion failures. Full detail in `docs/handoffs/core.md`'s dated Round
 entry, including the explicit confirmation that both `scripts/build.ts` and the new
 `LogHeader` shape are fully complete (not stubs) for Server/CI-Release/E2E's follow-on
 rounds to build against.
+
+### 2026-07-15 — Round 9 (scripts/build.ts: accept `--flag=value`, reject unknown args)
+
+Small, precisely-scoped fix — Nightingale found it the exact way this identity's own rounds
+have kept finding bugs: by checking the actual output artifact (`file` on the compiled
+binary showed native arm64 Mach-O instead of the requested Linux ELF), not from any error
+message, since the script's own "stamped build" success line gave no indication anything was
+wrong. `parseArgs()` in `scripts/build.ts` only matched `--target` as an exact token
+(space-separated value); `--target=<value>` was silently swallowed as an unrecognized token
+with no rejection logic to catch it, so the build silently proceeded for the host arch.
+
+**Fix:** each flag now detects an inline `=value` by splitting on the first `=` in any
+token starting with `--`, falling back to consuming the next argv slot when there's no
+inline value — same recognition logic for all three flags (`--target`/`--outfile`/
+`--release-tag`) for consistency. Any token that isn't a recognized flag in either form now
+prints `scripts/build.ts: unrecognized argument "<arg>"` and exits 2 immediately, rather than
+being silently dropped — this is the change that would have caught the original bug
+immediately instead of needing a `file`-based binary inspection to discover it.
+
+**Small implementation note:** biome's `noAssignInExpressions` rejected my first draft's
+`argv[(i += 1)]` inline-assignment-in-subscript style; rewrote as an explicit `i += 1; x =
+argv[i]` two-liner inside each branch instead. Not a design decision, just a lint-driven
+mechanical rewrite — noting it in case a future me reaches for the terser form again and
+hits the same lint error.
+
+**Checked, didn't change:** `src/cli.ts`'s own `parseArgs` doesn't support `=value` either
+and has no unknown-arg rejection to mirror — the round asked me to check for an existing
+convention there, not necessarily copy one; since none exists, `scripts/build.ts` now sets
+its own local convention rather than either inventing a mismatched one or leaving the bug
+unfixed. Didn't touch `src/cli.ts` — out of this round's scope.
+
+**Verification, same standing habit as every prior round — live process check, not just
+reading the diff:** ran the actual script three times against the real host toolchain (this
+is arm64 macOS): `--target=bun-linux-x64 --outfile /tmp/dh-test` → `file` confirmed a real
+`ELF 64-bit ... GNU/Linux` binary (the `=` form now honored); `--target bun-linux-x64
+--outfile /tmp/dh-test2` (space form) → same ELF output, confirming no regression to the
+pre-existing form; `--bogus-flag foo` → stderr message plus exit 2, no binary written. Both
+test binaries deleted afterward, nothing test-artifact left in the tree.
+
+**Gates:** `bun run typecheck` and `bun run lint` both green. No unit test added — `scripts/`
+is exempted from the 100% coverage gate per Round 8's own note, and this round's own DoD
+asked for documented manual verification as the alternative, which is what's recorded above
+and in `docs/handoffs/core.md`'s dated Round 9 entry. `bun run test:coverage`/`bun run e2e`
+not re-run this round since no `src/` file changed.
