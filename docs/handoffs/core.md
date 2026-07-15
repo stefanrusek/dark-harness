@@ -202,4 +202,72 @@ unchanged by me):
 **Gates:** `bun run typecheck` clean, `bun run lint` clean, `bun run test:coverage` — 233
 tests, 99.85%/99.98% funcs/lines aggregate across `src/agent/`, `src/config/`, `src/cli.ts`,
 and `src/contracts/` (both shortfalls explained above, neither a real gap in tested
-behavior).
+behavior; the `tasks.ts` one was subsequently fixed by the coordinator — same
+explicit-empty-constructor fix Radia used — see the merge commit).
+
+---
+
+## Round 2 — OPEN — integration: wire cli.ts to the real Server/TUI/Web
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+All six domains now share one tree (`claude/coordinator-onboarding-kab9ls`): Server
+(Radia), TUI (Mary), Web (Susan), Prompt (Iris), CI/Release (Nightingale), Core (you) are
+all merged and gate-green individually. `src/cli.ts` still calls five `TODO`-marked stub
+functions instead of the real Server/TUI/Web entry points — this round replaces those with
+real wiring, per your own request in round 1's status log.
+
+**Scope:**
+
+1. **Build the `AgentLoopHandle` adapter** (Server's `src/server/agent-loop.ts` interface —
+   your round-1 status log already flagged this and you leaned toward "(b) a thin wrapper in
+   `src/cli.ts`"; that's still the right call, land it there). Concretely, `AgentRuntime`
+   (`src/agent/runtime.ts`) doesn't match `AgentLoopHandle` shape-for-shape:
+   - `AgentLoopHandle.onEvent(listener): Unsubscribe` / `.onLog(listener): Unsubscribe` are
+     multi-subscriber; `AgentRuntimeOptions.onEvent`/`.onLogLine` are single fixed callbacks
+     set at construction. The adapter needs to fan a single `AgentRuntime` callback out to a
+     `Set` of subscribers (own call on exact mechanics).
+   - `AgentLoopHandle.getAgentTree(): AgentTreeNode[]` needs building from
+     `AgentRuntime.tasks.list()` (flat `TaskSnapshot[]`) into the nested `AgentTreeNode`
+     shape (`agentId`/`parentAgentId`/`model`/`status`/`children`) — you already have
+     `parentAgentId` on every `TaskSnapshot`, so this is a straightforward
+     group-by-parent, but is it only agent-kind tasks that belong in the tree, or bash-kind
+     too? Decide and document — my read of the contract's intent is agent-kind only (the
+     tree is about sub-agents, not every background Bash call), but it's your call as the
+     domain that knows the tool semantics best.
+   - `AgentLoopHandle.sendMessage(agentId, message)` / `.stopAgent(agentId)` map onto
+     `AgentRuntime.tasks.sendMessage(id, message)` / `.stop(id)` — check whether "agentId"
+     in the `AgentLoopHandle`/wire-truth sense and the task registry's task ids
+     (`agent-N`) are the same identifier space; if not, the adapter needs the translation.
+2. **Wire the four real run modes in `src/cli.ts`**, replacing `runStubbedMode()`'s five stub
+   calls:
+   - `--server`: construct a `DhServer` (`src/server/index.ts`) with the adapter as its
+     `agentLoop`, `config.security` passed through to `DhServerOptions.security`, and a real
+     session log directory.
+   - Local console (no `--web`): call `startTui(baseUrl)` (`src/tui/index.ts`) pointed at
+     the just-started local server.
+   - `--web` (local): call `serveWebUi({ port, targetBaseUrl, token })`
+     (`src/web/index.ts` or `src/web/server.ts` — check Susan's actual export path) pointed
+     at the just-started local server, and print/return its `url` per HANDOFF.md §2's
+     "open/print the URL" requirement.
+   - `--connect <host> [--web]`: same TUI/Web calls, but `baseUrl`/`targetBaseUrl` point at
+     the remote host instead of a locally-started server (no local `DhServer` in this mode).
+3. **`--instructions` + `--job` still needs to work standalone** (no server/client attached)
+   for the dark-factory headless case — don't regress the exit-code path you already built
+   and verified via live subprocess runs.
+4. Keep `CliDeps`/dependency-injection testability — the point of that interface was exactly
+   to make this swap-in "contained," per your own round-1 note.
+
+**Constraints:** you're reading from `src/server/`, `src/tui/`, `src/web/` (their public
+`index.ts`/`server.ts` exports only — not reaching into their internals), same as any other
+cross-domain import. If any of their exports don't fit what you need, that's a request back
+to that domain in this handoff's status log, not a workaround.
+
+**Gates:** same four commands as round 1, run against the full merged tree this time
+(`bun run typecheck` now runs both TS programs — root + `src/web`, per Susan's split).
+
+**Definition of done:** all four real run modes work (verify at least `--job` end-to-end
+against a real local `DhServer` + mock provider, and that `--web`/console modes actually
+start without crashing — full PTY/browser-driven verification is still the E2E domain's
+job). Anything you can't finish this round, name explicitly in a new dated status entry
+below.
