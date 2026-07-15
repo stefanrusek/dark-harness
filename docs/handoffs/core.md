@@ -1371,3 +1371,36 @@ hand, live, with the real script:
   produced.
 
 Both test binaries deleted after verification (not committed). No other files touched.
+
+---
+
+## Round 10 — OPEN — costUsd never reaches the JSONL log, only the live SSE stream
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+Found via hands-on testing with a real LM Studio model and configured pricing: `costUsd`
+shows up nowhere in the JSONL log. Root cause, confirmed directly in `src/agent/loop.ts`
+(~lines 359-380): the `token_usage` **event** (`emitEvent`, SSE-bound) includes
+`...(costUsd !== undefined ? { costUsd } : {})`, but the `token_usage` **log line**
+(`emitLog`, JSONL-bound, right below it) never includes `costUsd` at all — and
+`src/contracts/log.ts`'s `LogEvent`'s `token_usage` variant doesn't even have a `costUsd`
+field defined, so this isn't just a missed call, the type itself is incomplete.
+
+This matters: per ADR 0005/HANDOFF.md §7, the JSONL log is the **durable** diagnostic
+record — the SSE stream is ephemeral, only useful while a client is actively connected. A
+dark-factory run's cost is therefore currently only visible live, never recoverable after
+the fact from logs, which defeats half the point of Round 6b (cost accounting was framed
+around after-the-fact dark-factory diagnostics, same motivation as Round 6a's logging gap).
+
+**Fix:** add `costUsd?: number` to `LogEvent`'s `token_usage` variant in
+`src/contracts/log.ts` (small, additive contracts change — consistent with the existing
+optional-field pattern other `LogEvent` variants use, shouldn't need a fresh architect
+round-trip, but flag it if you think it does), then add the same
+`...(costUsd !== undefined ? { costUsd } : {})` spread to the `emitLog` call in `loop.ts`
+that's currently missing it.
+
+**Gates:** the standard four. Add a regression test proving a configured model's JSONL log
+(not just the SSE event) actually contains `costUsd` on its `token_usage` line — the exact
+gap that let this ship unnoticed in Round 6b (its own regression tests apparently only
+checked the SSE event side). Append a dated status entry here and update
+`docs/roster/grace.md` when done.
