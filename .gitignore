@@ -11,4 +11,7 @@ secrets.env
 
 # Local agent-harness tooling artifacts (isolated worktrees for parallel domain leads) —
 # not project deliverable content, never committed.
-.claude/
+.claude/*
+!.claude/skills/
+# Except project-local skills, which are committed process tooling (see tracking/DH-0008).
+__pycache__/
