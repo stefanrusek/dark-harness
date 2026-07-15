@@ -104,7 +104,66 @@ does it. No token in a URL, ever (same constraint as Web's ADR 0004 amendment).
 proves it (e.g. asserting the `Authorization` header on an injected fetch double). Append a
 dated status entry here when done, and update `docs/roster/mary.md`.
 
-### 2026-07-15 — Mary (TUI domain lead)
+### 2026-07-15 — Mary (TUI domain lead), Round 2: bearer-token passthrough
+
+Worked in a fresh worktree off `claude/coordinator-onboarding-kab9ls` (`34e49a1`, after
+Core's round-2 `src/cli.ts` merge) rather than my stale round-1 worktree, per the
+coordinator's instruction. Confirmed I'm already on the `CLAUDE.md` §7 roster table from
+that merge; read `docs/roster/mary.md` first, then this handoff's new section, then did the
+work.
+
+**Signature chosen:** `startTui(baseUrl: string, token?: string, io: Partial<TuiIO> = {}): Promise<void>`
+— a new positional parameter between `baseUrl` and `io`, rather than folding `token` into
+the `io`/`TuiIO` options object. Reasoning: `TuiIO` and its doc comment ("lets tests inject
+fake stdin/stdout/fetch") are specifically about swapping real I/O for test fakes; `token` is
+a real connection parameter every caller (test or production) needs to supply deliberately,
+not a fake to inject, so it reads better as its own argument — `startTui(baseUrl, config.security?.token)`
+at the call site in `src/cli.ts` is about as close to self-documenting as this gets. This is
+the first option the handoff offered, not the second.
+
+**What changed (`src/tui/` only, per ownership — I did not touch `src/cli.ts`):**
+- `src/tui/app.ts`: added the `token` parameter; when present, builds a single
+  `{ Authorization: \`Bearer ${token}\` }` header object once per `startTui` call and spreads
+  it into both the `sendCommand(...)` options (every command POST) and the
+  `runSseClient(...)` options (the SSE connection, including every reconnect — the header is
+  attached fresh on each `connectOnce` call inside `sse-client.ts`, which was already
+  unchanged from round 1 and already supported a `headers` passthrough). When `token` is
+  `undefined`, no `Authorization` key is added at all — never an empty/placeholder header,
+  matching Web's "omits Authorization when no token is configured" behavior exactly
+  (`src/web/client/commands.ts` / `sse.ts` were my reference for the exact convention:
+  header name casing, `Bearer ` prefix, never a `?token=` query param).
+- `src/tui/index.ts`: updated the entry-point doc comment for the new signature.
+- `src/tui/app.test.ts`: updated all 10 existing `startTui(...)` call sites for the new
+  positional argument (`undefined` where no token is under test), and added two new tests:
+  "a configured token is sent as an Authorization: Bearer header on every request" (asserts
+  the header on both the initial SSE connect and a triggered `request_agent_tree` POST) and
+  "omits the Authorization header entirely when no token is configured" (asserts
+  `.has("Authorization")` is `false` on both, not just that it's unset by omission).
+- No changes needed to `sse-client.ts` or `http-client.ts` — both already accepted a
+  `headers` passthrough from round 1; the whole gap really was exactly what Grace's note
+  said, `startTui`'s own signature having nowhere to receive a token.
+
+**Gates — all green** (ran the full-repo suite now that this worktree has every domain's
+code, not just `src/tui/`):
+```
+bun run typecheck      # tsc --noEmit && tsc --noEmit -p src/web — clean
+bun run lint            # biome check . — 133 files, no issues
+bun run test:coverage   # 635 pass / 0 fail, 100.00% lines all files; src/tui/* 100.00%
+                         # funcs+lines. src/cli.ts sits at 96.88% funcs — confirmed
+                         # pre-existing (identical with/without my diff via `git stash`),
+                         # not touched by this change, not a TUI-owned file.
+```
+
+**Cross-domain note (not a request, an FYI for Grace/Core):** `startTui`'s new signature is
+`(baseUrl, token?, io?)`. The `CliDeps.startTui` type in `src/cli.ts` and the
+`runInteractiveMode` call sites (`await deps.startTui(targetBaseUrl)` /
+`await deps.startTui(baseUrl)`) still reflect the old `(baseUrl) => Promise<void>` shape and
+don't pass `config.security?.token` through yet — that's the actual remaining wiring to make
+token-protected sessions work end to end with the console client, and it's a `src/cli.ts`
+edit, i.e. Core's file, not mine to make. Suggested one-line change for whoever picks this
+up: `deps.startTui: (baseUrl: string, token?: string) => Promise<void>` in the `CliDeps`
+interface and `defaultDeps()`, then `await deps.startTui(targetBaseUrl, config.security?.token)`
+/ `await deps.startTui(baseUrl, config.security?.token)` at the two call sites.
 
 Picked up mid-task from a prior instance of this role that was stopped before it could
 report; its uncommitted work was sitting in the worktree untracked. I read it in full

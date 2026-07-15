@@ -51,12 +51,27 @@ function defaultIO(): TuiIO {
 
 /**
  * Start the console TUI against the server at `baseUrl`. Resolves once the user quits
- * (Ctrl+C). `io` lets tests inject fake stdin/stdout/fetch; production callers (Core's
- * `src/cli.ts`) can omit it to use the real terminal and network.
+ * (Ctrl+C).
+ *
+ * `token`, when the target server has `security.token` configured (ADR 0004), is sent as a
+ * real `Authorization: Bearer <token>` header on every HTTP/SSE request the client makes —
+ * never as a URL query parameter (same constraint as the Web client, see
+ * `src/web/client/commands.ts` / `sse.ts`). Pass `undefined` (or omit) against an
+ * unauthenticated server.
+ *
+ * `io` lets tests inject fake stdin/stdout/fetch; production callers (Core's `src/cli.ts`)
+ * can omit it to use the real terminal and network.
  */
-export async function startTui(baseUrl: string, io: Partial<TuiIO> = {}): Promise<void> {
+export async function startTui(
+  baseUrl: string,
+  token?: string,
+  io: Partial<TuiIO> = {},
+): Promise<void> {
   const resolved: TuiIO = { ...defaultIO(), ...io };
   const { stdin, stdout, fetchImpl } = resolved;
+  const authHeaders: Record<string, string> | undefined = token
+    ? { Authorization: `Bearer ${token}` }
+    : undefined;
 
   let state: TuiState = initialState({
     rows: stdout.rows ?? 24,
@@ -86,7 +101,10 @@ export async function startTui(baseUrl: string, io: Partial<TuiIO> = {}): Promis
         return;
       }
       try {
-        const response = await sendCommand(baseUrl, effect.command, { fetchImpl });
+        const response = await sendCommand(baseUrl, effect.command, {
+          fetchImpl,
+          ...(authHeaders ? { headers: authHeaders } : {}),
+        });
         if (effect.command.type === "request_agent_tree" && "tree" in response) {
           dispatch({ type: "tree_response", tree: response.tree });
         } else if (!response.ok) {
@@ -133,6 +151,7 @@ export async function startTui(baseUrl: string, io: Partial<TuiIO> = {}): Promis
     void runSseClient({
       baseUrl,
       fetchImpl,
+      ...(authHeaders ? { headers: authHeaders } : {}),
       signal: abortController.signal,
       onEvent: (event) => dispatch({ type: "sse_event", event }),
       onConnectionChange: (status) => dispatch({ type: "connection", status }),

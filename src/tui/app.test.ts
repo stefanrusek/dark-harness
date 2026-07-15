@@ -98,6 +98,8 @@ interface FakeServer {
   nextCommandThrows: boolean;
   fetchImpl: typeof fetch;
   sseController: ReadableStreamDefaultController<Uint8Array> | null;
+  commandHeaders: Headers[];
+  sseHeaders: Headers[];
 }
 
 function makeFakeServer(): FakeServer {
@@ -107,11 +109,14 @@ function makeFakeServer(): FakeServer {
     nextCommandThrows: false,
     sseController: null,
     fetchImpl: undefined as unknown as typeof fetch,
+    commandHeaders: [],
+    sseHeaders: [],
   };
 
   server.fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     const target = String(url);
     if (target.endsWith(COMMAND_PATH)) {
+      server.commandHeaders.push(new Headers(init?.headers));
       if (server.nextCommandThrows) {
         throw new Error("network down");
       }
@@ -125,6 +130,7 @@ function makeFakeServer(): FakeServer {
       });
     }
     if (target.endsWith(EVENTS_PATH)) {
+      server.sseHeaders.push(new Headers(init?.headers));
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -174,7 +180,7 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
     expect(stdout.writes[0]).toContain(ALT_SCREEN_ENTER);
     expect(stdin.rawMode).toBe(true);
@@ -188,7 +194,7 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
 
     enqueueSse(server, {
@@ -221,7 +227,7 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
     enqueueSse(server, {
       version: 1,
@@ -259,7 +265,7 @@ describe("startTui", () => {
       ],
     });
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
 
     stdin.type("\x1b[D");
@@ -272,13 +278,59 @@ describe("startTui", () => {
     await done;
   });
 
+  test("a configured token is sent as an Authorization: Bearer header on every request", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    server.commandResponses.push({
+      ok: true,
+      tree: [
+        { agentId: "root", parentAgentId: null, model: "sonnet", status: "running", children: [] },
+      ],
+    });
+
+    const done = startTui("http://x", "s3cret", { stdin, stdout, fetchImpl: server.fetchImpl });
+    await flush();
+
+    // The SSE connection is opened as soon as the TUI starts.
+    expect(server.sseHeaders).toHaveLength(1);
+    expect(server.sseHeaders[0]?.get("Authorization")).toBe("Bearer s3cret");
+
+    // Trigger a command POST (request_agent_tree) and check it too.
+    stdin.type("\x1b[D");
+    await flush();
+    expect(server.commandHeaders).toHaveLength(1);
+    expect(server.commandHeaders[0]?.get("Authorization")).toBe("Bearer s3cret");
+
+    stdin.type("\x03");
+    await done;
+  });
+
+  test("omits the Authorization header entirely when no token is configured", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    server.commandResponses.push({ ok: true, tree: [] });
+
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    await flush();
+    expect(server.sseHeaders[0]?.has("Authorization")).toBe(false);
+
+    stdin.type("\x1b[D");
+    await flush();
+    expect(server.commandHeaders[0]?.has("Authorization")).toBe(false);
+
+    stdin.type("\x03");
+    await done;
+  });
+
   test("a command_error response updates the on-screen status message", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
     const server = makeFakeServer();
     server.commandResponses.push({ ok: false, error: "agent not found" });
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
 
     stdin.type("\x1b[D");
@@ -308,7 +360,7 @@ describe("startTui", () => {
       return new Response(new ReadableStream<Uint8Array>({ start() {} }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl });
     await flush();
 
     stdin.type("\x1b[D");
@@ -326,7 +378,7 @@ describe("startTui", () => {
     const server = makeFakeServer();
     server.nextCommandThrows = true;
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
 
     stdin.type("\x1b[D");
@@ -343,7 +395,7 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
     const writesBefore = stdout.writes.length;
 
@@ -361,7 +413,7 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
 
     stdin.type("\x03");
@@ -384,7 +436,7 @@ describe("startTui", () => {
       ],
     });
 
-    const done = startTui("http://x", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
     enqueueSse(server, {
       version: 1,
