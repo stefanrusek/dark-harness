@@ -1,5 +1,16 @@
 // Read tool — reads a file from disk, cat -n style (line numbers), with optional
 // offset/limit. Mirrors Claude Code's Read tool semantics.
+//
+// DH-0014 fix (tracking/DH-0014-read-tool-unbounded-memory-for-large-files.md): the previous
+// implementation called `new Uint8Array(await file.arrayBuffer())` — reading and decoding the
+// WHOLE file into memory — before the binary-sniff check or any offset/limit slicing ran. A
+// multi-GB file an agent stumbles into (a log, a build artifact) got fully buffered regardless
+// of what `limit` was requested. Fixed two ways: (1) a hard size cap, checked from file
+// metadata alone (no read at all) before anything else, refuses pathologically large files
+// outright with an actionable error; (2) for files under the cap, line content is streamed and
+// only the requested [offset, offset+limit) window is ever held in memory — lines outside the
+// window are counted (for the truncation notice's exact remaining-line count) but never
+// buffered. Binary sniffing reads only a small prefix via `file.slice()`, not the whole file.
 
 import { isAbsolute, resolve } from "node:path";
 import { recordRead } from "./read-guard.ts";
@@ -11,6 +22,11 @@ const MAX_LINE_LENGTH = 2000;
 // enough to catch binary formats' headers/magic bytes without reading (and decoding) an
 // entire large file just to reject it.
 const BINARY_SNIFF_BYTES = 8_000;
+// DH-0014: files larger than this are refused outright — checked from `Bun.file(...).size`
+// (filesystem metadata only), before any byte of the file is read. 256MB comfortably covers
+// any legitimate source file/log an agent should be reading whole; anything past that should
+// be sliced with offset/limit, or searched with Bash/grep, not read wholesale.
+const MAX_READABLE_BYTES = 256 * 1024 * 1024;
 
 function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
@@ -19,11 +35,66 @@ function resolvePath(filePath: string, cwd: string): string {
 /** Round 13: a NUL byte anywhere in the sampled prefix is a reliable binary signal — no valid
  * UTF-8 text file legitimately contains one. Cheap and doesn't require a full decode attempt. */
 function looksBinary(bytes: Uint8Array): boolean {
-  const sampleLength = Math.min(bytes.length, BINARY_SNIFF_BYTES);
-  for (let i = 0; i < sampleLength; i++) {
+  for (let i = 0; i < bytes.length; i++) {
     if (bytes[i] === 0) return true;
   }
   return false;
+}
+
+interface StreamedLines {
+  /** Lines within [startIndex, endIndex), in order. */
+  lines: string[];
+  /** Exact count of lines in the file beyond `endIndex` — computed by counting newlines
+   * without retaining their content, so this stays O(1) additional memory regardless of how
+   * far past the window the file continues. */
+  remaining: number;
+}
+
+/** Streams `path`'s text content line-by-line, retaining only lines within
+ * `[startIndex, endIndex)`. Every other line is counted, not buffered — memory use is bounded
+ * by the window size (`endIndex - startIndex`) plus at most one in-flight line, never by the
+ * file's total size. */
+async function streamLines(
+  path: string,
+  startIndex: number,
+  endIndex: number,
+): Promise<StreamedLines> {
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const lines: string[] = [];
+  let lineIndex = 0;
+  let carry = "";
+
+  const reader = Bun.file(path).stream().getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        // Mirrors `text.split("\n")`'s behavior: the final segment after the last newline
+        // (possibly empty, if the file ends with a trailing newline) is still a "line".
+        if (lineIndex >= startIndex && lineIndex < endIndex) {
+          lines.push(carry);
+        }
+        lineIndex += 1;
+        break;
+      }
+      carry += decoder.decode(value, { stream: true });
+      let nlIndex = carry.indexOf("\n");
+      while (nlIndex !== -1) {
+        const line = carry.slice(0, nlIndex);
+        carry = carry.slice(nlIndex + 1);
+        if (lineIndex >= startIndex && lineIndex < endIndex) {
+          lines.push(line);
+        }
+        lineIndex += 1;
+        nlIndex = carry.indexOf("\n");
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const remaining = Math.max(0, lineIndex - endIndex);
+  return { lines, remaining };
 }
 
 export const readTool: Tool = {
@@ -31,8 +102,8 @@ export const readTool: Tool = {
   description:
     "Read a file from the local filesystem, returned with cat -n style line numbers. " +
     "Truncates to at most 2000 lines by default (override with 'limit'); when truncated, a " +
-    "notice states how many lines remain. Refuses binary files with a clear error instead of " +
-    "returning decoded garbage.",
+    "notice states how many lines remain. Refuses binary files, and files above a size cap, " +
+    "with a clear error instead of returning decoded garbage or exhausting memory.",
   inputSchema: {
     type: "object",
     properties: {
@@ -68,33 +139,44 @@ export const readTool: Tool = {
       return { output: `Read tool error: file does not exist: ${absPath}`, isError: true };
     }
 
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    // Round 13: record the read regardless of outcome below (empty/binary/normal) — the
-    // model genuinely did read this path at this point in time, which is what Edit/Write's
-    // read-before-write guard (read-guard.ts) needs to know.
-    await recordRead(ctx, absPath);
+    // DH-0014: size cap enforced from metadata alone, before any byte is read.
+    if (file.size > MAX_READABLE_BYTES) {
+      return {
+        output:
+          `Read tool error: file is ${file.size} bytes, exceeding the ${MAX_READABLE_BYTES}-byte ` +
+          "readable limit. Use 'offset'/'limit' to read a smaller window, or search it with " +
+          "Bash (e.g. grep) instead of reading it whole.",
+        isError: true,
+      };
+    }
 
-    if (bytes.length === 0) {
+    if (file.size === 0) {
+      // Round 13: record the read regardless of outcome below — the model genuinely did read
+      // this path at this point in time, which is what Edit/Write's read-before-write guard
+      // (read-guard.ts) needs to know.
+      await recordRead(ctx, absPath);
       return {
         output: "<system-reminder>File exists but has empty contents.</system-reminder>",
         isError: false,
       };
     }
 
-    if (looksBinary(bytes)) {
+    const sniffSize = Math.min(file.size, BINARY_SNIFF_BYTES);
+    const sniffBytes = new Uint8Array(await file.slice(0, sniffSize).arrayBuffer());
+    if (looksBinary(sniffBytes)) {
+      await recordRead(ctx, absPath);
       return {
-        output: `Read tool error: binary file, ${bytes.length} bytes. Refusing to decode as text.`,
+        output: `Read tool error: binary file, ${file.size} bytes. Refusing to decode as text.`,
         isError: true,
       };
     }
 
-    const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-
-    const lines = text.split("\n");
     const startIndex = offset !== undefined ? offset - 1 : 0;
     const maxLines = limit !== undefined ? limit : DEFAULT_LIMIT;
-    const endIndex = Math.min(startIndex + maxLines, lines.length);
-    const slice = lines.slice(startIndex, endIndex);
+    const endIndex = startIndex + maxLines;
+
+    const { lines: slice, remaining } = await streamLines(absPath, startIndex, endIndex);
+    await recordRead(ctx, absPath);
 
     const formatted = slice
       .map((line, i) => {
@@ -105,7 +187,6 @@ export const readTool: Tool = {
       })
       .join("\n");
 
-    const remaining = lines.length - endIndex;
     if (remaining > 0) {
       return {
         output: `${formatted}\n\n<system-reminder>File truncated: ${remaining} more line${remaining === 1 ? "" : "s"} not shown. Pass a larger 'limit' or a later 'offset' to continue reading.</system-reminder>`,

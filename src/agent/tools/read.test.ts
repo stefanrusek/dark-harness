@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readTool } from "./read.ts";
@@ -115,7 +115,23 @@ describe("Read tool", () => {
     expect(result.output).not.toContain("truncated");
   });
 
-  test("refuses to decode a binary file, returning a clear error instead of garbage", async () => {
+  test("refuses a file above the size cap without reading its content", async () => {
+    const path = join(dir, "huge.txt");
+    const bigSize = 256 * 1024 * 1024 + 1;
+    // Sparse file: truncate to a size far past the 256MB cap without allocating real disk or
+    // memory for its content — proves the cap check happens from metadata (file.size) alone.
+    const handle = await open(path, "w");
+    await handle.truncate(bigSize);
+    await handle.close();
+
+    const ctx = makeToolContext({ cwd: dir });
+    const result = await readTool.execute({ file_path: path }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("exceeding");
+    expect(result.output).toContain(`${bigSize} bytes`);
+  });
+
+    test("refuses to decode a binary file, returning a clear error instead of garbage", async () => {
     const path = join(dir, "bin.dat");
     const bytes = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01,
