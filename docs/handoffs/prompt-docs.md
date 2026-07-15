@@ -228,3 +228,49 @@ environment. It's a prompt-text change reviewed for clarity and directness, not 
 behavioral fix.
 
 — Iris (she/her), Prompt domain lead, persistent for this build.
+
+---
+
+## Round 3 — OPEN — two more gaps found by an architect-level review
+
+**Addressed to:** Prompt (Iris, resumed — read `docs/roster/iris.md` first).
+
+Fable (architect-on-call) ran a full gap analysis comparing `HANDOFF.md`'s intent against
+what's built. Two findings are Prompt-domain, both small system-prompt text additions in the
+same file/style as your Round 2 fire-and-forget fix — bundled into one round.
+
+### 3a. `TASK_FAILED` self-report convention was never taught to the model
+
+Confirmed directly (grep across the repo): `TASK_FAILED` appears only in `src/agent/loop.ts`
+— the code that scans final assistant text for the marker and treats its presence as
+self-reported failure (ADR 0006's exit-code contract depends on this: no marker + no tool
+call = success, marker present = failure). `loop.ts`'s own header comment states plainly:
+"The system prompt must instruct the model to emit `TASK_FAILED`... that's a request to the
+Prompt domain, not implemented here" — a Core round-1 cross-domain request that was never
+picked up. The model has **never once been told this convention exists.** A locked
+architectural decision (ADR 0006) currently has a load-bearing dependency on prompt text
+that doesn't exist.
+
+**Fix:** add a clear discipline point (or a dedicated short section — your call) to
+`BASE_PROMPT` explicitly teaching: if you cannot complete the given instructions, say so by
+including the literal text `TASK_FAILED` somewhere in your final response; if you complete
+successfully, don't include it. State it plainly enough that it reads as a hard requirement,
+not a suggestion — this is the entire mechanism the harness uses to know success from
+failure when no tool call ends the conversation.
+
+### 3b. No guidance on background-task polling cadence
+
+A predictable next failure mode after your Round 2 fix: telling a model to "check back" on a
+background task doesn't say *how* — nothing guides it toward a sensible cadence (do other
+useful work and check later; wait an appropriate interval) versus spin-polling `Monitor` in
+a tight loop or waiting an arbitrarily long/short time.
+
+**Fix:** a short discipline addition, same style/location as Round 2's fix, giving concrete
+guidance — e.g. after starting a background task, either continue other independent work
+and check back later, or wait a reasonable interval before polling again; don't call
+`Monitor` in an immediate tight loop.
+
+**Gates:** the standard three. Update `system-prompt.test.ts`'s content assertions to cover
+both additions. As with Round 2, you can't fully behaviorally prove either fix against a real
+small model in this environment — that's fine, note it honestly rather than overclaiming.
+Append a dated status entry here and update `docs/roster/iris.md` when done.

@@ -426,3 +426,32 @@ bun run test:coverage   # 691 pass / 0 fail; src/tui/render.ts 100.00%/100.00%
 
 No cross-domain requests — this was fully containable inside `src/tui/render.ts` and its
 test file, per the handoff's own framing.
+
+---
+
+## Round 5 — OPEN — liveness indicator for long-running turns
+
+**Addressed to:** TUI (Mary, resumed — read `docs/roster/mary.md` first).
+
+Fable (architect-on-call) ran a gap analysis against `HANDOFF.md`'s intent. Finding: an
+operator watching a long-running agent (the core "observe a running agent" use case,
+especially for hours-long dark-factory-style work) has no way to distinguish "still
+thinking, be patient" from "silently stalled" — `running` is a single undifferentiated
+status with no elapsed-time or last-activity signal, and since the Anthropic provider adapter
+calls `messages.create` non-streaming (confirmed), a slow turn and a hung turn look
+byte-for-byte identical in the UI.
+
+**Fix:** every `ServerSentEvent` already carries a `timestamp` (`src/contracts/events.ts`) —
+this is fully derivable client-side, no wire-protocol change needed. Add a "time in current
+status" or "last event at" indicator per agent in the tree/agent view (your call on exact
+presentation — e.g. "running (12s)" or similar), updating live as time passes so a long
+silence during `running` is visibly distinguishable from a normal short turn.
+
+**Gates:** the standard three. Add a render-level test proving the indicator reflects
+elapsed time correctly (inject a fake clock/time source rather than a real sleep). Append a
+dated status entry here and update `docs/roster/mary.md` when done.
+
+Note: Web (Susan) is getting the equivalent request for `src/web/` in parallel — no shared
+files between your two changes, but consider whether the same "time in current status"
+framing/wording is worth keeping consistent between the two clients (not required, just a
+nice-to-have if it's easy).

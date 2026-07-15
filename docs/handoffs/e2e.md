@@ -237,3 +237,53 @@ already noted as pre-existing). `bun test e2e/server-protocol.test.ts` — 5 pas
 `expect()` calls. Did not run the full `bun run e2e` — this sandbox has no `tmux`/Chromium,
 so `tui.test.ts`/`web.test.ts` fail on missing tooling regardless of this change, per the
 task's own scoping.
+
+---
+
+## Round 2 — OPEN — two coverage gaps found by an architect-level review
+
+**Addressed to:** E2E (Hedy, resumed — read `docs/roster/hedy.md` first).
+
+Fable (architect-on-call) ran a full gap analysis comparing `HANDOFF.md`'s intent against
+what's built. Two findings are E2E-domain; bundled into one round since both likely touch
+`e2e/support/mock-provider.ts` and/or `server-protocol.test.ts`.
+
+### 2a. Sub-agent spawning has zero real-binary e2e coverage — the priority item this round
+
+HANDOFF.md §1's one-sentence product definition is "runs an LLM agent (and any number of
+sub-agents)." Confirmed (your own prior status log already says this explicitly): "every
+scenario here uses a single-turn root agent; no test scripts a `tool_use` turn" — meaning
+Bash/Read/Edit/Write tool execution, and especially a sub-agent actually being spawned and
+appearing in the agent tree, has never once been exercised against the real compiled binary.
+Given the TUI/Web bootstrap deadlock was *only* ever found via real-binary e2e (not unit
+tests), a nested-agent-tree bug of similar severity could exist right now undetected — this
+is exactly the risk class ADR 0008's e2e gate exists to catch, on the product's single most
+headline capability.
+
+**Fix:** at least one scenario that scripts the mock provider (`MockTurn` already supports
+`tool_use`, per your own prior work) to emit a real `tool_use` turn calling `Agent` to spawn
+a sub-agent; confirm the sub-agent's own SSE events/log file appear; confirm
+`getAgentTree()` returns a real nested parent-child structure (every existing test only
+covers the single-root case); if feasible in the time you have, a TUI or Web scenario
+confirming the tree UI actually renders nesting > 1 level (the tree/agent-tree UI code
+exists on both clients per earlier rounds — this would be the first time it's driven by a
+real nested tree rather than a hand-built fixture).
+
+### 2b. Bedrock provider is unexercised beyond unit tests and undocumented
+
+HANDOFF.md §5 names Bedrock as a first-class provider alongside Anthropic specifically for
+operators without Anthropic access — the whole point of the provider abstraction. Your own
+status log already states plainly: "`bedrock`-type provider not exercised (only
+`anthropic`-type, via the mock)." Combined with no README guidance beyond the one-line
+sample config entry, the second of exactly two named providers is effectively unverified and
+undocumented for a real operator.
+
+**Fix:** at minimum, one e2e scenario exercising the Bedrock adapter against a mock/stub
+Bedrock-shaped endpoint (mirroring however the Anthropic mock provider works today). If a
+README addition on Bedrock setup (region, credential-chain expectations) seems like the
+more valuable use of remaining time/lower lift, that's a request to Prompt rather than
+something to do yourself — say so explicitly rather than silently skipping it.
+
+**Gates:** the standard three (`typecheck`, `lint`, and whichever of `bun run e2e` your
+sandbox can actually run — note explicitly what you couldn't run, same as prior rounds).
+Append a dated status entry here and update `docs/roster/hedy.md` when done.

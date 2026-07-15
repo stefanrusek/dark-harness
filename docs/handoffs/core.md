@@ -870,3 +870,67 @@ fail: 4 failures are pre-existing environment gaps (no `tmux`, no Chromium at
 own instruction that this might not be runnable here); 3 failures are the real, now-stale
 `server-protocol.test.ts` expectations described above, flagged to Hedy rather than fixed
 directly.
+
+---
+
+## Round 6 — OPEN — three gaps found by an architect-level review against HANDOFF.md's intent
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+Fable (architect-on-call) ran a full gap analysis comparing the founding `HANDOFF.md` spec's
+intent against what's actually built, at the owner's request. Three of the findings are
+Core-domain and share touched files (`src/contracts/config.ts`, `src/cli.ts`,
+`src/agent/runtime.ts`) — bundled into one round rather than three separate ones to avoid
+you colliding with yourself. Fable's own analysis is the architect sign-off for the
+`src/contracts/config.ts` additions below (CLAUDE.md §6.2) — no further architect round-trip
+needed unless you find the shape doesn't fit cleanly.
+
+### 6a. No JSONL logging on the standalone `--instructions`/`--job` path
+
+HANDOFF.md §7 treats session logging as "first-class... same weight as the agent loop
+itself," critical for dark-factory diagnostics. Confirmed: `src/cli.ts`'s standalone branch
+(`deps.createRuntime(config, systemPrompt)`) constructs a bare `AgentRuntime` with no
+`SessionLogger` attached — only `runInteractiveMode`'s `DhServer` path gets one. A crashed or
+failed unattended container run currently leaves **no JSONL trail at all**, for the exact
+scenario (headless, unattended, hours-long) the product is built around.
+
+**Fix:** wire the same `SessionLogger`/log-directory mechanism (`.dh-logs/<sessionId>/` or
+similar) into the standalone path, independent of whether a `DhServer` is running — likely
+means extracting the log-wiring `DhServer`/`server.ts` currently does into a small shared
+helper both paths call, rather than duplicating it. Should not require starting an HTTP
+server just to get a JSONL sink.
+
+### 6b. Cost display is wired end-to-end but always shows $0.00
+
+HANDOFF.md §9 lists "token and cost display, per agent and session total" as **required for
+v1**. Confirmed: `TokenUsageEvent.costUsd` is optional in `src/contracts/events.ts`, and the
+Web client fully sums/formats/renders it (tested down to sub-cent formatting) — but nothing
+in `src/agent/loop.ts` or either provider adapter (`anthropic.ts`, `bedrock.ts`) ever
+computes a real value. It's fully wired and looks done, but is structurally inert.
+
+**Fix:** add an optional per-model price field to `src/contracts/config.ts`'s model entries
+(e.g. `inputPricePerMToken`/`outputPricePerMToken` — your call on exact naming/shape) since
+local/Bedrock models have no fixed public price and this must come from config, not a
+hardcoded table. Have `loop.ts` (or the provider adapters) compute `costUsd` on every
+`token_usage` event when a price is configured; leave it `undefined` (current behavior) when
+not configured, so existing tests/behavior for unconfigured models don't regress.
+
+### 6c. `maxTurns` isn't configurable from `dh.json`
+
+HANDOFF.md §1 promises unattended runs of potentially hours; §4's own real-run data cites
+"1309 Bash calls" in one observed session. `loop.ts` hardcodes `DEFAULT_MAX_TURNS = 100` with
+an optional `maxTurns` param that's never threaded from config anywhere — a genuinely long
+dark-factory task could hit this safety-valve failure with no operator-facing way to raise
+it short of patching source.
+
+**Fix:** add an optional `options.maxTurns` to `DhConfig` (bundle this into the same
+`src/contracts/config.ts` change as 6b above — one contracts diff, not two), thread it
+through `AgentRuntimeOptions` into every `runAgentLoop` call (`runRoot()` and
+`spawnAgent()`), defaulting to the current 100 when unset so nothing regresses.
+
+**Gates:** the standard four. Add regression tests for each: (a) a standalone
+`--instructions --job` run produces a real JSONL log file; (b) a configured price produces a
+non-zero `costUsd` on a `token_usage` event, and an unconfigured one still produces
+`undefined` (no regression); (c) a configured `maxTurns` actually changes when the loop's
+safety-valve fires. Append a dated status entry here and update `docs/roster/grace.md` when
+done — note any of the three you have to defer, explicitly, rather than silently dropping.
