@@ -1,18 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import {
   type AppCallbacks,
-  appendOutput,
+  appendTranscript,
   buildShell,
   hideError,
   renderAgentHeader,
   renderComposer,
   renderConnectionStatus,
-  renderOutput,
   renderSessionSummary,
   renderSidebar,
+  renderTranscript,
   showError,
 } from "./render.ts";
-import { type AgentNode, type WebState, applyEvent, createInitialState } from "./state.ts";
+import {
+  type AgentNode,
+  type Turn,
+  type WebState,
+  applyEvent,
+  createInitialState,
+} from "./state.ts";
 import { createTestDom } from "./test-dom.ts";
 
 function fakeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
@@ -21,7 +27,7 @@ function fakeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
     parentAgentId: null,
     model: "sonnet",
     status: "running",
-    output: "",
+    transcript: [],
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
@@ -29,6 +35,10 @@ function fakeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
     statusSince: "2026-07-15T00:00:00.000Z",
     ...overrides,
   };
+}
+
+function turn(role: Turn["role"], text: string, timestamp = "2026-07-15T00:00:00.000Z"): Turn {
+  return { role, text, timestamp };
 }
 
 function noopCallbacks(overrides: Partial<AppCallbacks> = {}): AppCallbacks {
@@ -269,47 +279,139 @@ describe("renderAgentHeader", () => {
   });
 });
 
-describe("renderOutput / appendOutput", () => {
-  test("renderOutput sets full text and returns its length", () => {
+describe("renderTranscript / appendTranscript (Round 4 — structured conversation view)", () => {
+  test("renderTranscript builds one distinct, role-styled block per turn", () => {
     const { document, root } = createTestDom();
-    const pre = document.createElement("pre");
-    root.appendChild(pre);
-    const len = renderOutput(pre, fakeAgentNode({ output: "hello" }));
-    expect(pre.textContent).toBe("hello");
-    expect(len).toBe(5);
+    const state = renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("user", "hi there"), turn("assistant", "hello!")] }),
+    );
+
+    const turns = root.querySelectorAll(".turn");
+    expect(turns.length).toBe(2);
+    expect(turns[0]?.classList.contains("turn-user")).toBe(true);
+    expect(turns[0]?.textContent).toContain("hi there");
+    expect(turns[1]?.classList.contains("turn-assistant")).toBe(true);
+    expect(turns[1]?.textContent).toContain("hello!");
+    expect(state).toEqual({ turnCount: 2, lastTurnTextLength: 6 });
   });
 
-  test("renderOutput handles a null agent (empty pane)", () => {
+  test("renderTranscript handles a null agent (empty pane)", () => {
     const { document, root } = createTestDom();
-    const pre = document.createElement("pre");
-    root.appendChild(pre);
-    const len = renderOutput(pre, null);
-    expect(pre.textContent).toBe("");
-    expect(len).toBe(0);
+    const state = renderTranscript(document, root, null);
+    expect(root.querySelectorAll(".turn").length).toBe(0);
+    expect(state).toEqual({ turnCount: 0, lastTurnTextLength: 0 });
   });
 
-  test("appendOutput appends only the new suffix and returns the new length", () => {
+  test("appendTranscript extends the still-open last turn's text in place (streaming fast path)", () => {
     const { document, root } = createTestDom();
-    const pre = document.createElement("pre");
-    root.appendChild(pre);
-    renderOutput(pre, null);
-    const afterFirst = appendOutput(document, pre, "hello", 0);
-    expect(pre.textContent).toBe("hello");
-    expect(afterFirst).toBe(5);
-
-    const afterSecond = appendOutput(document, pre, "hello world", afterFirst);
-    expect(pre.textContent).toBe("hello world");
-    expect(afterSecond).toBe(11);
+    let state = renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("assistant", "hel")] }),
+    );
+    state = appendTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("assistant", "hello world")] }),
+      state,
+    );
+    expect(root.querySelectorAll(".turn").length).toBe(1);
+    expect(root.querySelector(".turn-text")?.textContent).toBe("hello world");
+    expect(state).toEqual({ turnCount: 1, lastTurnTextLength: 11 });
   });
 
-  test("appendOutput is a no-op when there's no new text", () => {
+  test("appendTranscript adds a brand-new turn without touching the previous one's DOM node", () => {
     const { document, root } = createTestDom();
-    const pre = document.createElement("pre");
-    pre.textContent = "hello";
-    root.appendChild(pre);
-    const result = appendOutput(document, pre, "hello", 5);
-    expect(pre.textContent).toBe("hello");
-    expect(result).toBe(5);
+    let state = renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("user", "hi")] }),
+    );
+    const firstTurnEl = root.querySelector(".turn");
+
+    state = appendTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("user", "hi"), turn("assistant", "hello!")] }),
+      state,
+    );
+
+    const turns = root.querySelectorAll(".turn");
+    expect(turns.length).toBe(2);
+    expect(turns[0]).toBe(firstTurnEl as Element);
+    expect(turns[1]?.classList.contains("turn-assistant")).toBe(true);
+    expect(state).toEqual({ turnCount: 2, lastTurnTextLength: 6 });
+  });
+
+  test("multiple back-to-back assistant turns (e.g. Round 12 push-notification wake-ups) still read as separate turns", () => {
+    const { document, root } = createTestDom();
+    let state = renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("assistant", "first wake-up done")] }),
+    );
+    state = appendTranscript(
+      document,
+      root,
+      fakeAgentNode({
+        transcript: [
+          turn("assistant", "first wake-up done"),
+          turn("assistant", "second wake-up done"),
+        ],
+      }),
+      state,
+    );
+
+    const turns = root.querySelectorAll(".turn");
+    expect(turns.length).toBe(2);
+    expect(turns[0]?.textContent).toContain("first wake-up done");
+    expect(turns[1]?.textContent).toContain("second wake-up done");
+    expect(state.turnCount).toBe(2);
+  });
+
+  test("appendTranscript is a no-op when there's no new text or turns", () => {
+    const { document, root } = createTestDom();
+    const agent = fakeAgentNode({ transcript: [turn("assistant", "hello")] });
+    let state = renderTranscript(document, root, agent);
+    state = appendTranscript(document, root, agent, state);
+    expect(root.querySelectorAll(".turn").length).toBe(1);
+    expect(state).toEqual({ turnCount: 1, lastTurnTextLength: 5 });
+  });
+
+  test("appendTranscript falls back to a full rebuild when nothing was rendered yet", () => {
+    const { document, root } = createTestDom();
+    const state = appendTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("user", "hi")] }),
+      {
+        turnCount: 0,
+        lastTurnTextLength: 0,
+      },
+    );
+    expect(root.querySelectorAll(".turn").length).toBe(1);
+    expect(state).toEqual({ turnCount: 1, lastTurnTextLength: 2 });
+  });
+
+  test("appendTranscript stays empty when nothing has ever rendered and there's still nothing", () => {
+    const { document, root } = createTestDom();
+    const state = appendTranscript(document, root, null, { turnCount: 0, lastTurnTextLength: 0 });
+    expect(root.querySelectorAll(".turn").length).toBe(0);
+    expect(state).toEqual({ turnCount: 0, lastTurnTextLength: 0 });
+  });
+
+  test("appendTranscript clears the pane when the (new) agent has no transcript", () => {
+    const { document, root } = createTestDom();
+    let state = renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("user", "hi")] }),
+    );
+    state = appendTranscript(document, root, fakeAgentNode({ transcript: [] }), state);
+    expect(root.querySelectorAll(".turn").length).toBe(0);
+    expect(state).toEqual({ turnCount: 0, lastTurnTextLength: 0 });
   });
 });
 

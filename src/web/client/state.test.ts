@@ -8,6 +8,7 @@ import type {
   TokenUsageEvent,
 } from "../../contracts/index.ts";
 import {
+  addUserTurn,
   applyEvent,
   createInitialState,
   isRoot,
@@ -121,11 +122,37 @@ describe("state reducer", () => {
     expect(state.agents.get("child-1")?.parentAgentId).toBe("root-1");
   });
 
-  test("agent_output accumulates chunks in order, creating the agent if unseen", () => {
+  test("agent_output accumulates chunks into one assistant turn, creating the agent if unseen", () => {
     let state = createInitialState();
     state = applyEvent(state, output("a1", "hello "));
     state = applyEvent(state, output("a1", "world"));
-    expect(state.agents.get("a1")?.output).toBe("hello world");
+    const transcript = state.agents.get("a1")?.transcript;
+    expect(transcript).toHaveLength(1);
+    expect(transcript?.[0]).toMatchObject({ role: "assistant", text: "hello world" });
+  });
+
+  test("agent_output after a user turn opens a new assistant turn rather than merging", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("a1", null));
+    state = addUserTurn(state, "a1", "hi there", "2026-01-01T00:00:00Z");
+    state = applyEvent(state, output("a1", "hello"));
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    expect(transcript.map((t) => t.role)).toEqual(["user", "assistant"]);
+    expect(transcript[1]?.text).toBe("hello");
+  });
+
+  test("back-to-back agent_output bursts after multiple turns each stay separate turns", () => {
+    let state = createInitialState();
+    state = applyEvent(state, output("a1", "first burst, "));
+    state = applyEvent(state, output("a1", "still first"));
+    state = addUserTurn(state, "a1", "ok continue", "2026-01-01T00:00:01Z");
+    state = applyEvent(state, output("a1", "second burst"));
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    expect(transcript.map((t) => ({ role: t.role, text: t.text }))).toEqual([
+      { role: "assistant", text: "first burst, still first" },
+      { role: "user", text: "ok continue" },
+      { role: "assistant", text: "second burst" },
+    ]);
   });
 
   test("agent_status updates status, defaulting unseen agents to waiting first", () => {
@@ -336,7 +363,9 @@ describe("seedFromTree (Round 2 — fixes the fresh-session bootstrap deadlock)"
     // not overwrite what SSE already reported as more current.
     const next = seedFromTree(state, [treeNode({ agentId: "root-1", status: "waiting" })]);
     expect(next.agents.get("root-1")?.status).toBe("running");
-    expect(next.agents.get("root-1")?.output).toBe("already streaming output");
+    expect(next.agents.get("root-1")?.transcript).toEqual([
+      { role: "assistant", text: "already streaming output", timestamp: expect.any(String) },
+    ]);
   });
 
   test("is safe to call twice (idempotent) without duplicating or reordering agents", () => {
@@ -352,5 +381,40 @@ describe("seedFromTree (Round 2 — fixes the fresh-session bootstrap deadlock)"
     const next = seedFromTree(state, [treeNode({ agentId: "root-1" })]);
     expect(state.agents.size).toBe(0);
     expect(next.agents.size).toBe(1);
+  });
+});
+
+describe("addUserTurn (Round 4 — local echo of the operator's own sent message)", () => {
+  test("appends a user turn immediately, without needing a prior SSE event", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null));
+    state = addUserTurn(state, "root-1", "hello agent", "2026-01-01T00:00:00Z");
+    const transcript = state.agents.get("root-1")?.transcript;
+    expect(transcript).toEqual([
+      { role: "user", text: "hello agent", timestamp: "2026-01-01T00:00:00Z" },
+    ]);
+  });
+
+  test("creates the agent if unseen (defensive; app.ts only calls this for a known selected agent)", () => {
+    const state = createInitialState();
+    const next = addUserTurn(state, "unknown", "hi", "2026-01-01T00:00:00Z");
+    expect(next.agents.get("unknown")?.transcript).toEqual([
+      { role: "user", text: "hi", timestamp: "2026-01-01T00:00:00Z" },
+    ]);
+  });
+
+  test("two consecutive user turns never merge, unlike assistant chunks", () => {
+    let state = createInitialState();
+    state = addUserTurn(state, "a1", "first", "2026-01-01T00:00:00Z");
+    state = addUserTurn(state, "a1", "second", "2026-01-01T00:00:01Z");
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    expect(transcript.map((t) => t.text)).toEqual(["first", "second"]);
+  });
+
+  test("does not mutate the previous state object", () => {
+    const state = createInitialState();
+    const next = addUserTurn(state, "a1", "hi", "2026-01-01T00:00:00Z");
+    expect(state.agents.size).toBe(0);
+    expect(next.agents.get("a1")?.transcript).toHaveLength(1);
   });
 });

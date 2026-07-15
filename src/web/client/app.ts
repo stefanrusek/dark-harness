@@ -16,21 +16,23 @@ import { type DownloadEnv, downloadLogs } from "./download.ts";
 import {
   type AppCallbacks,
   type ShellRefs,
-  appendOutput,
+  type TranscriptRenderState,
+  appendTranscript,
   buildShell,
   hideError,
   renderAgentHeader,
   renderComposer,
   renderConnectionStatus,
-  renderOutput,
   renderSessionSummary,
   renderSidebar,
+  renderTranscript,
   showError,
 } from "./render.ts";
 import { type SseConnection, connectEvents } from "./sse.ts";
 import {
   type ConnectionStatus,
   type WebState,
+  addUserTurn,
   applyEvent,
   createInitialState,
   seedFromTree,
@@ -66,20 +68,27 @@ export class AppView {
   private state: WebState = createInitialState();
   private readonly shell: ShellRefs;
   private connection: SseConnection | null = null;
-  private renderedOutputLength = 0;
-  private renderedOutputForAgentId: string | null = null;
+  private renderedTranscript: TranscriptRenderState = { turnCount: 0, lastTurnTextLength: 0 };
+  private renderedTranscriptForAgentId: string | null = null;
   private errorTimer: ReturnType<typeof setTimeout> | undefined;
   private livenessTimer: ReturnType<typeof setInterval> | undefined;
 
   private readonly callbacks: AppCallbacks = {
     onSelectAgent: (agentId) => {
       this.state = selectAgent(this.state, agentId);
-      this.renderedOutputForAgentId = null;
+      this.renderedTranscriptForAgentId = null;
       this.renderAll();
     },
     onSendMessage: (message) => {
       const agent = selectedAgent(this.state);
       if (!agent) return;
+      // Local echo, same as any real chat UI: the operator's own turn appears immediately,
+      // client-side — it never arrives over SSE, so waiting for a server round-trip would
+      // mean the conversation view never showed what was actually sent (docs/handoffs/web.md
+      // Round 4).
+      const nowFn = this.deps.nowFn ?? Date.now;
+      this.state = addUserTurn(this.state, agent.agentId, message, new Date(nowFn()).toISOString());
+      this.renderAll();
       sendMessage(this.deps.target, agent.agentId, message, this.deps.fetchImpl).catch((err) =>
         this.reportError(err),
       );
@@ -212,20 +221,20 @@ export class AppView {
     const agent = selectedAgent(this.state);
     const currentAgentId = agent?.agentId ?? null;
 
-    if (currentAgentId !== this.renderedOutputForAgentId) {
-      this.renderedOutputLength = renderOutput(this.shell.output, agent);
-      this.renderedOutputForAgentId = currentAgentId;
+    if (currentAgentId !== this.renderedTranscriptForAgentId) {
+      this.renderedTranscript = renderTranscript(this.deps.doc, this.shell.output, agent);
+      this.renderedTranscriptForAgentId = currentAgentId;
       this.scrollToBottom();
       return;
     }
     if (!agent) return;
 
     const wasNearBottom = this.isNearBottom();
-    this.renderedOutputLength = appendOutput(
+    this.renderedTranscript = appendTranscript(
       this.deps.doc,
       this.shell.output,
-      agent.output,
-      this.renderedOutputLength,
+      agent,
+      this.renderedTranscript,
     );
     if (wasNearBottom) {
       this.scrollToBottom();

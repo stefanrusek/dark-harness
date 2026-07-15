@@ -458,7 +458,7 @@ worth a later glance at `src/tui/`'s equivalent copy for consistency, not requir
 
 ---
 
-## Round 4 — OPEN — conversation view has no turn structure, never shows the user's own messages
+## Round 4 — DONE — conversation view has no turn structure, never shows the user's own messages
 
 **Addressed to:** Web (Susan, resumed — read `docs/roster/susan.md` first).
 
@@ -492,3 +492,67 @@ Append a dated status entry here and update `docs/roster/susan.md` when done.
 Note: TUI (Mary) is getting the identical request for `src/tui/` in parallel — same root
 cause, no shared files between your two changes, but keep the same turn-model concept in
 sync where practical.
+
+### 2026-07-15 — Round 4 status: structured conversation transcript, done
+
+Replaced `AgentNode.output: string` with `AgentNode.transcript: Turn[]` (`{ role: "user" |
+"assistant", text, timestamp }`) in `src/web/client/state.ts`. `agent_output` events now call
+a new `appendAssistantChunk` helper that extends the last turn in place if it's already an
+assistant turn, or opens a new one otherwise — so a streamed response absorbs many small
+chunks as one turn, but a fresh turn starts cleanly after any intervening user message. A new
+exported `addUserTurn(state, agentId, text, timestamp?)` is the operator's local echo: called
+synchronously from `app.ts`'s `onSendMessage` callback, before the `sendMessage(...)` fetch is
+even issued, so the sent message renders immediately regardless of server latency — the same
+thing every real chat UI does.
+
+Rendering: `render.ts` drops `renderOutput`/`appendOutput` (which wrote one flat `<pre>`) for
+`renderTranscript`/`appendTranscript`, which build one `.turn.turn-{role}` block per turn.
+`appendTranscript` keeps the streaming-fast-path property the old code had — it takes a
+`TranscriptRenderState` snapshot (`{ turnCount, lastTurnTextLength }`) and only touches the
+DOM for what's actually new: appending text to the still-open last turn's `.turn-text` node,
+and/or appending whole new turn elements after it — never rebuilding turns that haven't
+changed. `buildShell`'s output container changed from `<pre class="agent-output">` to `<div
+class="agent-transcript">` since turns need block structure, not one continuous formatted
+text run; the scroll-region/jump-to-latest/near-bottom logic in `app.ts` needed no changes,
+just renamed fields (`renderedOutputLength`/`renderedOutputForAgentId` →
+`renderedTranscript`/`renderedTranscriptForAgentId`).
+
+**Visual design** (styles.css): user turns are right-aligned, accent-tinted (an outgoing chat
+bubble); assistant turns are left-aligned on the existing panel-raised background — the same
+left/right + color convention Claude Code's own CLI and most chat UIs use, so speaker reads
+from position alone, not just the small uppercase role label above each bubble. Reused the
+existing `fade-in-up` keyframe (already used for jump-to-latest) for each new turn's entrance
+rather than inventing a new animation, per the existing "restrained, purposeful motion"
+convention documented in this file's earlier design notes.
+
+**Tests added**, proving exactly what the handoff asked for: a sent message appears as a
+`.turn-user` block immediately, with no `await flush()` before the assertion, against a real
+(unmocked) `send_message` fetch that hasn't resolved yet (`app.test.ts`); an `agent_output`
+event renders as a distinct `.turn-assistant` block (`app.test.ts`, `render.test.ts`); and
+multiple back-to-back assistant turns (framed against Round 12's push-notification wake-ups)
+render as separate blocks rather than merging (`render.test.ts`, `state.test.ts`). Also
+covered: `addUserTurn` never merges two consecutive user turns (unlike assistant chunks,
+where merging is the point); `appendTranscript`'s fallback-to-full-rebuild paths (nothing
+rendered yet, agent switched to one with an empty transcript, both-empty no-op).
+
+**Judgment call — turn boundary is "role changed," not "time gap" or "explicit end-of-turn
+event."** The wire protocol has no explicit turn-end signal (`agent_output` is just a raw
+chunk stream), so the only reliable boundary available client-side is "did the last turn have
+a different role than what's arriving now." This is exactly right for the user side (each
+`addUserTurn` call is a deliberate, discrete send) and a reasonable approximation for the
+assistant side (matches how the Round 12 push-notification wake-ups actually work — each
+wake-up is its own burst of `agent_output` chunks following a user or prior-assistant turn,
+never interleaved with another).
+
+**Gates:** `bun run typecheck`, `bun run lint` (biome auto-fixed a few formatting nits after
+the initial pass — re-run `bun run lint` clean before treating any biome output as done), `bun
+run test:coverage` — 796 tests, 100% funcs/lines on every touched `src/web/` file (project-
+wide 99.96% funcs is `src/cli.ts`, untouched this round and already below 100% before this
+change). `bun run e2e`: 20/24 pass; the 4 failures are this sandbox's now-familiar tooling
+gaps (no `tmux` binary, no Chromium at `/opt/pw-browsers/chromium`, one bearer-token-matrix
+timeout) — same class Susan flagged in Round 3, nothing here touches routes, auth, or the
+wire protocol.
+
+**Worktree note:** this round's worktree started with only the two founding-doc commits (same
+gap Susan hit in Round 3) — fast-forward-merged `origin/claude/coordinator-onboarding-kab9ls`
+before starting, working tree was clean so it was lossless.

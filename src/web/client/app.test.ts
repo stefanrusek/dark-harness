@@ -331,7 +331,9 @@ describe("AppView construction and rendering", () => {
       chunk: "world",
     });
     await flush();
-    expect(h.root.querySelector(".agent-output")?.textContent).toBe("hello world");
+    const turns = h.root.querySelectorAll(".turn-assistant");
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.querySelector(".turn-text")?.textContent).toBe("hello world");
   });
 
   test("selecting a different agent swaps the rendered output", async () => {
@@ -360,7 +362,9 @@ describe("AppView construction and rendering", () => {
     const rows = h.root.querySelectorAll(".agent-row");
     h.dispatch(rows[1] as HTMLElement, "click");
     expect(h.app.getState().selectedAgentId).toBe("child-1");
-    expect(h.root.querySelector(".agent-output")?.textContent).toBe("child output");
+    const turns = h.root.querySelectorAll(".turn-assistant");
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.querySelector(".turn-text")?.textContent).toBe("child output");
   });
 });
 
@@ -380,6 +384,25 @@ describe("AppView commands", () => {
       { type: "request_agent_tree" },
       { type: "send_message", agentId: "root-1", message: "do the thing" },
     ]);
+  });
+
+  test("a sent message appears as a user turn immediately, before any server response arrives (local echo)", async () => {
+    const h = harness();
+    h.app.start();
+    await flush(); // only to resolve the request_agent_tree bootstrap that seeds root-1.
+
+    const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
+    const form = h.root.querySelector("form") as HTMLFormElement;
+    textarea.value = "hello from the operator";
+    h.dispatch(form, "submit", { cancelable: true });
+
+    // Deliberately no `await flush()` here: the whole point of local echo
+    // (docs/handoffs/web.md Round 4) is that the operator's turn renders synchronously at
+    // send time, without waiting on the send_message fetch (which hasn't resolved yet at
+    // this point in the test) to come back from the server.
+    const userTurns = h.root.querySelectorAll(".turn-user");
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0]?.querySelector(".turn-text")?.textContent).toBe("hello from the operator");
   });
 
   test("download-log button triggers a browser download via the injected env", async () => {
