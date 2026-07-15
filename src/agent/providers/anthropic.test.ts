@@ -170,4 +170,61 @@ describe("AnthropicProvider", () => {
     });
     expect(provider).toBeInstanceOf(AnthropicProvider);
   });
+
+  // Round 3 (docs/handoffs/core.md status log): complete()'s new second `signal` parameter
+  // — end-to-end proof that it actually reaches the underlying SDK call lives in
+  // runtime.test.ts's "stopRoot() aborts a running root loop's in-flight provider call"
+  // (a real never-responding HTTP server + a real abort); these two are the adapter-local
+  // unit-level check that the exact signal object is forwarded, not dropped or copied.
+  test("forwards the given AbortSignal to the SDK's create() call as its second argument", async () => {
+    let receivedOptions: { signal?: AbortSignal } | undefined;
+    const controller = new AbortController();
+    const client: AnthropicClientLike = {
+      messages: {
+        create: async (_params, options) => {
+          receivedOptions = options;
+          return {
+            id: "msg_7",
+            type: "message",
+            role: "assistant",
+            model: "sonnet-5",
+            content: [],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
+          } as unknown as Anthropic.Message;
+        },
+      },
+    };
+    const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+    await provider.complete(BASE_REQUEST, controller.signal);
+    expect(receivedOptions?.signal).toBe(controller.signal);
+  });
+
+  test("passes no options (rather than {signal: undefined}) when no signal is given", async () => {
+    let receivedOptions: { signal?: AbortSignal } | undefined;
+    let wasCalled = false;
+    const client: AnthropicClientLike = {
+      messages: {
+        create: async (_params, options) => {
+          wasCalled = true;
+          receivedOptions = options;
+          return {
+            id: "msg_8",
+            type: "message",
+            role: "assistant",
+            model: "sonnet-5",
+            content: [],
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
+          } as unknown as Anthropic.Message;
+        },
+      },
+    };
+    const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+    await provider.complete(BASE_REQUEST);
+    expect(wasCalled).toBe(true);
+    expect(receivedOptions).toBeUndefined();
+  });
 });

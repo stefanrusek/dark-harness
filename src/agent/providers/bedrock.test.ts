@@ -174,4 +174,35 @@ describe("BedrockProvider", () => {
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock", region: "us-east-1" });
     expect(provider).toBeInstanceOf(BedrockProvider);
   });
+
+  // Round 3 (docs/handoffs/core.md status log): complete()'s new second `signal` parameter.
+  test("forwards the given AbortSignal to the SDK's send() call as abortSignal", async () => {
+    let receivedOptions: { abortSignal?: AbortSignal } | undefined;
+    const controller = new AbortController();
+    const client: BedrockClientLike = {
+      send: async (_command, options) => {
+        receivedOptions = options;
+        return { output: { message: { role: "assistant", content: [] } }, stopReason: "end_turn" };
+      },
+    };
+    const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+    await provider.complete(BASE_REQUEST, controller.signal);
+    expect(receivedOptions?.abortSignal).toBe(controller.signal);
+  });
+
+  test("passes no options (rather than {abortSignal: undefined}) when no signal is given", async () => {
+    let receivedOptions: { abortSignal?: AbortSignal } | undefined;
+    let wasCalled = false;
+    const client: BedrockClientLike = {
+      send: async (_command, options) => {
+        wasCalled = true;
+        receivedOptions = options;
+        return { output: { message: { role: "assistant", content: [] } }, stopReason: "end_turn" };
+      },
+    };
+    const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+    await provider.complete(BASE_REQUEST);
+    expect(wasCalled).toBe(true);
+    expect(receivedOptions).toBeUndefined();
+  });
 });

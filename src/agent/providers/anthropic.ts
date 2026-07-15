@@ -19,7 +19,10 @@ const DEFAULT_MAX_TOKENS = 8192;
  * fake without touching the network. */
 export interface AnthropicClientLike {
   messages: {
-    create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message>;
+    create(
+      params: Anthropic.MessageCreateParamsNonStreaming,
+      options?: { signal?: AbortSignal },
+    ): Promise<Anthropic.Message>;
   };
 }
 
@@ -68,23 +71,29 @@ export class AnthropicProvider implements ModelProvider {
       });
   }
 
-  async complete(request: ProviderCompletionRequest): Promise<ProviderCompletionResult> {
+  async complete(
+    request: ProviderCompletionRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderCompletionResult> {
     let response: Anthropic.Message;
     try {
-      response = await this.client.messages.create({
-        model: request.model,
-        system: request.system,
-        max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-        messages: request.messages.map((m) => ({
-          role: m.role,
-          content: m.content.map(toAnthropicContent),
-        })),
-        tools: request.tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
-        })),
-      });
+      response = await this.client.messages.create(
+        {
+          model: request.model,
+          system: request.system,
+          max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+          messages: request.messages.map((m) => ({
+            role: m.role,
+            content: m.content.map(toAnthropicContent),
+          })),
+          tools: request.tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
+          })),
+        },
+        signal ? { signal } : undefined,
+      );
     } catch (err) {
       throw new ProviderError(`anthropic provider request failed: ${(err as Error).message}`, {
         cause: err,

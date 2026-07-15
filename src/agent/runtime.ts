@@ -94,6 +94,11 @@ export class AgentRuntime {
   private rootModel: string | undefined;
   private rootStatus: AgentStatus = "waiting";
   private rootSendMessage: ((message: string) => void) | undefined;
+  // Round 3 (docs/handoffs/core.md status log): the root isn't a TaskRegistry entry, so it
+  // needs its own AbortController — mirrors the one TaskRegistry.start() already creates
+  // per task, which is what makes stopAgent(subAgentId) reach the loop after this round's
+  // AgentLoopParams.signal addition.
+  private rootController: AbortController | undefined;
 
   constructor(options: AgentRuntimeOptions) {
     this.config = options.config;
@@ -178,6 +183,12 @@ export class AgentRuntime {
           tools: this.toolMap,
           toolContext: this.buildToolContext(agentId),
           registerSendMessage: handle.registerSendMessage,
+          // Round 3 (docs/handoffs/core.md status log): this AbortSignal was already sitting
+          // right here in scope — TaskRegistry.stop(id) calls this same task's
+          // AbortController, which previously only reached the Bash tool's own
+          // run_in_background subprocess handling. Passing it through here is what makes
+          // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
+          signal: handle.signal,
           onEvent: (event) => {
             if (event.type === "agent_output") handle.append(event.chunk);
             this.onEvent?.(event);
@@ -207,7 +218,12 @@ export class AgentRuntime {
    * for sub-agents via the task registry) so a running root agent can be steered by
    * sendMessageToRoot() — needed for interactive mode (TUI/Web), where the operator's input
    * box delivers messages into an already-running root loop, not just a one-shot
-   * `--instructions` file. */
+   * `--instructions` file.
+   *
+   * Round 3: creates a fresh AbortController for this run and passes its signal into the
+   * loop — stopRoot() (below) is what triggers it, giving src/cli.ts's AgentLoopHandle
+   * adapter something real to call for `stopAgent(ROOT_AGENT_ID)` instead of the previous
+   * no-op. */
   async runRoot(
     instruction: string,
     modelName?: string,
@@ -218,6 +234,7 @@ export class AgentRuntime {
     this.rootStarted = true;
     this.rootModel = model.name;
     this.rootStatus = "running";
+    this.rootController = new AbortController();
 
     const result = await runAgentLoop({
       sessionId: this.sessionId,
@@ -232,6 +249,7 @@ export class AgentRuntime {
       registerSendMessage: (fn) => {
         this.rootSendMessage = fn;
       },
+      signal: this.rootController.signal,
       ...(this.onEvent ? { onEvent: this.onEvent } : {}),
       ...(this.onLogLine
         ? { onLogLine: (line: LogLine) => this.onLogLine?.(ROOT_AGENT_ID, line) }
@@ -266,6 +284,16 @@ export class AgentRuntime {
       throw new RootNotListeningError();
     }
     this.rootSendMessage(message);
+  }
+
+  /** Round 3 (docs/handoffs/core.md status log): triggers the root agent's AbortController,
+   * if it has one yet (a no-op before runRoot() has ever been called — there's nothing
+   * running to stop). Cooperative, not forceful — see AgentLoopParams.signal's doc comment
+   * in loop.ts for exactly what this does and doesn't interrupt. Safe to call more than
+   * once or after the root has already finished (AbortController.abort() is itself
+   * idempotent). */
+  stopRoot(): void {
+    this.rootController?.abort();
   }
 
   /** Builds the nested AgentTreeNode[] shape Server's AgentLoopHandle.getAgentTree() needs,

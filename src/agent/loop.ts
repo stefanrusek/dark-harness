@@ -16,11 +16,22 @@
 
 import { randomUUID } from "node:crypto";
 import type { LogLine, ServerSentEvent } from "../contracts/index.ts";
-import type { ModelProvider, ProviderContentBlock, ProviderMessage } from "./providers/types.ts";
+import type {
+  ModelProvider,
+  ProviderCompletionResult,
+  ProviderContentBlock,
+  ProviderMessage,
+} from "./providers/types.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
 export const TASK_FAILED_MARKER = "TASK_FAILED";
 const DEFAULT_MAX_TURNS = 100;
+
+// Round 3 (docs/handoffs/core.md status log): the two distinct points `signal` is checked,
+// each with its own log reason so a "why did this stop" reader can tell which one fired.
+export const STOPPED_BETWEEN_TURNS_REASON = "stopped by operator before starting the next turn";
+export const STOPPED_DURING_PROVIDER_CALL_REASON =
+  "stopped by operator while waiting for the model";
 
 export interface AgentLoopParams {
   sessionId: string;
@@ -37,6 +48,21 @@ export interface AgentLoopParams {
   registerSendMessage?: (fn: (message: string) => void) => void;
   onEvent?: (event: ServerSentEvent) => void;
   onLogLine?: (line: LogLine) => void;
+  /** Round 3 addition: cooperative cancellation, driven by TaskStop/stopAgent
+   * (AgentRuntime.spawnAgent()/runRoot() — see their doc comments). Checked at two points:
+   * (1) the top of every turn, before starting a new one, so a stop between turns takes
+   * effect immediately rather than waiting for maxTurns or natural completion; (2) around
+   * the provider call itself — both built-in providers (anthropic.ts/bedrock.ts) forward
+   * this signal to their SDK's own abort support, so an in-flight model request can also be
+   * interrupted mid-flight, not just the *next* one prevented.
+   *
+   * NOT threaded into individual tool executions (ToolContext has no signal field this
+   * round) — a blocking tool call already in progress (e.g. Bash without
+   * run_in_background) runs to completion once started; stopping only guarantees no *new*
+   * turn or model request starts afterward. Documented explicitly (not silently) as the
+   * chosen minimum-viable scope — see docs/handoffs/core.md's Round 3 status log for the
+   * reasoning and what a deeper fix would need to touch. */
+  signal?: AbortSignal;
 }
 
 export interface AgentLoopResult {
@@ -55,6 +81,31 @@ function emitEvent(params: AgentLoopParams, event: ServerSentEvent): void {
 
 function emitLog(params: AgentLoopParams, line: LogLine): void {
   params.onLogLine?.(line);
+}
+
+/** Reports a stopped-via-signal turn using the exact same shape a self-reported failure
+ * already uses (`success: false`, `agent_status: failed`, a logged `failed` event) — Round
+ * 3's docs/handoffs/core.md status log entry explains why a distinct "stopped" AgentStatus
+ * wasn't introduced: TaskStop/stopAgent's existing task-registry bookkeeping for sub-agents
+ * already collapses "stopped" into "failed" (`task.error = "stopped by TaskStop"`), so this
+ * keeps the two mechanisms consistent instead of adding a status value only one of them
+ * uses. */
+function reportStopped(
+  params: AgentLoopParams,
+  finalText: string,
+  turns: number,
+  reason: string,
+): AgentLoopResult {
+  emitEvent(params, {
+    version: 1,
+    id: randomUUID(),
+    timestamp: nowIso(),
+    type: "agent_status",
+    agentId: params.agentId,
+    status: "failed",
+  });
+  emitLog(params, { version: 1, timestamp: nowIso(), type: "failed", reason });
+  return { success: false, finalOutput: finalText, turns };
 }
 
 function textOf(content: ProviderContentBlock[]): string {
@@ -156,6 +207,9 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
   let finalText = "";
 
   while (turns < maxTurns) {
+    if (params.signal?.aborted) {
+      return reportStopped(params, finalText, turns, STOPPED_BETWEEN_TURNS_REASON);
+    }
     turns += 1;
 
     if (pendingMessages.length > 0) {
@@ -170,12 +224,23 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       });
     }
 
-    const completion = await params.provider.complete({
-      model: params.model,
-      system: params.systemPrompt,
-      messages,
-      tools: toolDefs,
-    });
+    let completion: ProviderCompletionResult;
+    try {
+      completion = await params.provider.complete(
+        {
+          model: params.model,
+          system: params.systemPrompt,
+          messages,
+          tools: toolDefs,
+        },
+        params.signal,
+      );
+    } catch (err) {
+      if (params.signal?.aborted) {
+        return reportStopped(params, finalText, turns, STOPPED_DURING_PROVIDER_CALL_REASON);
+      }
+      throw err;
+    }
 
     messages.push({ role: "assistant", content: completion.content });
 
