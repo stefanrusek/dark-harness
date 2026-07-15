@@ -33,6 +33,12 @@
   --status-waiting: #f5a524;
   --status-done: #35c469;
   --status-failed: #f2545b;
+  /* DH-0029 (#25): "stopped" (Round 13's deliberate-stop terminal status, distinct from
+     "failed") had no color rule at all — it silently fell back to the default gray dot/
+     badge, indistinguishable from an unstyled element and inconsistent with the TUI, which
+     does color it. A muted violet keeps it visually distinct from every other status
+     (blue/orange/green/red) while still reading as "intentional, not an error." */
+  --status-stopped: #9a7bd1;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -212,6 +218,13 @@ button {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* DH-0029 (#38): rows are now keyboard-focusable (`tabindex="0"`) — a visible focus ring is
+   what makes that actually usable rather than just technically reachable. */
+.agent-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .agent-row.root .agent-label {
   font-weight: 600;
 }
@@ -266,6 +279,10 @@ button {
   background: var(--status-failed);
 }
 
+.status-dot.status-stopped {
+  background: var(--status-stopped);
+}
+
 .status-badge {
   font-size: 11px;
   font-weight: 600;
@@ -290,6 +307,10 @@ button {
 
 .status-badge.status-failed {
   color: var(--status-failed);
+}
+
+.status-badge.status-stopped {
+  color: var(--status-stopped);
 }
 
 .status-elapsed {
@@ -544,6 +565,73 @@ button {
   padding: var(--space-2) var(--space-4);
   font-size: 12px;
   animation: fade-in-up 0.2s var(--ease);
+}
+
+/* ---------- Gap banner (DH-0024) ---------- */
+
+.gap-banner {
+  position: absolute;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--panel-raised);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: 12px;
+  animation: fade-in-up 0.2s var(--ease);
+}
+
+.gap-banner-dismiss {
+  background: none;
+  border: 1px solid currentColor;
+  color: inherit;
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* ---------- Error log panel (DH-0029) ---------- */
+
+.error-log-panel {
+  border-top: 1px solid var(--border);
+  padding: var(--space-2) var(--space-4);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.error-log-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.error-log-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.error-log-entry {
+  display: flex;
+  gap: var(--space-2);
+  color: var(--danger);
+}
+
+.error-log-time {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  flex-shrink: 0;
 }
 
 /* ---------- Motion ---------- */

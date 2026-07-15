@@ -68,14 +68,20 @@ function harness(
 ) {
   const { document, root, dispatch, dispatchKey } = createTestDom();
   const target: ServerTarget = { baseUrl: "http://localhost:4000" };
-  const stream = fakeSseStream();
+  // A fresh stream per `/api/events` fetch (not one shared stream reused across
+  // reconnects) — matches how a real server behaves (every SSE request gets a distinct
+  // response body) and is what makes a genuine reconnect-then-open sequence testable
+  // (DH-0024): reading an already-closed/errored stream's body a second time either hangs
+  // or throws "ReadableStream is locked", neither of which a real reconnect would do.
+  let currentStream = fakeSseStream();
   const calls: FetchCall[] = [];
   const commandBodies: unknown[] = [];
 
   const fetchImpl = (async (url: string, init?: RequestInit) => {
     calls.push({ url: String(url), init });
     if (String(url).endsWith("/api/events")) {
-      return new Response(stream.body, { status: 200 });
+      currentStream = fakeSseStream();
+      return new Response(currentStream.body, { status: 200 });
     }
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     commandBodies.push(body);
@@ -138,7 +144,9 @@ function harness(
     root,
     dispatch,
     dispatchKey,
-    stream,
+    get stream() {
+      return currentStream;
+    },
     calls,
     commandBodies,
     downloadCalls,
@@ -485,8 +493,12 @@ describe("AppView commands", () => {
     h.dispatch(form, "submit", { cancelable: true });
     await flush();
 
-    expect(h.timeoutCalls).toHaveLength(1);
-    h.timeoutCalls[0]?.();
+    // 3 scheduled timers by this point: the tree-bootstrap command's timeout (DH-0029 #37 —
+    // cleared once its fetch resolves, but this harness's clearTimeoutImpl is a no-op so it
+    // stays recorded), this send_message's own command timeout (same reason), and finally
+    // the error banner's auto-hide timer, which is the one this test cares about.
+    expect(h.timeoutCalls).toHaveLength(3);
+    h.timeoutCalls[2]?.();
     const banner = h.root.querySelector(".error-banner");
     expect(banner?.classList.contains("hidden")).toBe(true);
   });
@@ -529,7 +541,10 @@ describe("AppView commands", () => {
     h.dispatch(form, "submit", { cancelable: true });
     await flush();
 
-    expect(h.timeoutCalls.length).toBe(2);
+    // 5 scheduled timers: tree bootstrap's command timeout, then a (command timeout, error
+    // banner hide) pair per submit — see the comment in the test above for why the no-op
+    // clearTimeoutImpl leaves cleared timers in this array too.
+    expect(h.timeoutCalls.length).toBe(5);
     const banner = h.root.querySelector(".error-banner");
     expect(banner?.classList.contains("hidden")).toBe(false);
   });
@@ -579,6 +594,32 @@ describe("AppView connection status", () => {
     h.stream.error();
     await flush();
     expect(h.root.querySelector(".connection-pill")?.textContent).toBe("Reconnecting…");
+  });
+
+  test("DH-0024: shows a dismissible gap banner once the connection reconnects after a drop", async () => {
+    const h = harness();
+    h.app.start();
+    await flush();
+
+    h.stream.close();
+    await flush();
+    expect(h.root.querySelector(".gap-banner")?.classList.contains("hidden")).toBe(true);
+
+    // Fire the scheduled reconnect timer directly (this harness's fake `fetchImpl` always
+    // hands back the same stream body, already closed — reading it again resolves
+    // immediately with `done: true`, which is enough to drive the reconnect status
+    // transition without a second fake stream).
+    const reconnectTimer = h.timeoutCalls.at(-1);
+    reconnectTimer?.();
+    await flush();
+
+    const banner = h.root.querySelector(".gap-banner");
+    expect(banner?.classList.contains("hidden")).toBe(false);
+    expect(banner?.textContent).toContain("Reconnected");
+
+    const dismissBtn = banner?.querySelector(".gap-banner-dismiss") as HTMLElement;
+    h.dispatch(dismissBtn, "click");
+    expect(banner?.classList.contains("hidden")).toBe(true);
   });
 });
 

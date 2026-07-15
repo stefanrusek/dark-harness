@@ -29,6 +29,19 @@ import type { ConnectionStatus } from "./state.ts";
 export interface SseHandlers {
   onEvent(event: ServerSentEvent): void;
   onStatusChange(status: ConnectionStatus): void;
+  /**
+   * Fired when a connection attempt succeeds *after* a prior drop (i.e. this is a
+   * reconnect, not the initial connect of a fresh session). DH-0024: neither client
+   * previously gave any indication that a reconnect might have missed events — a
+   * fixed-delay reconnect looked identical to a fresh, gap-free resume. There is no
+   * server-side gap/resync signal yet to distinguish a brief blip from a full session
+   * restart (tracked separately in DH-0019 — a `src/contracts/` wire change Web can't add
+   * unilaterally); until that lands, every reconnect is conservatively treated as a
+   * possible gap, since resuming via `Last-Event-ID` after any drop can miss events the
+   * server evicted or a restart in between. Optional so existing callers/tests don't need
+   * to change.
+   */
+  onReconnected?(): void;
 }
 
 export type SseFetch = typeof fetch;
@@ -39,10 +52,18 @@ export interface SseConnection {
 
 export interface ConnectEventsOptions {
   fetchImpl?: SseFetch | undefined;
-  /** Delay before retrying after the stream drops or fails to open. Defaults to 2000ms. */
+  /** Initial delay before the first retry after the stream drops or fails to open.
+   *  Subsequent attempts back off exponentially (see `nextReconnectDelayMs`), capped at
+   *  `maxReconnectDelayMs`, and reset back to this value once a connection succeeds.
+   *  Defaults to 1000ms. */
   reconnectDelayMs?: number | undefined;
+  /** Cap on the backed-off delay, so a genuinely down server is retried on a bounded
+   *  cadence instead of the wait growing forever. Defaults to 30000ms. */
+  maxReconnectDelayMs?: number | undefined;
   setTimeoutImpl?: typeof setTimeout | undefined;
   clearTimeoutImpl?: typeof clearTimeout | undefined;
+  /** Injectable source of randomness for reconnect jitter; defaults to `Math.random`. */
+  randomImpl?: (() => number) | undefined;
 }
 
 export interface SseRecord {
@@ -50,7 +71,25 @@ export interface SseRecord {
   data?: string | undefined;
 }
 
-const DEFAULT_RECONNECT_DELAY_MS = 2000;
+const DEFAULT_RECONNECT_DELAY_MS = 1000;
+const DEFAULT_MAX_RECONNECT_DELAY_MS = 30_000;
+
+/**
+ * Full-jitter exponential backoff (DH-0024): doubles the delay on each successive failed
+ * attempt (attempt 0 = first retry), capped at `maxDelayMs`, then picks a random value in
+ * `[0, cappedDelay]` rather than using the capped value outright — jitter keeps clients that
+ * all dropped at the same moment (e.g. a server restart) from reconnecting in lockstep and
+ * re-hammering it the instant it comes back.
+ */
+export function nextReconnectDelayMs(
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+  randomFn: () => number = Math.random,
+): number {
+  const capped = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
+  return Math.round(randomFn() * capped);
+}
 
 /**
  * Incrementally parses a decoded SSE text stream into `{ id, data }` records, split on the
@@ -121,10 +160,12 @@ function requestHeaders(target: ServerTarget, lastEventId: string | null): Heade
 }
 
 /**
- * Opens the SSE stream and keeps it open, retrying with a fixed backoff on any drop
- * (network error, non-OK response, the server closing the stream) until `close()` is
- * called. Every (re)connect attempt resends the highest event id seen so far via
- * `Last-Event-ID`, so a reconnect resumes rather than replaying from the start.
+ * Opens the SSE stream and keeps it open, retrying with exponential backoff + full jitter
+ * (DH-0024) on any drop (network error, non-OK response, the server closing the stream)
+ * until `close()` is called. Every (re)connect attempt resends the highest event id seen so
+ * far via `Last-Event-ID`, so a reconnect resumes rather than replaying from the start.
+ * `handlers.onReconnected` fires once per successful reconnect (not the initial connect) —
+ * see its doc comment for why every reconnect is treated as a possible gap.
  */
 export function connectEvents(
   target: ServerTarget,
@@ -132,7 +173,9 @@ export function connectEvents(
   options: ConnectEventsOptions = {},
 ): SseConnection {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
+  const baseReconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
+  const maxReconnectDelayMs = options.maxReconnectDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY_MS;
+  const randomImpl = options.randomImpl ?? Math.random;
   const setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
   const clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
 
@@ -140,13 +183,26 @@ export function connectEvents(
   let lastEventId: string | null = null;
   let abortController: AbortController | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Number of consecutive failed (re)connect attempts, driving the backoff delay. Reset to
+   *  0 once a connection opens successfully. */
+  let reconnectAttempt = 0;
+  /** Whether any connection has ever opened successfully — the first successful open is
+   *  the initial connect, not a reconnect, so it must not fire `onReconnected`. */
+  let everConnected = false;
 
   function scheduleReconnect(): void {
     if (closed) return;
     handlers.onStatusChange("reconnecting");
+    const delay = nextReconnectDelayMs(
+      reconnectAttempt,
+      baseReconnectDelayMs,
+      maxReconnectDelayMs,
+      randomImpl,
+    );
+    reconnectAttempt++;
     reconnectTimer = setTimeoutImpl(() => {
       void run();
-    }, reconnectDelayMs);
+    }, delay);
   }
 
   async function run(): Promise<void> {
@@ -170,7 +226,11 @@ export function connectEvents(
       return;
     }
 
+    const isReconnect = everConnected;
+    everConnected = true;
+    reconnectAttempt = 0;
     handlers.onStatusChange("open");
+    if (isReconnect) handlers.onReconnected?.();
     const parser = new SseStreamParser();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

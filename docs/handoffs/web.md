@@ -556,3 +556,81 @@ wire protocol.
 **Worktree note:** this round's worktree started with only the two founding-doc commits (same
 gap Susan hit in Round 3) — fast-forward-merged `origin/claude/coordinator-onboarding-kab9ls`
 before starting, working tree was clean so it was lossless.
+
+### 2026-07-15 — Round 5: closed DH-0024 (SSE reconnect backoff/gap) and DH-0029 (accessibility
+### + error-surfacing) for the Web side
+
+Worked both tickets from `tracking/` this round, `src/web/` only — DH-0024 is shared with TUI
+(fixing its own client in parallel), and DH-0029's user stories span both clients; neither
+ticket's TUI half was touched. See each ticket's own closing note (added to its `## Notes`
+section) for a compact per-story breakdown; this entry is the reasoning behind the judgment
+calls.
+
+**DH-0024, story 1 (backoff) — straightforward, done in full.** `sse.ts`'s `connectEvents`
+replaced its flat 2s retry with full-jitter exponential backoff: `nextReconnectDelayMs(attempt,
+base, max, randomFn)` doubles per consecutive failed attempt (base 1s, capped 30s), picks a
+random value in `[0, cappedDelay]` rather than using the capped value outright (jitter — so
+every client that dropped at the same instant, e.g. a server restart, doesn't reconnect in
+lockstep), and resets the attempt counter to 0 once a connection opens successfully.
+
+**DH-0024, story 2 (gap/restart indicator) — implemented the honest subset of what the ticket
+asks for, not the whole thing, because its own dependency (DH-0019) isn't done yet.** The
+ticket's acceptance criteria describe a server-emitted `resync`/`gap` signal (DH-0019) driving
+the client indicator — that event doesn't exist in `src/contracts/events.ts` yet, and adding it
+myself would be exactly the kind of unilateral `src/contracts/` edit CLAUDE.md §6.2 reserves
+for architect sign-off, not a routine Web call. Rather than block on that, I implemented the
+conservative version available without it: `sse.ts`'s `SseHandlers.onReconnected` fires once
+per successful *reconnect* (tracked via an `everConnected` flag — never on the very first
+connect of a fresh session), and `app.ts` treats every one of those as a possible gap
+(`state.possibleGap`), showing a dismissible "Reconnected — history may be incomplete." banner
+(`render.ts`'s `showGapBanner`/`hideGapBanner`) until the operator dismisses it. This can't yet
+say "this was a full session restart" vs. "this was a two-second blip" — that distinction
+needs either the DH-0019 signal or a session/generation id on the wire, neither of which exists
+today — so I chose language ("may be incomplete") that's true in both cases rather than
+overclaiming a distinction the client can't actually make. Revisit the wording once DH-0019
+lands.
+
+**DH-0029 — five of six items were a clean Web-only fix; the sixth needs a wire field I can't
+add.** Keyboard nav (#38), ARIA live regions (#39), the status-dot `aria-label` (#40), the
+missing `stopped` CSS (#25), and a persistent error-history panel (#33/#34) all landed —
+details in the ticket's closing note. The one I did *not* implement, and want to flag clearly
+rather than fudge: #35 ("see why an agent failed, not just a red badge") has no data to render
+even after the fix, because `AgentStatusEvent` in `src/contracts/events.ts` carries no
+error-detail field at all — there's no `errorMessage`/`reason` anywhere on the wire for a
+provider-level failure. This is a different code path from the `CommandAck.error` a failed
+`send_message`/`stop_agent` *command* already surfaces (that part worked before this round) —
+#35 is specifically about *why the agent's own status transitioned to `failed`*, which is a
+provider/runtime-level event, not a command response. **DH-0009** (provider retry/error
+taxonomy) and **DH-0017** (error swallowing/status inconsistencies) look like the right owners
+for adding that field; once either does, Web's remaining piece is small (render whatever text
+arrives next to the failed badge) and I've left the error-log/banner plumbing in a shape that
+can absorb it without further wire changes.
+
+**One test-harness fix that was a prerequisite, not a feature:** `app.test.ts`'s shared harness
+previously reused one single fake SSE stream body across every `/api/events` fetch, including
+reconnects — fine for the existing tests (none of them exercised a real reconnect-then-reopen
+sequence), but it meant a genuine reconnect test would try to `getReader()` a stream that had
+already been read to completion and whose lock was never released, which either hangs or
+throws depending on timing. Changed the harness to mint a fresh fake stream per `/api/events`
+fetch (matching how a real server behaves, and how `sse.test.ts`'s own lower-level harness
+already worked) and exposed the latest one via a `get stream()` accessor so every existing test
+that calls `h.stream.push/close/error` against the first (and, for them, only) connection
+keeps working unchanged.
+
+**Two existing `app.test.ts` assertions needed updating, not because behavior regressed but
+because the fixture's own accounting changed:** DH-0029's command-timeout (#37) means every
+`sendCommand` call — including the `request_agent_tree` bootstrap `start()` always fires —
+now also schedules a timer via the injected `setTimeoutImpl`. The harness's `clearTimeoutImpl`
+is a no-op that doesn't remove entries from its `timeoutCalls` tracking array, so two tests
+asserting an exact `timeoutCalls.length` needed their expected counts bumped (from 1 to 3, and
+2 to 5) with a comment explaining why — not a silent tolerance widening, the exact new counts
+are asserted and explained.
+
+**Gates:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` — 100% funcs/lines on
+every `src/web/` file (project-wide 99.96% funcs is still only `src/cli.ts`, untouched this
+round). `bun run e2e`: 21/25 pass; the 4 failures are this sandbox's now-familiar tooling gaps
+(no `tmux`, no Chromium at `/opt/pw-browsers/chromium`, one bearer-token-matrix timeout) — same
+class flagged in Rounds 3–4, nothing this round touches routes, auth, or the wire protocol.
+
+**Worktree note, again:** this round's worktree also started bare (two founding-doc commits
+only) — fast-forward-merged `origin/claude/coordinator-onboarding-kab9ls` before starting.

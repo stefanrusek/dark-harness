@@ -11,7 +11,10 @@ import {
   addUserTurn,
   applyEvent,
   createInitialState,
+  dismissPossibleGap,
   isRoot,
+  logError,
+  markPossibleGap,
   orderedAgents,
   seedFromTree,
   selectAgent,
@@ -225,6 +228,42 @@ describe("setConnectionStatus", () => {
     const next = setConnectionStatus(state, "open");
     expect(next.connectionStatus).toBe("open");
     expect(next.agents).toBe(state.agents);
+  });
+});
+
+describe("markPossibleGap / dismissPossibleGap (DH-0024)", () => {
+  test("markPossibleGap sets possibleGap", () => {
+    const state = createInitialState();
+    expect(state.possibleGap).toBe(false);
+    expect(markPossibleGap(state).possibleGap).toBe(true);
+  });
+
+  test("dismissPossibleGap clears possibleGap", () => {
+    const state = markPossibleGap(createInitialState());
+    expect(dismissPossibleGap(state).possibleGap).toBe(false);
+  });
+});
+
+describe("logError (DH-0029)", () => {
+  test("appends an entry with the given message and timestamp", () => {
+    const state = createInitialState();
+    const next = logError(state, "boom", "2026-01-01T00:00:00Z");
+    expect(next.errorLog).toEqual([{ message: "boom", timestamp: "2026-01-01T00:00:00Z" }]);
+  });
+
+  test("defaults the timestamp to now when omitted", () => {
+    const next = logError(createInitialState(), "boom");
+    expect(next.errorLog[0]?.timestamp).toBeTruthy();
+  });
+
+  test("caps the log at the most recent 50 entries", () => {
+    let state = createInitialState();
+    for (let i = 0; i < 55; i++) {
+      state = logError(state, `error-${i}`, `2026-01-01T00:00:${String(i).padStart(2, "0")}Z`);
+    }
+    expect(state.errorLog).toHaveLength(50);
+    expect(state.errorLog[0]?.message).toBe("error-5");
+    expect(state.errorLog.at(-1)?.message).toBe("error-54");
   });
 });
 

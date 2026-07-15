@@ -8,6 +8,7 @@ import type { ServerTarget } from "../protocol.ts";
 import {
   CommandError,
   type FetchLike,
+  type SendCommandOptions,
   requestAgentTree,
   sendMessage,
   stopAgent,
@@ -20,13 +21,16 @@ import {
   appendTranscript,
   buildShell,
   hideError,
+  hideGapBanner,
   renderAgentHeader,
   renderComposer,
   renderConnectionStatus,
+  renderErrorLog,
   renderSessionSummary,
   renderSidebar,
   renderTranscript,
   showError,
+  showGapBanner,
 } from "./render.ts";
 import { type SseConnection, connectEvents } from "./sse.ts";
 import {
@@ -35,6 +39,9 @@ import {
   addUserTurn,
   applyEvent,
   createInitialState,
+  dismissPossibleGap,
+  logError,
+  markPossibleGap,
   seedFromTree,
   selectAgent,
   selectedAgent,
@@ -89,9 +96,13 @@ export class AppView {
       const nowFn = this.deps.nowFn ?? Date.now;
       this.state = addUserTurn(this.state, agent.agentId, message, new Date(nowFn()).toISOString());
       this.renderAll();
-      sendMessage(this.deps.target, agent.agentId, message, this.deps.fetchImpl).catch((err) =>
-        this.reportError(err),
-      );
+      sendMessage(
+        this.deps.target,
+        agent.agentId,
+        message,
+        this.deps.fetchImpl,
+        this.commandOptions(),
+      ).catch((err) => this.reportError(err));
     },
     onDownloadAgentLog: (agentId) => {
       downloadLogs(this.deps.target, agentId, this.deps.downloadEnv, this.deps.fetchImpl).catch(
@@ -104,8 +115,8 @@ export class AppView {
       );
     },
     onStopAgent: (agentId) => {
-      stopAgent(this.deps.target, agentId, this.deps.fetchImpl).catch((err) =>
-        this.reportError(err),
+      stopAgent(this.deps.target, agentId, this.deps.fetchImpl, this.commandOptions()).catch(
+        (err) => this.reportError(err),
       );
     },
   };
@@ -127,6 +138,7 @@ export class AppView {
       {
         onEvent: (event) => this.handleEvent(event),
         onStatusChange: (status) => this.handleStatus(status),
+        onReconnected: () => this.handleReconnected(),
       },
       {
         fetchImpl: this.deps.fetchImpl,
@@ -136,6 +148,16 @@ export class AppView {
     );
     this.bootstrapAgentTree();
     this.startLivenessTicker();
+  }
+
+  /** Options threaded into every command send so a hung request reports a timeout instead
+   *  of hanging silently forever (DH-0029 #37) — shares the same injectable timer deps used
+   *  elsewhere in this class. */
+  private commandOptions(): SendCommandOptions {
+    const options: SendCommandOptions = {};
+    if (this.deps.setTimeoutImpl) options.setTimeoutImpl = this.deps.setTimeoutImpl;
+    if (this.deps.clearTimeoutImpl) options.clearTimeoutImpl = this.deps.clearTimeoutImpl;
+    return options;
   }
 
   /**
@@ -161,7 +183,7 @@ export class AppView {
    * resolves first wins; `seedFromTree`/`applyEvent` are both idempotent about it.
    */
   private bootstrapAgentTree(): void {
-    requestAgentTree(this.deps.target, this.deps.fetchImpl)
+    requestAgentTree(this.deps.target, this.deps.fetchImpl, this.commandOptions())
       .then((res) => {
         const nowFn = this.deps.nowFn ?? Date.now;
         this.state = seedFromTree(this.state, res.tree, new Date(nowFn()).toISOString());
@@ -194,9 +216,25 @@ export class AppView {
     renderConnectionStatus(this.shell.connectionPill, this.state);
   }
 
+  /** DH-0024: fires on every SSE reconnect (not the initial connect) — see sse.ts's
+   *  `onReconnected` for why this is treated as a possible gap. Shows the dismissible
+   *  banner; the operator dismisses it once they've seen it (`dismissGapBanner`). */
+  private handleReconnected(): void {
+    this.state = markPossibleGap(this.state);
+    this.renderAll();
+  }
+
+  private dismissGapBanner(): void {
+    this.state = dismissPossibleGap(this.state);
+    hideGapBanner(this.shell.gapBanner);
+  }
+
   private reportError(err: unknown): void {
     const message = err instanceof CommandError ? err.message : "Request failed.";
     showError(this.shell.errorBanner, message);
+    const nowFn = this.deps.nowFn ?? Date.now;
+    this.state = logError(this.state, message, new Date(nowFn()).toISOString());
+    renderErrorLog(this.deps.doc, this.shell.errorLogPanel, this.state);
     const setTimeoutFn = this.deps.setTimeoutImpl ?? setTimeout;
     const clearTimeoutFn = this.deps.clearTimeoutImpl ?? clearTimeout;
     if (this.errorTimer) clearTimeoutFn(this.errorTimer);
@@ -214,6 +252,12 @@ export class AppView {
     renderSessionSummary(doc, this.shell.sessionSummary, this.state);
     renderAgentHeader(doc, this.shell.agentHeader, this.state, this.callbacks, now);
     renderComposer(doc, this.shell.composer, this.state, this.callbacks.onSendMessage);
+    if (this.state.possibleGap) {
+      showGapBanner(this.shell.gapBanner, () => this.dismissGapBanner());
+    } else {
+      hideGapBanner(this.shell.gapBanner);
+    }
+    renderErrorLog(doc, this.shell.errorLogPanel, this.state);
     this.updateOutput();
   }
 

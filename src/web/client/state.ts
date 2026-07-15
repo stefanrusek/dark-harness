@@ -74,7 +74,29 @@ export interface WebState {
   exitCode: number | null;
   /** Highest SSE event id observed, for diagnostics / potential manual resume. */
   lastEventId: string | null;
+  /**
+   * DH-0024: set whenever the SSE connection reconnects after a drop (see
+   * `sse.ts`'s `onReconnected`) — resuming via `Last-Event-ID` after any disconnection can
+   * miss events the server evicted or a restart in between, and there is no server-side
+   * gap signal yet to say for certain either way (DH-0019). Surfaced as a dismissible
+   * "reconnected — history may be incomplete" banner; cleared by `dismissPossibleGap`.
+   */
+  possibleGap: boolean;
+  /**
+   * DH-0029: a durable log of past errors (command failures, SSE reconnects that timed
+   * out, etc.), so an operator who missed a transient banner can still review what
+   * happened. Newest last; the render layer shows newest first. Capped at
+   * `MAX_ERROR_LOG_ENTRIES` so a long session can't grow this unboundedly.
+   */
+  errorLog: ErrorLogEntry[];
 }
+
+export interface ErrorLogEntry {
+  message: string;
+  timestamp: string;
+}
+
+const MAX_ERROR_LOG_ENTRIES = 50;
 
 let spawnCounter = 0;
 
@@ -88,6 +110,8 @@ export function createInitialState(): WebState {
     sessionEnded: false,
     exitCode: null,
     lastEventId: null,
+    possibleGap: false,
+    errorLog: [],
   };
 }
 
@@ -272,6 +296,34 @@ export function seedFromTree(
 
 export function setConnectionStatus(state: WebState, status: ConnectionStatus): WebState {
   return { ...state, connectionStatus: status };
+}
+
+/** DH-0024: marks that the current session may have a gap in its event history. */
+export function markPossibleGap(state: WebState): WebState {
+  return { ...state, possibleGap: true };
+}
+
+/** Dismisses the "history may be incomplete" banner once the operator has seen it. */
+export function dismissPossibleGap(state: WebState): WebState {
+  return { ...state, possibleGap: false };
+}
+
+/**
+ * DH-0029: appends an entry to the persistent error log, oldest-first, capped at
+ * `MAX_ERROR_LOG_ENTRIES` (drops the oldest once full) so a long session's log can't grow
+ * unboundedly.
+ */
+export function logError(
+  state: WebState,
+  message: string,
+  timestamp: string = new Date().toISOString(),
+): WebState {
+  const entries = [...state.errorLog, { message, timestamp }];
+  const errorLog =
+    entries.length > MAX_ERROR_LOG_ENTRIES
+      ? entries.slice(entries.length - MAX_ERROR_LOG_ENTRIES)
+      : entries;
+  return { ...state, errorLog };
 }
 
 export function selectAgent(state: WebState, agentId: string): WebState {

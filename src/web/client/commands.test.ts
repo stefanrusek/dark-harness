@@ -111,6 +111,45 @@ describe("sendCommand", () => {
     );
     expect(result).toEqual(tree);
   });
+
+  test("DH-0029 (#37): reports a timeout instead of hanging forever on a hung send", async () => {
+    // A fetch double that never resolves — simulates a server that accepted the connection
+    // but never responded, the exact case a command timeout exists to give feedback for.
+    const hungFetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+    const timeoutCalls: Array<() => void> = [];
+    const setTimeoutImpl = ((fn: () => void) => {
+      timeoutCalls.push(fn);
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    const clearTimeoutImpl = (() => {}) as typeof clearTimeout;
+
+    const pending = sendCommand(target, buildRequestAgentTreeCommand(), hungFetch, {
+      timeoutMs: 5000,
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    });
+    expect(timeoutCalls).toHaveLength(1);
+    timeoutCalls[0]?.();
+
+    await expect(pending).rejects.toThrow("No response after 5s — the server may be unresponsive.");
+  });
+
+  test("clears its timeout timer once the fetch resolves", async () => {
+    const { fetch: fetchImpl } = fakeFetch(200, { ok: true });
+    let cleared = false;
+    const setTimeoutImpl = ((fn: () => void) =>
+      setTimeout(fn, 100_000)) as unknown as typeof setTimeout;
+    const clearTimeoutImpl = ((id: unknown) => {
+      cleared = true;
+      clearTimeout(id as ReturnType<typeof setTimeout>);
+    }) as typeof clearTimeout;
+
+    await sendCommand(target, buildRequestAgentTreeCommand(), fetchImpl, {
+      setTimeoutImpl,
+      clearTimeoutImpl,
+    });
+    expect(cleared).toBe(true);
+  });
 });
 
 describe("sendMessage / requestAgentTree / stopAgent", () => {
