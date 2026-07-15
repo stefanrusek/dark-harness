@@ -309,6 +309,53 @@ own change *directly causes* another domain's tests to fail rather than just lea
 they might want filled — a slightly different flavor of cross-domain courtesy than before,
 but the same boundary.
 
+### 2026-07-15 — Round 7 (sub-agents no longer inherit the root's `interactive` flag)
+
+E2E's round-2 sub-agent-spawning coverage found a real bug (documented inline in its own
+test, flagged as out-of-scope for E2E to fix): `spawnAgent()` in `src/agent/runtime.ts` was
+passing the runtime-instance `interactive` flag into every sub-agent's loop params too, not
+just the root's — so any sub-agent spawned from an interactive server/TUI/Web session
+inherited Round 5's "pause instead of end" semantics and hung `"waiting"` forever instead of
+ever reaching `"done"`, since nothing was ever going to call `SendMessage` on it to wake it
+back up. This silently broke the `Agent` tool's blocking (`run_in_background: false`) mode in
+exactly the contexts (server/TUI/Web) where most real usage happens.
+
+**The fix itself was one line** (`interactive: this.interactive` → `interactive: false` in
+`spawnAgent()`'s call to `runAgentLoop()`), but I didn't stop at "make the obvious change" —
+the handoff explicitly asked me to confirm `SendMessage`-driven mid-conversation steering of a
+still-running sub-agent wouldn't regress, and the honest way to check that was reading
+`loop.ts` closely rather than assuming the one-line change was safe by construction. It is
+safe: `registerSendMessage`'s pending-message queue is armed and drained unconditionally,
+regardless of `interactive` — `interactive` only gates the decision made *after* a turn
+returns with no tool use, which is exactly the one thing this fix needed to change and
+nothing else. Wrote a dedicated regression test proving this rather than trusting the code
+read alone, consistent with this identity's standing "prove it, don't just reason about it"
+habit.
+
+**A pre-existing test had encoded the bug as an expectation, and I judged that the honest fix
+was to replace it, not patch around it.** The Round 5 describe block's second test asserted a
+sub-agent under an interactive root *should* pause `"waiting"` after one exchange — true
+before this round, actively wrong after. I deleted it and split its still-valid coverage
+across two new, more precisely-targeted tests rather than trying to minimally edit an
+assertion that no longer described a real invariant. This is the same judgment call as Round
+5's own "the tests were testing the bug" moment, now encountered from the other side — as the
+person whose earlier-round test itself needed to go.
+
+**Held the `e2e/` ownership boundary on a one-line, unambiguous fix.** `e2e/
+server-protocol.test.ts`'s own test had already documented this exact bug inline as a known
+Core gap, with a precise note on what to change once fixed. I ran it, confirmed it now fails
+exactly where expected (child's expected `status: "waiting"` needs to become `"done"`; the
+root's stays `"waiting"` correctly, unchanged), and wrote up the one-line fix as a request
+in `docs/handoffs/core.md` rather than editing `e2e/` myself — same standing rule as Round
+3/5, held even though the fix is about as small and unambiguous as this kind of request ever
+gets.
+
+**Gates:** all four run; `bun run e2e`'s PTY/browser suites still aren't runnable in this
+sandbox (no tmux/Chromium), but I ran `e2e/server-protocol.test.ts` directly per the round's
+own instructions — 5/6 pass, the 1 failure being the pre-existing, now-flagged, not-a-new-
+regression assertion above. Full detail in `docs/handoffs/core.md`'s dated Round 7 status log
+entry.
+
 **Verification discipline, continued:** live-verified with the real compiled binary — a real
 mock HTTP provider, a real `dh --server` process, `curl`-driven `send_message` twice in
 sequence, `download_logs` afterward showing both exchanges as one JSONL history with a real

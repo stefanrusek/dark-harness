@@ -238,7 +238,20 @@ export class AgentRuntime {
           // run_in_background subprocess handling. Passing it through here is what makes
           // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
           signal: handle.signal,
-          interactive: this.interactive,
+          // Round 7 fix (docs/handoffs/core.md status log): sub-agents never inherit the
+          // root/runtime's `interactive` flag. Round 5's "pause instead of end" semantics
+          // exist so an operator can keep talking to an interactive root — but a sub-agent
+          // spawned via the `Agent` tool has no operator; if it inherited `interactive: true`
+          // from an interactive server/TUI/Web root, it would pause in "waiting" forever on
+          // its first non-tool-use turn instead of reaching "done"/"failed", hanging the
+          // `Agent` tool's blocking (`run_in_background: false`) `awaitDone` wait. Sub-agents
+          // always get non-interactive (terminate-on-first-non-tool-use-turn) semantics,
+          // regardless of the root's mode. This does NOT affect `SendMessage`-driven
+          // steering of a still-running sub-agent — `registerSendMessage`'s sink is wired up
+          // unconditionally in loop.ts regardless of `interactive`, so a sub-agent can still
+          // be steered mid-conversation while it's actively looping; `interactive` only
+          // controls what happens when the model itself produces a non-tool-use turn.
+          interactive: false,
           ...(this.config.options.maxTurns !== undefined
             ? { maxTurns: this.config.options.maxTurns }
             : {}),

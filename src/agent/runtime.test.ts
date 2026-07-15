@@ -813,15 +813,25 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
     }
   });
 
-  test("the same multi-exchange behavior works for a sub-agent reachable via SendMessage (not just the root)", async () => {
+  // Round 7 (docs/handoffs/core.md status log): E2E found that spawnAgent() used to pass
+  // the runtime-instance `interactive` flag into every sub-agent too, so a sub-agent spawned
+  // from an interactive root inherited Round 5's "pause instead of end" semantics — but a
+  // sub-agent has no operator to send it more messages, so it hung "waiting" forever instead
+  // of ever reaching "done"/"failed", silently breaking the Agent tool's blocking
+  // (`run_in_background: false`) mode. This replaces the old (now-wrong) test above, which
+  // asserted the sub-agent *should* pause "waiting" after its first exchange — that was
+  // exactly the bug, encoded as an expectation. A sub-agent's own conversation now always
+  // ends on its first non-tool-use turn, regardless of the root's mode; only
+  // `SendMessage`-driven steering of a still-*running* (tool-using) sub-agent survives, since
+  // `registerSendMessage`'s pending-message queue in loop.ts is wired up unconditionally, not
+  // gated on `interactive`.
+  test("a sub-agent spawned from an interactive root still reaches 'done' on its first non-tool-use turn (not stuck 'waiting' forever)", async () => {
     const server = startAccumulatingEchoServer();
     try {
-      const events: ServerSentEvent[] = [];
       const runtime = new AgentRuntime({
         config: interactiveConfig(server),
         systemPrompt: "sp",
         interactive: true,
-        onEvent: (e) => events.push(e),
       });
 
       const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
@@ -829,43 +839,89 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
         prompt: "child first",
       });
 
-      // Round 5 wiring: spawnAgent()'s onEvent handler now mirrors agent_status into the
-      // task registry (this.tasks.setStatus) — getAgentTree()/TaskSnapshot.status must
-      // reflect "waiting" for the sub-agent too, the same as the root.
-      while (runtime.getAgentTree()[0]?.children[0]?.status !== "waiting") {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      expect(
-        events.some(
-          (e) =>
-            e.type === "agent_output" &&
-            e.agentId === taskId &&
-            e.chunk.includes("seen so far: child first"),
-        ),
-      ).toBe(true);
-
-      // The exact regression this round fixes, applied to a sub-agent: TaskRegistry.
-      // sendMessage() used to reach a loop that could no longer do anything with it once
-      // the first exchange had "finished" (task.sendMessage pointed at a dead closure).
-      runtime.tasks.sendMessage(taskId, "child second");
-      while (
-        !events.some(
-          (e) =>
-            e.type === "agent_output" &&
-            e.agentId === taskId &&
-            e.chunk.includes("seen so far: child first | child second"),
-        )
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("waiting");
-
-      runtime.tasks.stop(taskId);
+      // This resolving at all (rather than hanging until bun's test timeout) is the actual
+      // proof: before the fix, this sub-agent inherited `interactive: true` and would pause
+      // "waiting" after its one and only exchange, so awaitDone() would never settle.
       await runtime.tasks.awaitDone(taskId);
-      expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("failed");
+      const snapshot = runtime.tasks.snapshot(taskId);
+      expect(snapshot.status).toBe("done");
+      expect(snapshot.output).toContain("seen so far: child first");
     } finally {
       server.stop(true);
     }
+  });
+
+  test("SendMessage can still steer a still-running (tool-using) sub-agent under an interactive root, even though it now terminates instead of waiting", async () => {
+    const { onLogLine, logLines } = collectors();
+    const runtime = new AgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      interactive: true,
+      onLogLine,
+    });
+
+    // "loop-forever" (see startMockAnthropicServer above) keeps issuing tool_use turns
+    // regardless of tool_result feedback, so the sub-agent stays "running" (never reaches a
+    // non-tool-use turn) long enough to prove a mid-flight SendMessage is actually picked up
+    // by the loop while it's still going — this is the steering path Round 7's fix must not
+    // regress, since it's unconditional in loop.ts (not gated on `interactive`).
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "loop-forever please",
+    });
+
+    while (runtime.getAgentTree()[0]?.children[0]?.status !== "running") {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    runtime.tasks.sendMessage(taskId, "steer now");
+
+    // loop.ts logs every injected pending message as a new "user" message line at the top of
+    // its next turn (regardless of `interactive`) — this is the actual proof the sendMessage
+    // sink is still live and consumed mid-conversation for a sub-agent, not just for the
+    // root. The mock's "loop-forever" branch itself never produces this text, so it can only
+    // appear here via the real injection path.
+    while (
+      !logLines.some((l) => l.type === "message" && l.role === "user" && l.content === "steer now")
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    runtime.tasks.stop(taskId);
+    await runtime.tasks.awaitDone(taskId);
+    expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("failed");
+  });
+
+  test("the Agent tool's blocking mode (run_in_background: false) actually resolves for a sub-agent spawned from an interactive root", async () => {
+    const events: ServerSentEvent[] = [];
+    const runtime = new AgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      interactive: true,
+      onEvent: (e) => events.push(e),
+    });
+
+    // "use-agent-tool" makes the root call the Agent tool with run_in_background: false,
+    // which awaits ctx.tasks.awaitDone(taskId) internally (src/agent/tools/agent.ts) before
+    // the root's own tool_use turn can get a tool_result back and continue. Before the Round
+    // 7 fix, the spawned child ("child instruction" -> a plain non-tool-use reply) would
+    // inherit interactive: true and pause "waiting" forever, so awaitDone() never resolved,
+    // the Agent tool call never returned a tool_result, and the root's conversation could
+    // never proceed to its own next (interactive) turn — this test only passes if that whole
+    // chain actually completes.
+    const runPromise = runtime.runRoot("use-agent-tool");
+    while (!events.some((e) => e.type === "agent_status" && e.status === "waiting")) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(runtime.getAgentTree()[0]?.status).toBe("waiting");
+    expect(events.some((e) => e.type === "agent_output" && e.chunk === "finished after tool")).toBe(
+      true,
+    );
+    // The sub-agent itself reached a real terminal state, not stuck "waiting".
+    expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("done");
+
+    runtime.stopRoot();
+    const result = await runPromise;
+    expect(result.success).toBe(false); // stopped, collapsed into "failed" per Round 3's convention
   });
 });
 

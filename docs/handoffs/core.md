@@ -1036,3 +1036,96 @@ a status field); (c) `SendMessage` can still steer a running sub-agent mid-conve
 regression to Round 5's root use case, applied correctly to sub-agents too if that's still
 desired for a still-running one). Append a dated status entry here and update
 `docs/roster/grace.md` when done.
+
+### 2026-07-15 — Round 7 status log (fixed: sub-agents no longer inherit `interactive`)
+
+Confirmed Core round 6 was merged (`b0cfe9b`) before starting; this round touches the same
+file (`src/agent/runtime.ts`) as flagged.
+
+**The fix** was exactly as small as the handoff's diagnosis implied: `spawnAgent()`
+(`src/agent/runtime.ts`, in the `run:` closure passed to `this.tasks.start()`) previously
+passed `interactive: this.interactive` into its `runAgentLoop()` call, mirroring `runRoot()`'s
+own call one-for-one. Changed it to the literal `interactive: false`, with an inline comment
+explaining why (sub-agents always terminate on their first non-tool-use turn, root-only gets
+Round 5's "pause instead of end" semantics). `runRoot()` itself is untouched — it still passes
+`this.interactive` as before, since the root's mode genuinely does depend on how the runtime
+was constructed.
+
+**Confirmed the one exception the handoff called out ("SendMessage steering must still work
+for a still-running sub-agent") holds without any code change,** by reading `loop.ts` closely
+before touching anything: `registerSendMessage`'s sink pushes into a `pendingMessages` queue
+and is armed unconditionally at the top of `runAgentLoop()`, and the queue is drained at the
+top of *every* turn (`if (pendingMessages.length > 0) { ... }`) regardless of `interactive`.
+`interactive` only gates what happens *after* a turn comes back with a non-tool-use
+`stopReason` — it has nothing to do with whether a mid-flight message during an active
+(tool-using) turn gets picked up. So setting sub-agents to `interactive: false` only changes
+behavior at the exact moment the handoff wanted changed (the terminal-turn decision), not the
+steering path. Wrote a regression test for this specifically (see below) rather than taking
+the read of the code as sufficient on its own, per this identity's standing "prove it, don't
+just reason about it" habit from prior rounds.
+
+**Regression tests added, all in `src/agent/runtime.test.ts`'s "Round 5" describe block**
+(three tests total, replacing one that had gone from "proves the fix" to "encodes the bug" —
+see below):
+1. `"a sub-agent spawned from an interactive root still reaches 'done' on its first
+   non-tool-use turn (not stuck 'waiting' forever)"` — spawns a sub-agent from an
+   `interactive: true` runtime and `await`s `tasks.awaitDone(taskId)` with no manual polling
+   loop or timeout logic at all; the test only passes if that promise actually settles. Before
+   the fix, this hung until bun's default per-test timeout — a stronger proof than checking a
+   status field after some fixed delay (this identity's Round 3 note: "a test that can only
+   pass by actually interrupting/completing a truly-pending operation is a stronger proof than
+   one that races a timer").
+2. `"SendMessage can still steer a still-running (tool-using) sub-agent under an interactive
+   root..."` — uses the existing `"loop-forever"` mock-provider branch (Round 6c) to keep a
+   sub-agent in `"running"` indefinitely, sends it a message via `tasks.sendMessage()`, and
+   asserts the injected message shows up as a logged user-role message line (loop.ts logs
+   every injected pending message verbatim at the top of its next turn) — this is what proves
+   requirement (c) from the handoff without depending on the mock echoing it back as text
+   (the `loop-forever` branch never produces assistant text, so there was no way to observe
+   the injection via `agent_output` events; log lines were the right observation point).
+3. `"the Agent tool's blocking mode (run_in_background: false) actually resolves for a
+   sub-agent spawned from an interactive root"` — the actual E2E-found hang, reproduced at the
+   `AgentRuntime` level: an `interactive: true` root runs `"use-agent-tool"`, which makes it
+   call the real `Agent` tool with `run_in_background: false`; before the fix this would hang
+   forever because `ctx.tasks.awaitDone()` inside the tool never resolved. Proven by the root
+   actually reaching its own next `"waiting"` turn (which requires the tool call to have
+   returned a `tool_result`, which requires the child to have reached a terminal state) and by
+   asserting the child's own status is `"done"`, not `"waiting"`.
+
+**The pre-existing second test in that describe block had to be replaced, not just left
+alone — it encoded the bug as an expectation, the same class of issue this identity's Round 5
+notes already called out for a different file.** It spawned a sub-agent from an
+`interactive: true` runtime and asserted the sub-agent *itself* paused `"waiting"` after one
+exchange, then proved a second exchange worked via `SendMessage` — that was true before this
+fix and is now actively wrong: with the fix, that same sub-agent reaches `"done"` after its
+first exchange and never pauses at all. Deleted it and split its real, still-valid coverage
+(root-analog multi-exchange behavior isn't a sub-agent concern anymore; SendMessage-while-
+running is) into the two new tests above instead of trying to patch it in place.
+
+**Cross-domain finding for Hedy/E2E (not fixed here, e2e/ is E2E's ownership per
+CLAUDE.md §3):** `e2e/server-protocol.test.ts`'s `"sub-agent spawning over real HTTP/SSE
+(Round 2, gap 2a)"` test (~line 334) asserts the spawned child's `status` as `"waiting"` in
+its `request_agent_tree` snapshot — its own inline comment already documents this as the
+exact bug this round fixes, explicitly flagged as "not fixed here, out of e2e's ownership."
+Ran it after the fix (`bun test e2e/server-protocol.test.ts`) and confirmed it now fails
+exactly there, nowhere else: `expect(treeBody.tree).toEqual([...])`'s nested child object has
+`status: "waiting"` where the real (now-correct) value is `"done"`. The root's own `status`
+in that same assertion correctly stays `"waiting"` (unchanged — the root is still
+interactive, only the child's semantics changed). This is a one-line fix (change the child's
+expected `status` from `"waiting"` to `"done"`) and the surrounding ~15-line comment block
+documenting the "known bug" can likely be trimmed or turned into a short "regression test,
+see Core round 7" note once updated. Routed as a request rather than edited directly,
+consistent with this identity's standing rule (Round 3/5 notes) of never touching `e2e/`
+myself even when the fix is this small and unambiguous.
+
+**Gates:** `bun run typecheck` and `bun run lint` (both clean; `biome check .` separately
+flags `dh.json` at the repo root for formatting, but that file is untracked and unrelated to
+this round's change — confirmed via `git status` before starting), `bun run test:coverage`
+(724 tests, 99.96%/100% funcs/lines aggregate; `src/agent/runtime.ts` itself is 100%/100%;
+the pre-existing `src/cli.ts` 97.37%/100% gap is the same `import.meta.main` process-entry
+line documented in this identity's round-1 notes, unrelated to this round). `bun run e2e`'s
+PTY/browser suites weren't runnable in this sandbox (no tmux/Chromium, the same gap every
+prior round has hit) — but per the round's own instructions I ran the non-PTY/non-browser
+`e2e/server-protocol.test.ts` directly, which is what surfaced the cross-domain finding above
+(5 of 6 tests pass; the 1 failure is the known, now-flagged pre-existing assertion, not a new
+regression from this round's change).
