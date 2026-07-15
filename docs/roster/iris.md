@@ -87,3 +87,17 @@ overclaiming test coverage of prompt-text effectiveness.
 Gates: `typecheck` and `test:coverage` pass (693/693 tests, 100% coverage on
 `system-prompt.ts`). `lint` has one pre-existing failure on an untracked root `dh.json`
 unrelated to `src/prompt/` — not touched, out of scope.
+
+### 2026-07-15 — Round 4: README Bedrock setup section
+
+Routed over from E2E's Round 5 (they built real Bedrock e2e coverage and flagged the README
+only had a one-line sample config entry, no operator-facing setup guidance). Added an "AWS
+Bedrock setup" subsection to `README.md` covering `provider.region`, the standard AWS
+credential chain (env vars, `~/.aws/credentials`/`config`, instance/container roles — `dh`
+does no custom credential handling), `ProviderError`-wrapped error surfacing (same shape as
+Anthropic), and a practical note that Bedrock model ids are region/account-specific and a
+seemingly-valid id can still be legacy/deprecated, so "invalid model"/"access denied" errors
+are usually account-side, not a `dh` config bug. Full text and placement rationale in
+`docs/handoffs/prompt-docs.md` Round 4 status entry.
+
+Docs-only, no code gates apply this round.

@@ -331,3 +331,34 @@ flagged that README.md's Bedrock guidance is currently just the one-line sample 
 
 **Gates:** none beyond your existing ones — this is a docs-only addition. Append a dated
 status entry here and update `docs/roster/iris.md` when done.
+
+### 2026-07-15 — Round 4 status: done
+
+Added an "AWS Bedrock setup" subsection to `README.md`, placed right after the `dh.json`
+config-reference bullet list and before the bearer-token/TLS section (same section level,
+same pattern of prose + example JSON block). Covers, per E2E's Round 5 notes:
+
+- `provider.region` — what it's for and what happens if it's omitted (AWS SDK's own region
+  resolution via `AWS_REGION`/`AWS_DEFAULT_REGION`/`~/.aws/config`).
+- The standard AWS credential chain in full — env vars, shared credentials/config files
+  (including `AWS_PROFILE`), and instance/container/task roles — stated explicitly that `dh`
+  does no custom credential handling and there's no `dh.json` access-key field, so operators
+  don't go looking for one.
+- Error surfacing — same `ProviderError` wrapping as Anthropic, nothing Bedrock-specific
+  about the shape.
+- The practical heads-up from E2E's real testing: Bedrock model ids are region/account
+  specific and some valid-looking ids are legacy/deprecated, so an "invalid model" or
+  "access denied" error is usually an account/model-availability issue, not a `dh`
+  configuration bug.
+
+**Judgment call:** used a concrete, realistic example config (a named `bedrock` provider
+with `region: "us-west-2"` and a versioned Bedrock Anthropic model id) rather than an
+abstract placeholder, consistent with the rest of the README's config examples.
+
+**Gates:** docs-only, no code gates apply. Read the rendered section back in place to check
+it flows with the surrounding config-reference prose — no broken structure, headings, or
+JSON.
+
+No cross-domain requests. Nothing deferred.
+
+— Iris (she/her), Prompt domain lead, persistent for this build.

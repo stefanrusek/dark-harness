@@ -122,6 +122,37 @@ connection survives ordinary HTTP proxies and reconnects cleanly via `Last-Event
 
 Full schema rationale: [`docs/adr/0007-dhjson-schema.md`](docs/adr/0007-dhjson-schema.md).
 
+### AWS Bedrock setup
+
+```json
+{
+  "provider": [
+    { "name": "bedrock", "type": "bedrock", "region": "us-west-2" }
+  ],
+  "models": [
+    { "name": "sonnet", "provider": "bedrock", "model": "us.anthropic.claude-sonnet-4-5-20250929-v1:0" }
+  ]
+}
+```
+
+- **`provider.region`** — the AWS region the Bedrock endpoint is called in (e.g.
+  `us-west-2`). If omitted, the AWS SDK falls back to its own region resolution (an
+  `AWS_REGION`/`AWS_DEFAULT_REGION` env var, or a configured region in `~/.aws/config`).
+- **Credentials** — `dh` does no custom credential handling for Bedrock; it relies entirely
+  on the AWS SDK's standard credential chain, the same one any AWS CLI tool uses. In order:
+  environment variables (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+  `AWS_SESSION_TOKEN`), the shared credentials/config files (`~/.aws/credentials`,
+  `~/.aws/config`, respecting `AWS_PROFILE`), and finally an instance/container/task role
+  when running on EC2, ECS, or Lambda. There is no `dh.json` field for an access key —
+  configure credentials the normal AWS way, outside the config file.
+- **Errors** surface through the same `ProviderError` wrapping as the Anthropic provider —
+  nothing Bedrock-specific about the error shape. In practice, most Bedrock failures are
+  account/model availability issues rather than `dh` misconfiguration: Bedrock model ids are
+  region- and account-specific (a model enabled in one region/account may not be in
+  another), and some ids that are syntactically valid are legacy or deprecated. An
+  "invalid model" or "access denied" error is usually a sign to check model access in the
+  AWS Bedrock console for that region/account, not a `dh.json` problem.
+
 ### Optional: bearer token + TLS
 
 ```json
