@@ -167,6 +167,95 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
     expect(replayedStatus.id).toBe(status.id);
   });
 
+  test("a second send_message to a waiting root agent continues the same conversation", async () => {
+    // Open thread since Round 1/2 (docs/roster/hedy.md): every prior sub-agent e2e test
+    // incidentally drove two exchanges as a side effect of testing spawning, but nothing
+    // asserted the actual point of plain multi-turn continuity — a *second* send_message to
+    // an already-"waiting" root agent, with no sub-agents involved, over real HTTP/SSE.
+    const provider = startMockAnthropicProvider([
+      successTurn("Nice to meet you, Ada."),
+      successTurn("Yes, I remember your name is Ada."),
+    ]);
+    cleanups.push(provider.stop);
+    const ws = createWorkspace();
+    cleanups.push(ws.cleanup);
+    ws.writeConfig(baseConfig(provider.baseURL));
+    const port = await findFreePort();
+
+    const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
+    cleanups.push(proc.kill);
+    await proc.waitForStdout(/listening on port/);
+    const baseUrl = `http://localhost:${port}`;
+
+    const sse = await connectSse(baseUrl);
+    cleanups.push(sse.close);
+
+    // First exchange.
+    const firstRes = await fetch(new URL("/api/commands", baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "send_message",
+        agentId: "agent-root",
+        message: "Hi, my name is Ada.",
+      }),
+    });
+    expect(firstRes.status).toBe(200);
+
+    const firstOutput = await sse.waitFor(
+      (e) => e.type === "agent_output" && e.agentId === "agent-root" && e.chunk.length > 0,
+    );
+    expect(firstOutput).toMatchObject({ chunk: "Nice to meet you, Ada." });
+
+    const isWaiting = (e: (typeof sse.events)[number]) =>
+      e.type === "agent_status" && e.agentId === "agent-root" && e.status === "waiting";
+    await sse.waitFor(isWaiting);
+    expect(provider.callCount).toBe(1);
+
+    // Second exchange, sent only after the first has fully completed and the session is
+    // sitting "waiting" — this is the actual scenario this test exists to prove.
+    const secondRes = await fetch(new URL("/api/commands", baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "send_message",
+        agentId: "agent-root",
+        message: "What is my name?",
+      }),
+    });
+    expect(secondRes.status).toBe(200);
+
+    const secondOutput = await sse.waitFor(
+      (e) =>
+        e.type === "agent_output" &&
+        e.agentId === "agent-root" &&
+        e.chunk === "Yes, I remember your name is Ada.",
+    );
+    expect(secondOutput).toMatchObject({ chunk: "Yes, I remember your name is Ada." });
+
+    await sse.waitFor((e) => isWaiting(e) && sse.events.filter(isWaiting).length >= 2);
+    expect(provider.callCount).toBe(2);
+
+    // The real proof of shared conversation history, not two independent runs: the second
+    // /v1/messages request the mock provider actually received carries the *entire* prior
+    // exchange (both the user's first message and the model's first reply) ahead of the new
+    // user turn — a fresh/independent session would only ever send the second message alone.
+    const secondRequest = provider.requests[1] as {
+      messages: { role: string; content: unknown }[];
+    };
+    const roles = secondRequest.messages.map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "user"]);
+    const flatten = (content: unknown): string =>
+      typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content.map((c: { text?: string }) => c.text ?? "").join("")
+          : "";
+    expect(flatten(secondRequest.messages[0]?.content)).toContain("Hi, my name is Ada.");
+    expect(flatten(secondRequest.messages[1]?.content)).toContain("Nice to meet you, Ada.");
+    expect(flatten(secondRequest.messages[2]?.content)).toContain("What is my name?");
+  });
+
   test("download_logs: per-agent JSONL and full session tar bundle", async () => {
     const { baseUrl } = await startServer();
 

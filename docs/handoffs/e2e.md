@@ -588,3 +588,72 @@ everything and re-running `bun run typecheck` clean, then restoring. Not this ro
 **Open threads:** the pre-existing uncommitted typecheck/lint failures above are Core/TUI/Web
 territory, not e2e — flagging for whoever owns landing round 12's work, since a dirty tree
 with failing gates was left uncommitted going into this round.
+
+### 2026-07-15 — Round 7 (Hedy, fresh process): closed DH-0006, plain multi-turn conversation e2e coverage
+
+Picked up `tracking/DH-0006-e2e-multiturn-conversation-coverage.md` (already `implementing`),
+the oldest open thread in this domain — flagged by Round 1, re-flagged every round since
+(Round 2, Round 2 gap-2a, Round 4, Round 5, Round 6 implicitly): every existing e2e test that
+happens to touch a second exchange (the sub-agent-spawning test) does so as a side effect of
+testing spawning, not as its actual point. No test asserted "a root agent, with no
+sub-agents, holds a real second conversation exchange over real HTTP/SSE, and the second
+response is provably conditioned on the first."
+
+**Worktree note, again:** the fourth time this exact issue has recurred for this role — this
+worktree started branched from the pre-domain-landing ancestor commit `12679e4` (zero unique
+commits of its own; confirmed via `git merge-base --is-ancestor`), not from the real
+`origin/claude/coordinator-onboarding-kab9ls` HEAD (`fb07db7`, which by this round also
+includes the Spile-tracker migration — `tracking/DH-0001` through `DH-0008` and
+`tracking/SPILE-SPEC.md`). Fast-forwarded before starting, same as every prior round. This is
+now a firmly established pattern for this role specifically; worth the coordinator looking at
+worktree provisioning rather than each instance independently rediscovering and working
+around it.
+
+**What I built:** one new test in `e2e/server-protocol.test.ts`,
+`"a second send_message to a waiting root agent continues the same conversation"`, in the
+existing top-level `describe` block alongside the other plain-root-agent scenarios (not the
+sub-agent `describe` block below it — deliberately, since the whole point is proving this
+without any sub-agent involved). Real compiled `dh --server`, real HTTP/SSE, one mock
+provider scripted with two turns. Flow: send "Hi, my name is Ada." -> assert output "Nice to
+meet you, Ada." -> wait for `agent_status: "waiting"` -> **only then** send "What is my
+name?" -> assert output "Yes, I remember your name is Ada." -> wait for the second
+`"waiting"` status.
+
+The actual proof of shared conversation history (not just "two exchanges happened, who knows
+if they were connected"): the mock provider's `requests` array captures every `/v1/messages`
+body it actually received (`e2e/support/mock-provider.ts` already exposed this — no support
+code changed). Asserted the *second* request's `messages` array has
+`roles === ["user", "assistant", "user"]` and, flattening each message's content, that
+element 0 contains the first user message, element 1 contains the model's first reply
+verbatim, and element 2 contains the new user message — i.e. the real agent loop sent the
+full prior exchange back to the provider ahead of the new turn. A test that only checked
+`chunk === "Yes, I remember your name is Ada."` would have passed even if the second call had
+been a completely fresh, context-free session (the mock provider doesn't care what's in the
+request when scripted with plain `successTurn`s) — the request-body assertion is what
+actually rules that out.
+
+**Judgment call:** put this test alongside the existing single-turn tests in the first
+`describe` block rather than inventing a new one — it is testing the exact same "plain root
+agent" surface as `"send_message to agent-root runs a full turn..."`, just extended by one
+more exchange, so grouping it there reads as "the next scenario in the same family" rather
+than a new category.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean (one auto-fix applied by
+`biome check --write` to this test's own formatting, nothing else touched).
+`bun test e2e/server-protocol.test.ts` — 7 pass / 0 fail (was 6, now 7), 42 `expect()` calls.
+`bun run test:coverage` — 806 pass / 0 fail, 100% coverage maintained (no `src/` files
+touched this round). Full `bun run e2e` — 21 pass / 4 fail, all four the same pre-flagged
+environment gaps every prior round has hit (no `tmux`, no Chromium binary at
+`/opt/pw-browsers/chromium`, the pre-existing `security.test.ts` bearer-token SSE timeout) —
+no regressions from this change.
+
+**Ticket closed:** `tracking/DH-0006-e2e-multiturn-conversation-coverage.md` front matter set
+to `status: closed`, `resolution: done`, with a Resolution section added; regenerated
+`tracking/views/dark-harness-view.md` to move DH-0006 from `implementing` to
+`Recently Closed`.
+
+**Open threads unchanged:** the pre-existing uncommitted typecheck/lint failures flagged in
+Round 6 were not present in this round's tree (clean `typecheck`/`lint` from the start, so
+presumably landed by whoever owned that by now). TUI/web tests still need real `tmux`/a
+Chromium binary in the sandbox to run — unrelated to this round, flagged every round since
+Round 1.

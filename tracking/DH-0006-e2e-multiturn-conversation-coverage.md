@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0006
 type: bug
-status: implementing
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -47,3 +47,16 @@ never captured as an automated e2e scenario.
 > This is a coverage gap, not a functional bug — the underlying behavior is known-working
 > (verified by hand, and by unit tests in `src/agent/loop.test.ts`/`runtime.test.ts`). The
 > ticket is specifically about closing the e2e-level blind spot.
+
+## Resolution
+
+Closed 2026-07-15 (Hedy, E2E). Added
+`"a second send_message to a waiting root agent continues the same conversation"` to
+`e2e/server-protocol.test.ts`: a plain root agent (no sub-agents) over a real compiled
+`dh --server` process, real HTTP/SSE. First exchange ("Hi, my name is Ada." ->
+"Nice to meet you, Ada.") runs to completion ("waiting"); a second `send_message`
+("What is my name?") is sent only after that, and the mock provider's own second
+`/v1/messages` request body is asserted to carry the full prior exchange
+(`roles === ["user", "assistant", "user"]`, each message's flattened content checked) ahead
+of the new turn — the proof that this is genuinely shared conversation history, not two
+independent runs. See `docs/handoffs/e2e.md`'s dated status entry for full detail.
