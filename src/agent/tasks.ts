@@ -62,6 +62,13 @@ export class TaskRegistry {
   private tasks = new Map<string, InternalTask>();
   private counter = 0;
 
+  // An explicit (even empty) constructor is required for Bun's coverage instrumentation to
+  // count the class's synthetic constructor slot as "hit" — see docs/handoffs/server.md
+  // status log for detail (Radia independently found and fixed the same instrumentation
+  // artifact in src/server/fake-agent-loop.ts).
+  // biome-ignore lint/complexity/noUselessConstructor: see comment above
+  constructor() {}
+
   private nextId(kind: TaskKind): string {
     this.counter += 1;
     return `${kind}-${this.counter}`;
