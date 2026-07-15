@@ -78,4 +78,85 @@ README has no gate beyond lint/spellcheck-by-eye — it's prose, not code.
 
 ## Status log
 
-_(Append dated entries here. Status supersedes.)_
+### 2026-07-15 — Iris (Prompt domain lead), first round
+
+**Built:**
+
+- `src/prompt/skills.ts` — `Skill` type (`name`, `description`, `source`) and skill
+  discovery: `parseSkillFrontmatter(content)` (a deliberately minimal frontmatter reader —
+  flat `key: value` lines, optionally double-quoted with `\"`/`\\` escapes; every real
+  SKILL.md observed, including this project's own, fits that shape, so a full YAML parser
+  wasn't worth the dependency) and `discoverSkills(skillPaths)` (async, scans each configured
+  directory's immediate subdirectories for a `SKILL.md`; missing directories, non-directory
+  entries, missing/malformed `SKILL.md`, and races like a dangling symlink are all skipped
+  gracefully rather than throwing — one bad skill directory can't take down prompt loading).
+- `src/prompt/system-prompt.ts` — the built-in prompt text (methodology discipline:
+  escalate-don't-guess, commit-before-yield, status-supersedes, self-contained handoffs,
+  no-silent-truncation; plus the "your output is automatically logged, you never call a
+  logging tool" statement per ADR 0005) and:
+  - `loadSystemPrompt(config: DhConfig): Promise<string>` — the signature named in the
+    handoff. If `config.systemPrompt` is set it's a **full override**: reads that file
+    verbatim (trimmed), no skill injection — the operator owns the whole prompt at that
+    point. Otherwise builds the default prompt with skill enumeration.
+  - `buildDefaultSystemPrompt(config)` and `renderSkillsSection(skills)` exported
+    separately for testability and reuse.
+  - `CLI_TOOLS_SKILL` — the bundled skill's `{ name, description }`, parsed from the real
+    `SKILL.md` at module load (not hand-duplicated, so the prompt text can't drift from the
+    file), with a hardcoded fallback only for the theoretical case that file's frontmatter
+    ever breaks.
+- `src/prompt/skills/cli-tools/SKILL.md` — the real bundled skill, covering `git`, `gh`,
+  `pnpm`, `tilt`, `kubectl`, `jq`, `doppler`, `npx`/`playwright`, `curl` per HANDOFF.md
+  Appendix A's bold entries. Always enumerated in the default prompt, independent of
+  `config.skillPaths`.
+- `src/prompt/md-text.d.ts` — ambient `declare module "*.md"` so `import ... from
+  "./skills/cli-tools/SKILL.md" with { type: "text" }` typechecks. **Design call:** the
+  skill's content is imported as a Bun text asset specifically so `bun build --compile`
+  embeds it into the binary — verified locally (compiled a throwaway binary, deleted the
+  source `.txt` fixture, ran the binary, content was still there). bun-types ships this
+  declaration for `*.txt` but not `*.md`; added the missing one scoped to `src/prompt/`
+  rather than touching a shared config.
+- `README.md` — pitch, air-gap security stance up front (before quick start, per ADR 0004's
+  weight), quick start (`bunx dark-harness` + build-from-source), the full mode matrix
+  (HANDOFF.md §2 / ADR 0001), a `dh.json` reference kept in sync with ADR 0007 by hand,
+  the bearer-token/TLS section (ADR 0004 Addendum B), a short tools/skills/logging summary,
+  and links to METHODOLOGY.md/CLAUDE.md for contributors.
+
+**Gates:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass — 100%
+line and function coverage on every file touched (`src/prompt/skills.ts`,
+`src/prompt/system-prompt.ts`, including the bundled `SKILL.md` text asset itself, which
+Bun's coverage tool tracks as a file).
+
+**Deferred, named explicitly:**
+
+- No logo/wordmark in the README (noted in its own "Status / deferred" section).
+- No skills beyond the one bundled `cli-tools` skill this round.
+- `README.md`'s `dh.json` sample is maintained by hand against ADR 0007, not generated from
+  `src/contracts/config.ts` — fine for now, but will drift silently if the contract changes
+  without a README follow-up. Flagging so a future pass (mine or another domain's) considers
+  a generated/checked reference.
+- Did not touch `bunfig.toml` / any repo-wide coverage-threshold enforcement — `src/prompt/`
+  hits 100% on its own, but I didn't verify whether CI/Release's gate wiring expects a
+  `[test] coverageThreshold` in `bunfig.toml` versus deriving pass/fail from the `bun test
+  --coverage` table output some other way. Flagging as a heads-up for CI/Release, not a
+  blocker for this handoff.
+
+**Cross-domain requests:**
+
+- To Core (`src/config/`, `src/agent/`): the `Skill` tool (your territory) will need a way
+  to load a skill's *full* instructional body by name at invocation time, not just the
+  name+description this domain enumerates in the prompt. For skills discovered via
+  `config.skillPaths` that's a plain file read. For the bundled `cli-tools` skill, its
+  content only exists as a `.md`-text import baked into this binary (see `md-text.d.ts`
+  above) — there's no on-disk `SKILL.md` next to a compiled `dh` binary to fall back to. If
+  the `Skill` tool's lookup is purely filesystem-based, invoking `cli-tools` by name will
+  fail in a compiled binary even though it's listed in the prompt. Two options I see: (a)
+  Core's `Skill` tool special-cases a small set of builtin skills exported from
+  `src/prompt/` (I can export the raw body text alongside `CLI_TOOLS_SKILL` if useful —
+  say the word), or (b) treat "builtin" skills as pre-resolved and have the agent loop pass
+  their full content in some other way. Not blocking this round since `Skill`-tool
+  implementation is still open per `docs/handoffs/core.md`, but wanted it flagged before
+  that lands and the mismatch becomes a silent runtime gap.
+- No changes requested to `src/contracts/` this round — `DhConfig.systemPrompt` and
+  `skillPaths` were sufficient as-is.
+
+— Iris (she/her), Prompt domain lead, persistent for this build.
