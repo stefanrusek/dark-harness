@@ -468,6 +468,25 @@ describe("startTui", () => {
     await done;
   });
 
+  test("a periodic tick redraws the frame on its own, advancing the liveness indicator", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    await flush();
+    const writesBefore = stdout.writes.length;
+
+    // No key was pressed and no SSE event arrived — any further redraw must come from the
+    // app's own periodic tick timer, not from an externally triggered dispatch.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    expect(stdout.writes.length).toBeGreaterThan(writesBefore);
+
+    stdin.type("\x03");
+    await done;
+  });
+
   test("ctrl-c exits the alt screen, shows the cursor, and stops listening", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();

@@ -174,3 +174,53 @@ Durable notes:
 
 Open thread for a future round: none. This round didn't touch any other domain's surface
 and needed no cross-domain request.
+
+### 2026-07-15 — Round 5, liveness indicator for long-running turns
+
+Fable's gap analysis: an operator watching a long `running` turn (e.g. dark-factory-style
+hours-long work) couldn't tell "still thinking" from "silently stalled" — no elapsed-time or
+last-activity signal existed anywhere in the tree/agent view. Worked in a fresh worktree
+(needed a `git reset --hard` to the real branch tip first — see note below).
+
+Durable notes:
+
+- **Two timestamps, not one, because they answer different questions.** `lastEventAt`
+  (bumped by *any* SSE event for that agent — spawn, output chunk, status, token usage) is
+  "how long since anything happened," the actual stall detector. `statusSince` (bumped only
+  when `status` itself changes) is "how long in this status." A `running` agent deep in one
+  long tool call has a stale `statusSince` but a fresh `lastEventAt` from streamed output —
+  showing only one of the two would either cry wolf or hide a real stall. Both derive from
+  each event's existing ISO `timestamp` field (`src/contracts/events.ts`) — no wire change,
+  confirmed against `HANDOFF.md`/ADR 0002 before touching anything.
+
+- **`render.ts` stays pure — no `Date.now()` inside it.** Added `TuiState.now`, mutated only
+  by a new `tick` action the reducer applies verbatim. `app.ts` is the only place that calls
+  a real clock, via a 1s `setInterval` (`.unref()`d, cleared in `cleanup()`). This preserves
+  the existing "state -> pure render -> testable without a terminal" architecture rather than
+  quietly breaking it for this one feature — same principle Round 4's cursor marker and
+  Round 3's root-detection fix both leaned on.
+
+- **`formatElapsed` as an exported pure helper**, same "public surface tests assert against
+  directly" pattern as `CURSOR_MARKER` (Round 4). Clamped negative durations to `"0s"` rather
+  than showing a confusing negative number — a clock/event-timestamp mismatch should degrade
+  gracefully, not display garbage.
+
+- **One real sleep, deliberately.** Every other test in this repo's TUI suite drives the
+  reducer synchronously or injects a fake clock — `app.test.ts`'s new test is the one
+  exception, `await`-ing ~1.1s of real wall time to prove the periodic tick actually redraws
+  on its own with no keystroke or SSE event in between. That's the one behavior that
+  genuinely can't be observed without a real timer firing; injecting the reducer's `now`
+  wouldn't prove `app.ts`'s wiring to a live `setInterval` actually works.
+
+- **Worktree hygiene gotcha worth remembering for a future round:** this round's worktree
+  was created off a *very* stale base — no `src/` at all, just the founding docs — while
+  `main`'s tracked branch (`claude/coordinator-onboarding-kab9ls`) had moved far ahead on
+  `origin`. `git log --oneline -3` on arrival showing only 2 ancient commits was the tell;
+  fixed with `git fetch origin claude/coordinator-onboarding-kab9ls` + `git reset --hard` to
+  it (safe here since the stale worktree branch had zero unique commits of its own — checked
+  with `git diff HEAD origin/... --stat` first). If a future round's worktree looks emptied
+  out like this, check that before assuming something is broken in the repo itself.
+
+Open thread for a future round: none blocking. Didn't verify wording consistency with Web
+(Susan)'s parallel round-5 liveness indicator — the handoff flagged it as a nice-to-have, not
+required; worth a glance if a later round touches both clients' status/liveness display.

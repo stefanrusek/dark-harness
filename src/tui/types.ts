@@ -26,6 +26,15 @@ export interface AgentInfo {
   inputTokens: number;
   outputTokens: number;
   costUsd: number | null;
+  /** Epoch ms of the most recent SSE event seen for this agent (any type — spawn, output,
+   * status, token usage). A liveness signal ("last heard from at") distinct from
+   * `statusSince`: it resets on every event, so a `running` agent that has gone quiet is
+   * visibly distinguishable from one still actively streaming (Round 5,
+   * docs/handoffs/tui.md). */
+  lastEventAt: number;
+  /** Epoch ms when `status` last changed — answers "how long in this status", as opposed to
+   * `lastEventAt`'s "how long since anything happened at all". */
+  statusSince: number;
 }
 
 export interface TuiState {
@@ -40,6 +49,12 @@ export interface TuiState {
   sessionEnded: { exitCode: number } | null;
   size: { rows: number; cols: number };
   statusMessage: string | null;
+  /** Current wall-clock time (epoch ms), as known to the reducer. Set by `initialState`
+   * (real `Date.now()`) and advanced only via the `tick` action — never read implicitly at
+   * render time — so `render.ts` stays a pure function of state and tests can inject an
+   * arbitrary fake clock instead of sleeping. Drives the tree/agent-view liveness indicator
+   * (elapsed = now - agent.lastEventAt). */
+  now: number;
 }
 
 export type Action =
@@ -48,7 +63,8 @@ export type Action =
   | { type: "command_error"; error: string }
   | { type: "key"; key: KeyEvent }
   | { type: "resize"; rows: number; cols: number }
-  | { type: "connection"; status: ConnectionStatus };
+  | { type: "connection"; status: ConnectionStatus }
+  | { type: "tick"; now: number };
 
 export type Effect = { type: "send_command"; command: ClientCommand } | { type: "quit" };
 

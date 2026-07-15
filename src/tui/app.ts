@@ -49,6 +49,11 @@ function defaultIO(): TuiIO {
   };
 }
 
+/** How often the frame is force-redrawn purely to advance the liveness indicator (Round 5,
+ * docs/handoffs/tui.md) — no state.ts field but `now` changes on a tick, so a long-silent
+ * `running` agent visibly keeps counting up even with no new SSE events arriving. */
+const TICK_INTERVAL_MS = 1000;
+
 /**
  * Start the console TUI against the server at `baseUrl`. Resolves once the user quits
  * (Ctrl+C).
@@ -118,7 +123,15 @@ export async function startTui(
       }
     }
 
+    const tickTimer = setInterval(() => {
+      dispatch({ type: "tick", now: Date.now() });
+    }, TICK_INTERVAL_MS);
+    // Never keep the process alive on its own — real terminal input / the abort signal below
+    // are what actually end the session; this timer only redraws in the meantime.
+    tickTimer.unref?.();
+
     function cleanup(): void {
+      clearInterval(tickTimer);
       abortController.abort();
       stdout.write(SHOW_CURSOR + ALT_SCREEN_EXIT);
       stdin.setRawMode?.(false);

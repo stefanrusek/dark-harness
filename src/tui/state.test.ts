@@ -196,6 +196,65 @@ describe("reducer: sse_event agent_status", () => {
   });
 });
 
+describe("reducer: liveness — lastEventAt / statusSince", () => {
+  test("lastEventAt is set from the event's timestamp on every event type", () => {
+    const { state } = reducer(initialState(size()), {
+      type: "sse_event",
+      event: spawned({ timestamp: "2026-07-15T00:00:10.000Z" }),
+    });
+    expect(state.agents.get("root")?.lastEventAt).toBe(Date.parse("2026-07-15T00:00:10.000Z"));
+  });
+
+  test("agent_output bumps lastEventAt but never statusSince", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ timestamp: "2026-07-15T00:00:00.000Z" }),
+    }));
+    const statusSinceAfterSpawn = state.agents.get("root")?.statusSince;
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: output({ timestamp: "2026-07-15T00:00:20.000Z", chunk: "hi" }),
+    }));
+    const agent = state.agents.get("root");
+    expect(agent?.lastEventAt).toBe(Date.parse("2026-07-15T00:00:20.000Z"));
+    expect(agent?.statusSince).toBe(statusSinceAfterSpawn);
+  });
+
+  test("a status change bumps statusSince; an unchanged status does not", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: statusEvent({ status: "running", timestamp: "2026-07-15T00:00:00.000Z" }),
+    }));
+    const firstStatusSince = state.agents.get("root")?.statusSince;
+    // Same status again, later timestamp: statusSince must not move.
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: statusEvent({ status: "running", timestamp: "2026-07-15T00:00:30.000Z" }),
+    }));
+    expect(state.agents.get("root")?.statusSince).toBe(firstStatusSince);
+    // A genuine status change moves statusSince to that event's timestamp.
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: statusEvent({ status: "done", timestamp: "2026-07-15T00:01:00.000Z" }),
+    }));
+    expect(state.agents.get("root")?.statusSince).toBe(Date.parse("2026-07-15T00:01:00.000Z"));
+  });
+
+  test("falls back to Date.now() for an unparseable timestamp instead of throwing", () => {
+    const before = Date.now();
+    const { state } = reducer(initialState(size()), {
+      type: "sse_event",
+      event: spawned({ timestamp: "not-a-date" }),
+    });
+    const after = Date.now();
+    const lastEventAt = state.agents.get("root")?.lastEventAt ?? -1;
+    expect(lastEventAt).toBeGreaterThanOrEqual(before);
+    expect(lastEventAt).toBeLessThanOrEqual(after);
+  });
+});
+
 describe("reducer: sse_event token_usage", () => {
   test("sets token counts and costUsd when present", () => {
     const { state } = reducer(initialState(size()), {
@@ -324,6 +383,11 @@ describe("reducer: command_error / resize / connection", () => {
   test("resize updates size", () => {
     const { state } = reducer(initialState(size()), { type: "resize", rows: 40, cols: 120 });
     expect(state.size).toEqual({ rows: 40, cols: 120 });
+  });
+
+  test("tick updates now with an injected clock value (no real sleep needed)", () => {
+    const { state } = reducer(initialState(size()), { type: "tick", now: 999_999 });
+    expect(state.now).toBe(999_999);
   });
 
   test("connection updates connection status", () => {
