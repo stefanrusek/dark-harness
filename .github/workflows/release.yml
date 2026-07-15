@@ -1,8 +1,18 @@
 name: Release
 
 # HANDOFF.md §11 / docs/handoffs/ci-release.md scope 2: tag-driven release.
-# v* tag push -> full gate -> cross-compiled binaries -> GitHub Release (with a
-# conventional-commits changelog) -> npm publish (so `bunx dark-harness` works).
+# v* tag push -> full gate -> cross-compiled binaries -> smoke test on a real runner
+# of each target OS/arch -> GitHub Release (with a conventional-commits changelog) ->
+# npm publish (so `bunx dark-harness` works).
+#
+# DH-0032: all 5 release targets used to be cross-compiled from a single
+# ubuntu-latest runner with zero execution anywhere in CI — a broken cross-compile
+# (wrong syscalls, path separators, bun-windows quirks) would never be caught before
+# shipping, and the e2e gate (also ubuntu-only) never touched the windows/macOS
+# artifacts at all. The `smoke-test` job below downloads each `build` job's actual
+# artifact (the literal file that ships, not a separately-built native-host binary)
+# and runs `dh --version` on a real runner of the matching OS/arch, gating `release`
+# on all five passing.
 on:
   push:
     tags:
@@ -77,9 +87,74 @@ jobs:
             dist/${{ matrix.artifact }}.sha256
           if-no-files-found: error
 
+  smoke-test:
+    name: Smoke test (${{ matrix.artifact }} on ${{ matrix.runs-on }})
+    needs: build
+    runs-on: ${{ matrix.runs-on }}
+    # One real runner per released target, matched to that target's actual OS/arch —
+    # not just "any Linux box can cross-compile it." `ubuntu-24.04-arm` and
+    # `macos-13` (Intel) / `macos-latest` (Apple Silicon, GitHub's default macOS
+    # runner as of the images this was authored against) are GitHub-hosted labels;
+    # if a future runner-image deprecation renames/retires one of these, this step
+    # will fail loudly (unknown runner label) rather than silently skip — flag and
+    # fix the label, don't remove the check.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - artifact: dh-linux-x64
+            binary: dh-linux-x64
+            runs-on: ubuntu-latest
+          - artifact: dh-linux-arm64
+            binary: dh-linux-arm64
+            runs-on: ubuntu-24.04-arm
+          - artifact: dh-darwin-x64
+            binary: dh-darwin-x64
+            runs-on: macos-13
+          - artifact: dh-darwin-arm64
+            binary: dh-darwin-arm64
+            runs-on: macos-latest
+          - artifact: dh-windows-x64.exe
+            binary: dh-windows-x64.exe
+            runs-on: windows-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+
+      - name: Smoke test dh --version (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "dist/${{ matrix.binary }}"
+          OUT="$(dist/${{ matrix.binary }} --version)"
+          echo "dh --version -> $OUT"
+          if [ -z "$OUT" ]; then
+            echo "::error::dh --version produced no output on ${{ matrix.runs-on }} for ${{ matrix.artifact }}."
+            exit 1
+          fi
+
+      - name: Smoke test dh --version (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = & "dist/${{ matrix.binary }}" --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "dh --version exited $LASTEXITCODE on ${{ matrix.runs-on }} for ${{ matrix.artifact }}."
+            exit 1
+          }
+          Write-Host "dh --version -> $out"
+          if (-not $out) {
+            Write-Error "dh --version produced no output on ${{ matrix.runs-on }} for ${{ matrix.artifact }}."
+            exit 1
+          }
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: smoke-test
     runs-on: ubuntu-latest
     permissions:
       contents: write
