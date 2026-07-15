@@ -8,11 +8,22 @@
 
 ## Context
 
-Read `CLAUDE.md`, ADR 0003 (client-side-only web UI), and `HANDOFF.md` §9 before starting.
-This UI is **served by the client process**, never by the headless server (ADR 0003) — it's
-a static bundle plus JS that talks to the server over the same HTTP+SSE contract in
-`src/contracts/` that the TUI uses (via the browser's native `EventSource` for the SSE side,
-`fetch` for commands).
+Read `CLAUDE.md`, ADR 0003 (client-side-only web UI), ADR 0004 including its **2026-07-15
+amendment**, and `HANDOFF.md` §9 before starting. This UI is **served by the client
+process**, never by the headless server (ADR 0003) — it's a static bundle plus JS that
+talks to the server over the same HTTP+SSE contract in `src/contracts/` that the TUI uses.
+
+**Locked constraint (superseding anything below that says otherwise): do not use the
+browser's native `EventSource` for the SSE connection.** `EventSource` cannot set the
+`Authorization` header, so it can't carry a configured bearer token — this was escalated
+(CLAUDE.md §6 trigger 4) and decided by the architect-on-call; see ADR 0004's 2026-07-15
+amendment for full rationale. Use a `fetch()`-based reader instead: request the SSE
+endpoint with `Authorization: Bearer <token>` set when a token is configured, manually
+parse the `text/event-stream` response body (a `ReadableStream`), and implement your own
+reconnect/backoff resuming via `Last-Event-ID` (ADR 0002 already requires resume support).
+The console TUI hand-parses SSE the same way — there's in-repo precedent; consider whether
+a shared parser is worth extracting, though that's your implementation call. **No token
+material may ever appear in a URL/query string, under any circumstance.**
 
 **"Make it a joy to use" is an explicit owner requirement, not decoration** (`HANDOFF.md`
 §9) — this is the one domain where visual/interaction polish is genuinely in scope, not
@@ -35,9 +46,9 @@ cross-process browser e2e (headless browser driving a real server) is the E2E do
      (`src/contracts/events.ts`).
    - **Log download**: single agent's JSONL, or the full session bundle — hits the
      `download_logs` command and triggers a browser download of the response.
-   - Live updates via the SSE stream (`EventSource`, honoring reconnect — the browser's
-     native `EventSource` already retries and can send `Last-Event-ID` itself on
-     reconnect).
+   - Live updates via the SSE stream — per the locked constraint above, via a
+     `fetch()`-based reader with your own reconnect/backoff honoring `Last-Event-ID`, not
+     `EventSource`.
 
 3. **Build/serve**: this is a static bundle (HTML/CSS/JS) that the client process serves
    locally — coordinate with Core on exactly how `src/cli.ts`'s `--web` / `--connect --web`

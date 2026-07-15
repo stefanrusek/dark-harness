@@ -1,6 +1,7 @@
 # ADR 0004: Plaintext/air-gap default, opt-in bearer token + TLS
 
-**Status:** Accepted (amended 2026-07-14, per HANDOFF.md Addendum B)
+**Status:** Accepted (amended 2026-07-14, per HANDOFF.md Addendum B; amended 2026-07-15, SSE
+transport clarification — see bottom)
 
 ## Context
 
@@ -45,3 +46,29 @@ per-agent scopes, no user accounts — explicitly out of scope for this version.
   authenticated happy path, and a self-signed-cert TLS round trip (CLAUDE.md §5).
 - README security section must state the default plainly and name air-gapping as the
   strongest posture even with token/TLS available.
+
+## Amendment 2026-07-15 — no client uses native `EventSource`
+
+**Trigger:** the Server domain (Radia) implemented the bearer-token rule above correctly,
+then flagged that it's unsatisfiable by a browser client using the native `EventSource`
+API — `EventSource` cannot set custom headers, so it cannot send
+`Authorization: Bearer <token>`. Escalated per CLAUDE.md §6 trigger 4 rather than resolved
+unilaterally; decided by the architect-on-call (Fable).
+
+**Decision:** every client's SSE connection — web and console alike — is established via a
+manually-parsed `fetch()` request carrying the same `Authorization: Bearer <token>` header
+used for POST commands, not the browser's native `EventSource`. Reconnection is
+client-implemented (backoff + resume via `Last-Event-ID`, already required by ADR 0002) —
+`EventSource`'s automatic reconnection is given up in exchange for header support. **No
+token material may ever appear in a URL/query string** — that was considered and rejected
+explicitly (query strings leak into proxy/server access logs and browser history, which
+directly contradicts "never logged" above; server-side redaction can't reach an
+intermediate proxy's logs).
+
+**Consequences:**
+- The original bearer-token rule (§ above) is unchanged — this amendment is a clarification
+  of *how* clients satisfy it, not a relaxation of it.
+- The web UI's SSE handling now matches the console TUI's (both hand-parse
+  `text/event-stream`), rather than diverging by client type — one code pattern, not two.
+- `docs/handoffs/web.md` is updated to reflect this as a locked constraint, not an open
+  implementation choice.
