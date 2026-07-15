@@ -75,8 +75,12 @@ function sessionEnded(overrides: Partial<SessionEndedEvent> = {}): SessionEndedE
   };
 }
 
-function treeNode(agentId: string, children: AgentTreeNode[] = []): AgentTreeNode {
-  return { agentId, parentAgentId: null, model: "sonnet", status: "running", children };
+function treeNode(
+  agentId: string,
+  children: AgentTreeNode[] = [],
+  parentAgentId: string | null = null,
+): AgentTreeNode {
+  return { agentId, parentAgentId, model: "sonnet", status: "running", children };
 }
 
 describe("initialState", () => {
@@ -252,6 +256,62 @@ describe("reducer: tree_response", () => {
     state = { ...state, view: { kind: "tree", selectedIndex: 5 } };
     const { state: next } = reducer(state, { type: "tree_response", tree: [] });
     expect(next.view).toEqual({ kind: "tree", selectedIndex: 0 });
+  });
+
+  // Round 3 (docs/handoffs/tui.md): a fresh session must be able to send its first message
+  // without ever seeing a live agent_spawned event, or it deadlocks — agent_spawned never
+  // fires until the loop starts, which requires a first message, which requires a known
+  // rootAgentId. Seeding rootAgentId from the startup tree fetch breaks that cycle.
+  test("seeds rootAgentId from the tree's root node (parentAgentId === null) when not already known", () => {
+    const tree = [treeNode("agent-root")];
+    const { state } = reducer(initialState(size()), { type: "tree_response", tree });
+    expect(state.rootAgentId).toBe("agent-root");
+  });
+
+  test("does not overwrite an already-known rootAgentId from a later tree response", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "root", parentAgentId: null }),
+    }));
+    const { state: next } = reducer(state, {
+      type: "tree_response",
+      tree: [treeNode("other-root")],
+    });
+    expect(next.rootAgentId).toBe("root");
+  });
+
+  test("identifies the root by parentAgentId === null, not by array position", () => {
+    const root = treeNode("root-id");
+    const nonRoot = treeNode("weird-first-entry", [], "root-id");
+    const { state } = reducer(initialState(size()), {
+      type: "tree_response",
+      tree: [nonRoot, root],
+    });
+    expect(state.rootAgentId).toBe("root-id");
+  });
+
+  test("leaves rootAgentId null when no entry has a null parentAgentId", () => {
+    const tree = [treeNode("x", [], "y")];
+    const { state } = reducer(initialState(size()), { type: "tree_response", tree });
+    expect(state.rootAgentId).toBeNull();
+  });
+
+  test("seeding rootAgentId unblocks sending the first message via 'enter'", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "tree_response",
+      tree: [treeNode("agent-root")],
+    }));
+    state = { ...state, input: "hello" };
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.statusMessage).not.toBe("No root agent yet — please wait.");
+    expect(effects).toEqual([
+      {
+        type: "send_command",
+        command: { type: "send_message", agentId: "agent-root", message: "hello" },
+      },
+    ]);
   });
 });
 

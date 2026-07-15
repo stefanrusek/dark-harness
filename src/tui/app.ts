@@ -157,6 +157,15 @@ export async function startTui(
       onConnectionChange: (status) => dispatch({ type: "connection", status }),
     });
 
+    // Fire request_agent_tree on startup (not just on left-arrow) so rootAgentId gets
+    // seeded from the tree response's root node (state.ts's applyTreeResponse) before the
+    // operator ever types anything — otherwise a fresh session can never send its first
+    // message, since agent_spawned never fires until the loop starts, which requires a
+    // first message (Round 3, docs/handoffs/tui.md). Runs through the same runEffect path
+    // as every other command, so a failure here surfaces as an ordinary status message
+    // rather than crashing startup.
+    void runEffect({ type: "send_command", command: { type: "request_agent_tree" } });
+
     draw();
   });
 }

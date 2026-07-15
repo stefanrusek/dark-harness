@@ -292,15 +292,19 @@ describe("startTui", () => {
     const done = startTui("http://x", "s3cret", { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
 
-    // The SSE connection is opened as soon as the TUI starts.
+    // The SSE connection and the automatic startup request_agent_tree command (Round 3's
+    // deadlock fix) both fire as soon as the TUI starts — both must carry the header.
     expect(server.sseHeaders).toHaveLength(1);
     expect(server.sseHeaders[0]?.get("Authorization")).toBe("Bearer s3cret");
-
-    // Trigger a command POST (request_agent_tree) and check it too.
-    stdin.type("\x1b[D");
-    await flush();
     expect(server.commandHeaders).toHaveLength(1);
     expect(server.commandHeaders[0]?.get("Authorization")).toBe("Bearer s3cret");
+
+    // A later, operator-triggered command (left-arrow -> another request_agent_tree)
+    // carries it too, not just the startup one.
+    stdin.type("\x1b[D");
+    await flush();
+    expect(server.commandHeaders).toHaveLength(2);
+    expect(server.commandHeaders[1]?.get("Authorization")).toBe("Bearer s3cret");
 
     stdin.type("\x03");
     await done;
@@ -314,11 +318,67 @@ describe("startTui", () => {
 
     const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
+    // Index 0 is the automatic startup request_agent_tree command.
     expect(server.sseHeaders[0]?.has("Authorization")).toBe(false);
+    expect(server.commandHeaders[0]?.has("Authorization")).toBe(false);
 
     stdin.type("\x1b[D");
     await flush();
-    expect(server.commandHeaders[0]?.has("Authorization")).toBe(false);
+    expect(server.commandHeaders[1]?.has("Authorization")).toBe(false);
+
+    stdin.type("\x03");
+    await done;
+  });
+
+  test("fires request_agent_tree automatically on startup", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    await flush();
+
+    expect(server.commands).toContainEqual({ type: "request_agent_tree" });
+
+    stdin.type("\x03");
+    await done;
+  });
+
+  test("Round 3: a fresh session can send its first message through the UI, seeded purely by " +
+    "the startup tree fetch — no agent_spawned event ever arrives", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    server.commandResponses.push({
+      ok: true,
+      tree: [
+        {
+          agentId: "agent-root",
+          parentAgentId: null,
+          model: "sonnet",
+          status: "waiting",
+          children: [],
+        },
+      ],
+    });
+
+    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    await flush();
+
+    // Deliberately no enqueueSse(...) call here — this is the whole point of the
+    // regression test. Before Round 3's fix, this would sit forever on
+    // "No root agent yet — please wait." since agent_spawned never fires until a first
+    // message is sent, and a first message could never be sent.
+    stdin.type("hello");
+    stdin.type("\r");
+    await flush();
+
+    expect(server.commands).toContainEqual({
+      type: "send_message",
+      agentId: "agent-root",
+      message: "hello",
+    });
+    expect(stdout.allWrites()).not.toContain("please wait");
 
     stdin.type("\x03");
     await done;
