@@ -201,6 +201,33 @@ describe("composeMode", () => {
   });
 });
 
+describe("main — --help", () => {
+  test("--help prints usage and exits Success without touching config", async () => {
+    const io = fakeIo();
+    const code = await main(["--help"], {
+      io,
+      loadConfig: async () => {
+        throw new Error("--help must not load config");
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.exitCodes).toEqual([ExitCode.Success]);
+    expect(io.stdoutLines[0]).toContain("dh — Dark Harness");
+    expect(io.stdoutLines[0]).toContain("--help, -h");
+  });
+
+  test("-h behaves the same as --help", async () => {
+    const io = fakeIo();
+    const code = await main(["-h"], {
+      io,
+      loadConfig: async () => {
+        throw new Error("-h must not load config");
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+  });
+});
+
 describe("main — usage/config/systemPrompt failures", () => {
   test("a usage error returns HarnessError without touching config", async () => {
     const io = fakeIo();

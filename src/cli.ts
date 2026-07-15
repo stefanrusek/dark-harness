@@ -54,6 +54,30 @@ export interface CliOptions {
 
 const FLAGS_WITH_VALUES = new Set(["--connect", "--port", "--instructions", "--config"]);
 
+/** Printed by `--help`/`-h`, handled before flag parsing/config loading so it never depends
+ * on a working `dh.json` — mirrors the mode matrix and flag list in README.md / HANDOFF.md §2. */
+export const HELP_TEXT = `dh — Dark Harness: an autonomous coding agent harness.
+
+Usage:
+  dh                              Local server + console TUI, one process.
+  dh --web                        Local server + locally-served web UI.
+  dh --server                     Headless server only (port 4000, or --port).
+  dh --connect <host>              Console client to a remote server.
+  dh --connect <host> --web        Web client, locally served, connected to a remote server.
+
+Flags:
+  --web                    Serve the web UI instead of (or alongside --connect) the console TUI.
+  --server                 Run headless (no client attached).
+  --connect <host>         Connect to a remote dh --server instead of starting a local one.
+  --port <n>               Listen port for --server, or target port for --connect (default 4000).
+  --instructions <file>    Path to an instructions file; starts the root agent on it immediately.
+  --job                    Exit when the root agent finishes: 0 success, 1 self-reported failure, 2+ harness error.
+  --config <path>          Path to dh.json (default: ./dh.json).
+  --help, -h               Show this help and exit.
+
+Config: dh.json in the working directory (or --config <path>). See README.md for the schema.
+`;
+
 /** Parses argv (excluding the `bun`/script prefix — pass `process.argv.slice(2)`). Throws
  * CliUsageError on anything malformed; never exits or prints — that's main()'s job. */
 export function parseArgs(argv: string[]): CliOptions {
@@ -390,6 +414,12 @@ export async function main(
 ): Promise<ExitCodeType> {
   const deps: CliDeps = { ...defaultDeps(), ...overrides };
   const { io } = deps;
+
+  if (argv.includes("--help") || argv.includes("-h")) {
+    io.stdout(HELP_TEXT);
+    io.exit(ExitCode.Success);
+    return ExitCode.Success;
+  }
 
   let options: CliOptions;
   try {
