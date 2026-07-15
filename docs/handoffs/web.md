@@ -255,3 +255,96 @@ in-place.
    domains' compilation).
 2. Route/auth reconciliation against Server's actual implementation (`/api/commands`
    plural, header-based auth) is done on my side; no outstanding ask there.
+
+---
+
+### 2026-07-15 — Susan (Web domain lead), Round 2 complete — fixed the interactive bootstrap deadlock
+
+**Fresh clean checkout, not the round-1 worktree**, per the coordinator's instruction:
+`.claude/worktrees/susan-round2` off `origin/claude/coordinator-onboarding-kab9ls` at
+`1a0cb39` (past Core round 2, TUI round 2, E2E landing, and the CORS
+`Access-Control-Expose-Headers` fix — confirmed already present in `src/server/server.ts`,
+no action needed on my side there, as flagged).
+
+**The fix**, exactly as scoped in this section's brief:
+1. `src/web/client/app.ts`'s `start()` now also calls a new `bootstrapAgentTree()`, which
+   issues `request_agent_tree` (already existed in `commands.ts` since round 1, unused
+   until now) and, on response, calls a new `state.ts` function against the result.
+2. `src/web/client/state.ts`'s new `seedFromTree(state, tree)`: flattens the (possibly
+   nested) `AgentTreeNode[]` response, registers every node into `state.agents`, and finds
+   **the entry with `parentAgentId === null`** — not a hardcoded id string — to seed
+   `rootAgentId`/`selectedAgentId`. Idempotent and order-independent against the SSE
+   connection's own `agent_spawned` handler in `applyEvent`, which runs concurrently: never
+   overwrites an already-known agent's fields (an SSE event that beat the tree response to
+   the client is strictly more current than a boot-time snapshot), and never moves
+   `rootAgentId`/`selectedAgentId` once set by whichever path got there first. A failed
+   bootstrap request surfaces through the existing error-banner mechanism (`reportError`)
+   instead of hanging silently.
+
+**Regression coverage, at three levels:**
+- `state.test.ts`: `seedFromTree`'s contract directly — seeds from the parentless entry
+  (not a hardcoded id), flattens nested children, no-ops on an empty tree, doesn't clobber
+  live SSE-reported fields with a stale snapshot, doesn't move root/selection once set,
+  idempotent, doesn't mutate the previous state object.
+- `app.test.ts` (`happy-dom` + fake `fetch`/streams): a brand-new session sends its first
+  message via the real composer (**click** and **Enter-to-send**, both), with **no
+  `agent_spawned` SSE event ever having fired** — the actual deadlock scenario, proven with
+  no workaround. Also: seeds correctly from a non-hardcoded root id, and a failed
+  tree-bootstrap request shows the error banner rather than hanging. Updated the test
+  harness so the tree-bootstrap call (now fired by every `start()`) doesn't collide with
+  existing tests' `commandResponse` overrides (which target one specific action's failure,
+  not the bootstrap) or their exact-array `commandBodies` assertions (now correctly include
+  the leading `request_agent_tree` call).
+- `e2e/web.test.ts` (real compiled binary, real headless Chromium, real Server) — **this
+  file itself was testing around the bug**: its header comment documented the exact defect
+  and worked around it with a direct `fetch` POST to `/api/commands` instead of using the
+  UI, because the composer used to never render pre-message. I updated it (see cross-domain
+  note below) to drive the real composer instead, which is now possible — this is the
+  strongest evidence the fix works, a real browser against a real server, no workaround.
+
+**Cross-domain touch, flagged prominently: I edited `e2e/web.test.ts` (Hedy/E2E's
+directory), not just my own.** Fixing the deadlock made that file's own workaround-era
+assertion (`.empty-state` should read "Waiting for an agent to spawn…" pre-message) false —
+the composer now renders immediately, so `.empty-state` never appears, and the test hung
+for the full 30s timeout waiting on a locator that no longer exists. This isn't a new,
+separate defect; it's the direct, mechanical, expected consequence of fixing the bug that
+file's own header comment documented. I judged fixing it myself (rather than leaving `bun
+run e2e` red and handing back a broken gate) as the right call — the alternative was
+leaving a real regression test failing for a symptom I'd just fixed — but it's still a
+directory outside `src/web/`'s ownership, so flagging clearly: I (1) replaced the direct-
+API workaround with real Playwright interactions against `.composer-input` + the "Send"
+button, (2) removed the now-false `.empty-state` wait/assertion, (3) rewrote the header
+comment following this same file's own established "FIXED DEFECT" convention (used
+one paragraph down for the CORS fix), and (4) touched nothing else in `e2e/` — didn't look
+at or touch `e2e/tui.test.ts`, which documents the analogous TUI-side defect that's Mary's
+Round 3 to fix, not mine. Hedy/the coordinator should sanity-check this diff specifically.
+
+**Gates: all green.**
+
+```
+bun run typecheck      # tsc --noEmit && tsc --noEmit -p src/web — clean, both programs
+bun run lint            # biome check . — clean
+bun run test:coverage   # 100% funcs/100% lines on every src/web/ file, 647 tests project-
+                         # wide (all domains merged in this checkout)
+bun run e2e             # 18/18 real-binary e2e tests pass, including the fixed web.test.ts
+```
+
+One more of the documented Bun coverage-instrumentation quirks recurred (see
+`docs/roster/radia.md`, `docs/roster/susan.md`): the `applyEvent` reducer's exhaustive-
+switch `default` case's closing brace showed as an uncovered line despite the branch
+executing (proven by a dedicated test since round 1). Removing the block braces (as Radia's
+fix does) isn't legal here as-is — the case has a local `const` declaration, and biome's
+`noSwitchDeclarations` correctly requires a block around any case-local declaration to
+avoid it leaking scope into sibling cases. Resolved by moving the exhaustiveness check into
+a tiny top-level `assertNever(_value: never): void {}` helper instead of a local `const` —
+same compile-time guarantee (TS still errors if a new `ServerSentEvent` variant lacks a
+case), no local declaration in the case, so no block needed, so the quirk doesn't trigger.
+Worth remembering as the general pattern: prefer a no-op `assertNever` helper over a local
+`const _exhaustive: never = x` when the case needs to stay unbraced.
+
+**Deferred, not done:** everything already listed as deferred in the round-1 entry above
+still stands (shared SSE parser extraction, SSE reconnect backoff strategy). Nothing new
+deferred this round — the brief's full scope (both fix parts, plus the definition-of-done's
+required regression test) is done.
+
+**Roster:** updated `docs/roster/susan.md` with this round's memory entry.

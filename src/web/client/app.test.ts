@@ -37,8 +37,35 @@ interface FetchCall {
   init?: RequestInit | undefined;
 }
 
-function harness(overrides: { commandResponse?: (body: unknown) => Response } = {}) {
-  const { document, root, dispatch } = createTestDom();
+/** Default `request_agent_tree` fixture: a single pre-start root, matching what Server
+ *  actually synthesizes (see e2e/server-protocol.test.ts) — and deliberately using the
+ *  same agentId ("root-1") that `spawnRoot()` below later spawns via SSE, so existing
+ *  tests that call both see one consistent root, not two different agents racing. */
+function defaultTreeResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      tree: [
+        {
+          agentId: "root-1",
+          parentAgentId: null,
+          model: "sonnet",
+          status: "waiting",
+          children: [],
+        },
+      ],
+    }),
+    { status: 200 },
+  );
+}
+
+function harness(
+  overrides: {
+    commandResponse?: (body: unknown) => Response;
+    treeResponse?: (body: unknown) => Response;
+  } = {},
+) {
+  const { document, root, dispatch, dispatchKey } = createTestDom();
   const target: ServerTarget = { baseUrl: "http://localhost:4000" };
   const stream = fakeSseStream();
   const calls: FetchCall[] = [];
@@ -51,6 +78,13 @@ function harness(overrides: { commandResponse?: (body: unknown) => Response } = 
     }
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     commandBodies.push(body);
+    // The tree bootstrap (app.ts's start()) is a separate concern from whatever a given
+    // test is exercising via `commandResponse` (a failed send_message/stop_agent/
+    // download_logs) — special-cased first so those overrides don't also fail the
+    // bootstrap and throw an unrelated error banner into every such test.
+    if (body?.type === "request_agent_tree") {
+      return overrides.treeResponse ? overrides.treeResponse(body) : defaultTreeResponse();
+    }
     if (overrides.commandResponse) return overrides.commandResponse(body);
     if (body?.type === "download_logs") return new Response("bytes", { status: 200 });
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -84,6 +118,7 @@ function harness(overrides: { commandResponse?: (body: unknown) => Response } = 
     document,
     root,
     dispatch,
+    dispatchKey,
     stream,
     calls,
     commandBodies,
@@ -110,6 +145,88 @@ async function spawnRoot(h: ReturnType<typeof harness>, agentId = "root-1"): Pro
   });
   await flush();
 }
+
+describe("AppView interactive bootstrap (Round 2 — fresh-session deadlock fix)", () => {
+  test("a brand-new session can send its first message via composer + click, with no agent_spawned SSE event ever having fired", async () => {
+    const h = harness();
+    h.app.start();
+    await flush(); // resolve the request_agent_tree bootstrap — no spawnRoot(), on purpose:
+    // this is the whole point of the regression test. A fresh dh --web session has sent no
+    // message yet, so no agent_spawned SSE event exists; the only way the composer can know
+    // the root agent's id is the request_agent_tree bootstrap in app.ts's start().
+
+    expect(h.app.getState().rootAgentId).toBe("root-1");
+    expect(h.root.querySelector(".agent-row")).not.toBeNull();
+
+    const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
+    const form = h.root.querySelector("form") as HTMLFormElement;
+    expect(textarea).not.toBeNull();
+    expect(form).not.toBeNull();
+    textarea.value = "first message ever";
+    h.dispatch(form, "submit", { cancelable: true });
+    await flush();
+
+    expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
+      { type: "send_message", agentId: "root-1", message: "first message ever" },
+    ]);
+  });
+
+  test("a brand-new session can send its first message via Enter in the composer, same as click", async () => {
+    const h = harness();
+    h.app.start();
+    await flush();
+
+    const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "enter to send";
+    h.dispatchKey(textarea, "keydown", { key: "Enter", cancelable: true });
+    await flush();
+
+    expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
+      { type: "send_message", agentId: "root-1", message: "enter to send" },
+    ]);
+  });
+
+  test("seeds from the tree entry whose parentAgentId is null, not a hardcoded id", async () => {
+    const h = harness({
+      treeResponse: () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            tree: [
+              {
+                agentId: "agent-42",
+                parentAgentId: null,
+                model: "opus",
+                status: "waiting",
+                children: [],
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    });
+    h.app.start();
+    await flush();
+
+    expect(h.app.getState().rootAgentId).toBe("agent-42");
+    expect(h.root.querySelector(".agent-header-name")?.textContent).toBe("Root agent");
+    expect(h.root.querySelector("form")).not.toBeNull();
+  });
+
+  test("a failed tree-bootstrap request surfaces the error banner instead of hanging silently", async () => {
+    const h = harness({
+      treeResponse: () =>
+        new Response(JSON.stringify({ ok: false, error: "tree unavailable" }), { status: 200 }),
+    });
+    h.app.start();
+    await flush();
+
+    const banner = h.root.querySelector(".error-banner");
+    expect(banner?.classList.contains("hidden")).toBe(false);
+  });
+});
 
 describe("AppView construction and rendering", () => {
   test("renders the shell immediately without opening a connection", async () => {
@@ -212,6 +329,7 @@ describe("AppView commands", () => {
 
     await flush();
     expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
       { type: "send_message", agentId: "root-1", message: "do the thing" },
     ]);
   });
@@ -227,7 +345,10 @@ describe("AppView commands", () => {
 
     await flush();
     expect(h.downloadCalls).toHaveLength(1);
-    expect(h.commandBodies).toEqual([{ type: "download_logs", agentId: "root-1" }]);
+    expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
+      { type: "download_logs", agentId: "root-1" },
+    ]);
   });
 
   test("download-session-bundle button requests the full bundle (no agentId)", async () => {
@@ -241,7 +362,7 @@ describe("AppView commands", () => {
 
     await flush();
     expect(h.downloadCalls).toHaveLength(1);
-    expect(h.commandBodies).toEqual([{ type: "download_logs" }]);
+    expect(h.commandBodies).toEqual([{ type: "request_agent_tree" }, { type: "download_logs" }]);
   });
 
   test("stop button sends a stop_agent command for the selected agent", async () => {
@@ -255,7 +376,10 @@ describe("AppView commands", () => {
     if (stopBtn) h.dispatch(stopBtn, "click");
 
     await flush();
-    expect(h.commandBodies).toEqual([{ type: "stop_agent", agentId: "root-1" }]);
+    expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
+      { type: "stop_agent", agentId: "root-1" },
+    ]);
   });
 
   test("a failed stop command shows the error banner too", async () => {

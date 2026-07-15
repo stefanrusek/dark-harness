@@ -3,6 +3,7 @@ import type {
   AgentOutputEvent,
   AgentSpawnedEvent,
   AgentStatusEvent,
+  AgentTreeNode,
   SessionEndedEvent,
   TokenUsageEvent,
 } from "../../contracts/index.ts";
@@ -11,6 +12,7 @@ import {
   createInitialState,
   isRoot,
   orderedAgents,
+  seedFromTree,
   selectAgent,
   selectedAgent,
   sessionTotals,
@@ -262,5 +264,93 @@ describe("sessionTotals", () => {
   test("returns zeros for an empty session", () => {
     const totals = sessionTotals(createInitialState());
     expect(totals).toEqual({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
+  });
+});
+
+function treeNode(overrides: Partial<AgentTreeNode> & { agentId: string }): AgentTreeNode {
+  return {
+    parentAgentId: null,
+    model: "sonnet",
+    status: "waiting",
+    children: [],
+    ...overrides,
+  };
+}
+
+describe("seedFromTree (Round 2 — fixes the fresh-session bootstrap deadlock)", () => {
+  test("seeds rootAgentId/selectedAgentId from the tree entry with parentAgentId === null", () => {
+    const state = createInitialState();
+    const next = seedFromTree(state, [treeNode({ agentId: "agent-root" })]);
+    expect(next.rootAgentId).toBe("agent-root");
+    expect(next.selectedAgentId).toBe("agent-root");
+    expect(next.agents.get("agent-root")).toMatchObject({
+      agentId: "agent-root",
+      parentAgentId: null,
+      model: "sonnet",
+      status: "waiting",
+    });
+  });
+
+  test("does not hardcode an id — a differently-named root is still recognized as root", () => {
+    const state = createInitialState();
+    const next = seedFromTree(state, [treeNode({ agentId: "some-other-id-entirely" })]);
+    expect(next.rootAgentId).toBe("some-other-id-entirely");
+  });
+
+  test("flattens nested children into the agents map", () => {
+    const state = createInitialState();
+    const next = seedFromTree(state, [
+      treeNode({
+        agentId: "root",
+        children: [treeNode({ agentId: "child", parentAgentId: "root" })],
+      }),
+    ]);
+    expect(next.agents.has("root")).toBe(true);
+    expect(next.agents.has("child")).toBe(true);
+    expect(next.agents.get("child")?.parentAgentId).toBe("root");
+    // Only the parentless entry becomes root/selected, never a nested child.
+    expect(next.rootAgentId).toBe("root");
+  });
+
+  test("an empty tree is a no-op", () => {
+    const state = createInitialState();
+    const next = seedFromTree(state, []);
+    expect(next).toBe(state);
+  });
+
+  test("does not move rootAgentId/selectedAgentId once already set by an earlier agent_spawned", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "sonnet"));
+    const next = seedFromTree(state, [treeNode({ agentId: "root-1" })]);
+    expect(next.rootAgentId).toBe("root-1");
+    expect(next.selectedAgentId).toBe("root-1");
+  });
+
+  test("does not clobber a known agent's live fields with the boot-time snapshot", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "sonnet"));
+    state = applyEvent(state, statusEvent("root-1", "running"));
+    state = applyEvent(state, output("root-1", "already streaming output"));
+
+    // A stale/racing tree response claims root-1 is still "waiting" with no output — must
+    // not overwrite what SSE already reported as more current.
+    const next = seedFromTree(state, [treeNode({ agentId: "root-1", status: "waiting" })]);
+    expect(next.agents.get("root-1")?.status).toBe("running");
+    expect(next.agents.get("root-1")?.output).toBe("already streaming output");
+  });
+
+  test("is safe to call twice (idempotent) without duplicating or reordering agents", () => {
+    const state = createInitialState();
+    const once = seedFromTree(state, [treeNode({ agentId: "root-1" })]);
+    const twice = seedFromTree(once, [treeNode({ agentId: "root-1" })]);
+    expect(twice.agents.size).toBe(1);
+    expect(orderedAgents(twice).map((a) => a.agentId)).toEqual(["root-1"]);
+  });
+
+  test("does not mutate the previous state object", () => {
+    const state = createInitialState();
+    const next = seedFromTree(state, [treeNode({ agentId: "root-1" })]);
+    expect(state.agents.size).toBe(0);
+    expect(next.agents.size).toBe(1);
   });
 });

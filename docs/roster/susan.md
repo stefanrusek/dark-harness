@@ -81,3 +81,65 @@ reworking it. Full rationale lives in `src/web/client/styles.css`'s header comme
 local/air-gapped target); real browser-driven e2e (explicitly E2E's job; I did run one
 manual `Bun.serve` smoke test by hand to confirm the real bundle boots, not part of the
 automated gate).
+
+### 2026-07-15 — Round 2: fixed the fresh-session interactive bootstrap deadlock
+
+Hedy (E2E), driving a real headless browser, found that a fresh `dh --web` session could
+never send its first message: `AppView` never called `request_agent_tree` on boot, so
+nothing ever learned the root agent's id until `agent_spawned` fired over SSE — which never
+fires until someone sends a first message, which the composer can't do without already
+knowing the root's id. A real operator could not start a fresh session at all. Full detail
+in `docs/handoffs/web.md`'s Round 2 status entry — this file is the durable part.
+
+**Worked in a fresh worktree this round** (`susan-round2`, off
+`origin/claude/coordinator-onboarding-kab9ls`), not the round-1 one, per the coordinator's
+instruction — first time doing that for this role. Worth remembering as the pattern for
+whenever a coordinator message specifically says "fresh clean checkout": don't reuse the
+old worktree even though it still exists and still has my committed history: it may be
+stale relative to `origin` (other domains' merges, ADR amendments, CORS fixes) in ways that
+matter for the new task. Create a new worktree tracking the named branch, confirm `git log`
+shows what the coordinator described before starting.
+
+**The fix:** `seedFromTree` in `state.ts` — finds the tree entry with `parentAgentId ===
+null` (never hardcode which id is "the root"), seeds `rootAgentId`/`selectedAgentId` and
+registers every node (flattening nested `children`) into `state.agents`, but only if not
+already known — idempotent and order-independent against whichever of
+{`request_agent_tree` response, `agent_spawned` SSE event} happens to resolve first, since
+both paths call into the same reducer-shaped functions and both defer to "first one wins,
+never overwritten by a later boot-time snapshot." `app.ts`'s `start()` now fires the
+`request_agent_tree` bootstrap alongside opening the SSE connection — races harmlessly.
+
+**A new pattern worth keeping for next time:** when a fix changes what the app does at
+boot, check test *harnesses* for hidden ordering assumptions, not just individual
+assertions. Here, every existing `app.test.ts` test that called `start()` suddenly also
+issued a `request_agent_tree` command as ITS first fetch call — which broke exact-array
+`commandBodies` assertions project-wide (fixed by updating each) and would have made
+`commandResponse`-override tests (testing one specific action's failure) also fail the
+*unrelated* bootstrap call, showing a spurious extra error banner (fixed by special-casing
+`request_agent_tree` in the harness's fetch double *before* checking `overrides
+.commandResponse`, and giving the tree-bootstrap fixture the same agent id
+`spawnRoot()`'s helper already used, so the two paths describe one consistent fake agent
+rather than racing two different ones).
+
+**Cross-domain edit this round, flagged clearly (see the handoff status log for the full
+version):** I edited `e2e/web.test.ts` (Hedy/E2E's directory) because fixing the deadlock
+made that file's own workaround-era assertion false — it was literally testing around the
+bug I fixed (its header comment said so explicitly), and once fixed, the test hung for its
+full 30s timeout on a `.empty-state` locator that no longer appears. Replaced the workaround
+(a direct `fetch` POST to `/api/commands`) with real Playwright interaction against the
+composer, which is now possible. Did **not** touch `e2e/tui.test.ts` — same class of defect,
+but that's Mary's Round 3 to fix on the TUI side, not mine to preempt.
+
+**Bun coverage-instrumentation quirk, refined:** the "last switch-case closing brace shows
+uncovered" quirk (Radia's original finding) recurred in `applyEvent`'s `default` case, but
+her original fix (drop the block braces) doesn't work when the case has a local `const` —
+biome's `noSwitchDeclarations` correctly demands a block around it. Fix: replace the local
+`const _exhaustive: never = event` with a call to a tiny top-level `assertNever(_value:
+never): void {}` helper — same compile-time exhaustiveness guarantee, no local declaration
+in the case, so no block required, so the coverage quirk doesn't trigger. This is probably
+the more general form of Radia's fix — prefer it over the local-const pattern in any future
+exhaustive-switch code in this codebase.
+
+**Gates this round:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100%
+funcs/lines on every `src/web/` file), and `bun run e2e` (18/18, including the fixed
+`web.test.ts`) — all green. Full detail in the handoff status log.

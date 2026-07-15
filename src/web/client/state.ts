@@ -2,7 +2,10 @@
 // `ServerSentEvent`s (src/contracts/events.ts) plus a few UI-only fields (selection,
 // connection status). Kept framework-free and fully unit-testable.
 
-import type { AgentStatus, ServerSentEvent } from "../../contracts/index.ts";
+import type { AgentStatus, AgentTreeNode, ServerSentEvent } from "../../contracts/index.ts";
+
+/** Compile-time-only exhaustiveness helper — see its call site in `applyEvent` below. */
+function assertNever(_value: never): void {}
 
 export interface AgentNode {
   agentId: string;
@@ -120,17 +123,71 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       next.exitCode = event.exitCode;
       return next;
     }
-    default: {
-      // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added
-      // to src/contracts/ without a case here. At runtime this is reachable if a future
-      // server build sends an event type this client build predates — tolerate it rather
-      // than corrupt state: keep `next` (already has the bumped `lastEventId`), don't
-      // return the raw unrecognized event itself.
-      const _exhaustive: never = event;
-      void _exhaustive;
+    default:
+      // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added to
+      // src/contracts/ without a case here (assertNever's parameter type is `never`, which
+      // `event` only satisfies once every other case has been handled). At runtime this is
+      // reachable if a future server build sends an event type this client build predates —
+      // tolerate it rather than corrupt state: keep `next` (already has the bumped
+      // `lastEventId`), don't return the raw unrecognized event itself.
+      // A function call rather than a local `const` deliberately avoids needing a block
+      // around this case (biome's noSwitchDeclarations would otherwise require one just to
+      // scope the const) — an unbraced last case is what sidesteps a known Bun coverage-
+      // instrumentation quirk where its closing brace shows as an uncovered "line" even
+      // when the branch executes (see docs/roster/radia.md).
+      assertNever(event);
       return next;
-    }
   }
+}
+
+function flattenTree(tree: AgentTreeNode[], out: AgentTreeNode[] = []): AgentTreeNode[] {
+  for (const node of tree) {
+    out.push(node);
+    flattenTree(node.children, out);
+  }
+  return out;
+}
+
+/**
+ * Seeds state from a `request_agent_tree` response. This is the *only* way a fresh session
+ * can learn the root agent's id: `agent_spawned` (the other path that sets
+ * `rootAgentId`/`selectedAgentId`, above) only fires once the agent loop actually starts,
+ * which only happens once someone sends the first message — which the composer can't do
+ * without already knowing the root's id. Server synthesizes a pre-start root node
+ * (`status: "waiting"`, `parentAgentId: null`) precisely so `request_agent_tree` can answer
+ * this before any message is ever sent (see docs/handoffs/web.md's Round 2 status log).
+ *
+ * Idempotent and safe to call regardless of arrival order relative to SSE events: never
+ * overwrites an already-known agent's fields (an `agent_spawned`/`agent_status` that beat
+ * this response to the client is strictly more current than a boot-time snapshot), and
+ * never moves `rootAgentId`/`selectedAgentId` once already set.
+ */
+export function seedFromTree(state: WebState, tree: AgentTreeNode[]): WebState {
+  const nodes = flattenTree(tree);
+  if (nodes.length === 0) return state;
+
+  const next: WebState = { ...state, agents: new Map(state.agents) };
+  for (const node of nodes) {
+    if (next.agents.has(node.agentId)) continue; // SSE already told us something more current.
+    next.agents.set(node.agentId, {
+      agentId: node.agentId,
+      parentAgentId: node.parentAgentId,
+      model: node.model,
+      status: node.status,
+      output: "",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      spawnOrder: spawnCounter++,
+    });
+  }
+
+  const root = nodes.find((node) => node.parentAgentId === null);
+  if (root) {
+    if (next.rootAgentId === null) next.rootAgentId = root.agentId;
+    if (next.selectedAgentId === null) next.selectedAgentId = root.agentId;
+  }
+  return next;
 }
 
 export function setConnectionStatus(state: WebState, status: ConnectionStatus): WebState {
