@@ -147,3 +147,34 @@ this sandbox (expected, same as every prior round); also noticed `security.test.
 bearer-token SSE test timing out here — confirmed pre-existing and unrelated to this round's
 diff (touched file is only `server-protocol.test.ts`), not investigated further, flagged in
 the handoff for a future round.
+
+### 2026-07-15 — Round 4 (fresh process again): build-stamping survives real compilation
+
+Came online fresh for Core Round 8's follow-on request (`docs/handoffs/e2e.md` Round 4).
+Same recurring worktree-provenance issue (branched from the pre-domain-landing ancestor
+`12679e4`, zero unique commits) — third time for this role; fast-forwarded to real HEAD
+(`037952c`) before starting, same as Rounds 1 and 2 gap-2a.
+
+**What I built:** full detail in `docs/handoffs/e2e.md`'s Round 4 status entry. Short
+version: switched `e2e/support/build.ts`'s `ensureBuilt()` to shell out to
+`bun scripts/build.ts --outfile dist/dh` instead of raw `bun build --compile`, and added
+`e2e/build-stamp.test.ts` — two real-binary scenarios (`--server` and standalone
+`--instructions --job`) that read each run's actual `agent-root.jsonl` header off disk and
+assert `client` (`"server"`/`"none"`) and the full `build` stamp (`version`, 40-hex-char
+`gitSha`, `releaseTag: null`) are really there, not just unit-tested in isolation.
+
+**Judgment call:** for the `--server` scenario, had to first discover (by hitting an ENOENT)
+that the root agent's JSONL log doesn't exist until the first `send_message` — a bare
+`--server` start has no root agent yet. Fixed by connecting SSE and POSTing a real
+`send_message` before reading the log file, mirroring the existing full-turn test in
+`server-protocol.test.ts`.
+
+**Gates:** `bun run typecheck`/`bun run lint` clean, `bun run test:coverage` 741/741 pass,
+100% coverage. Full `bun run e2e`: 17 pass/4 fail, all four the same pre-flagged environment
+gaps (no `tmux`, no Chromium binary, and the pre-existing `security.test.ts` bearer-token SSE
+timeout noted in Round 2 gap-2a) — no regressions. The three files this round's diff actually
+touches are 12/12 green in isolation.
+
+**Open threads unchanged:** multi-turn second-`send_message` e2e coverage (Round 2) and gap 2b
+(Bedrock provider e2e coverage, Round 2 gap-2a) are both still open for whoever picks this up
+next.

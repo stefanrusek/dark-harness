@@ -417,3 +417,50 @@ not just in isolation.
 **Gates:** the standard three, plus whichever e2e files your sandbox can actually run (same
 tmux/Chromium caveat as every prior round — note explicitly what you couldn't run). Append a
 dated status entry here and update `docs/roster/hedy.md` when done.
+
+### 2026-07-15 — Round 4 status (Hedy, fresh process, resumed): DONE
+
+**Worktree note (recurring, per prior rounds):** launched into a worktree
+(`agent-a511bf423269437d4`) again branched from the pre-domain-landing ancestor commit
+(`12679e4`), zero unique commits of its own. Confirmed via `git merge-base --is-ancestor` and
+fast-forwarded to the real HEAD (`037952c`) before starting — third time this has happened for
+this role; still worth someone looking at the worktree provisioning for E2E specifically.
+
+**What I built:**
+
+- `e2e/support/build.ts`'s `ensureBuilt()` now spawns `bun scripts/build.ts --outfile dist/dh`
+  (cwd repo root) instead of raw `bun build --compile ./src/cli.ts --outfile dist/dh` — same
+  call-site shape `package.json`/`release.yml` use, per Core's request.
+- New `e2e/build-stamp.test.ts`, two scenarios, both driving the real compiled binary:
+  - `--server` run: since the root agent (and its JSONL log) isn't created until the first
+    `send_message` (confirmed against `e2e/server-protocol.test.ts`'s own "no message sent"
+    tree test), the test connects SSE, POSTs `send_message` to `agent-root`, waits for
+    `agent_output`, then reads `<workspace>/.dh-logs/<sessionId>/agent-root.jsonl`'s first
+    line directly off disk and asserts `header.client === "server"`.
+  - Standalone `--instructions --job` run: runs to completion (exit 0), then reads the same
+    file shape and asserts `header.client === "none"`.
+  - Both assert `header.type === "header"`, `header.build.version === pkg.version`,
+    `header.build.gitSha` matches `/^[0-9a-f]{40}$/` (the full sha `scripts/build.ts` stamps,
+    not the shortened one it only uses in its own console log line), and
+    `header.build.releaseTag === null` (no `--release-tag` passed to a local dev build).
+
+**Judgment call:** rather than trying to guess/parse the randomly-generated `sessionId`
+ahead of time, each test just `readdirSync`s the workspace's `.dh-logs/` directory (each test
+uses its own fresh tmp workspace, so exactly one session directory ever exists there) and
+asserts there's exactly one entry before reading into it — simpler than threading the
+sessionId out of stdout, and doubles as an implicit assertion that a run only ever creates one
+session directory.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean (149 files; biome auto-fixed one
+import-order nit in the new test file). `bun run test:coverage`: 741 pass / 0 fail / 100%
+coverage maintained. Ran `bun run e2e` in full: 17 pass / 4 fail — all four failures are
+environment gaps already flagged in prior rounds, not regressions from this change:
+`tui.test.ts` (2 tests, missing `tmux`), `web.test.ts` (1 test, missing Chromium at
+`/opt/pw-browsers/chromium`), and `security.test.ts`'s bearer-token SSE test (timeout,
+flagged as pre-existing/unrelated back in Round 2 gap-2a's status entry). The three files
+this round actually touches/depends on —`build-stamp.test.ts`, `exit-codes.test.ts`,
+`server-protocol.test.ts` — are 12/12 green on their own (`bun test e2e/build-stamp.test.ts
+e2e/exit-codes.test.ts e2e/server-protocol.test.ts`).
+
+No open threads added this round beyond what was already tracked (multi-turn second-exchange
+coverage, gap 2b Bedrock e2e coverage — both still open from prior rounds).
