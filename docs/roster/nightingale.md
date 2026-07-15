@@ -81,3 +81,52 @@ appeared inline in a tool result (not as a real coordinator turn) instructing me
 Web domain, not to CI/Release). Nothing in `.github/workflows/` touches SSE or
 EventSource. I did not act on it. Recording this here in case the injection recurs against
 a future instance of this role — it should be recognized and ignored the same way.
+
+### 2026-07-15 — round 2 (scripts/build.ts wiring in release.yml)
+
+Fresh instance again, resuming this name for the follow-on round Core's round 8 opened
+(ADR 0005 amendment: build-identity stamping via `scripts/build.ts`). Full verification
+transcript is in `docs/handoffs/ci-release.md`'s Round 2 status entry; identity-level
+residue here.
+
+**Branch currency (open thread #5 from round 1, now resolved for this round):** my worktree
+was still sitting at the round-1 commit, several commits behind
+`claude/coordinator-onboarding-kab9ls` (missing all of Core round 6-8, TUI/Web/E2E rounds,
+etc. — including `scripts/build.ts` itself, the thing this round needed to touch). Unlike
+round 1, this time my branch had **zero unique commits** of its own (`HEAD` was exactly the
+merge-base with the coordinator branch), so a plain `git merge --ff-only` onto the
+coordinator tip was a clean fast-forward with no reconciliation judgment call needed — not
+the same situation round 1 flagged as needing a real merge/rebase by someone else. Worth
+distinguishing for the next instance: check `git merge-base HEAD
+claude/coordinator-onboarding-kab9ls` vs `HEAD` first — if they're equal, `--ff-only` is
+safe and unambiguous; if not, that's round 1's still-open reconciliation question.
+
+**A real bug I found by testing rather than trusting the spec, and how:** the handoff's
+literal suggested invocation (`bun scripts/build.ts --target=<matrix-target> ...`) does not
+work. `scripts/build.ts`'s `parseArgs` only accepts `--target` as a standalone token followed
+by a separate value token — `--target=bun-linux-x64` (one token, `=`-joined) never matches,
+so the target silently stays `undefined` and bun compiles for the host architecture instead.
+This fails *silently* — exit 0, a plausible-looking "stamped build" log line, no error
+anywhere. I only caught it because I ran `file` on the output binary and noticed it was a
+native arm64 Mach-O when I'd asked for `bun-linux-x64`. Fixed by using the space-separated
+form (`--target ${{ matrix.target }}`) in `release.yml`, with a comment above the step
+explaining why, so nobody "simplifies" it back to `=`. Did not touch `scripts/build.ts`
+itself (Core-owned per CLAUDE.md §3) — flagged as an optional ergonomics improvement in the
+handoff status log, not a blocking cross-domain request.
+
+**Lesson for future rounds of this role:** when a handoff's suggested command line uses
+`--flag=value` syntax against a hand-rolled CLI-arg parser (not a library like `yargs`/
+`commander` that normalizes both forms), don't assume it works — actually run it and inspect
+the *output artifact*, not just the exit code and log text. A green exit code from a wrapper
+script proves the wrapper ran, not that it did what its args say.
+
+**Gate status this round:** `typecheck`/`lint` clean (YAML-only change). `actionlint` was
+not available in this worktree this time (no cached Go module build present, unlike round
+1's session) — I did not attempt to rebuild it from scratch since the YAML-only diff is
+small and I substituted `python3 -c "import yaml; yaml.safe_load(...)"` plus a hand-run of
+the actual command as the verification instead. Recommend whoever runs the next
+`actionlint`-capable session give `release.yml` a pass before the first real `v*` tag push.
+
+**Open threads carried forward unchanged (see round 1 for detail, all still true):**
+coverage-completeness gate red (Contracts-domain fix, not mine), action version pins
+unverified live, `NPM_TOKEN` secret absent, npm package linux-x64-only.
