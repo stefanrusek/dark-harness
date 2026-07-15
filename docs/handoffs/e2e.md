@@ -197,3 +197,43 @@ testing (ADR 0008's whole rationale) — not fixed here, out of `e2e/`'s ownersh
 
 No changes made outside `e2e/` (mock-provider/build/workspace/port/dh-process/sse-client/tmux-pty
 support modules plus the five test files above) and this status-log entry + `docs/roster/hedy.md`.
+
+### 2026-07-15 — Round 2 (Hedy, fresh process): fixed the three Round-5-superseded tests in `server-protocol.test.ts`
+
+Core's Round 5 (`docs/handoffs/core.md`) landed the interactive-session multi-exchange fix
+and flagged, as a cross-domain request rather than editing `e2e/` directly, that three tests
+in `e2e/server-protocol.test.ts` still encoded the old "one message ends the session"
+assumption and would hang/fail. This round is exactly that fix, per the precise diagnosis
+already in the handoff (no new investigation needed) — mirroring the pattern Core's own
+`src/cli.test.ts` used for the identical problem.
+
+**Fixed, all in `e2e/server-protocol.test.ts`:**
+
+1. `"send_message to agent-root runs a full turn, observable live over SSE"` — now expects
+   `agent_status: "waiting"` (not `"done"`) and the tree to read `"waiting"` after one
+   message, with no `session_ended` at that point. To actually observe a `session_ended`,
+   the test now POSTs `stop_agent` for `agent-root` first, then waits for `session_ended` —
+   asserting `exitCode: ExitCode.TaskFailure` (imported from `src/contracts/exit-codes.ts`),
+   matching Round 3's "a genuine stop collapses into failed" convention, not `Success`.
+2. `"SSE resume via Last-Event-ID replays buffered events"` — swapped its synchronization
+   point from `session_ended` (which now never fires after a single message) to
+   `agent_status: "waiting"`, on both the original and the Last-Event-ID-resumed connection.
+   The test's actual point (does resume replay the same buffered event by id) is unaffected
+   by which event type is used as the sync point.
+3. `"download_logs: per-agent JSONL and full session tar bundle"` — same swap, waits for
+   `agent_status: "waiting"` before hitting `download_logs`; the JSONL/tar shape assertions
+   themselves are untouched.
+
+No other test files touched — the other four (`exit-codes.test.ts`, `security.test.ts`,
+`tui.test.ts`, `web.test.ts`) don't share this assumption (per Round 5's own note, only
+`server-protocol.test.ts` surfaced it, since the tmux/Chromium-dependent files fail on
+missing tooling in this sandbox regardless, unrelated to this change).
+
+**Gates:** `bun run typecheck` clean (both TS programs). `bun run lint` clean on
+`e2e/server-protocol.test.ts` itself (biome auto-fixed import order/formatting after my
+edits); the one remaining lint failure is the pre-existing untracked `dh.json` in the repo
+root, present before this round and unrelated to it (same file Round 5's own status log
+already noted as pre-existing). `bun test e2e/server-protocol.test.ts` — 5 pass, 0 fail, 22
+`expect()` calls. Did not run the full `bun run e2e` — this sandbox has no `tmux`/Chromium,
+so `tui.test.ts`/`web.test.ts` fail on missing tooling regardless of this change, per the
+task's own scoping.

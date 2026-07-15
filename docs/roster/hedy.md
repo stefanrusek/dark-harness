@@ -65,3 +65,37 @@ security matrix, TUI, web) — 18 tests, all green, plus `typecheck`/`lint` clea
   `toolCalls` field already exists) are ready for it, just not exercised yet.
 - Haven't touched `.github/workflows/`; someone should confirm `bun run e2e` is actually
   wired into the gate (Nightingale's domain).
+
+### 2026-07-15 — Round 2 (fresh process, no memory of Round 1): fixed the Round-5-superseded tests
+
+Came online fresh (no memory of the Round 1 instance's session) to act on Core's Round 5
+cross-domain request: three tests in `e2e/server-protocol.test.ts` still assumed "one message
+ends the session" (a real design Core deliberately superseded that round — interactive
+sessions now pause `"waiting"` between exchanges instead of ending), so they hung/failed.
+
+Read this file and `docs/handoffs/e2e.md` first per CLAUDE.md §7's resuming convention, then
+Core's Round 5 diagnosis (already precise — exact tests, exact line ranges, exact fix,
+pointing at `src/cli.test.ts`'s own Round-5 fix as the pattern to mirror). Fixed all three:
+swapped `session_ended` waits for `agent_status: "waiting"` waits in the resume and
+download-logs tests (their actual point — SSE resume semantics, log/tar shape — never
+depended on the session ending); for the full-turn test, added an explicit `stop_agent` POST
+before the `session_ended` wait, and changed the expected `exitCode` from `0` to
+`ExitCode.TaskFailure` (Round 3's "stop collapses into failed" convention, not a success
+completion).
+
+**Judgment call:** kept the fix minimal and mechanical, exactly as Round 5's request framed
+it — no new coverage added (e.g. no new test for a genuine second exchange producing new
+output; that's arguably still open work, see below) since the task was specifically "these
+three tests are stale, fix them," not "expand multi-turn coverage." Full detail in
+`docs/handoffs/e2e.md`'s Round 2 status log entry.
+
+**Open thread still not picked up:** a real e2e test proving a *second* `send_message` to an
+already-waiting root agent produces new output that references the first exchange (the
+`runtime.test.ts`/`cli.test.ts` accumulating-echo pattern Core used in Round 5, at the
+real-binary/real-HTTP+SSE level) — flagged by the Round 1 instance, still not built. Would
+slot naturally alongside the now-fixed full-turn test in `server-protocol.test.ts`.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean on the touched file (pre-existing
+untracked `dh.json` lint failure is unrelated, noted in the handoff), `bun test
+e2e/server-protocol.test.ts` — 5 pass, 0 fail. Did not run the full `bun run e2e` (no
+tmux/Chromium in this sandbox, unrelated to this change, per the task's own scoping).

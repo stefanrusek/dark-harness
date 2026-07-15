@@ -4,6 +4,7 @@
 // (src/server/server.test.ts), which never cross a real process boundary at all.
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { ExitCode } from "../src/contracts/exit-codes.ts";
 import type { AgentTreeResponse, CommandAck } from "../src/contracts/index.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
@@ -103,22 +104,39 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
     const tokenUsage = await sse.waitFor((e) => e.type === "token_usage");
     expect(tokenUsage).toMatchObject({ type: "token_usage", agentId: "agent-root" });
 
+    // Round 5: a non-tool-call turn in an interactive session now pauses "waiting" for the
+    // next message rather than ending the session — there is no natural "done"/session_ended
+    // after a single exchange anymore (docs/handoffs/core.md Round 5).
     const status = await sse.waitFor((e) => e.type === "agent_status");
-    expect(status).toMatchObject({ type: "agent_status", agentId: "agent-root", status: "done" });
-
-    const ended = await sse.waitFor((e) => e.type === "session_ended");
-    expect(ended).toMatchObject({ type: "session_ended", exitCode: 0 });
+    expect(status).toMatchObject({
+      type: "agent_status",
+      agentId: "agent-root",
+      status: "waiting",
+    });
 
     expect(provider.callCount).toBe(1);
 
-    // Tree now reflects the completed run.
+    // Tree reflects the paused-waiting run — not "done".
     const treeRes = await fetch(new URL("/api/commands", baseUrl), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "request_agent_tree" }),
     });
     const treeBody = (await treeRes.json()) as AgentTreeResponse;
-    expect(treeBody.tree[0]?.status).toBe("done");
+    expect(treeBody.tree[0]?.status).toBe("waiting");
+
+    // To actually observe a session_ended/exit code for an interactive session, a genuine stop
+    // is required (Round 3's "stopped collapses into failed" convention) — mirrors the fix
+    // src/cli.test.ts's Round 5 update made for the identical assumption.
+    const stopRes = await fetch(new URL("/api/commands", baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "stop_agent", agentId: "agent-root" }),
+    });
+    expect(stopRes.status).toBe(200);
+
+    const ended = await sse.waitFor((e) => e.type === "session_ended");
+    expect(ended).toMatchObject({ type: "session_ended", exitCode: ExitCode.TaskFailure });
   });
 
   test("SSE resume via Last-Event-ID replays buffered events", async () => {
@@ -131,17 +149,22 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
     });
 
     const first = await connectSse(baseUrl);
-    const ended = await first.waitFor((e) => e.type === "session_ended");
+    // Round 5: a single message now pauses the interactive session "waiting" rather than
+    // ending it — use that status change (a turn having completed) as the synchronization
+    // point instead of session_ended, which no longer fires here.
+    const status = await first.waitFor((e) => e.type === "agent_status" && e.status === "waiting");
     first.close();
 
     // A fresh connection with Last-Event-ID set to the very first event's id should replay
-    // everything after it, including the same session_ended event we already saw.
+    // everything after it, including the same agent_status event we already saw.
     const firstEventId = first.events[0]?.id;
     expect(firstEventId).toBeDefined();
     const resumed = await connectSse(baseUrl, { lastEventId: firstEventId as string });
     cleanups.push(resumed.close);
-    const replayedEnded = await resumed.waitFor((e) => e.type === "session_ended");
-    expect(replayedEnded.id).toBe(ended.id);
+    const replayedStatus = await resumed.waitFor(
+      (e) => e.type === "agent_status" && e.status === "waiting",
+    );
+    expect(replayedStatus.id).toBe(status.id);
   });
 
   test("download_logs: per-agent JSONL and full session tar bundle", async () => {
@@ -154,7 +177,9 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
     });
     const sse = await connectSse(baseUrl);
     cleanups.push(sse.close);
-    await sse.waitFor((e) => e.type === "session_ended");
+    // Round 5: wait for the turn to complete ("waiting" for the next message) rather than
+    // session_ended, which no longer fires after a single exchange in an interactive session.
+    await sse.waitFor((e) => e.type === "agent_status" && e.status === "waiting");
 
     const agentLogRes = await fetch(new URL("/api/commands", baseUrl), {
       method: "POST",
