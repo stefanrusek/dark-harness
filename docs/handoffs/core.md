@@ -114,3 +114,92 @@ bun run test:coverage   # 100% on new/changed code in your directories
 
 _(Append dated entries here as you make progress or hand off further. Do not overwrite
 earlier entries — status supersedes, but the history stays.)_
+
+### 2026-07-15 — Grace, first round (resumed from a stopped instance's WIP)
+
+I'm Grace, the Core domain lead, coming online in worktree `worktree-agent-a572554c3ba0257bf`
+where a previous, stopped instance of this role had already built most of `src/config/` and
+most of `src/agent/` (providers, tools, task registry, loop) uncommitted on disk, plus
+`bun.lock`/`package.json` diffs adding `@anthropic-ai/sdk` and
+`@aws-sdk/client-bedrock-runtime`. I read all of it before changing anything (status
+supersedes; the inherited code is the status, not a prior report). Full detail of what I
+inherited/verified/built lives in `docs/roster/grace.md`'s Memory section — this entry is the
+handoff-facing summary.
+
+**Fixed in inherited code:**
+- Two `exactOptionalPropertyTypes` typecheck errors in `src/agent/runtime.ts` (conditional
+  spread instead of passing possibly-`undefined` values into non-`| undefined` optional
+  fields).
+- `src/agent/runtime.ts` had zero tests (it didn't even show up in the coverage report — bun
+  only instruments files a test imports). Added `src/agent/runtime.test.ts`, 18 tests,
+  exercising the real `AnthropicProvider` against a local mock Anthropic-compatible HTTP
+  server (not a fake `ModelProvider` — `createProvider()` always builds the real adapter from
+  config, which is how the sample config's "local provider" pattern is meant to work). Now
+  100%/100% funcs/lines.
+
+**Built new:**
+- `src/cli.ts` (didn't exist before this round). All documented flags (`--web`, `--server`,
+  `--connect <host>`, `--port <n>`, `--instructions <file>`, `--job`, `--config <path>`);
+  `composeMode()` implements the exact mode table from HANDOFF.md §2 / ADR 0001 as a pure,
+  independently-tested function. `--instructions` runs the root agent directly via
+  `AgentRuntime` and `--job` maps its outcome to `ExitCode` (0/1/2+) per ADR 0006 — verified
+  with three live subprocess runs (`bun run src/cli.ts` against real local mock servers):
+  success → exit 0, self-reported `TASK_FAILED` → exit 1, bad `--config` path → exit 2.
+  Server/TUI/Web don't exist in this worktree yet, so every other mode combination calls one
+  of five `TODO`-marked stub functions instead of importing those domains directly — all of
+  `main()`'s dependencies are injected via a `CliDeps` interface, so swapping the stubs for
+  real imports later should be contained. 40 tests, 100%/99.44% funcs/lines (the one
+  uncovered line is the `import.meta.main` process-entry guard itself — see "known gaps"
+  below).
+
+**Cross-domain finding (read-only check of Server's landed work on
+`claude/coordinator-onboarding-kab9ls`, per the coordinator's instruction — never merged
+in):**
+1. **Fixed:** Radia's `src/server/exit.ts` (`waitForExitCode`) subscribes to a
+   `session_ended` `ServerSentEvent` to resolve `--job`'s exit code server-side, but the
+   inherited `loop.ts` never emitted one. This is a real integration gap I could close from
+   my side of the boundary without needing `src/server/` to exist: `AgentRuntime.runRoot()`
+   now emits `session_ended` (with `exitCode` mapped from the root agent's self-report) on
+   every normal return path — sub-agents spawned via `spawnAgent()` correctly do not emit
+   it, since only the root run represents "the session." Two new tests cover it.
+2. **Flagged, not guessed at:** Radia's `src/server/agent-loop.ts` defines an
+   `AgentLoopHandle` interface she needs Core's real loop to satisfy (directly, or via a thin
+   `src/cli.ts` adapter) once Server actually lands in a shared tree — her handoff explicitly
+   asks for this to be routed to Core as a reconciliation item rather than assumed to line
+   up. `src/server/` doesn't exist in this worktree, so there's nothing concrete to adapt to
+   or typecheck against yet. **Requesting the coordinator route this as an explicit
+   reconciliation task** once Core and Server share a tree — likely candidates are (a) make
+   `AgentRuntime`/`runAgentLoop`'s shape satisfy `AgentLoopHandle` directly, or (b) a thin
+   wrapper in `src/cli.ts` (which already owns the composition of config → runtime →
+   exit-code mapping) bridging the two. I have an opinion (probably (b), since `cli.ts`
+   already does exactly this kind of composition and `AgentLoopHandle` is Server's own
+   internal contract, not `src/contracts/` wire truth) but didn't act on it unilaterally
+   since it's Radia's interface and a two-domain decision.
+
+**Known, explained coverage gaps (not silent per CLAUDE.md's workflow rules):**
+- `src/agent/tasks.ts`: 94.74% func coverage (18/19) despite 100% lines. I instrumented every
+  function in the file with temporary markers and confirmed all real functions fire across
+  the full suite — this is almost certainly the same instrumentation artifact Radia already
+  independently noted in `docs/handoffs/server.md`'s status log (a class's implicit
+  field-initializer constructor showing as an uncounted/uncalled synthetic slot). Not a real
+  gap. (Restored the file to its pre-instrumentation state before committing — no diff there.)
+- `src/cli.ts`: 99.44% lines (178/179). The uncovered line is the literal
+  `await main(process.argv.slice(2));` inside `if (import.meta.main) { ... }`. Confirmed
+  empirically (isolated repro, not just assumed) that `import.meta.main` is only `true` for
+  the actual process entry module and cannot be forced true for a module under test — the
+  same structural boundary as Python's `if __name__ == "__main__":`. Verified this exact path
+  manually instead via three live subprocess runs (see above) rather than chasing a unit-test
+  workaround that would've meant an artificial file split purely to game the coverage tool.
+
+**Deferred / explicitly out of scope this round** (all inherited from the previous instance,
+unchanged by me):
+- `McpAuth` tool — documented stub per the handoff's own allowance for this round.
+- `src/agent/mcp.ts` (`ToolSearch` backing) — searches *configured* `mcpServers` entries and
+  returns synthetic descriptors; does not dial a real MCP server/list its actual tools.
+- No real `--connect` client, headless server process, or TUI/web rendering this round — see
+  the cross-domain section above for what remains once Server/TUI/Web land in this tree.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean, `bun run test:coverage` — 233
+tests, 99.85%/99.98% funcs/lines aggregate across `src/agent/`, `src/config/`, `src/cli.ts`,
+and `src/contracts/` (both shortfalls explained above, neither a real gap in tested
+behavior).
