@@ -83,6 +83,26 @@ export interface DhOptions {
    * exists to bound a pathological loop, not to constrain a legitimate long-running task.
    */
   maxTurns?: number;
+  /**
+   * DH-0013 (tracking/DH-0013-no-cost-turn-time-or-fanout-budgets.md): `maxTurns` above was
+   * the *only* safety valve on a running session — no wall-clock timeout, no cumulative
+   * cost/token budget, and no cap on sub-agent fan-out, so a runaway/looping agent could burn
+   * arbitrary compute/spend with nothing to stop it. These are all session-wide (root plus
+   * every sub-agent combined), enforced by AgentRuntime, and all optional — omitted means no
+   * cap of that kind, matching pre-DH-0013 behavior exactly.
+   */
+  /** Cumulative USD across every agent in the session (requires per-model pricing configured
+   * — see ModelConfig — otherwise cost is never computed and this cap can never trigger). */
+  maxCostUsd?: number;
+  /** Cumulative input+output tokens across every agent in the session. */
+  maxTotalTokens?: number;
+  /** Wall-clock duration of the whole session, independent of turn count. */
+  maxWallClockMs?: number;
+  /** Maximum number of agents (root + sub-agents) live (running/waiting) at once. */
+  maxConcurrentAgents?: number;
+  /** Maximum sub-agent nesting depth; the root is depth 0, a sub-agent it spawns is depth 1,
+   * a sub-agent *that* spawns is depth 2, and so on. */
+  maxAgentDepth?: number;
 }
 
 export interface DhConfig {

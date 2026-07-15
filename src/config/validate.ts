@@ -140,6 +140,26 @@ function validateOptionalPrice(value: unknown, path: string): number | undefined
   return value;
 }
 
+/** DH-0013: validates an optional positive number/integer budget field. */
+function validatePositiveNumber(
+  value: unknown,
+  path: string,
+  requireInteger: boolean,
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    (requireInteger && !Number.isInteger(value))
+  ) {
+    throw new ConfigError(
+      `${path} must be a positive ${requireInteger ? "integer" : "number"} when present`,
+    );
+  }
+  return value;
+}
+
 function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | undefined {
   if (raw === undefined) return undefined;
   if (!isRecord(raw)) {
@@ -195,6 +215,30 @@ export function validateConfig(raw: unknown): DhConfig {
   ) {
     throw new ConfigError("options.maxTurns must be a positive integer when present");
   }
+
+  // DH-0013: session-wide budget caps — all optional, all "positive number/integer when
+  // present", following the same pattern as maxTurns above.
+  const maxCostUsd = validatePositiveNumber(raw.options.maxCostUsd, "options.maxCostUsd", false);
+  const maxTotalTokens = validatePositiveNumber(
+    raw.options.maxTotalTokens,
+    "options.maxTotalTokens",
+    true,
+  );
+  const maxWallClockMs = validatePositiveNumber(
+    raw.options.maxWallClockMs,
+    "options.maxWallClockMs",
+    true,
+  );
+  const maxConcurrentAgents = validatePositiveNumber(
+    raw.options.maxConcurrentAgents,
+    "options.maxConcurrentAgents",
+    true,
+  );
+  const maxAgentDepth = validatePositiveNumber(
+    raw.options.maxAgentDepth,
+    "options.maxAgentDepth",
+    true,
+  );
 
   if (!Array.isArray(raw.provider)) {
     throw new ConfigError("config.provider must be an array");
@@ -262,6 +306,11 @@ export function validateConfig(raw: unknown): DhConfig {
       defaultModel,
       ...(runInBackgroundDefault !== undefined ? { runInBackgroundDefault } : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
+      ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
+      ...(maxTotalTokens !== undefined ? { maxTotalTokens } : {}),
+      ...(maxWallClockMs !== undefined ? { maxWallClockMs } : {}),
+      ...(maxConcurrentAgents !== undefined ? { maxConcurrentAgents } : {}),
+      ...(maxAgentDepth !== undefined ? { maxAgentDepth } : {}),
     },
     models,
     provider: providers,

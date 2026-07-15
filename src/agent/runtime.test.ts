@@ -1057,6 +1057,147 @@ describe("AgentRuntime — Round 6b/6c: config-driven cost pricing and maxTurns"
   });
 });
 
+describe("AgentRuntime — DH-0013: session-wide budgets", () => {
+  // The mock server always reports usage: { input_tokens: 5, output_tokens: 5 } — a single
+  // exchange is exactly 10 tokens.
+
+  test("maxTotalTokens stops the session once cumulative tokens reach the cap", async () => {
+    const { onEvent, onLogLine, events, logLines } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig({ options: { defaultModel: "test-model", maxTotalTokens: 10 } }),
+      systemPrompt: "sp",
+      onEvent,
+      onLogLine,
+    });
+    const result = await runtime.runRoot("loop-forever please");
+    expect(result.success).toBe(false);
+    expect(
+      logLines.some(
+        (l) =>
+          l.type === "message" &&
+          l.role === "system" &&
+          l.content.includes("Session budget exceeded"),
+      ),
+    ).toBe(true);
+    expect(
+      logLines.some(
+        (l) => l.type === "message" && l.role === "system" && l.content.includes("maxTotalTokens"),
+      ),
+    ).toBe(true);
+    const statusEvent = events.find((e) => e.type === "agent_status");
+    expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe(
+      "stopped",
+    );
+  });
+
+  test("maxCostUsd stops the session once cumulative cost reaches the cap", async () => {
+    const { onLogLine, logLines } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig({
+        options: { defaultModel: "test-model", maxCostUsd: 0.00001 },
+        models: [
+          {
+            name: "test-model",
+            provider: "mock",
+            model: "mock-1",
+            inputPricePerMToken: 3,
+            outputPricePerMToken: 15,
+          },
+        ],
+      }),
+      systemPrompt: "sp",
+      onLogLine,
+    });
+    const result = await runtime.runRoot("loop-forever please");
+    expect(result.success).toBe(false);
+    expect(
+      logLines.some(
+        (l) => l.type === "message" && l.role === "system" && l.content.includes("maxCostUsd"),
+      ),
+    ).toBe(true);
+  });
+
+  test("no budget configured never trips (no regression)", async () => {
+    const { onLogLine, logLines } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+    const result = await runtime.runRoot("please just answer");
+    expect(result.success).toBe(true);
+    expect(logLines.some((l) => l.type === "message" && l.content.includes("budget"))).toBe(false);
+  });
+
+  test("maxWallClockMs stops a long-running interactive session even though turn count never fires", async () => {
+    const { onEvent, onLogLine, events, logLines } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig({ options: { defaultModel: "test-model", maxWallClockMs: 50 } }),
+      systemPrompt: "sp",
+      interactive: true,
+      onEvent,
+      onLogLine,
+    });
+    // Interactive root pauses "waiting" after its first exchange — nothing else would ever
+    // end this session except the wall-clock budget.
+    const runPromise = runtime.runRoot("please just answer");
+    const result = await runPromise;
+    expect(result.success).toBe(false);
+    expect(
+      logLines.some(
+        (l) => l.type === "message" && l.role === "system" && l.content.includes("maxWallClockMs"),
+      ),
+    ).toBe(true);
+    const statusEvent = events.filter((e) => e.type === "agent_status").pop();
+    expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe(
+      "stopped",
+    );
+  }, 2000);
+
+  test("maxAgentDepth refuses a sub-agent spawn past the configured nesting limit", () => {
+    const runtime = newAgentRuntime({
+      config: baseConfig({ options: { defaultModel: "test-model", maxAgentDepth: 1 } }),
+      systemPrompt: "sp",
+    });
+    // Root is depth 0; a direct sub-agent (depth 1) is allowed...
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+    });
+    expect(() => runtime.spawnAgent(taskId, { model: "test-model", prompt: "grandchild" })).toThrow(
+      /nesting depth/,
+    );
+  });
+
+  test("maxConcurrentAgents refuses a spawn once the live-agent cap is reached", async () => {
+    const runtime = newAgentRuntime({
+      config: baseConfig({ options: { defaultModel: "test-model", maxConcurrentAgents: 1 } }),
+      systemPrompt: "sp",
+    });
+    // First spawn (blocking, background: false) occupies the one concurrency slot until it
+    // resolves — but since we don't await it yet, a second spawn attempted meanwhile refuses.
+    runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+      background: true,
+    });
+    expect(() =>
+      runtime.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "child instruction" }),
+    ).toThrow(/maxConcurrentAgents/);
+  });
+
+  test("the Agent tool surfaces a fan-out refusal as a normal tool-error, not an uncaught exception", async () => {
+    const { onEvent } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig({ options: { defaultModel: "test-model", maxAgentDepth: 0 } }),
+      systemPrompt: "sp",
+      onEvent,
+    });
+    const result = await runtime.runRoot("use-agent-tool");
+    // maxAgentDepth: 0 means even a direct root->child spawn (depth 1) is refused — the
+    // Agent tool call inside the loop gets a tool-error result back, not a crash, so the
+    // root's own conversation continues normally to its next turn instead of the whole
+    // runRoot() call throwing.
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("AgentRuntime — Round 12: proactive push notification on background task/sub-agent completion", () => {
   test("a real background Bash task's completion is proactively delivered into a waiting interactive root's conversation, not just retrievable via TaskOutput", async () => {
     const { logLines, onLogLine } = collectors();

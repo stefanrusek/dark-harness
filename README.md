@@ -134,7 +134,15 @@ connection survives ordinary HTTP proxies and reconnects cleanly via `Last-Event
   [`docs/adr/0006-exit-code-contract.md`](docs/adr/0006-exit-code-contract.md).
 - **`options.defaultModel`** — required; the model used when a tool/agent spawn doesn't name
   one. **`options.runInBackgroundDefault`** overrides the default (`true`) for every
-  async-capable tool. **`options.maxTurns`** overrides the agent loop's default safety-valve
+  async-capable tool.
+- **Session-wide budgets** (all optional; omitted means no cap of that kind) —
+  `options.maxCostUsd` and `options.maxTotalTokens` cap cumulative spend/tokens across the
+  whole session (root plus every sub-agent); `options.maxWallClockMs` caps total duration
+  independent of turn count; `options.maxConcurrentAgents` caps how many agents can be live
+  at once; `options.maxAgentDepth` caps sub-agent nesting depth (the root is depth 0). A
+  cost/token/wall-clock cap stops the whole session (every live agent), logging why to each
+  agent's own JSONL stream; a fan-out cap refuses the specific `Agent` spawn that would
+  exceed it, surfaced back to the spawning agent as a normal tool error. **`options.maxTurns`** overrides the agent loop's default safety-valve
   turn cap (100) for every agent this runtime runs, root and sub-agents alike — the default
   exists to bound a pathological loop, not to constrain a legitimate long-running
   dark-factory task.

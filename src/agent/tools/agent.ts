@@ -76,12 +76,25 @@ export const agentTool: Tool = {
         ? input.run_in_background
         : ctx.runInBackgroundDefault;
 
-    const taskId = ctx.spawnAgent({
-      model,
-      prompt,
-      background: runInBackground,
-      ...(description !== undefined ? { description } : {}),
-    });
+    // DH-0013 (tracking/DH-0013-no-cost-turn-time-or-fanout-budgets.md): ctx.spawnAgent()
+    // (runtime.ts) throws synchronously when a configured maxConcurrentAgents/maxAgentDepth
+    // budget would be exceeded — caught here and surfaced as a normal tool-error result (a
+    // clear refusal the spawning agent's own turn can react to), rather than an uncaught
+    // exception escaping this tool call and crashing the whole loop.
+    let taskId: string;
+    try {
+      taskId = ctx.spawnAgent({
+        model,
+        prompt,
+        background: runInBackground,
+        ...(description !== undefined ? { description } : {}),
+      });
+    } catch (err) {
+      return {
+        output: `Agent tool error: ${(err as Error).message}`,
+        isError: true,
+      };
+    }
 
     if (runInBackground) {
       return {

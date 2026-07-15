@@ -158,6 +158,23 @@ export class AgentRuntime {
   // AgentLoopParams.signal addition.
   private rootController: AbortController | undefined;
 
+  // DH-0013 (tracking/DH-0013-no-cost-turn-time-or-fanout-budgets.md) — session-wide budget
+  // bookkeeping. `maxTurns` (existing) was the only safety valve on a running session; these
+  // extend that to cumulative cost/tokens, wall-clock duration, and sub-agent fan-out, all
+  // optional (config.options.max*) and all enforced here since AgentRuntime, not loop.ts, is
+  // the layer that sees every agent in the session, not just one loop's own turns.
+  private cumulativeCostUsd = 0;
+  private cumulativeTokens = 0;
+  private sessionStartMs: number | undefined;
+  private wallClockTimer: ReturnType<typeof setTimeout> | undefined;
+  /** agentId -> nesting depth (root is 0). Populated by spawnAgent(); never evicted (mirrors
+   * TaskRegistry's own "tasks are never evicted" policy) — depth lookups only ever need a
+   * *live* agent's own depth (to compute its children's), so a stale entry for an already-
+   * finished agent is harmless, just unused. */
+  private readonly agentDepth = new Map<string, number>([[ROOT_AGENT_ID, 0]]);
+  private liveAgentCount = 0;
+  private budgetTripped = false;
+
   constructor(options: AgentRuntimeOptions) {
     this.config = options.config;
     this.systemPrompt = options.systemPrompt;
@@ -168,6 +185,79 @@ export class AgentRuntime {
     this.onLogLine = options.onLogLine;
     this.interactive = options.interactive ?? false;
     this.client = options.client;
+  }
+
+  /** DH-0013: records a `token_usage` event's contribution to the session-wide cumulative
+   * cost/token budgets and trips them if exceeded. Called from every onEvent path (root and
+   * every sub-agent) — see spawnAgent()'s/runRoot()'s onEvent handlers below. */
+  private recordUsageAndCheckBudgets(
+    inputTokens: number,
+    outputTokens: number,
+    costUsd: number | undefined,
+  ): void {
+    if (this.budgetTripped) return;
+    this.cumulativeTokens += inputTokens + outputTokens;
+    if (costUsd !== undefined) this.cumulativeCostUsd += costUsd;
+
+    const { maxCostUsd, maxTotalTokens } = this.config.options;
+    if (maxCostUsd !== undefined && this.cumulativeCostUsd >= maxCostUsd) {
+      this.tripBudget(
+        `cumulative cost $${this.cumulativeCostUsd.toFixed(4)} reached configured options.maxCostUsd ($${maxCostUsd})`,
+      );
+      return;
+    }
+    if (maxTotalTokens !== undefined && this.cumulativeTokens >= maxTotalTokens) {
+      this.tripBudget(
+        `cumulative tokens ${this.cumulativeTokens} reached configured options.maxTotalTokens (${maxTotalTokens})`,
+      );
+    }
+  }
+
+  /** DH-0013: stops every live agent in the session (root + every running/waiting sub-agent
+   * task) exactly once, logging the reason to each live agent's own JSONL stream first (the
+   * same "log before/alongside the stop" pattern DH-0017's error-logging fix uses) so the
+   * budget-exceeded reason is distinguishable from a normal completion or an
+   * operator-initiated TaskStop/stopRoot() when reading the log back. Idempotent — a second
+   * budget crossing (e.g. both cost and wall-clock firing close together) is a no-op. */
+  private tripBudget(reason: string): void {
+    if (this.budgetTripped) return;
+    this.budgetTripped = true;
+
+    const logReason = (agentId: string) => {
+      this.onLogLine?.(agentId, {
+        version: 1,
+        timestamp: new Date().toISOString(),
+        type: "message",
+        role: "system",
+        content: `Session budget exceeded: ${reason}. Stopping.`,
+      });
+    };
+
+    if (this.rootStarted && this.isLiveStatus(this.rootStatus)) {
+      logReason(ROOT_AGENT_ID);
+    }
+    for (const task of this.tasks.list()) {
+      if (this.isLiveStatus(task.status)) {
+        logReason(task.id);
+      }
+    }
+
+    this.stopRoot();
+    for (const task of this.tasks.list()) {
+      if (this.isLiveStatus(task.status)) {
+        try {
+          this.tasks.stop(task.id);
+        } catch {
+          // Already reached a terminal status between the isLiveStatus check above and here
+          // (e.g. it finished naturally in the same tick) — nothing left to stop.
+        }
+      }
+    }
+
+    if (this.wallClockTimer) {
+      clearTimeout(this.wallClockTimer);
+      this.wallClockTimer = undefined;
+    }
   }
 
   private resolveModel(name: string): ModelConfig {
@@ -228,9 +318,31 @@ export class AgentRuntime {
     parentAgentId: string,
     params: { model: string; prompt: string; background?: boolean; description?: string },
   ): string {
+    // DH-0013: fan-out budget checks — depth first (cheaper, no model/provider resolution
+    // needed to reject), then concurrency. Both throw synchronously; the Agent tool
+    // (tools/agent.ts) catches and surfaces this as a normal tool-error result.
+    const parentDepth = this.agentDepth.get(parentAgentId) ?? 0;
+    const depth = parentDepth + 1;
+    const maxAgentDepth = this.config.options.maxAgentDepth;
+    if (maxAgentDepth !== undefined && depth > maxAgentDepth) {
+      throw new Error(
+        `spawn refused: this sub-agent would be at nesting depth ${depth}, exceeding the ` +
+          `configured options.maxAgentDepth (${maxAgentDepth}).`,
+      );
+    }
+    const maxConcurrentAgents = this.config.options.maxConcurrentAgents;
+    if (maxConcurrentAgents !== undefined && this.liveAgentCount >= maxConcurrentAgents) {
+      throw new Error(
+        `spawn refused: ${this.liveAgentCount} sub-agent(s) already live, at the configured ` +
+          `options.maxConcurrentAgents (${maxConcurrentAgents}) limit.`,
+      );
+    }
+
     const model = this.resolveModel(params.model);
     const provider = this.providerFor(model);
     const agentId = `agent-${randomUUID()}`;
+    this.agentDepth.set(agentId, depth);
+    this.liveAgentCount += 1;
 
     return this.tasks.start({
       kind: "agent",
@@ -240,62 +352,79 @@ export class AgentRuntime {
       background: params.background ?? true,
       ...(params.description !== undefined ? { description: params.description } : {}),
       run: async (handle) => {
-        const result = await runAgentLoop({
-          sessionId: this.sessionId,
-          agentId,
-          parentAgentId,
-          model: model.name,
-          providerModel: model.model,
-          systemPrompt: this.systemPrompt,
-          instruction: params.prompt,
-          ...(params.description !== undefined ? { description: params.description } : {}),
-          provider,
-          tools: this.toolMap,
-          toolContext: this.buildToolContext(agentId),
-          registerSendMessage: handle.registerSendMessage,
-          // Round 3 (docs/handoffs/core.md status log): this AbortSignal was already sitting
-          // right here in scope — TaskRegistry.stop(id) calls this same task's
-          // AbortController, which previously only reached the Bash tool's own
-          // run_in_background subprocess handling. Passing it through here is what makes
-          // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
-          signal: handle.signal,
-          // Round 7 fix (docs/handoffs/core.md status log): sub-agents never inherit the
-          // root/runtime's `interactive` flag. Round 5's "pause instead of end" semantics
-          // exist so an operator can keep talking to an interactive root — but a sub-agent
-          // spawned via the `Agent` tool has no operator; if it inherited `interactive: true`
-          // from an interactive server/TUI/Web root, it would pause in "waiting" forever on
-          // its first non-tool-use turn instead of reaching "done"/"failed", hanging the
-          // `Agent` tool's blocking (`run_in_background: false`) `awaitDone` wait. Sub-agents
-          // always get non-interactive (terminate-on-first-non-tool-use-turn) semantics,
-          // regardless of the root's mode. This does NOT affect `SendMessage`-driven
-          // steering of a still-running sub-agent — `registerSendMessage`'s sink is wired up
-          // unconditionally in loop.ts regardless of `interactive`, so a sub-agent can still
-          // be steered mid-conversation while it's actively looping; `interactive` only
-          // controls what happens when the model itself produces a non-tool-use turn.
-          interactive: false,
-          client: this.client,
-          ...(this.config.options.maxTurns !== undefined
-            ? { maxTurns: this.config.options.maxTurns }
-            : {}),
-          ...pricingOverride(model),
-          onEvent: (event) => {
-            if (event.type === "agent_output") handle.append(event.chunk);
-            // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
-            // turn, so the task registry's own status (what getAgentTree() actually reads —
-            // see TaskRegistry.snapshot()) needs to track the loop's mid-conversation
-            // waiting/running transitions explicitly instead of only being set once when
-            // `run()` resolves/rejects.
-            if (event.type === "agent_status" && event.agentId === agentId) {
-              this.tasks.setStatus(agentId, event.status);
-            }
-            this.onEvent?.(event);
-          },
-          ...(this.onLogLine
-            ? { onLogLine: (line: LogLine) => this.onLogLine?.(agentId, line) }
-            : {}),
-        });
-        if (!result.success) {
-          throw new Error(result.finalOutput || "sub-agent reported failure");
+        // DH-0013: decrement liveAgentCount once this sub-agent's own loop settles
+        // (success or failure alike) — see spawnAgent()'s increment above and its own doc
+        // comment for why this lives in `run` rather than a `background`-gated hook (TaskRegistry's
+        // `onSettled` only fires for background tasks; `run` itself is awaited unconditionally).
+        try {
+          const result = await runAgentLoop({
+            sessionId: this.sessionId,
+            agentId,
+            parentAgentId,
+            model: model.name,
+            providerModel: model.model,
+            systemPrompt: this.systemPrompt,
+            instruction: params.prompt,
+            ...(params.description !== undefined ? { description: params.description } : {}),
+            provider,
+            tools: this.toolMap,
+            toolContext: this.buildToolContext(agentId),
+            registerSendMessage: handle.registerSendMessage,
+            // Round 3 (docs/handoffs/core.md status log): this AbortSignal was already sitting
+            // right here in scope — TaskRegistry.stop(id) calls this same task's
+            // AbortController, which previously only reached the Bash tool's own
+            // run_in_background subprocess handling. Passing it through here is what makes
+            // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
+            signal: handle.signal,
+            // Round 7 fix (docs/handoffs/core.md status log): sub-agents never inherit the
+            // root/runtime's `interactive` flag. Round 5's "pause instead of end" semantics
+            // exist so an operator can keep talking to an interactive root — but a sub-agent
+            // spawned via the `Agent` tool has no operator; if it inherited `interactive: true`
+            // from an interactive server/TUI/Web root, it would pause in "waiting" forever on
+            // its first non-tool-use turn instead of reaching "done"/"failed", hanging the
+            // `Agent` tool's blocking (`run_in_background: false`) `awaitDone` wait. Sub-agents
+            // always get non-interactive (terminate-on-first-non-tool-use-turn) semantics,
+            // regardless of the root's mode. This does NOT affect `SendMessage`-driven
+            // steering of a still-running sub-agent — `registerSendMessage`'s sink is wired up
+            // unconditionally in loop.ts regardless of `interactive`, so a sub-agent can still
+            // be steered mid-conversation while it's actively looping; `interactive` only
+            // controls what happens when the model itself produces a non-tool-use turn.
+            interactive: false,
+            client: this.client,
+            ...(this.config.options.maxTurns !== undefined
+              ? { maxTurns: this.config.options.maxTurns }
+              : {}),
+            ...pricingOverride(model),
+            onEvent: (event) => {
+              if (event.type === "agent_output") handle.append(event.chunk);
+              // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
+              // turn, so the task registry's own status (what getAgentTree() actually reads —
+              // see TaskRegistry.snapshot()) needs to track the loop's mid-conversation
+              // waiting/running transitions explicitly instead of only being set once when
+              // `run()` resolves/rejects.
+              if (event.type === "agent_status" && event.agentId === agentId) {
+                this.tasks.setStatus(agentId, event.status);
+              }
+              // DH-0013: this sub-agent's own token usage counts toward the session-wide
+              // cumulative cost/token budgets, same as the root's.
+              if (event.type === "token_usage") {
+                this.recordUsageAndCheckBudgets(
+                  event.inputTokens,
+                  event.outputTokens,
+                  event.costUsd,
+                );
+              }
+              this.onEvent?.(event);
+            },
+            ...(this.onLogLine
+              ? { onLogLine: (line: LogLine) => this.onLogLine?.(agentId, line) }
+              : {}),
+          });
+          if (!result.success) {
+            throw new Error(result.finalOutput || "sub-agent reported failure");
+          }
+        } finally {
+          this.liveAgentCount -= 1;
         }
       },
     });
@@ -350,6 +479,23 @@ export class AgentRuntime {
     this.rootStatus = "running";
     this.rootController = new AbortController();
 
+    // DH-0013: wall-clock budget, started once per runtime instance (runRoot() is only
+    // meaningfully called once per session in practice — see AgentRuntimeOptions' own doc
+    // comments). Unref'd so a configured cap alone never keeps the process alive past
+    // whatever would otherwise have ended it.
+    if (this.sessionStartMs === undefined) {
+      this.sessionStartMs = Date.now();
+      const maxWallClockMs = this.config.options.maxWallClockMs;
+      if (maxWallClockMs !== undefined) {
+        this.wallClockTimer = setTimeout(() => {
+          this.tripBudget(
+            `wall-clock duration exceeded the configured options.maxWallClockMs (${maxWallClockMs}ms)`,
+          );
+        }, maxWallClockMs);
+        (this.wallClockTimer as unknown as { unref?: () => void }).unref?.();
+      }
+    }
+
     let result: { success: boolean; finalOutput: string };
     try {
       result = await runAgentLoop({
@@ -381,6 +527,11 @@ export class AgentRuntime {
           if (event.type === "agent_status" && event.agentId === ROOT_AGENT_ID) {
             this.rootStatus = event.status;
           }
+          // DH-0013: the root's own token usage counts toward the session-wide cumulative
+          // cost/token budgets, same as every sub-agent's.
+          if (event.type === "token_usage") {
+            this.recordUsageAndCheckBudgets(event.inputTokens, event.outputTokens, event.costUsd);
+          }
           this.onEvent?.(event);
         },
         ...(this.onLogLine
@@ -410,6 +561,12 @@ export class AgentRuntime {
     // onEvent handler above mutating it during the awaited runAgentLoop() call.
     if ((this.rootStatus as AgentStatus) !== "stopped") {
       this.rootStatus = result.success ? "done" : "failed";
+    }
+    // DH-0013: the root loop itself has ended (success, failure, or stop) — the wall-clock
+    // budget timer no longer has anything to guard, whether or not it ever fired.
+    if (this.wallClockTimer) {
+      clearTimeout(this.wallClockTimer);
+      this.wallClockTimer = undefined;
     }
     this.onEvent?.({
       version: 1,
