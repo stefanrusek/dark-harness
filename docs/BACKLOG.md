@@ -1,4 +1,10 @@
-# Backlog
+# Backlog (superseded)
+
+**Superseded by `tracking/` (Spile-format tickets DH-0001 through DH-0007) — kept as-is,
+not retroactively restructured, per this project's "don't fix the past" convention.** All
+future open-issue tracking happens in `tracking/`; see `tracking/README.md` and
+`tracking/views/dark-harness-view.md`. This file's content below is left exactly as it was
+at the point of migration, as a historical record.
 
 The durable issue log described in `PLAYBOOK.md` §4.7 — every open item lands here the
 moment it's identified, sized to its actual weight. The coordinator re-reads this

@@ -38,7 +38,8 @@ needs are requests to the other owner, never a direct edit (PLAYBOOK.md §5).
 | `e2e/` | **E2E** | Real-binary end-to-end tests: PTY harness for TUI, headless browser for web, HTTP/SSE across processes, mock provider endpoint. Sequenced after the other domains land. |
 | `docs/adr/` | Coordinator | Locked decisions. |
 | `docs/handoffs/` | Coordinator | Domain handoff documents. |
-| `docs/BACKLOG.md` | Coordinator | Durable issue log (PLAYBOOK.md §4.7) — every open item, sized to its weight, worked as a live queue. |
+| `docs/BACKLOG.md` | Coordinator | Superseded historical record — see `tracking/`. |
+| `tracking/` | Coordinator | Durable issue log (PLAYBOOK.md §4.7), Spile-format (`DH-NNNN` tickets). All open-issue tracking going forward; see `tracking/README.md`. |
 | `.github/workflows/` | **CI/Release** | CI gate, tag-driven release/publish. |
 
 ## 4. Invariants (locked decisions — reference the ADR, do not relitigate)
