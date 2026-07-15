@@ -302,3 +302,31 @@ Open thread carried forward: none new. The three open threads listed in
 `docs/roster/radia.md`'s Round 1 memory (AgentLoopHandle reconciliation, the
 EventSource+bearer-token escalation, and the Core `session_ended` confirmation request)
 are untouched by this round and still need checking against Core's current state.
+
+### 2026-07-15 — DH-0007 status: CLOSED (verification pass, no code changes)
+
+Went back and explicitly checked all three Round-1 open threads against the current
+codebase, per `tracking/DH-0007-server-round1-open-threads-verification.md`. All three are
+resolved:
+
+1. **`AgentLoopHandle` reconciliation** — `src/cli.ts`'s `AgentRuntimeLoopAdapter` bridges
+   Core's real `AgentRuntime` to Server's `AgentLoopHandle` interface (`src/server/agent-loop.ts`,
+   unchanged from Round 1) exactly the way the open thread anticipated: `onEvent`/`onLog`
+   fan out from `AgentRuntime`'s single fixed callback pair to multiple subscribers, and
+   `sendMessage`/`stopAgent`/`getAgentTree` map onto `AgentRuntime`'s real methods.
+2. **EventSource + bearer-token** — resolved by the Web domain choosing option (a) from the
+   three I escalated: `src/web/client/sse.ts` reads the SSE stream via `fetch()` instead of
+   native `EventSource`, so it can set a real `Authorization: Bearer <token>` header. No
+   query-param-token workaround was added anywhere — the security posture this thread was
+   escalated over is untouched. `src/tui/sse-client.ts` independently solved it the same way.
+3. **Core's `session_ended` self-report** — confirmed in `src/agent/runtime.ts`'s
+   `runRoot()`: exactly one `session_ended` event per run, both on normal completion
+   (`exitCode` from the loop's own self-report) and on a harness-level crash before/during
+   the loop (`exitCode: HarnessError`, via a try/catch wrapping `runAgentLoop`). Matches the
+   contract `src/server/exit.ts`'s `waitForExitCode` was built against; exercised directly
+   in `src/agent/runtime.test.ts`.
+
+No code changes were needed — this was read-only verification. Gates re-run clean:
+`bun run typecheck`, `bun run lint`, `bun run test:coverage` (806 pass, 0 fail, 100%
+coverage across `src/server/`). Ticket closed (`status: closed`, `resolution: done`);
+`tracking/views/dark-harness-view.md` regenerated to match.
