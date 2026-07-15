@@ -12,16 +12,15 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
 import type { LogHeader } from "../src/contracts/index.ts";
+import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
-import { findFreePort } from "./support/port.ts";
+import { startDhServer } from "./support/port.ts";
 import { connectSse } from "./support/sse-client.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
 
-const cleanups: (() => void)[] = [];
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
-});
+const cleanups = createCleanupRegistry();
+afterEach(() => cleanups.runAll());
 
 /**
  * Every real `dh` run writes its JSONL logs to `<cwd>/.dh-logs/<sessionId>/<agentId>.jsonl`
@@ -55,22 +54,19 @@ function expectRealBuildStamp(header: LogHeader) {
 describe("build-identity stamp survives the real compilation pipeline (Round 4)", () => {
   test("--server run: header.client === 'server', real build stamp present", async () => {
     const provider = startMockAnthropicProvider([successTurn("stamped server run")]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(baseConfig(provider.baseURL));
-    const port = await findFreePort();
-
-    const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
-    cleanups.push(proc.kill);
-    await proc.waitForStdout(/listening on port/);
+    const { proc, port } = await startDhServer({ cwd: ws.dir });
+    cleanups.addProcess(proc.kill);
 
     // The root agent (and its JSONL log, whose first line is the header this test asserts
     // on) isn't created until the first send_message — a bare `--server` start has no root
     // agent at all yet (see e2e/server-protocol.test.ts's own "no message sent" tree test).
     const baseUrl = `http://localhost:${port}`;
     const sse = await connectSse(baseUrl);
-    cleanups.push(sse.close);
+    cleanups.addProcess(sse.close);
     await fetch(new URL("/api/commands", baseUrl), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -85,9 +81,9 @@ describe("build-identity stamp survives the real compilation pipeline (Round 4)"
 
   test("standalone --instructions --job run: header.client === 'none', real build stamp present", async () => {
     const provider = startMockAnthropicProvider([successTurn("stamped standalone run")]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(baseConfig(provider.baseURL));
     const instructionsPath = ws.writeFile("instructions.txt", "Do the thing.");
 

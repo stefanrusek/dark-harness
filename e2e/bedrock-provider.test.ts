@@ -21,6 +21,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { DhConfig } from "../src/contracts/index.ts";
+import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import {
   mockBedrockEnv,
@@ -29,10 +30,8 @@ import {
 } from "./support/mock-bedrock-provider.ts";
 import { createWorkspace } from "./support/workspace.ts";
 
-const cleanups: (() => void)[] = [];
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
-});
+const cleanups = createCleanupRegistry();
+afterEach(() => cleanups.runAll());
 
 const BEDROCK_MODEL_ID = "anthropic.claude-3-5-sonnet-20241022-v2:0";
 
@@ -51,9 +50,9 @@ function bedrockConfig(): DhConfig {
 describe("bedrock-type provider (gap 2b)", () => {
   test("real binary drives the real BedrockProvider against a mock Converse endpoint -> exit 0", async () => {
     const provider = await startMockBedrockProvider([successTurn("All done via Bedrock.")]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(bedrockConfig());
     const instructionsPath = ws.writeFile("instructions.txt", "Do the thing via Bedrock.");
 
@@ -78,9 +77,9 @@ describe("bedrock-type provider (gap 2b)", () => {
     const provider = await startMockBedrockProvider([
       { text: "Could not complete the task. TASK_FAILED", stopReason: "end_turn" },
     ]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(bedrockConfig());
     const instructionsPath = ws.writeFile(
       "instructions.txt",
@@ -107,9 +106,9 @@ describe("bedrock-type provider (gap 2b)", () => {
       },
       successTurn("Ran the command via Bedrock tool_use."),
     ]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(bedrockConfig());
     const instructionsPath = ws.writeFile("instructions.txt", "Run echo hi via Bedrock.");
 

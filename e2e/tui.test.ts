@@ -13,28 +13,26 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { ensureBuilt } from "./support/build.ts";
-import { spawnDh } from "./support/dh-process.ts";
+import { createCleanupRegistry } from "./support/cleanup.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
-import { findFreePort } from "./support/port.ts";
+import { startDhServer } from "./support/port.ts";
 import { startTmuxSession } from "./support/tmux-pty.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
 
-const cleanups: (() => void)[] = [];
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
-});
+const cleanups = createCleanupRegistry();
+afterEach(() => cleanups.runAll());
 
 describe("local TUI (dh, no flags) under a real PTY", () => {
   test("boots, renders the alt-screen shell, and responds to real keystrokes", async () => {
     const provider = startMockAnthropicProvider([successTurn("Hello from the fixed TUI!")]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(baseConfig(provider.baseURL));
     const dhBinary = await ensureBuilt();
 
     const session = startTmuxSession([dhBinary], { cwd: ws.dir, cols: 100, rows: 30 });
-    cleanups.push(session.kill);
+    cleanups.addProcess(session.kill);
 
     await session.waitFor((screen) => screen.includes("Dark Harness"));
     await session.waitFor((screen) => screen.includes("Root Agent"));
@@ -71,24 +69,19 @@ describe("local TUI (dh, no flags) under a real PTY", () => {
 describe("--connect: a real second dh process against a real dh --server", () => {
   test("console client renders live SSE output from a message sent to the remote server", async () => {
     const provider = startMockAnthropicProvider([successTurn("Hello from the remote server!")]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
 
     const serverWs = createWorkspace();
-    cleanups.push(serverWs.cleanup);
+    cleanups.addWorkspace(serverWs.cleanup);
     serverWs.writeConfig(baseConfig(provider.baseURL));
-    const port = await findFreePort();
-    const serverProc = await spawnDh({
-      args: ["--server", "--port", String(port)],
-      cwd: serverWs.dir,
-    });
-    cleanups.push(serverProc.kill);
-    await serverProc.waitForStdout(/listening on port/);
+    const { proc: serverProc, port } = await startDhServer({ cwd: serverWs.dir });
+    cleanups.addProcess(serverProc.kill);
 
     // The connecting client also loads its own dh.json (models/provider are required by the
     // schema even though --connect never calls a model directly) — reuse baseConfig with an
     // unused provider URL.
     const clientWs = createWorkspace();
-    cleanups.push(clientWs.cleanup);
+    cleanups.addWorkspace(clientWs.cleanup);
     clientWs.writeConfig(baseConfig("http://localhost:1"));
 
     const dhBinary = await ensureBuilt();
@@ -97,7 +90,7 @@ describe("--connect: a real second dh process against a real dh --server", () =>
       cols: 100,
       rows: 30,
     });
-    cleanups.push(session.kill);
+    cleanups.addProcess(session.kill);
 
     await session.waitFor((screen) => screen.includes("Dark Harness"));
 

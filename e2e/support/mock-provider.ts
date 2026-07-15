@@ -25,6 +25,37 @@ export interface MockTurn {
   stopReason?: "end_turn" | "tool_use" | "max_tokens";
   inputTokens?: number;
   outputTokens?: number;
+  /** Error-injection mode (DH-0033): when set, this scripted "turn" isn't a completion at
+   * all — the server responds with this HTTP status/body instead of a `Message`, simulating
+   * an upstream provider failure (429/500/etc) or a malformed response. Mutually exclusive
+   * with the completion fields above. */
+  error?: MockError;
+}
+
+export interface MockError {
+  /** HTTP status to respond with, e.g. 429, 500, 529 (Anthropic's "overloaded"). */
+  status: number;
+  /** Response body, JSON-encoded. Defaults to a minimal Anthropic-shaped error envelope.
+   * Ignored when `rawBody` is set. */
+  body?: Record<string, unknown>;
+  /** When set, respond with this literal string body instead of JSON-encoding `body` —
+   * simulates a malformed/truncated/non-JSON upstream response (still whatever `status` is
+   * set, default 200 for "malformed success body"). */
+  rawBody?: string;
+}
+
+/** Shorthand for a scripted provider-error turn (DH-0033): the next `/v1/messages` call gets
+ * this HTTP status/body instead of a completion — e.g. `errorTurn(429)` for a rate limit,
+ * `errorTurn(529, { error: { type: "overloaded_error", message: "Overloaded" } })` for
+ * Anthropic's overloaded response, `errorTurn(500)` for a generic upstream 5xx. */
+export function errorTurn(status: number, body?: Record<string, unknown>): MockTurn {
+  return { error: body !== undefined ? { status, body } : { status } };
+}
+
+/** Shorthand for a scripted malformed-response turn (DH-0033): a 200 whose body isn't valid
+ * JSON at all — the "provider returned garbage" case, distinct from a clean non-200 error. */
+export function malformedTurn(rawBody = "not json{{{"): MockTurn {
+  return { error: { status: 200, rawBody } };
 }
 
 export interface MockAnthropicProvider {
@@ -93,6 +124,22 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
       callCount += 1;
       // biome-ignore lint/style/noNonNullAssertion: index is clamped into [0, turns.length)
       const turn = turns[index]!;
+      if (turn.error) {
+        const { status, body: errBody, rawBody } = turn.error;
+        if (rawBody !== undefined) {
+          return new Response(rawBody, {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return Response.json(
+          errBody ?? {
+            type: "error",
+            error: { type: "api_error", message: "mock provider error" },
+          },
+          { status },
+        );
+      }
       return Response.json(turnToMessage(turn));
     },
   });
