@@ -677,3 +677,66 @@ tests passing, 99.95%/100% funcs/lines aggregate (same single pre-existing expla
 rounds 2-3: `cli.ts`'s real `startTui` default needs an actual PTY). `bun run e2e` — 18
 tests passing, unchanged (no `e2e/` file touched this round — the bug and its fix are both
 fully within `src/agent/`, no new cross-domain wire-protocol behavior to verify there).
+
+---
+
+## Round 5 — OPEN — interactive sessions can only ever have one exchange
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+**Confirmed live by the owner and coordinator, testing on a real machine against a real
+local model (LM Studio):** a root agent (and, by the same code path, any sub-agent) can only
+ever receive **one** message. After the first exchange completes with no tool call (a normal
+conversational turn — e.g. the model asks a clarifying question, or just answers), sending a
+*second* message returns `{"ok":true}` from the command handler but **does nothing at all**
+— no new turn, no output, status stays `"done"` forever. Reproduced directly: two
+`send_message` POSTs to a real running `dh --server`, `request_agent_tree` polled after each
+— identical `"done"` tree both times, second message silently vanished.
+
+**Root cause** (confirmed by reading `src/agent/loop.ts`, whose own header comment documents
+the design): the loop treats **any** turn where `completion.stopReason !== "tool_use"` as
+terminal — self-reported success/failure via the `TASK_FAILED` text-marker convention, per
+ADR 0006. That's exactly correct for the standalone `--instructions`/`--job` dark-factory
+path (a one-shot autonomous task genuinely should exit when the model stops working). It's
+wrong for interactive sessions (server/TUI/Web): a conversational turn with no tool call
+routinely just means "waiting for the human's reply," not "task complete." Separately,
+`AgentRuntime.runRoot()`'s `registerSendMessage` sink (`this.rootSendMessage = fn`) is never
+cleared after the loop returns — so a second `sendMessageToRoot()` call doesn't throw, it
+silently pushes into a dead closure's `pendingMessages` array that nothing reads anymore.
+Same underlying mechanism for sub-agents via `TaskRegistry`/`spawnAgent()` — this isn't
+root-specific.
+
+**This needs a real design, not a patch — scope it properly:**
+
+1. **A mode distinction is required.** The standalone `--instructions`/`--job` path's current
+   behavior (end on first non-tool-call turn, `TASK_FAILED` marker, exit code per ADR 0006)
+   must be preserved exactly — don't regress dark-factory autonomous runs. Interactive
+   sessions (root agent under server/TUI/Web, and sub-agents reachable via `SendMessage`)
+   need the loop to instead: on a non-tool-call turn, mark status `"waiting"` (already an
+   existing `AgentStatus` value in `src/contracts/` — check whether TUI/Web already render
+   it sensibly, they were built against the full enum) and **pause without returning**,
+   keeping the conversation's message history intact, resuming the same loop when the next
+   message arrives via the registered sink. Only a genuine stop (`stopAgent`/`TaskStop`,
+   already wired via `AbortSignal` from Round 3) should actually end an interactive session
+   — there's no natural "done" state for an ongoing conversation, same as a real chat UX.
+2. **This must work for both root and sub-agents** — they share `runAgentLoop`; find the one
+   fix that covers both rather than a root-only patch, consistent with `HANDOFF.md`'s own
+   tool descriptions ("steer a running agent between turns" implies this for both).
+3. **`maxTurns` needs reconsidering** in light of a session that may now run indefinitely
+   across many exchanges — your call on the exact mechanics (per-message turn budget vs.
+   whole-conversation cap vs. something else), just document the choice and reasoning.
+4. Don't touch `src/contracts/` unless you find you genuinely need a new `AgentStatus` value
+   (you probably don't — `"waiting"` already exists) — if you do, that's a request per usual.
+
+**Gates:** the standard four. Add regression tests proving: (a) an interactive root agent
+can have a real second exchange, with message history preserved (the model can reference
+something from the first exchange in its second response — the strongest proof it's really
+the same conversation, not two independent ones); (b) the standalone `--instructions --job`
+path still exits correctly on the very first non-tool-call turn, unaffected; (c) the same
+multi-exchange behavior works for a sub-agent via `SendMessage`.
+
+**Definition of done:** live-verify against a real running `dh --server` process (build the
+binary, spawn it, POST two `send_message`s in sequence, confirm the second one actually
+produces new output/events and correctly references context from the first) — don't just
+trust unit tests for this one, the bug was only caught by doing exactly that. Append a dated
+status entry here and update `docs/roster/grace.md` when done.
