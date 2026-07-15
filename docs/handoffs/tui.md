@@ -377,3 +377,29 @@ already existed on `main` but before this worktree (branched at `a975c25`) had i
 edit this worktree's `CLAUDE.md` — that's the coordinator's file to reconcile on merge (see
 `docs/roster/mary.md` for my memory entry and a note to that effect). My roster-table row
 still needs to be added to `CLAUDE.md` §7 by whoever merges this.
+
+---
+
+## Round 4 — OPEN — visible cursor in the input box
+
+**Addressed to:** TUI (Mary, resumed — read `docs/roster/mary.md` first).
+
+Confirmed via real interactive testing (owner, on a real terminal): typing in the root
+view's input box works correctly, but there's no visible cursor — the app hides the real
+terminal cursor entirely at startup (`app.ts`: `stdout.write(ALT_SCREEN_ENTER + HIDE_CURSOR)`,
+only re-shown on quit) and `render.ts`'s input line (`const inputLine = \`> ${state.input}\`;`)
+never renders a cursor marker of its own. Makes typing hard to track — you can't tell where
+you are in the input.
+
+**Fix:** render a synthetic cursor as part of the frame text itself (consistent with the
+existing pure `TuiState -> string[]` rendering architecture — no need to calculate real
+terminal cursor positions relative to variable-height content above it). A reasonable
+approach: an inverse-video space or block character (`\x1b[7m \x1b[0m` or similar) appended
+at the end of `state.input` when the root view is focused and editable; no cursor needed in
+the read-only tree/agent views. Your call on the exact rendering, but it should be visually
+obvious in a real terminal, not just "technically present."
+
+**Gates:** the standard three (`bun run typecheck`, `bun run lint`, `bun run test:coverage`).
+Add a render-level unit test asserting the cursor marker appears in the rendered frame when
+appropriate and doesn't appear in read-only views. Append a dated status entry here and
+update `docs/roster/mary.md` when done.

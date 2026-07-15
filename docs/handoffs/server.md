@@ -245,3 +245,29 @@ coverage, just an instrumentation artifact; noting them so nobody burns time cha
    implementation.
 
 Everything above is scoped to `src/server/`; no other domain's files were touched.
+
+---
+
+## Round 2 — OPEN — periodic SSE heartbeat to prevent idle disconnects
+
+**Addressed to:** Server (Radia, resumed — read `docs/roster/radia.md` first).
+
+Confirmed via real interactive testing (owner, both TUI and Web UI): SSE connections
+disconnect and reconnect during normal use. Root cause, confirmed by reading `server.ts`:
+only a **one-time** `": connected\n\n"` comment is sent when a connection opens (line ~153)
+— no periodic keep-alive after that. During any idle stretch (a slow model turn, or just
+waiting between messages), something in the network path (browser, OS, an intermediate
+proxy) apparently decides the connection is stale and drops it. The client-side
+reconnect-with-backoff logic (built in earlier rounds) handles this correctly when it
+happens — no data is lost — but it's a visible, avoidable hiccup.
+
+**Fix:** send a periodic SSE comment line (e.g. `: ping\n\n`, no `id:` field so it doesn't
+interact with `Last-Event-ID`/`EventBuffer` at all) on some reasonable interval (15-30s is a
+typical range for this kind of keep-alive; your call, document the choice) for as long as a
+connection is open. Make sure it's cleaned up correctly when a connection closes (no leaked
+timers).
+
+**Gates:** the standard three. Add a test proving the heartbeat is actually sent on an
+open connection over time (using a fake/injectable clock or timer, not a real multi-second
+sleep in the test suite). Append a dated status entry here and update `docs/roster/radia.md`
+when done.

@@ -160,3 +160,36 @@ Bun's coverage tool tracks as a file).
   `skillPaths` were sufficient as-is.
 
 — Iris (she/her), Prompt domain lead, persistent for this build.
+
+---
+
+## Round 2 — OPEN — a tool call is never fire-and-forget
+
+**Addressed to:** Prompt (Iris, resumed — read `docs/roster/iris.md` first).
+
+Confirmed via extensive real testing against local models (LM Studio, gemma-4-e4b/31b):
+the model routinely starts a background task (a backgrounded `Bash` call, most commonly)
+and then simply ends its turn without ever following up via `Monitor`/`TaskOutput` to see
+the result — treating the tool call as fire-and-forget. This isn't a code bug (the loop
+correctly reports the model's own `end_turn` with no further tool call as a completed turn,
+per Round 5's now-correct interactive-session semantics) — it's a prompting gap. Smaller/
+local models clearly don't infer this obligation on their own the way Claude does.
+
+**Fix:** add an explicit, pushy discipline point to `BASE_PROMPT`'s "Working discipline"
+section in `src/prompt/system-prompt.ts`, in the same style as the existing bullets
+(Escalate-don't-guess, Commit-before-yield, etc.) — something along the lines of: **a tool
+call is never fire-and-forget.** If a tool starts work whose result isn't immediately
+visible (a backgrounded shell command, a spawned sub-agent), you are responsible for
+following up on it — check `Monitor`/`TaskOutput` before considering your turn done. Ending
+a turn without checking on a background task's result abandons it, it does not complete it.
+Word it as strongly as the other discipline points; this is a correctness requirement, not a
+suggestion. Your call on exact phrasing/placement, but it needs to be unambiguous enough
+that a small model reliably picks up on it (short, direct, impossible to miss — avoid
+burying it in a long paragraph).
+
+**Gates:** the standard three. Update `system-prompt.test.ts`'s existing prompt-content
+assertions if they snapshot/check the discipline section, so they reflect the addition
+rather than fail. Append a dated status entry here and update `docs/roster/iris.md` when
+done. (This can't be "live-verified" against a specific model the way code fixes have been
+in this session — a small local model choosing to poll a background task is a probabilistic
+improvement, not a guaranteed one. Note that honestly rather than claiming it's proven.)
