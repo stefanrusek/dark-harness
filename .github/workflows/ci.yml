@@ -1,0 +1,18 @@
+name: CI
+
+# HANDOFF.md §11 / docs/handoffs/ci-release.md scope 1: CI on PRs and pushes to main.
+# All the actual work lives in gate.yml (a reusable workflow) so this file and
+# release.yml can never drift on what "the gate" means.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Gate
+    uses: ./.github/workflows/gate.yml

@@ -1,0 +1,125 @@
+name: Gate
+
+# Reusable quality gate: typecheck, lint, coverage (hard 100% threshold), e2e.
+# Called by ci.yml (on PRs/main) and release.yml (before cutting a release) so both
+# paths run the exact same checks and can never drift apart.
+#
+# `test:coverage` (`bun test src --coverage`) reports coverage but does not itself
+# fail the process below 100% — bun's own hard-threshold mechanism is a `bunfig.toml`
+# `coverageThreshold` entry, which is a repo-root file outside this domain's ownership
+# (.github/workflows/, per CLAUDE.md §3). Rather than add that file unilaterally, this
+# workflow parses `bun test --coverage`'s text summary ("All files" row) itself and
+# fails the step if either the function or line percentage is below 100.00. This was
+# verified locally against bun 1.3.11: `bun test src --coverage --coverage-reporter=text`
+# prints a summary line of the form:
+#   All files                    |  100.00 |  100.00 |
+# See docs/handoffs/ci-release.md status log for the alternative (bunfig.toml) and why
+# it was left as a request rather than a silent edit.
+on:
+  workflow_call:
+
+jobs:
+  gate:
+    name: typecheck / lint / coverage / e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          # Pinned to the version this workflow was authored/tested against
+          # (verified locally: `bun --version` -> 1.3.11). CLAUDE.md §2 floors the
+          # project at Bun >=1.3; bump this deliberately alongside that floor, not
+          # silently via a "latest" tag, so gate behavior stays reproducible.
+          bun-version: "1.3.11"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Test with coverage gate (100% required)
+        shell: bash
+        run: |
+          set -o pipefail
+          bun test src --coverage --coverage-reporter=text 2>&1 | tee coverage-report.txt
+          TEST_EXIT="${PIPESTATUS[0]}"
+          if [ "$TEST_EXIT" -ne 0 ]; then
+            echo "::error::bun test failed (exit $TEST_EXIT) — see log above."
+            exit "$TEST_EXIT"
+          fi
+
+          SUMMARY_LINE="$(grep '^All files' coverage-report.txt || true)"
+          if [ -z "$SUMMARY_LINE" ]; then
+            echo "::error::Could not find a coverage summary ('All files' row) in bun's output — treating as a gate failure rather than a silent pass."
+            exit 1
+          fi
+
+          FUNCS_PCT="$(echo "$SUMMARY_LINE" | awk -F'|' '{gsub(/ /,"",$2); print $2}')"
+          LINES_PCT="$(echo "$SUMMARY_LINE" | awk -F'|' '{gsub(/ /,"",$3); print $3}')"
+          echo "Coverage: functions=${FUNCS_PCT}% lines=${LINES_PCT}%"
+
+          if [ "$FUNCS_PCT" != "100.00" ] || [ "$LINES_PCT" != "100.00" ]; then
+            echo "::error::Coverage gate failed — CLAUDE.md §5 requires 100% (functions and lines). Got functions=${FUNCS_PCT}%25, lines=${LINES_PCT}%25."
+            exit 1
+          fi
+
+      - name: Coverage completeness (every src file must be exercised by a test)
+        shell: bash
+        run: |
+          # Bun's own docs are explicit: "Coverage only tracks files that are
+          # loaded" — a src file that no test imports (directly or transitively)
+          # is silently OMITTED from the report rather than shown at 0%, so the
+          # 100%-threshold step above would report "100.00%" even with completely
+          # untested files sitting in src/. Verified locally against this repo:
+          # src/contracts/{commands,config,events,index,log}.ts currently have zero
+          # test coverage and do not appear in bun's coverage table at all, yet the
+          # threshold check reports 100%. This step closes that gap by diffing the
+          # set of files bun's coverage table actually lists against every real
+          # source file, and hard-failing on anything missing — so "100% coverage
+          # is a gate, not a target" (CLAUDE.md §5) holds for the whole tree, not
+          # just the subset some test happens to import.
+          set -euo pipefail
+          REPORTED_FILES="$(awk -F'|' '
+            /^-+\|/ { c++; next }
+            c==2 {
+              path=$1; gsub(/^ +| +$/,"",path);
+              if (path != "All files" && path != "") print path;
+            }
+          ' coverage-report.txt | sort -u)"
+
+          ALL_SRC="$(git ls-files 'src/*.ts' 'src/**/*.ts' 'src/*.tsx' 'src/**/*.tsx' 2>/dev/null \
+            | grep -vE '\.(test|spec)\.(ts|tsx)$' \
+            | grep -vE '\.d\.ts$' \
+            | sort -u)"
+
+          MISSING="$(comm -23 <(echo "$ALL_SRC") <(echo "$REPORTED_FILES") | sed '/^$/d')"
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::The following src files are never loaded by any test, so bun's coverage report doesn't even see them (and the 100%25 threshold check above can't catch them). Add a test that imports each one (directly, or transitively via a barrel file), even a minimal smoke test:"
+            echo "$MISSING" | while read -r f; do echo "::error::  - $f"; done
+            exit 1
+          fi
+
+          echo "All src files are exercised by at least one test."
+
+      - name: E2E (real compiled binary, once e2e/ lands tests)
+        shell: bash
+        run: |
+          # HANDOFF.md §10 / docs/handoffs/ci-release.md: e2e/ is sequenced after the
+          # other domains land, so it may not exist (or may be empty) yet. Rather than
+          # a permanent `continue-on-error` that would need a follow-up PR to remove,
+          # this step auto-detects real test files and only then runs (and hard-fails
+          # on) `bun run e2e`. Once the E2E domain adds test files this becomes a real
+          # gate with no further workflow change required.
+          if find e2e -type f \( -name "*.test.ts" -o -name "*.spec.ts" -o -name "*_test_*.ts" -o -name "*_spec_*.ts" \) 2>/dev/null | grep -q .; then
+            bun run e2e
+          else
+            echo "::notice::No e2e test files found under e2e/ yet — skipping (not yet a hard gate). This step self-activates once the E2E domain lands *.test.ts/*.spec.ts files."
+          fi
