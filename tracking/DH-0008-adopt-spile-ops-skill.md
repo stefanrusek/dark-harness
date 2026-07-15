@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0008
 type: feature
-status: implementing
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -66,3 +66,21 @@ instead of the coordinator writing every file by hand.
 > Raised by the owner directly: "if at any point you feel like we need skills for anything...
 > feel free to create a ticket... it would totally save context just to fire off a sub agent
 > saying create this file/document or update this document." This ticket is exactly that.
+
+> [!NOTE]
+> Resolved by building a project-local skill — no upstream `spile-ops` package was found to
+> adopt (checked via web search; "Spile" is this project's own bespoke tracker, not a
+> published package ecosystem). Landed at `.claude/skills/spile-ops/SKILL.md`, backed by
+> three stdlib-only Python 3 scripts under `.claude/skills/spile-ops/scripts/`:
+> `new_ticket.py` (mints the next ID from this root doc's counter, writes the front matter +
+> body skeleton, bumps the counter only after the write succeeds), `transition.py` (updates
+> `status`/`resolution`/`blocked_by`/`owner`, warns but does not block on out-of-order
+> lifecycle jumps per the spec's advisory-not-enforced principle, and requires
+> `--resolution` to close), and `regen_view.py` (rebuilds
+> `tracking/views/dark-harness-view.md` from scratch: Needs Attention = refining/verifying/
+> blocked, Board = open tickets grouped by status, Recently Closed = last 15). All three
+> auto-regenerate the view on mutation. Verified end-to-end by minting a real scratch ticket
+> (DH-0009), transitioning it through refining → implementing → closed, confirming the view
+> updated correctly at each step (including fixing a stale 🔒 badge on DH-0005 that the
+> hand-written view had wrongly carried), then deleting the scratch ticket and restoring the
+> counter to 8 before regenerating the final view.
