@@ -33,6 +33,7 @@ source: tracking/
 | [DH-0005](../DH-0005-npm-token-secret.md) | `NPM_TOKEN` repository secret not yet set | feature | stefan |
 | [DH-0006](../DH-0006-e2e-multiturn-conversation-coverage.md) | No dedicated e2e test for plain multi-turn conversation continuity | bug | stefan |
 | [DH-0007](../DH-0007-server-round1-open-threads-verification.md) | Server's three Round-1 open threads — likely stale, unverified | bug | stefan |
+| [DH-0008](../DH-0008-adopt-spile-ops-skill.md) | Adopt (or build) a `spile-ops` skill for mechanical ticket operations | feature | stefan |
 
 ## Recently Closed
 
