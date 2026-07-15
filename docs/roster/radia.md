@@ -85,3 +85,27 @@ durable bit worth remembering here:
   open threads from Round 1 (`AgentLoopHandle` reconciliation, EventSource+bearer-token
   escalation, Core's `session_ended` confirmation) are unrelated to this round and remain
   open — check their status before assuming resolved.
+
+### 2026-07-15 — DH-0007: closing out the three Round-1 open threads
+
+Verification pass (tracking/DH-0007), no code changes. Checked all three threads directly
+against current code and closed the ticket (`status: closed`, `resolution: done`):
+
+1. **`AgentLoopHandle`** — Core built to my shape, not the other way around.
+   `AgentRuntimeLoopAdapter` in `src/cli.ts` bridges `AgentRuntime`'s single fixed
+   `onEvent`/`onLogLine` callback pair to my multi-subscriber `onEvent`/`onLog` interface,
+   and maps `sendMessage`/`stopAgent`/`getAgentTree` onto `AgentRuntime`'s real methods
+   (`sendMessageToRoot`/`tasks.sendMessage`, `stopRoot`/`tasks.stop`, `getAgentTree`).
+   `src/server/agent-loop.ts`'s interface itself is unchanged from what I originally wrote.
+2. **EventSource + bearer-token** — Web chose option (a) from my escalated list: dropped
+   native `EventSource` entirely for a `fetch()`-based SSE reader
+   (`src/web/client/sse.ts`) that can set the real `Authorization: Bearer <token>` header.
+   No query-param-token fallback exists anywhere — the security posture I flagged as not
+   mine to bend was never bent. TUI independently arrived at the same fetch-based approach.
+3. **`session_ended`** — confirmed live in `src/agent/runtime.ts`'s `runRoot()`: exactly one
+   `session_ended` event per run on every path (normal self-report success/failure, and the
+   crash/harness-error path via try/catch), `exitCode` shaped exactly as `exit.ts` assumed.
+   `runtime.test.ts` has direct assertions for all three cases.
+
+Nothing here needed a fix — this was pure confirmation that the integration risk noted at
+handoff time paid off cleanly. No new open threads from this pass.
