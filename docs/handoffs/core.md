@@ -1445,3 +1445,56 @@ Chromium-launch tests failing on missing binaries (`Executable not found in $PAT
 
 No other files touched — this was a two-file fix (contracts + loop) plus its own test file,
 scoped exactly to what the handoff described.
+
+---
+
+## Round 11 — OPEN, URGENT — every provider call sends the wrong model identifier
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+**This is severe — found while testing Bedrock with real AWS credentials, but affects every
+provider, including plain Anthropic.** `ModelConfig` (`src/contracts/config.ts`) deliberately
+has two separate fields: `name` (the friendly alias tools/`options.defaultModel` refer to)
+and `model` (the real provider-side model identifier, e.g.
+`anthropic.claude-3-haiku-20240307-v1:0` for Bedrock, or a real Anthropic model slug). The
+whole point of having both is letting an operator use a short alias while pointing at the
+real upstream identifier.
+
+Confirmed by direct trace: `src/agent/runtime.ts` (~lines 229, 346) passes `model:
+model.name` into `runAgentLoop`'s params — **the friendly alias, not `model.model`**.
+`loop.ts` (~line 319) passes that straight through as `provider.complete({ model:
+params.model, ... })`. Both `anthropic.ts` and `bedrock.ts` then send that value directly as
+the real API's model identifier. **The `model` field configured in `dh.json` is never
+actually used to talk to any provider — every call sends the config alias instead.**
+
+This has been silently masked everywhere in prior testing: LM Studio's server ignores the
+`model` field entirely (single model loaded, doesn't validate it) so it never surfaced there
+even across extensive testing this session; every real Anthropic API test earlier failed on
+an invalid API key before ever reaching model validation, so it never surfaced there either.
+**Confirmed live just now against real AWS Bedrock**: three different, genuinely valid model
+identifiers (a bare Claude 3.5 Sonnet id, a bare Claude 3 Haiku id, and a `us.`-prefixed
+cross-region inference-profile id) all failed identically with `"The provided model
+identifier is invalid"` — because Bedrock was actually receiving the *config alias*
+(`"bedrock-sonnet"`/`"bedrock-haiku"`), never the real id, regardless of what was configured.
+
+**Fix:** `runtime.ts`'s two call sites should pass `model: model.model` (the provider-side
+id) to `runAgentLoop`, not `model: model.name`. Check whether `params.model`/the log
+header's own `model` field (which is presumably meant to show the friendly alias for
+human-readability in logs/UI) needs to keep using `model.name` for *that* purpose while a
+separate field carries the real id to the provider call — don't just blanket-replace every
+use of `model.name` without checking which ones are "for the provider" vs "for display."
+Trace every place `AgentLoopParams.model`/`params.model` is read (loop.ts's own log header
+construction, the SSE agent-tree `model` field TUI/Web display, `provider.complete()`) and
+get each one pointed at the field it actually needs.
+
+**Gates:** the standard four. Add a regression test proving the *provider* receives
+`model.model` (the config's provider-side id), not `model.name`, using a fake provider that
+asserts on the exact string it was called with and a config where `name` and `model` are
+deliberately different (this exact bug would have been invisible in any test where they
+happened to match, which is presumably why it shipped unnoticed). Also check whether the log
+header / TUI/Web agent-tree display should still show the friendly `name` for
+human-readability — if so, make sure that display path is unaffected by the fix.
+
+**Given the severity (every real provider call has been sending the wrong identifier), treat
+this as blocking** — flag immediately if you find it's more involved than described above.
+Append a dated status entry here and update `docs/roster/grace.md` when done.
