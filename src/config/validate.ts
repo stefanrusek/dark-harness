@@ -14,6 +14,20 @@ import { ConfigError } from "./errors.ts";
 
 const PROVIDER_TYPES: ProviderType[] = ["anthropic", "bedrock"];
 
+// DH-0015 fix (tracking/DH-0015-config-validation-gaps.md): provider/mcpServers entries used
+// to spread unknown keys straight through unchecked (`{ ...raw, name, type }`), unlike the
+// strict top-level allowlist just below — a typo'd key inside one of these (e.g. `apiKye`
+// instead of `apiKey`) was silently accepted, with the intended field silently `undefined`,
+// defeating the file's own stated "catch config typos early" goal. Every provider entry
+// accepts `name`/`type` plus `retry` (DH-0009's provider-level retry/backoff config); the
+// remaining keys are type-specific.
+const PROVIDER_COMMON_KEYS = new Set(["name", "type", "retry"]);
+const PROVIDER_TYPE_KEYS: Record<ProviderType, Set<string>> = {
+  anthropic: new Set(["baseURL", "apiKey"]),
+  bedrock: new Set(["region"]),
+};
+const KNOWN_MCP_SERVER_KEYS = new Set(["command", "args", "env", "url", "headers"]);
+
 /** ADR 0007: unknown top-level keys are rejected to catch config typos early. */
 const KNOWN_TOP_LEVEL_KEYS = new Set([
   "options",
@@ -47,7 +61,17 @@ function validateProvider(raw: unknown, index: number): ProviderConfig {
       `provider[${index}].type must be one of ${PROVIDER_TYPES.join(", ")}, got ${JSON.stringify(type)}`,
     );
   }
-  const config: ProviderConfig = { ...raw, name, type: type as ProviderType };
+  const providerType = type as ProviderType;
+  const allowedKeys = PROVIDER_TYPE_KEYS[providerType];
+  for (const key of Object.keys(raw)) {
+    if (!PROVIDER_COMMON_KEYS.has(key) && !allowedKeys.has(key)) {
+      const known = [...PROVIDER_COMMON_KEYS, ...allowedKeys].join(", ");
+      throw new ConfigError(
+        `provider[${index}] ("${name}", type "${providerType}") has unknown key "${key}"; known keys for this type: ${known}`,
+      );
+    }
+  }
+  const config: ProviderConfig = { ...raw, name, type: providerType };
   return config;
 }
 
@@ -103,6 +127,13 @@ function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | und
       throw new ConfigError(
         `mcpServers["${serverName}"] must specify either "command" (stdio) or "url" (HTTP)`,
       );
+    }
+    for (const key of Object.keys(serverConfig)) {
+      if (!KNOWN_MCP_SERVER_KEYS.has(key)) {
+        throw new ConfigError(
+          `mcpServers["${serverName}"] has unknown key "${key}"; known keys: ${[...KNOWN_MCP_SERVER_KEYS].join(", ")}`,
+        );
+      }
     }
   }
   return raw as Record<string, McpServerConfig>;

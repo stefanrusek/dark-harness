@@ -107,7 +107,10 @@ connection survives ordinary HTTP proxies and reconnects cleanly via `Last-Event
   is how the `"local"` provider above points at any Anthropic-compatible endpoint) or
   `type: "bedrock"` (AWS Bedrock via the standard AWS credential chain).
 - **`$(VAR)`** in any string value resolves against the environment at load time — e.g.
-  `"apiKey": "$(ANTHROPIC_API_KEY)"`.
+  `"apiKey": "$(ANTHROPIC_API_KEY)"`. To use a literal `$(...)`-shaped string (meant for
+  something other than `dh`'s own interpolation — e.g. a value a Bash tool call's subprocess
+  should see verbatim), escape it as `$$(...)`: `$$(FOO)` resolves to the literal text
+  `$(FOO)`, with no environment lookup attempted.
 - **`skillPaths`** — directories scanned for skill folders (each containing a `SKILL.md`,
   the same convention Claude Code uses). `dh` also always bundles a `cli-tools` skill
   covering `git`, `gh`, `pnpm`, `tilt`, `kubectl`, `jq`, `doppler`, `npx`/`playwright`, and
@@ -175,9 +178,21 @@ Rationale and scope: [`docs/adr/0004-security-posture.md`](docs/adr/0004-securit
 
 ### Keeping secrets out of `dh.json`: `--env <file>`
 
-`--env <file>` loads a dotenv-style file (`KEY=VALUE` per line, `#` comments, blank lines
-skipped, optional surrounding double-quotes on the value) into the process environment
-*before* `dh.json` is loaded — so its `$(VAR)` interpolation can resolve against it.
+`--env <file>` loads a dotenv-style file into the process environment *before* `dh.json` is
+loaded — so its `$(VAR)` interpolation can resolve against it. The supported subset is
+deliberately minimal, not a full reimplementation of any particular dotenv tool's dialect:
+
+- `KEY=VALUE` per line; blank lines and lines starting with `#` (after trimming leading
+  whitespace) are skipped as comments — `#` is *not* treated as an inline/trailing comment
+  marker within a value (a value containing `#` is taken literally, in full).
+- A value may be wrapped in double quotes (`"..."`), which are stripped, with `"`, `\`,
+  `
+`, and `	` escape sequences resolved inside them.
+- A value may instead be wrapped in single quotes (`'...'`), which are stripped with **no**
+  escape processing at all — the content between the quotes is used completely literally
+  (the one way to include a literal `#`, backslash, or double-quote without any escaping).
+- An unquoted value is used as-is (after trimming surrounding whitespace), with no escape
+  processing.
 
 The intended workflow: keep a gitignored `secrets.env` (populated however you like — by hand,
 or via tooling like Doppler) holding real API keys, and commit a fully-functional `dh.json`

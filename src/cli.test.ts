@@ -714,6 +714,22 @@ describe("parseEnvFile", () => {
     expect(parseEnvFile('FOO=bar"baz')).toEqual({ FOO: 'bar"baz' });
   });
 
+  test("DH-0015: resolves backslash escapes inside a double-quoted value", () => {
+    expect(
+      parseEnvFile(String.raw`FOO="line one\nline two\ttabbed \"quoted\" back\\slash"`),
+    ).toEqual({ FOO: 'line one\nline two\ttabbed "quoted" back\\slash' });
+  });
+
+  test("DH-0015: a single-quoted value is used completely literally, no escape processing", () => {
+    expect(
+      parseEnvFile(String.raw`FOO='a # not a comment \n literal backslash-n "quotes" too'`),
+    ).toEqual({ FOO: 'a # not a comment \\n literal backslash-n "quotes" too' });
+  });
+
+  test("DH-0015: '#' inside an unquoted value is never treated as an inline comment marker", () => {
+    expect(parseEnvFile("FOO=bar#not-a-comment")).toEqual({ FOO: "bar#not-a-comment" });
+  });
+
   test("throws a clear error naming the malformed line", () => {
     expect(() => parseEnvFile("FOO=bar\nnotanassignment\n")).toThrow(/line 2/);
     expect(() => parseEnvFile("notanassignment")).toThrow(/notanassignment/);

@@ -288,6 +288,38 @@ describe("validateConfig — rejections", () => {
     ).toThrow(/options.maxTurns must be a positive integer/);
   });
 
+  test("DH-0015: rejects a typo'd key inside a provider entry", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ provider: [{ name: "anthropic", type: "anthropic", apiKye: "x" }] }),
+      ),
+    ).toThrow(/provider\[0\].*unknown key "apiKye"/);
+  });
+
+  test("DH-0015: rejects a bedrock-only key (region) on an anthropic-type provider", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ provider: [{ name: "anthropic", type: "anthropic", region: "us-west-2" }] }),
+      ),
+    ).toThrow(/unknown key "region"/);
+  });
+
+  test("DH-0015: accepts region on a bedrock-type provider", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [{ name: "sonnet", provider: "bedrock", model: "sonnet-5" }],
+        provider: [{ name: "bedrock", type: "bedrock", region: "us-west-2" }],
+      }),
+    );
+    expect(config.provider[0]?.region).toBe("us-west-2");
+  });
+
+  test("DH-0015: rejects a typo'd key inside an mcpServers entry", () => {
+    expect(() =>
+      validateConfig(baseConfig({ mcpServers: { foo: { command: "x", enviroment: {} } } })),
+    ).toThrow(/mcpServers\["foo"\] has unknown key "enviroment"/);
+  });
+
   test("rejects a negative models[].inputPricePerMToken", () => {
     expect(() =>
       validateConfig(
