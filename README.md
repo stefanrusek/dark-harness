@@ -84,9 +84,15 @@ connection survives ordinary HTTP proxies and reconnects cleanly via `Last-Event
 
 ```json
 {
-  "options": { "defaultModel": "sonnet" },
+  "options": { "defaultModel": "sonnet", "runInBackgroundDefault": true, "maxTurns": 100 },
   "models": [
-    { "name": "sonnet", "provider": "anthropic", "model": "sonnet-5" },
+    {
+      "name": "sonnet",
+      "provider": "anthropic",
+      "model": "sonnet-5",
+      "inputPricePerMToken": 3,
+      "outputPricePerMToken": 15
+    },
     { "name": "gemma4", "provider": "bedrock", "model": "gemma4" }
   ],
   "provider": [
@@ -103,6 +109,12 @@ connection survives ordinary HTTP proxies and reconnects cleanly via `Last-Event
 
 - **`models`** — named entries mapping to a named `provider` plus a provider-side model id.
   Tools and options refer to models by `name`, never by the provider-side id directly.
+  Optional **`inputPricePerMToken`**/**`outputPricePerMToken`** (USD per million tokens) drive
+  the token/cost display in the TUI and web UI — there's no built-in pricing table (no public
+  fixed price exists for local/Bedrock models), so cost tracking for a model is opt-in via
+  these fields. If only one of the pair is set, the other side of that model's cost is
+  treated as `$0`; if neither is set, cost stays unreported (`undefined`) for that model
+  rather than showing a misleading `$0.00`.
 - **`provider`** — `type: "anthropic"` (the Anthropic SDK; supports a custom `baseURL`, which
   is how the `"local"` provider above points at any Anthropic-compatible endpoint) or
   `type: "bedrock"` (AWS Bedrock via the standard AWS credential chain).
@@ -113,11 +125,16 @@ connection survives ordinary HTTP proxies and reconnects cleanly via `Last-Event
   covering `git`, `gh`, `pnpm`, `tilt`, `kubectl`, `jq`, `doppler`, `npx`/`playwright`, and
   `curl` — no config needed for that one.
 - **`mcpServers`** — a Claude Code-style map of MCP server definitions (stdio and HTTP).
-- **`systemPrompt`** — optional path to a file that fully replaces the built-in system
-  prompt.
+- **`systemPrompt`** — optional path to a file whose contents replace the built-in
+  working-discipline preamble. The `TASK_FAILED`/logging contract the harness's own
+  exit-code behavior depends on is always appended after it regardless — see
+  [`docs/adr/0006-exit-code-contract.md`](docs/adr/0006-exit-code-contract.md).
 - **`options.defaultModel`** — required; the model used when a tool/agent spawn doesn't name
   one. **`options.runInBackgroundDefault`** overrides the default (`true`) for every
-  async-capable tool.
+  async-capable tool. **`options.maxTurns`** overrides the agent loop's default safety-valve
+  turn cap (100) for every agent this runtime runs, root and sub-agents alike — the default
+  exists to bound a pathological loop, not to constrain a legitimate long-running
+  dark-factory task.
 - **`security`** — see below.
 
 Full schema rationale: [`docs/adr/0007-dhjson-schema.md`](docs/adr/0007-dhjson-schema.md).
@@ -152,6 +169,40 @@ Full schema rationale: [`docs/adr/0007-dhjson-schema.md`](docs/adr/0007-dhjson-s
   another), and some ids that are syntactically valid are legacy or deprecated. An
   "invalid model" or "access denied" error is usually a sign to check model access in the
   AWS Bedrock console for that region/account, not a `dh.json` problem.
+
+### Git credentials and workspace convention
+
+`dh` has no `workspaceDir`-style config field and does no repo checkout of its own — the
+canonical "clone a repo and work on it" scenario (HANDOFF.md's founding use case) is entirely
+the operator's responsibility to set up before starting `dh`. The convention:
+
+- **Working directory is the workspace.** The `Bash` tool runs every command at the
+  process's own current working directory (`process.cwd()` at `dh` startup) — there is no
+  separate configured workspace path. Start `dh` with its working directory already set to
+  the checked-out repo (e.g. a container's `WORKDIR`, or `cd`'d into the repo before
+  invoking `dh` on the host). `dh.json` itself is looked up relative to that same directory
+  by default (`--config` to override).
+- **Git credentials are the container's/host's responsibility, not `dh.json`'s.** There is
+  no credential field in the config schema — `git` inside a `Bash` call authenticates
+  exactly as it would for a human at that same shell prompt. Recommended patterns, in order
+  of how most dark-factory deployments set this up:
+  - **Mounted SSH key** — mount a deploy key at `~/.ssh/id_ed25519` (read-only, correct
+    permissions) with `known_hosts` pre-populated or `StrictHostKeyChecking=no` in
+    `~/.ssh/config` for known-good hosts (e.g. `github.com`). Works with `git@host:org/repo`
+    remotes with no further config.
+  - **`GIT_ASKPASS`** — set `GIT_ASKPASS` to a small script that echoes a token from the
+    environment, and use HTTPS remotes. Useful when a platform makes injecting an SSH key
+    awkward but env vars easy (most container schedulers).
+  - **`.netrc`** — a mounted or generated `~/.netrc` with `machine <host>` / `login` /
+    `password <token>` entries; `git` over HTTPS reads this automatically with no
+    per-invocation flag.
+  - **PAT via env + credential helper** — set a personal-access-token env var and configure
+    `git config --global credential.helper` to a one-liner that prints it; combine with
+    `--env secrets.env` (below) to keep the token out of `dh.json`.
+
+  None of these are `dh`-specific — they're the same options as any other headless git
+  automation. `dh` does not special-case any of them; whichever one is already set up in the
+  environment `dh` starts in is what its agents inherit.
 
 ### Optional: bearer token + TLS
 
@@ -211,6 +262,19 @@ Every session is logged automatically: one JSONL file per agent, resumable and d
 with enough in each file's header line to reconstruct the full agent tree without parsing
 event bodies. Agents never call a logging tool — their output *is* the log.
 
+## Further documentation
+
+- [TUI keybindings reference](docs/tui-keybindings.md)
+- [Web UI guide](docs/web-ui-guide.md)
+- [Writing an instructions file](docs/instructions-authoring-guide.md)
+- [JSONL log format reference](docs/jsonl-log-format.md) (user-facing; ADR 0005 is the
+  authoritative schema source)
+- [MCP server configuration examples](docs/mcp-servers.md)
+- [Writing a skill](docs/skills-authoring-guide.md)
+- [Troubleshooting / FAQ](docs/troubleshooting.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+
 ## Contributing / how this was built
 
 This project was built by a small fleet of AI agents coordinating through durable documents
@@ -222,9 +286,11 @@ should read both before their first change.
 ## Status / deferred this round
 
 - No logo or wordmark yet.
-- This README will grow a config-reference generated/checked against
-  `src/contracts/config.ts` as that stabilizes; for now the sample above is kept in sync by
-  hand with ADR 0007.
+- The config reference above is still hand-maintained prose, not generated from
+  `src/contracts/config.ts` — but `src/prompt/readme-config-sync.test.ts` runs in the normal
+  `bun test src` gate and fails the build if a field is added to `DhOptions` or `ModelConfig`
+  without a corresponding mention landing here, so drift is now caught automatically instead
+  of relying on manual diligence (DH-0042).
 
 ## License
 

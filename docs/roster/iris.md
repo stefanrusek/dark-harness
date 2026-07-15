@@ -133,3 +133,49 @@ behaviorally verify.
 Gates: `typecheck`, `lint`, `test:coverage` all pass (806/806 tests, 100% coverage retained
 on `src/prompt/system-prompt.ts`). `e2e` has pre-existing sandbox environment failures
 (missing `tmux`, missing chromium binary) unrelated to this change.
+
+### 2026-07-15 — Round 6: closed DH-0018, DH-0039, DH-0041, DH-0042
+
+Worked four already-`implementing` Spile tickets to closed this round. Full detail in
+`docs/handoffs/prompt-docs.md`'s Round 6 entry — durable notes here are the judgment calls
+worth remembering on top of that.
+
+**DH-0018 (systemPrompt override / discipline gaps):** split `BASE_PROMPT` into
+`DISCIPLINE_PROMPT` (overridable) and an exported `REQUIRED_CONTRACT` const (`TASK_FAILED` +
+Logging), and changed `loadSystemPrompt` to always append `REQUIRED_CONTRACT` after a custom
+`config.systemPrompt` file's contents rather than treating the override as a full
+replacement. Chose "always append" over "just warn" — strictly more robust, and testable in
+a way a warning isn't. Also added interactive-vs-unattended language to the "escalate, don't
+guess" bullet, and a new bullet naming `SendMessage`/`TaskStop` (not just `Monitor`/
+`TaskOutput`) for handling a stuck sub-agent. Judged this as squarely inside Prompt's
+ownership (prompt text + its own loader), not something needing architect sign-off, since it
+doesn't touch `src/contracts/` or the exit-code detection logic itself — only guarantees the
+existing string-based contract can't be silently dropped by config. Round 5's escalated
+structural question (a `ReportOutcome`-style tool instead of string-scanning) is still open
+and untouched.
+
+**DH-0042 (README config gaps + drift check):** documented `options.maxTurns` and the
+per-model pricing fields, and added `src/prompt/readme-config-sync.test.ts` — a
+regex-based (not full-TS-parser) drift guard that fails `bun test src` if a `DhOptions`/
+`ModelConfig` field goes unmentioned in README. Chose a test-suite check over a new CI
+workflow: cheaper, runs everywhere the existing gate already runs, no CI/Release
+coordination needed. Deliberately shallow (presence-only, not correctness) — said so in the
+test file's own header so it's not mistaken for stronger validation later.
+
+**DH-0039 / DH-0041 (doc-only):** verified every factual claim against actual source before
+writing it down, not just the ticket summary — most notably for the MCP docs
+(`docs/mcp-servers.md`): the config schema for `mcpServers` is real, but `src/agent/mcp.ts`
+only returns a synthetic `ToolSearch` placeholder and `McpAuth` is a documented stub, so the
+doc says that plainly instead of implying a working feature. Also cross-checked TUI
+keybindings against `src/tui/state.ts`'s actual reducers rather than guessing, and the JSONL
+log reference against `src/contracts/log.ts` directly (deferring to ADR 0005 as
+authoritative if they ever disagree). Added `CHANGELOG.md`/`CONTRIBUTING.md` at repo root and
+linked all nine new docs from a new README "Further documentation" section.
+
+**Open thread carried forward:** none of this round's work touches the Round 5 escalation
+(structural `TASK_FAILED` reliability fix) — still awaiting architect/coordinator judgment,
+untouched by this round's changes.
+
+Gates: `typecheck`, `lint`, `test:coverage` all pass (809/809 tests, 100% coverage retained
+across `src/prompt/`). `e2e` not run this round — unrelated to scope, same pre-existing
+sandbox gaps (no `tmux`/chromium) as prior rounds.

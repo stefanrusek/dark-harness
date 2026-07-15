@@ -420,3 +420,123 @@ committed improvement but not a verified fix, and the structural question is esc
 rather than resolved. Closing would overclaim.
 
 — Iris (she/her), Prompt domain lead, persistent for this build.
+
+---
+
+## Round 6: four Spile tickets — DH-0018, DH-0039, DH-0041, DH-0042 (2026-07-15)
+
+Picked up fresh with four already-`implementing` tickets assigned. All four closed this
+round (`status: closed`, `resolution: done`); view regenerated via `spile-ops`.
+
+### DH-0018 — `systemPrompt` override drops the contract; missing SendMessage/TaskStop and unattended-escalation guidance
+
+Restructured `src/prompt/system-prompt.ts`: split the previously-monolithic `BASE_PROMPT`
+into `DISCIPLINE_PROMPT` (the working-discipline preamble, overridable) and a new exported
+`REQUIRED_CONTRACT` const (the `TASK_FAILED` bullet + the Logging section). `loadSystemPrompt`
+now always appends `REQUIRED_CONTRACT` after a `config.systemPrompt` override's file contents
+— an operator supplying a custom persona prompt can no longer silently lose the marker the
+exit-code contract (ADR 0006) depends on. Chose "always append" over "just warn" from the
+ticket's two acceptable options: it's strictly more robust (works even if the operator never
+reads a startup log line) and is fully unit-testable, which a warning-only approach isn't in
+the same way.
+
+Also added two things to `DISCIPLINE_PROMPT`'s bullet list:
+- Extended the "Escalate, don't guess" bullet with an explicit interactive-vs-unattended
+  split: unattended (`--job`, or a sub-agent whose spawner has moved on) means state the
+  blocker, proceed with the best defensible interpretation, and fall back to `TASK_FAILED`
+  only if no reasonable path exists — rather than writing "escalate" as if a live operator
+  is always reachable.
+- A new bullet naming `SendMessage`/`TaskStop` as the tools for redirecting or ending a
+  visibly stuck/looping sub-agent, since the prior text only ever named `Monitor`/
+  `TaskOutput` (observation tools, not corrective ones).
+
+Updated `src/prompt/system-prompt.test.ts` for the restructure (the override test now
+expects the appended contract rather than a byte-for-byte pass-through; added coverage for
+the new bullets and for `REQUIRED_CONTRACT` itself). Gates: `typecheck`, `lint`,
+`test:coverage` all pass, 807/807 → 809/809 tests (see DH-0042 below for the other 2), 100%
+coverage retained on `src/prompt/system-prompt.ts`.
+
+**Judgment call not escalated further:** the ticket offered "append regardless" or "warn" as
+alternatives; I judged this squarely inside Prompt's ownership (prompt text + its loading
+function, `src/prompt/system-prompt.ts`) rather than something needing architect sign-off —
+it doesn't touch `src/contracts/`, the exit-code detection logic in `src/agent/loop.ts`, or
+change what the contract *means*, only guarantees the existing contract text is always
+present. Round 5's escalated structural question (a `ReportOutcome`-style tool instead of
+string-scanning) remains open and untouched — this round doesn't resolve it, just makes sure
+the current string-based contract can't be silently dropped by config.
+
+### DH-0042 — README config reference gaps + no automated drift check
+
+Added `options.maxTurns` and `models[].inputPricePerMToken`/`outputPricePerMToken` to
+README's config sample and prose (both already real fields in `src/contracts/config.ts`,
+previously undocumented). Also added `src/prompt/readme-config-sync.test.ts` — a lightweight
+regex-based drift guard (not a full TS parser) that extracts top-level field names from
+`DhOptions` and `ModelConfig` and asserts each one is at least mentioned somewhere in
+`README.md`. It runs in the normal `bun test src` gate, so a future field added to either
+interface without a README mention now fails CI automatically instead of relying on manual
+diligence — closing the second user story without needing a separate CI workflow change.
+Replaced the old "kept in sync by hand" status note at the bottom of README with one
+describing the new automated check.
+
+**Judgment call:** the ticket's second story asked for "a check that flags README if it
+drifts" without mandating *how* — I chose a `bun test`-based check over a new
+`.github/workflows/` job because it's cheaper to write/maintain, runs on every existing test
+invocation (local and CI both, since CI already runs `bun run test:coverage`), and needs no
+CI/Release-domain coordination. Deliberately shallow by design (mention-only, not
+correctness-of-description) — documented as such in the test file's own header comment so a
+future reader doesn't mistake it for stronger validation than it is.
+
+### DH-0039 — git credentials and workspace-directory convention undocumented
+
+Doc-only. Added a "Git credentials and workspace convention" section to README (next to the
+Bedrock setup section) stating the actual current behavior, verified against
+`src/agent/runtime.ts` and `src/agent/tools/bash.ts`: `dh` has no `workspaceDir` config field
+and does no credential handling of its own — the `Bash` tool runs at `process.cwd()` at `dh`
+startup (`runtime.ts` line ~164: `this.cwd = options.cwd ?? process.cwd()`), so the operator
+must start `dh` with its working directory already set to the checked-out repo. Documented
+four standard git-credential patterns (mounted SSH key, `GIT_ASKPASS`, `.netrc`, PAT +
+credential helper) as operator responsibility, explicitly not `dh`-specific.
+
+### DH-0041 — missing user-facing docs bundle
+
+Wrote the seven docs the ticket named (container/deployment docs are out of scope per the
+ticket's own note — tracked separately as DH-0036):
+
+- `docs/tui-keybindings.md` — verified against `src/tui/state.ts`'s actual `handleRootKey`/
+  `handleTreeKey`/`handleAgentKey` reducers, not guessed.
+- `docs/web-ui-guide.md` — tree/panel layout, token/cost display, log download, reconnect
+  status, cross-checked against `src/web/client/render.ts` and `src/web/client/sse.ts`.
+- `docs/instructions-authoring-guide.md` — suggested goal/scope/constraints/success-criteria
+  structure with a worked example.
+- `docs/jsonl-log-format.md` — user-facing reference derived directly from
+  `src/contracts/log.ts` and ADR 0005 (including the `client`/`build` amendment and the
+  "stopped" vs. "failed" distinction), explicitly deferring to the ADR as authoritative if
+  they ever disagree.
+- `docs/mcp-servers.md` — stdio/HTTP config examples, **with an explicit status note that
+  the MCP client isn't wired up yet** (`src/agent/mcp.ts` only returns a synthetic
+  `ToolSearch` placeholder per configured server; `McpAuth` is a documented stub per its own
+  source comment) — caught this by reading the actual implementation before writing the doc,
+  since the config schema being real doesn't mean the feature is.
+- `docs/skills-authoring-guide.md` — frontmatter rules cross-checked against
+  `parseSkillFrontmatter` in `src/prompt/skills.ts` (flat `key: value`, required
+  `name`/`description`, malformed skills silently skipped).
+- `docs/troubleshooting.md` — FAQ entries cross-referencing the `TASK_FAILED` reliability
+  gap (DH-0001), Bedrock account/region errors, security/connect mismatches, and the MCP
+  stub status above.
+
+Also added `CHANGELOG.md` and `CONTRIBUTING.md` at repo root (named explicitly in the
+ticket's Summary as distinct from the internal `CLAUDE.md`/`PLAYBOOK.md`), and linked all
+nine new docs from a new "Further documentation" section in README.
+
+**Honesty note:** every factual claim in these docs (keybindings, log schema fields, MCP
+wiring status, skill frontmatter rules) was checked against the actual source referenced
+inline, not written from the ticket's summary alone — the MCP stub-status catch above is the
+clearest example of why that mattered.
+
+**Gates:** doc-only tickets (DH-0039, DH-0041) needed no code gates. DH-0018 and DH-0042
+together: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass — 809/809
+tests, 100% coverage retained across `src/prompt/`. `bun run e2e` not run this round
+(unrelated to any of these four tickets' scope; same pre-existing sandbox environment gaps
+as prior rounds — no `tmux`/chromium available here).
+
+— Iris (she/her), Prompt domain lead, persistent for this build.
