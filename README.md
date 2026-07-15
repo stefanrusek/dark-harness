@@ -277,9 +277,14 @@ dh --env secrets.env
 
 The root agent and every sub-agent get one fixed tool set, with semantics mirroring Claude
 Code's tools of the same name: `Bash`, `Read`, `Edit`, `Write`, `Agent`, `ToolSearch`,
-`Skill`, `TaskOutput`, `SendMessage`, `Monitor`, `TaskStop`, `McpAuth`. Sub-agents are
-purely ad-hoc — `Agent` takes a model name and a prompt, no predefined agent definitions,
-arbitrary nesting depth, and (by default) run concurrently with their parent.
+`Skill`, `TaskOutput`, `SendMessage`, `Monitor`, `TaskStop`, `McpAuth`, `Grep`, `Glob`.
+Sub-agents are purely ad-hoc — `Agent` takes a model name and a prompt, no predefined agent
+definitions, arbitrary nesting depth, and (by default) run concurrently with their parent.
+
+`Grep`/`Glob` are structured, cross-platform alternatives to shelling out to `grep`/`find`
+via `Bash` — no shell-quoting footguns, consistent behavior across OS. `Bash`'s own
+`grep`/`find` (the cli-tools skill's "generic POSIX tools") remain available too; these
+aren't a replacement, just a purpose-built option for the common case.
 
 Every session is logged automatically: one JSONL file per agent, resumable and diffable,
 with enough in each file's header line to reconstruct the full agent tree without parsing

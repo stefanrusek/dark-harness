@@ -2,13 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { ALL_TOOLS, buildToolMap } from "./index.ts";
 
 describe("tool registry", () => {
-  test("exposes exactly the 12 tools from HANDOFF.md §4", () => {
+  test("exposes exactly the 14 tools (HANDOFF.md §4's original 12, plus DH-0054's Grep/Glob)", () => {
     const names = ALL_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual(
       [
         "Agent",
         "Bash",
         "Edit",
+        "Glob",
+        "Grep",
         "McpAuth",
         "Monitor",
         "Read",
