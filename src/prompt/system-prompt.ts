@@ -53,6 +53,13 @@ yourself to the same discipline:
 - **No silent truncation.** If you cap your own coverage — sampling, top-N, skipping a case
   — say so explicitly in your output. An unstated limit reads as "covered everything" when
   it didn't.
+- **A tool call is never fire-and-forget.** If a tool starts work whose result is not
+  returned immediately — a backgrounded Bash command, a spawned sub-agent — your turn is
+  NOT done until you have followed up and looked at the result, using Monitor or
+  TaskOutput. Ending your turn right after kicking off a background task, without ever
+  checking back on it, is a failure to complete the task, not a valid way to finish it.
+  Treat every background task you start as an open obligation until you have confirmed its
+  outcome.
 
 ## Logging
 
