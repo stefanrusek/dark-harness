@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bashTool } from "./bash.ts";
@@ -88,7 +88,7 @@ describe("Bash tool", () => {
     const ctx = makeToolContext({ cwd: dir });
     const result = await bashTool.execute({ command: "echo hi", timeout_ms: -5 }, ctx);
     expect(result.isError).toBe(true);
-    expect(result.output).toContain("timeout_ms");
+    expect(result.output).toContain("timeout");
   });
 
   test("rejects a non-number timeout_ms", async () => {
@@ -114,5 +114,65 @@ describe("Bash tool", () => {
       ctx,
     );
     expect(result.output.trim()).toBe("capped");
+  });
+
+  describe("Round 13 conformance", () => {
+    test("honors the real 'timeout' param name (not just the 'timeout_ms' alias)", async () => {
+      const ctx = makeToolContext({ cwd: dir });
+      const start = Date.now();
+      const result = await bashTool.execute(
+        { command: "sleep 5", timeout: 50, run_in_background: false },
+        ctx,
+      );
+      const elapsed = Date.now() - start;
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("timed out after 50ms");
+      expect(elapsed).toBeLessThan(2000);
+    }, 3000);
+
+    test("'timeout' takes precedence over 'timeout_ms' when both are given", async () => {
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await bashTool.execute(
+        { command: "sleep 5", timeout: 50, timeout_ms: 10_000, run_in_background: false },
+        ctx,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("timed out after 50ms");
+    }, 3000);
+
+    test("caps returned output to its tail with a notice stating the true total size", async () => {
+      const ctx = makeToolContext({ cwd: dir });
+      // Produce well over the 30,000-char cap.
+      const result = await bashTool.execute(
+        {
+          command: "yes x | head -c 40000",
+          run_in_background: false,
+        },
+        ctx,
+      );
+      expect(result.isError).toBe(false);
+      expect(result.output.length).toBeLessThan(31_000);
+      expect(result.output).toContain("[output truncated: showing last 30000 of");
+    });
+
+    test("working directory does NOT persist between calls (documented statelessness)", async () => {
+      const ctx = makeToolContext({ cwd: dir });
+      await bashTool.execute(
+        {
+          command: `cd ${dir}/does-not-exist-marker-dir || true; mkdir -p sub && cd sub`,
+          run_in_background: false,
+        },
+        ctx,
+      );
+      const result = await bashTool.execute({ command: "pwd", run_in_background: false }, ctx);
+      // Every call runs fresh at ctx.cwd — the prior call's `cd sub` must not have persisted.
+      // Compare via realpath since bash's `pwd` resolves symlinks (e.g. macOS's /var ->
+      // /private/var) that mkdtemp's returned path may not have been resolved through.
+      expect(await realpath(result.output.trim())).toBe(await realpath(dir));
+    });
+
+    test("tool description documents the cwd-reset/statelessness divergence from a real shell", () => {
+      expect(bashTool.description).toContain("do NOT persist between calls");
+    });
   });
 });

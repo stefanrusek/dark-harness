@@ -40,6 +40,11 @@ export const agentTool: Tool = {
         type: "string",
         description: "Model name from dh.json; defaults to options.defaultModel.",
       },
+      description: {
+        type: "string",
+        description:
+          "Short human-readable label for this sub-agent (shown in the agent tree, Monitor output, and its log header).",
+      },
       run_in_background: { type: "boolean" },
     },
     required: ["prompt"],
@@ -50,6 +55,14 @@ export const agentTool: Tool = {
     const prompt = input.prompt;
     if (typeof prompt !== "string" || prompt.length === 0) {
       return { output: "Agent tool error: 'prompt' must be a non-empty string.", isError: true };
+    }
+
+    const description = input.description;
+    if (description !== undefined && typeof description !== "string") {
+      return {
+        output: "Agent tool error: 'description' must be a string when provided.",
+        isError: true,
+      };
     }
 
     const modelResult = resolveModelName(input, ctx);
@@ -63,7 +76,12 @@ export const agentTool: Tool = {
         ? input.run_in_background
         : ctx.runInBackgroundDefault;
 
-    const taskId = ctx.spawnAgent({ model, prompt, background: runInBackground });
+    const taskId = ctx.spawnAgent({
+      model,
+      prompt,
+      background: runInBackground,
+      ...(description !== undefined ? { description } : {}),
+    });
 
     if (runInBackground) {
       return {

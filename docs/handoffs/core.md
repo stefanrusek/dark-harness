@@ -1712,7 +1712,7 @@ expected, precisely-diagnosed regression above, routed to Hedy rather than fixed
 
 ---
 
-## Round 13 — OPEN — tool-fidelity fixes from the Claude Code conformance audit
+## Round 13 — DONE (2026-07-15) — tool-fidelity fixes from the Claude Code conformance audit
 
 **Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
 
@@ -1810,3 +1810,86 @@ file, your call):
 Append a dated status entry here and update `docs/roster/grace.md` when done. This is a
 large round — if you have to defer any specific item, say so explicitly rather than silently
 dropping it; this round can span more than one pass if needed.
+
+### 2026-07-15 — Round 13 status log
+
+All P1 and P2 items implemented in one pass; nothing deferred.
+
+1. **Bash output cap** — new `src/agent/tools/output-cap.ts` (`capOutput`, `OUTPUT_CAP_CHARS =
+   30_000`): caps to the tail with a `[output truncated: showing last N of M total chars]`
+   notice. Applied to both Bash's foreground return path and TaskOutput (the only other
+   surface that returns task/bash output to the model).
+2. **`timeout` param** — `bash.ts`'s `resolveTimeout` now reads `input.timeout` first,
+   falling back to `input.timeout_ms` as a back-compat alias (`timeout` wins if both given).
+   Schema/description updated to document both.
+3. **Statelessness documented** — Bash's tool description now states explicitly that each
+   call is a fresh shell at `ctx.cwd` and `cd` does not persist; no persistent-shell
+   implementation added (per Fable's adopted recommendation).
+4. **SendMessage false-success fix** — `TaskRegistry.sendMessage()`/`stop()` now check for a
+   terminal status first and throw `TaskFinishedError` (new, in `tasks.ts`); `SendMessage`'s
+   tool layer reports "already finished; message not delivered" instead of a false
+   "delivered" claim.
+5. **TaskOutput incremental delta** — `TaskRegistry.outputSince(id, readerId)`: per-(task,
+   reader) char-offset cursor, returns only the new slice plus a running total. `TaskOutput`
+   tool defaults to this; `full: true` opts back into the old full-buffer behavior.
+6. **Read truncation indicator** — appends a `<system-reminder>File truncated: N more
+   line(s) not shown...</system-reminder>` notice whenever the slice doesn't reach EOF.
+7. **Read binary detection** — samples the first 8000 bytes for a NUL byte (a reliable
+   binary signal); refuses with `"binary file, N bytes"` instead of decoding garbage.
+8. **Agent `description` param** — threaded end-to-end: `Agent` tool input →
+   `ToolContext.spawnAgent` → `StartTaskParams`/`TaskSnapshot` (`tasks.ts`) →
+   `AgentRuntime.spawnAgent`/`getAgentTree()` (`runtime.ts`, → `AgentTreeNode.description` in
+   `contracts/commands.ts`) → `AgentLoopParams.description` (`loop.ts`) → `LogHeader.description`
+   (`contracts/log.ts`). Also shows in Monitor's output line.
+9. **TaskStop "stopped" status** — new `AgentStatus` value `"stopped"` in
+   `contracts/log.ts` (architect sign-off already given per the audit). `TaskRegistry.stop()`
+   sets it directly instead of overloading `"failed"`; the run-promise's subsequent rejection
+   (from the abort) no longer overwrites it — see the `.catch()` guard in `tasks.ts`. Stopping
+   an already-finished task now throws `TaskFinishedError`, and `TaskStop`'s tool layer reports
+   "already finished; nothing to stop" instead of a false "Stopped `<id>`" claim.
+   - Cross-domain fix required by this: `AgentTreeNode.status` in `contracts/commands.ts` was
+     a hand-duplicated literal union that didn't include `"stopped"` — changed to reference
+     `AgentStatus` directly so the two can't drift again. Also patched the two other
+     `Record<AgentStatus, ...>` exhaustive maps this broke: `src/tui/render.ts`'s
+     `STATUS_COLOR` (added a dim gray for `"stopped"`) and `src/web/client/format.ts`'s
+     `STATUS_STYLES` (added a "Stopped" label/token). Flagging for Mary/Susan in case they
+     want different styling — these were minimal type-safety fixes, not a design pass.
+10. **Read-before-Edit/Write guard** — new `ToolContext.readRegistry: Map<string, {mtimeMs,
+    size}>` (one per agent lifetime, matching `ToolContext`'s own lifetime) and
+    `src/agent/tools/read-guard.ts` (`checkReadBeforeWrite`/`recordRead`). `Read` records every
+    read (success, empty-file, and binary-refusal alike — the model did read the path).
+    `Edit` always requires a prior read matching the current on-disk mtime/size. `Write` only
+    enforces this when overwriting an *existing* path — creating a brand-new file needs
+    nothing. Both re-record after a successful write so a same-turn follow-up edit doesn't
+    need a redundant re-Read.
+11. **Skill `args` param** — optional `args: string`, appended to the returned content as a
+    `<skill-args>...</skill-args>` block when provided; omitted entirely otherwise.
+
+**Conformance tests** — written as concrete assertions per the audit's list, mostly
+distributed into each tool's existing test file (`bash.test.ts`, `read.test.ts`,
+`edit.test.ts`, `write.test.ts`, `agent.test.ts`, `send-message.test.ts`,
+`task-output.test.ts`, `task-stop.test.ts`, `skill.test.ts`, `tasks.test.ts`) rather than a
+separate `conformance.test.ts` — kept alongside the code they exercise since each is a small,
+focused addition, not a large new surface needing its own file.
+
+**Gates:**
+- `bun run typecheck` — clean.
+- `bun run lint` — clean (biome auto-fix applied for formatting only; two `useTemplate`
+  findings in `read-guard.ts` fixed by hand).
+- `bun run test:coverage` — 784 pass, 0 fail, every touched file at 100%/100% (funcs/lines);
+  aggregate "All files" shows 99.96% funcs, which is a pre-existing rounding artifact of the
+  full-repo total, not a gap in anything this round touched.
+- `bun run e2e` — tmux and Chromium are both unavailable in this sandbox (confirmed:
+  `which tmux chromium chromium-browser` all fail), so `tui.test.ts`/`web.test.ts` couldn't
+  run here; ran the rest by hand (`exit-codes.test.ts`, `security.test.ts`,
+  `server-protocol.test.ts`, `build-stamp.test.ts`, `bedrock-provider.test.ts`): 20 pass, 1
+  fail. The one failure (`security matrix > bearer token: authenticated happy path`, a
+  5000ms timeout) reproduces identically on a clean `git stash` of this round's changes —
+  confirmed pre-existing/sandbox-environment, not caused by this round.
+
+**Deferred:** nothing from this round's P1/P2 list. (P3 — `ToolSearch`'s `select:`/`+term`
+query grammar — was already explicitly out of scope per the work order, for a future
+MCP-client round.)
+
+**Nothing pending for architect review** — the one contracts change (`AgentStatus`'s new
+`"stopped"` value) had sign-off already given in the audit itself.

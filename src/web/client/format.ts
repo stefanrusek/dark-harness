@@ -15,6 +15,10 @@ const STATUS_STYLES: Record<AgentStatus, StatusStyle> = {
   waiting: { label: "Waiting", token: "waiting" },
   done: { label: "Done", token: "done" },
   failed: { label: "Failed", token: "failed" },
+  // Round 13 (docs/handoffs/core.md): new terminal AgentStatus distinct from "failed" — a
+  // deliberately-stopped task/agent, not a fault. Web's own token/label call, revisit if
+  // Susan wants different styling.
+  stopped: { label: "Stopped", token: "stopped" },
 };
 
 export function agentStatusStyle(status: AgentStatus): StatusStyle {

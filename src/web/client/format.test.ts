@@ -15,6 +15,7 @@ describe("agentStatusStyle", () => {
     expect(agentStatusStyle("waiting")).toEqual({ label: "Waiting", token: "waiting" });
     expect(agentStatusStyle("done")).toEqual({ label: "Done", token: "done" });
     expect(agentStatusStyle("failed")).toEqual({ label: "Failed", token: "failed" });
+    expect(agentStatusStyle("stopped")).toEqual({ label: "Stopped", token: "stopped" });
   });
 });
 

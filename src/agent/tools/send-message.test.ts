@@ -33,17 +33,48 @@ describe("SendMessage tool", () => {
     expect(result.output).toContain("unknown task id");
   });
 
-  test("errors when the task hasn't registered a message sink (e.g. a bash task)", async () => {
+  test("errors when the task hasn't registered a message sink (e.g. a still-running bash task)", async () => {
     const ctx = makeToolContext();
+    let release: () => void = () => {};
+    const stillRunning = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const taskId = ctx.tasks.start({
       kind: "bash",
       parentAgentId: ctx.agentId,
-      run: async () => {},
+      run: async () => {
+        await stillRunning;
+      },
     });
-    await ctx.tasks.awaitDone(taskId);
     const result = await sendMessageTool.execute({ task_id: taskId, message: "hi" }, ctx);
     expect(result.isError).toBe(true);
     expect(result.output).toContain("delivery failed:");
+    release();
+    await ctx.tasks.awaitDone(taskId);
+  });
+
+  // Round 13 (docs/handoffs/core.md, P1 item 4): previously this silently "succeeded" while
+  // the message landed in a pendingMessages array nobody would ever read again.
+  test("refuses to deliver to a finished task instead of falsely reporting success", async () => {
+    const ctx = makeToolContext();
+    let sawSink = false;
+    const taskId = ctx.tasks.start({
+      kind: "agent",
+      parentAgentId: ctx.agentId,
+      run: async (handle) => {
+        handle.registerSendMessage(() => {
+          sawSink = true;
+        });
+      },
+    });
+    await ctx.tasks.awaitDone(taskId);
+    expect(ctx.tasks.snapshot(taskId).status).toBe("done");
+
+    const result = await sendMessageTool.execute({ task_id: taskId, message: "hi" }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("already finished");
+    expect(result.output).not.toContain("Message delivered");
+    expect(sawSink).toBe(false);
   });
 
   test("rejects a missing task_id", async () => {

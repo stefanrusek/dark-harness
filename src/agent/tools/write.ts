@@ -2,6 +2,7 @@
 // Claude Code's Write tool.
 
 import { isAbsolute, resolve } from "node:path";
+import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
 function resolvePath(filePath: string, cwd: string): string {
@@ -33,6 +34,16 @@ export const writeTool: Tool = {
     }
 
     const absPath = resolvePath(filePath, ctx.cwd);
+
+    // Round 13 (docs/handoffs/core.md): only overwriting an *existing* path needs a prior
+    // Read — creating a brand-new file has nothing to blindly clobber.
+    if (await Bun.file(absPath).exists()) {
+      const guardError = await checkReadBeforeWrite(ctx, absPath, "Write");
+      if (guardError) {
+        return { output: guardError.error, isError: true };
+      }
+    }
+
     try {
       await Bun.write(absPath, content);
     } catch (err) {
@@ -41,6 +52,7 @@ export const writeTool: Tool = {
         isError: true,
       };
     }
+    await recordRead(ctx, absPath);
 
     return { output: `Wrote ${content.length} bytes to ${absPath}.`, isError: false };
   },

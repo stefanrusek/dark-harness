@@ -1,6 +1,6 @@
 // TaskStop tool — stops a background task or sub-agent by id (HANDOFF.md §4).
 
-import { TaskNotFoundError } from "../tasks.ts";
+import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
 export const taskStopTool: Tool = {
@@ -27,6 +27,14 @@ export const taskStopTool: Tool = {
     try {
       ctx.tasks.stop(taskId);
     } catch (err) {
+      // Round 13 (docs/handoffs/core.md): stopping an already-finished task is not an error —
+      // report the true state instead of either a false "Stopped" claim or a hard failure.
+      if (err instanceof TaskFinishedError) {
+        return {
+          output: `TaskStop: ${taskId} is already finished; nothing to stop.`,
+          isError: false,
+        };
+      }
       if (!(err instanceof TaskNotFoundError)) throw err;
       return { output: `TaskStop tool error: ${err.message}`, isError: true };
     }

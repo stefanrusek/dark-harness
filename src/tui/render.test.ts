@@ -77,6 +77,7 @@ describe("colorizeStatus", () => {
     expect(colorizeStatus("waiting", "x")).toBe("\x1b[36mx\x1b[0m");
     expect(colorizeStatus("done", "x")).toBe("\x1b[32mx\x1b[0m");
     expect(colorizeStatus("failed", "x")).toBe("\x1b[31mx\x1b[0m");
+    expect(colorizeStatus("stopped", "x")).toBe("\x1b[90mx\x1b[0m");
   });
 });
 

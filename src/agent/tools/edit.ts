@@ -2,6 +2,7 @@
 // old_string must match exactly (and uniquely, unless replace_all is set).
 
 import { isAbsolute, resolve } from "node:path";
+import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
 function resolvePath(filePath: string, cwd: string): string {
@@ -63,6 +64,11 @@ export const editTool: Tool = {
       return { output: `Edit tool error: file does not exist: ${absPath}`, isError: true };
     }
 
+    const guardError = await checkReadBeforeWrite(ctx, absPath, "Edit");
+    if (guardError) {
+      return { output: guardError.error, isError: true };
+    }
+
     const original = await file.text();
     const occurrences = countOccurrences(original, oldString);
     if (occurrences === 0) {
@@ -80,6 +86,7 @@ export const editTool: Tool = {
       : original.replace(oldString, newString);
 
     await Bun.write(absPath, updated);
+    await recordRead(ctx, absPath);
 
     return {
       output: `Updated ${absPath} (${occurrences} replacement${occurrences === 1 ? "" : "s"}).`,

@@ -206,6 +206,9 @@ export class AgentRuntime {
       loadSkill: (name: string) => loadSkillFromPaths(name, this.config.skillPaths ?? []),
       searchDeferredTools: (query: string) =>
         searchConfiguredMcpTools(this.config.mcpServers, query),
+      // Round 13 (docs/handoffs/core.md): fresh per agent lifetime, matching this
+      // ToolContext's own lifetime — see readRegistry's doc comment in tools/types.ts.
+      readRegistry: new Map(),
     };
   }
 
@@ -223,7 +226,7 @@ export class AgentRuntime {
    * away instead of working around. */
   spawnAgent(
     parentAgentId: string,
-    params: { model: string; prompt: string; background?: boolean },
+    params: { model: string; prompt: string; background?: boolean; description?: string },
   ): string {
     const model = this.resolveModel(params.model);
     const provider = this.providerFor(model);
@@ -235,6 +238,7 @@ export class AgentRuntime {
       model: model.name,
       id: agentId,
       background: params.background ?? true,
+      ...(params.description !== undefined ? { description: params.description } : {}),
       run: async (handle) => {
         const result = await runAgentLoop({
           sessionId: this.sessionId,
@@ -244,6 +248,7 @@ export class AgentRuntime {
           providerModel: model.model,
           systemPrompt: this.systemPrompt,
           instruction: params.prompt,
+          ...(params.description !== undefined ? { description: params.description } : {}),
           provider,
           tools: this.toolMap,
           toolContext: this.buildToolContext(agentId),
@@ -458,6 +463,7 @@ export class AgentRuntime {
         parentAgentId: snapshot.parentAgentId,
         model: snapshot.model ?? "",
         status: snapshot.status,
+        ...(snapshot.description !== undefined ? { description: snapshot.description } : {}),
         children: [],
       });
     }

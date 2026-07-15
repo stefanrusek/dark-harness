@@ -2,7 +2,7 @@
 // Only agent-kind tasks accept messages; a bash-kind task id, or an agent that hasn't
 // registered its message sink yet, errors clearly.
 
-import { TaskNotFoundError } from "../tasks.ts";
+import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
 export const sendMessageTool: Tool = {
@@ -37,6 +37,18 @@ export const sendMessageTool: Tool = {
     try {
       ctx.tasks.sendMessage(taskId, message);
     } catch (err) {
+      // Round 13 (docs/handoffs/core.md): previously this fell through to a generic
+      // "delivery failed" message while `tasks.sendMessage()` actually threw nothing — the
+      // real bug was that a finished task's stale `sendMessage` sink silently accepted the
+      // call and the message was never read again, while the tool still reported success.
+      // TaskFinishedError (thrown by tasks.ts now that finished status is checked first)
+      // makes that state explicit instead of a false "delivered" claim.
+      if (err instanceof TaskFinishedError) {
+        return {
+          output: `SendMessage tool error: task ${taskId} has already finished; message not delivered.`,
+          isError: true,
+        };
+      }
       const prefix = err instanceof TaskNotFoundError ? "" : "delivery failed: ";
       return {
         output: `SendMessage tool error: ${prefix}${(err as Error).message}`,

@@ -84,6 +84,10 @@ export interface AgentLoopParams {
   providerModel: string;
   systemPrompt: string;
   instruction: string;
+  /** Round 13 (docs/handoffs/core.md, P1 item 8): human-readable label from the Agent tool's
+   * optional `description` param, threaded from runtime.ts's spawnAgent() into this call's
+   * JSONL log header — the root agent never has one (nothing spawned it via the Agent tool). */
+  description?: string;
   provider: ModelProvider;
   tools: Map<string, Tool>;
   toolContext: ToolContext;
@@ -287,6 +291,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     instructionsSummary: params.instruction.slice(0, 200),
     client: params.client,
     build: BUILD_INFO,
+    ...(params.description !== undefined ? { description: params.description } : {}),
   });
   emitLog(params, {
     version: 1,

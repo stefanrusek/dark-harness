@@ -641,3 +641,46 @@ round touched, aggregate 99.96%/100% with the sole shortfall being `src/cli.ts`'
 `import.meta.main` gap from round 1). `bun run e2e`: 19/24 — 4 are the standing tmux/Chromium
 sandbox gap every round hits, 1 is the real, precisely-diagnosed, routed-to-Hedy regression
 above.
+
+### 2026-07-15 — Round 13 (tool-fidelity conformance audit fixes)
+
+Came online fresh this round (no memory of prior rounds beyond this file + core.md's status
+log). Fable's conformance audit gave a concrete, well-scoped punch list across all 12 tools;
+implemented every P1/P2 item in one pass, nothing deferred. Full technical rundown is in
+core.md's Round 13 status log — durable judgment calls worth remembering here:
+
+- **`AgentStatus` gained `"stopped"`** (architect sign-off already given in the audit itself,
+  so no round-trip needed). This exposed a latent type-safety gap: `AgentTreeNode.status` in
+  `contracts/commands.ts` was a hand-duplicated literal union, not a reference to
+  `AgentStatus` — it would have silently rejected `"stopped"` at compile time everywhere
+  `getAgentTree()` builds a node. Fixed to reference `AgentStatus` directly. This forced two
+  small edits *outside* Core's own directories: `src/tui/render.ts`'s `STATUS_COLOR` map and
+  `src/web/client/format.ts`'s `STATUS_STYLES` map are both `Record<AgentStatus, ...>`
+  exhaustive maps that would no longer compile without a `"stopped"` entry. I added minimal,
+  reasonable-default styling (dim gray in TUI, "Stopped" label/token in Web) and flagged it
+  explicitly in the status log for Mary/Susan — this was a required type-safety fix riding
+  along with a contracts change, not a design opinion imposed on their domains. Worth
+  double-checking they're happy with the actual color/label choices next time either is
+  online.
+- **Read-before-Edit/Write guard's registry lifetime**: `ToolContext.readRegistry` is a plain
+  `Map` created once per `buildToolContext(agentId)` call in `runtime.ts` — which happens once
+  per agent (root or sub-agent), not per tool call, since the same `ToolContext` object is
+  threaded through every turn of that agent's `runAgentLoop()`. That's what makes "Read once,
+  Edit twice in the same turn" work without a redundant re-Read, and what correctly scopes the
+  guard to "this agent's own conversation" rather than leaking across sibling sub-agents
+  touching the same files. Didn't add any cross-agent invalidation — a sibling editing the
+  same file underneath you can still race you (real Claude Code doesn't solve this except via
+  the mtime/size staleness check, which does still catch it after the fact).
+- **TaskOutput's incremental cursor is per-(task, reader)**, not per-task — deliberately, so a
+  second/sibling caller polling the same background task still gets "what's new to *me*"
+  instead of getting nothing because someone else already advanced a shared cursor.
+- Bash's output cap and TaskOutput's cap share one helper (`output-cap.ts`) rather than being
+  duplicated — both are "surface that returns Bash/task output to the model," so they should
+  agree on what "too much" means.
+
+**Gates:** typecheck/lint clean. `bun run test:coverage`: 784 pass, 0 fail, every file this
+round touched at 100%/100%. `bun run e2e`: tmux/Chromium both unavailable in this sandbox (as
+usual); ran the rest by hand — 20 pass, 1 fail (`security matrix > bearer token: authenticated
+happy path`, a 5000ms timeout) — confirmed via `git stash` that this reproduces identically on
+a clean tree before this round's changes, so it's a pre-existing sandbox-environment issue,
+not a regression I introduced.

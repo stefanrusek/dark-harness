@@ -38,6 +38,11 @@ export interface LogHeader {
   instructionsSummary: string;
   client: SessionClientKind;
   build: BuildInfo;
+  /** Round 13 (docs/handoffs/core.md, P1 item 8): human-readable label from the Agent tool's
+   * optional `description` param. Undefined for the root agent (no spawning call to supply
+   * one) and for any sub-agent spawned without it — readers must tolerate its absence exactly
+   * like any other optional header field. */
+  description?: string;
 }
 
 export interface LogEventBase {
@@ -78,7 +83,11 @@ export interface LogTokenUsageEvent extends LogEventBase {
   costUsd?: number;
 }
 
-export type AgentStatus = "running" | "waiting" | "done" | "failed";
+// Round 13 (docs/handoffs/core.md): "stopped" is a distinct terminal status from "failed" —
+// a deliberately TaskStop-ped task/agent is not the same diagnostic signal as a genuine
+// failure, and JSONL post-analysis needs to tell them apart. Architect (Fable) sign-off
+// already given in the conformance audit that introduced this round; see task-stop.ts.
+export type AgentStatus = "running" | "waiting" | "done" | "failed" | "stopped";
 
 export interface LogStatusChangeEvent extends LogEventBase {
   type: "status_change";

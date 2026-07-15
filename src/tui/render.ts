@@ -22,6 +22,10 @@ const STATUS_COLOR: Record<AgentStatus, string> = {
   waiting: "\x1b[36m",
   done: "\x1b[32m",
   failed: "\x1b[31m",
+  // Round 13 (docs/handoffs/core.md): distinct from "failed" now that TaskStop reports a
+  // dedicated "stopped" status. Same dimming as "done" (neutral outcome, not a fault) — TUI's
+  // own domain call, revisit if Mary wants a different color.
+  stopped: "\x1b[90m",
 };
 
 export function colorizeStatus(status: AgentStatus, text: string): string {

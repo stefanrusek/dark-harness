@@ -23,6 +23,7 @@ export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolConte
     },
     loadSkill: async () => null,
     searchDeferredTools: () => [],
+    readRegistry: new Map(),
     ...overrides,
   };
   return context;

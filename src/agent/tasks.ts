@@ -17,6 +17,9 @@ export interface TaskSnapshot {
   status: AgentStatus;
   output: string;
   model?: string;
+  /** Round 13 (docs/handoffs/core.md, P1 item 8): human-readable label, from the Agent
+   * tool's optional `description` param — surfaced in Monitor output and the agent tree. */
+  description?: string;
   createdAt: string;
   finishedAt?: string;
   error?: string;
@@ -33,6 +36,9 @@ export interface StartTaskParams {
   kind: TaskKind;
   parentAgentId: string;
   model?: string;
+  /** Round 13 (docs/handoffs/core.md, P1 item 8): human-readable label threaded from the
+   * Agent tool's optional `description` param, through to TaskSnapshot/Monitor/agent tree. */
+  description?: string;
   /** Caller-supplied id, overriding the registry's own counter-based generation. Used by
    * AgentRuntime.spawnAgent() so the task registry's id for an agent-kind task IS the same
    * identifier the agent loop uses for its own SSE events/log lines (see runtime.ts and
@@ -63,6 +69,7 @@ interface InternalTask {
   status: AgentStatus;
   chunks: string[];
   model?: string;
+  description?: string;
   createdAt: string;
   finishedAt?: string;
   error?: string;
@@ -79,9 +86,28 @@ export class TaskNotFoundError extends Error {
   }
 }
 
+/** Round 13 (docs/handoffs/core.md): thrown by stop()/sendMessage() when the target task has
+ * already reached a terminal status ("done" | "failed" | "stopped") — lets TaskStop report
+ * "already finished" instead of a false "Stopped" claim, and SendMessage refuse with a clear
+ * reason instead of silently dropping the message into a `pendingMessages` array nobody reads
+ * again (the bug this round's audit found). */
+export class TaskFinishedError extends Error {
+  constructor(id: string, status: AgentStatus) {
+    super(`task ${id} has already finished (status: ${status})`);
+    this.name = "TaskFinishedError";
+  }
+}
+
 export class TaskRegistry {
   private tasks = new Map<string, InternalTask>();
   private counter = 0;
+  // Round 13 (docs/handoffs/core.md): per-(task, reader) read cursor backing TaskOutput's
+  // incremental delta — outer key is the task id, inner key is the calling agent's own id
+  // (ctx.agentId), value is how many chars of that task's accumulated output this reader has
+  // already been shown. Deliberately per-reader, not a single cursor per task: nothing in the
+  // tool contract limits polling to one caller, and a second reader (e.g. a sibling sub-agent
+  // also watching the same background Bash task) should still see its own "what's new to me."
+  private readCursors = new Map<string, Map<string, number>>();
 
   /** Round 12 (docs/handoffs/core.md): fired once, after a *background* task's `run` has
    * settled (success or failure), with its final snapshot — the hook AgentRuntime uses to
@@ -112,6 +138,7 @@ export class TaskRegistry {
       done: Promise.resolve(),
       background: params.background ?? true,
       ...(params.model !== undefined ? { model: params.model } : {}),
+      ...(params.description !== undefined ? { description: params.description } : {}),
     };
     this.tasks.set(id, task);
 
@@ -134,9 +161,15 @@ export class TaskRegistry {
         task.finishedAt = new Date().toISOString();
       })
       .catch((err: unknown) => {
-        task.status = "failed";
-        task.error = err instanceof Error ? err.message : String(err);
-        task.finishedAt = new Date().toISOString();
+        // Round 13: stop() already set status to "stopped" (and finishedAt) synchronously
+        // before aborting the controller — the run's promise then rejects (typically from
+        // the abort) shortly after. Don't let that rejection overwrite a deliberate stop
+        // with "failed"; a stopped task should stay "stopped", not look like a fault.
+        if (task.status !== "stopped") {
+          task.status = "failed";
+          task.error = err instanceof Error ? err.message : String(err);
+          task.finishedAt = new Date().toISOString();
+        }
       })
       .then(() => {
         // Round 12: fires after the branches above have settled task.status/error/finishedAt,
@@ -173,6 +206,7 @@ export class TaskRegistry {
       output: task.chunks.join(""),
       createdAt: task.createdAt,
       ...(task.model !== undefined ? { model: task.model } : {}),
+      ...(task.description !== undefined ? { description: task.description } : {}),
       ...(task.finishedAt !== undefined ? { finishedAt: task.finishedAt } : {}),
       ...(task.error !== undefined ? { error: task.error } : {}),
     };
@@ -196,24 +230,55 @@ export class TaskRegistry {
     this.require(id).status = status;
   }
 
+  /** Round 13 (docs/handoffs/core.md): stopping a task now records a distinct terminal
+   * "stopped" status instead of overloading "failed" (see AgentStatus's doc comment in
+   * contracts/log.ts), and throws TaskFinishedError — rather than silently no-oping — when
+   * the task has already reached a terminal status, so TaskStop's tool layer can report
+   * "already finished" instead of a false "Stopped `<id>`" claim. */
   stop(id: string): void {
     const task = this.require(id);
-    task.controller.abort();
-    if (task.status === "running" || task.status === "waiting") {
-      task.status = "failed";
-      task.error = "stopped by TaskStop";
-      task.finishedAt = new Date().toISOString();
+    if (task.status !== "running" && task.status !== "waiting") {
+      throw new TaskFinishedError(id, task.status);
     }
+    task.controller.abort();
+    task.status = "stopped";
+    task.finishedAt = new Date().toISOString();
   }
 
+  /** Round 13 (docs/handoffs/core.md): refuses (TaskFinishedError) once the task has reached
+   * a terminal status, instead of the previous silent-drop bug — the registered
+   * `sendMessage` sink is never cleared after a task/agent finishes (see runtime.ts's
+   * `tryDeliverToAgent` doc comment for why that's true elsewhere too), so without this check
+   * the call would appear to succeed while the message landed nowhere anyone will ever read. */
   sendMessage(id: string, message: string): void {
     const task = this.require(id);
+    if (task.status !== "running" && task.status !== "waiting") {
+      throw new TaskFinishedError(id, task.status);
+    }
     if (!task.sendMessage) {
       throw new Error(
         `task ${id} does not accept messages (not an agent task, or not yet listening)`,
       );
     }
     task.sendMessage(message);
+  }
+
+  /** Round 13 (docs/handoffs/core.md): incremental read backing TaskOutput — returns only the
+   * output chars appended since `readerId`'s last call for this task id, plus the running
+   * total length (for the "N chars total" notice). Advances the cursor as a side effect;
+   * callers that want the full buffer every time should not use this (TaskOutput's `full`
+   * param bypasses it entirely). */
+  outputSince(id: string, readerId: string): { delta: string; totalLength: number } {
+    const task = this.require(id);
+    const full = task.chunks.join("");
+    let perTask = this.readCursors.get(id);
+    if (!perTask) {
+      perTask = new Map<string, number>();
+      this.readCursors.set(id, perTask);
+    }
+    const previous = perTask.get(readerId) ?? 0;
+    perTask.set(readerId, full.length);
+    return { delta: full.slice(previous), totalLength: full.length };
   }
 
   /** All tasks spawned (directly or transitively tracked) — used by the agent tree. */

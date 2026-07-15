@@ -2,7 +2,14 @@
 // stdout+stderr in output order as best-effort, supports a timeout, and supports
 // run_in_background (HANDOFF.md §4 — default true, overridable by
 // options.runInBackgroundDefault / the per-call flag).
+//
+// Round 13 (docs/handoffs/core.md) divergence, documented rather than "fixed" per Fable's
+// adopted recommendation: every call is a fresh `bash -c` at ctx.cwd — a `cd` in one call
+// does NOT persist to the next call, unlike a real interactive shell. This matches how real
+// Claude Code's own *subagent* Bash threads behave, not a novel choice; see the tool
+// description below, which states this explicitly for the model.
 
+import { capOutput } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -57,11 +64,17 @@ async function runCommand(
   }
 }
 
+// Round 13 (docs/handoffs/core.md, P1 item 2): real Claude Code's Bash tool names this
+// parameter `timeout` (milliseconds), not `timeout_ms` — and unknown JSON-schema properties
+// are silently dropped by providers, so a model trained on the real convention emitting
+// `timeout: 600000` was previously ignored outright, silently running with the 120s default.
+// `timeout` is now the primary/documented name; `timeout_ms` remains accepted as a back-compat
+// alias. If both are provided, `timeout` wins.
 function resolveTimeout(input: Record<string, unknown>): number {
-  const raw = input.timeout_ms;
+  const raw = input.timeout ?? input.timeout_ms;
   if (raw === undefined) return DEFAULT_TIMEOUT_MS;
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
-    throw new Error("timeout_ms must be a positive number when provided");
+    throw new Error("timeout must be a positive number (milliseconds) when provided");
   }
   return Math.min(raw, MAX_TIMEOUT_MS);
 }
@@ -70,7 +83,11 @@ export const bashTool: Tool = {
   name: "Bash",
   description:
     "Run a shell command via bash -c in the working directory. Supports run_in_background " +
-    "(default true) to run concurrently and be observed later via Monitor/TaskOutput/TaskStop.",
+    "(default true) to run concurrently and be observed later via Monitor/TaskOutput/TaskStop. " +
+    "Output returned to you is capped (long output is truncated to its tail, with a notice " +
+    "stating the true total size). Statelessness note: each call is a fresh shell at the " +
+    "working directory — `cd` and other shell state do NOT persist between calls; use " +
+    "absolute paths, or chain with && in one call, instead of relying on a prior `cd`.",
   inputSchema: {
     type: "object",
     properties: {
@@ -79,7 +96,11 @@ export const bashTool: Tool = {
         type: "string",
         description: "Short human-readable description of the command.",
       },
-      timeout_ms: { type: "number", description: "Max time to allow the command to run, in ms." },
+      timeout: { type: "number", description: "Max time to allow the command to run, in ms." },
+      timeout_ms: {
+        type: "number",
+        description: "Deprecated alias for 'timeout'; 'timeout' takes precedence if both given.",
+      },
       run_in_background: { type: "boolean" },
     },
     required: ["command"],
@@ -134,12 +155,13 @@ export const bashTool: Tool = {
 
     await ctx.tasks.awaitDone(taskId);
     const snapshot = ctx.tasks.snapshot(taskId);
+    const capped = capOutput(snapshot.output);
     if (snapshot.status === "failed") {
       return {
-        output: `${snapshot.output}\n[error] ${snapshot.error ?? "command failed"}`,
+        output: `${capped.text}\n[error] ${snapshot.error ?? "command failed"}`,
         isError: true,
       };
     }
-    return { output: snapshot.output, isError: false };
+    return { output: capped.text, isError: false };
   },
 };

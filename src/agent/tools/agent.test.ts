@@ -9,11 +9,12 @@ function withFakeSpawn(overrides: Parameters<typeof makeToolContext>[0] = {}) {
     ...overrides,
     spawnAgent: () => "placeholder",
   });
-  ctx.spawnAgent = ({ model, prompt }) =>
+  ctx.spawnAgent = ({ model, prompt, description }) =>
     ctx.tasks.start({
       kind: "agent",
       parentAgentId: ctx.agentId,
       model,
+      ...(description !== undefined ? { description } : {}),
       run: async (handle) => {
         handle.append(`ran with prompt: ${prompt}`);
         if (prompt.includes("fail")) {
@@ -98,5 +99,26 @@ describe("Agent tool", () => {
     const ctx = withFakeSpawn({ runInBackgroundDefault: false });
     const result = await agentTool.execute({ prompt: "hi" }, ctx);
     expect(result.output).toContain("ran with prompt: hi");
+  });
+
+  // Round 13 (docs/handoffs/core.md, P1 item 8): description accepted and appears in
+  // TaskSnapshot (what Monitor's output and the agent tree both read from).
+  test("accepts a 'description' and surfaces it on the resulting TaskSnapshot", async () => {
+    const ctx = withFakeSpawn();
+    const result = await agentTool.execute(
+      { prompt: "do the thing", description: "audit the invoices", run_in_background: true },
+      ctx,
+    );
+    expect(result.isError).toBe(false);
+    const taskId = result.output.match(/agent-\d+/)?.[0];
+    if (!taskId) throw new Error("expected a task id in the output");
+    expect(ctx.tasks.snapshot(taskId).description).toBe("audit the invoices");
+  });
+
+  test("rejects a non-string description", async () => {
+    const ctx = withFakeSpawn();
+    const result = await agentTool.execute({ prompt: "hi", description: 5 }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("'description'");
   });
 });

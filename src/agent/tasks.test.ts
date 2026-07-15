@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { DuplicateTaskIdError, TaskNotFoundError, TaskRegistry } from "./tasks.ts";
+import {
+  DuplicateTaskIdError,
+  TaskFinishedError,
+  TaskNotFoundError,
+  TaskRegistry,
+} from "./tasks.ts";
 
 describe("TaskRegistry", () => {
   test("start assigns incrementing ids per kind", () => {
@@ -43,12 +48,86 @@ describe("TaskRegistry", () => {
     expect(registry.list().map((t) => t.id)).toEqual([id]);
   });
 
-  test("stop() on an already-finished task leaves its status untouched", async () => {
+  // Round 13 (docs/handoffs/core.md): stop() on an already-terminal task now throws
+  // TaskFinishedError instead of silently no-oping — lets TaskStop's tool layer distinguish
+  // "already finished" from an actual stop.
+  test("stop() on an already-finished task throws TaskFinishedError and leaves status untouched", async () => {
     const registry = new TaskRegistry();
     const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
     await registry.awaitDone(id);
-    registry.stop(id);
+    expect(() => registry.stop(id)).toThrow(TaskFinishedError);
     expect(registry.snapshot(id).status).toBe("done");
+  });
+
+  // Round 13: distinct terminal status from "failed" (contracts/log.ts's AgentStatus).
+  test("stop() on a running task marks it 'stopped', not 'failed'", async () => {
+    const registry = new TaskRegistry();
+    const id = registry.start({
+      kind: "bash",
+      parentAgentId: "root",
+      run: () => new Promise(() => {}),
+    });
+    registry.stop(id);
+    expect(registry.snapshot(id).status).toBe("stopped");
+  });
+
+  test("sendMessage() to an already-finished task throws TaskFinishedError", async () => {
+    const registry = new TaskRegistry();
+    const id = registry.start({
+      kind: "agent",
+      parentAgentId: "root",
+      run: async (handle) => {
+        handle.registerSendMessage(() => {});
+      },
+    });
+    await registry.awaitDone(id);
+    expect(() => registry.sendMessage(id, "hi")).toThrow(TaskFinishedError);
+  });
+
+  describe("outputSince (Round 13: incremental TaskOutput)", () => {
+    test("returns only output appended since the reader's last call, and the running total", async () => {
+      const registry = new TaskRegistry();
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const id = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: async (handle) => {
+          handle.append("one");
+          await gate;
+          handle.append("two");
+        },
+      });
+
+      const firstRead = registry.outputSince(id, "reader-a");
+      expect(firstRead).toEqual({ delta: "one", totalLength: 3 });
+
+      release?.();
+      await registry.awaitDone(id);
+
+      const secondRead = registry.outputSince(id, "reader-a");
+      expect(secondRead).toEqual({ delta: "two", totalLength: 6 });
+    });
+
+    test("tracks cursors independently per reader id", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: async (handle) => {
+          handle.append("hello");
+        },
+      });
+      await registry.awaitDone(id);
+
+      expect(registry.outputSince(id, "reader-a").delta).toBe("hello");
+      // A different reader hasn't seen anything yet, so it still gets the full output.
+      expect(registry.outputSince(id, "reader-b").delta).toBe("hello");
+      // reader-a has now already seen it — nothing new.
+      expect(registry.outputSince(id, "reader-a").delta).toBe("");
+    });
   });
 
   test("awaitDone on an unknown id throws TaskNotFoundError", async () => {

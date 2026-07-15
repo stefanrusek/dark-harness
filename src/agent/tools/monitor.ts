@@ -33,7 +33,7 @@ export const monitorTool: Tool = {
       try {
         const snapshot = ctx.tasks.snapshot(id);
         lines.push(
-          `${snapshot.id} [${snapshot.kind}] status=${snapshot.status}${snapshot.model ? ` model=${snapshot.model}` : ""}`,
+          `${snapshot.id} [${snapshot.kind}] status=${snapshot.status}${snapshot.model ? ` model=${snapshot.model}` : ""}${snapshot.description ? ` description="${snapshot.description}"` : ""}`,
         );
       } catch (err) {
         if (!(err instanceof TaskNotFoundError)) throw err;
