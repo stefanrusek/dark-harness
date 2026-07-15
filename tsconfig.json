@@ -20,5 +20,6 @@
     "allowJs": false,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "e2e"]
+  "include": ["src", "e2e"],
+  "exclude": ["src/web"]
 }

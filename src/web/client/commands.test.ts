@@ -1,0 +1,197 @@
+import { describe, expect, test } from "bun:test";
+import type { AgentTreeResponse, CommandAck } from "../../contracts/index.ts";
+import type { ServerTarget } from "../protocol.ts";
+import {
+  CommandError,
+  buildDownloadLogsCommand,
+  buildRequestAgentTreeCommand,
+  buildSendMessageCommand,
+  buildStopAgentCommand,
+  requestAgentTree,
+  requestLogDownload,
+  sendCommand,
+  sendMessage,
+  stopAgent,
+} from "./commands.ts";
+
+const target: ServerTarget = { baseUrl: "http://localhost:4000" };
+const targetWithToken: ServerTarget = { baseUrl: "http://localhost:4000", token: "shh" };
+
+describe("command builders", () => {
+  test("buildSendMessageCommand", () => {
+    expect(buildSendMessageCommand("a1", "hello")).toEqual({
+      type: "send_message",
+      agentId: "a1",
+      message: "hello",
+    });
+  });
+
+  test("buildRequestAgentTreeCommand", () => {
+    expect(buildRequestAgentTreeCommand()).toEqual({ type: "request_agent_tree" });
+  });
+
+  test("buildDownloadLogsCommand with an agentId", () => {
+    expect(buildDownloadLogsCommand("a1")).toEqual({ type: "download_logs", agentId: "a1" });
+  });
+
+  test("buildDownloadLogsCommand without an agentId (full bundle)", () => {
+    expect(buildDownloadLogsCommand()).toEqual({ type: "download_logs" });
+  });
+
+  test("buildStopAgentCommand", () => {
+    expect(buildStopAgentCommand("a1")).toEqual({ type: "stop_agent", agentId: "a1" });
+  });
+});
+
+interface FetchCall {
+  url: string;
+  init: RequestInit | undefined;
+}
+
+function fakeFetch(status: number, body: unknown): { fetch: typeof fetch; calls: FetchCall[] } {
+  const calls: FetchCall[] = [];
+  const impl = (async (url: string, init?: RequestInit) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  return { fetch: impl, calls };
+}
+
+describe("sendCommand", () => {
+  test("POSTs the command JSON to the command endpoint", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true } satisfies CommandAck);
+    await sendCommand(target, buildStopAgentCommand("a1"), fetchImpl);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("http://localhost:4000/api/commands");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "stop_agent",
+      agentId: "a1",
+    });
+  });
+
+  test("adds an Authorization header when a token is configured", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await sendCommand(targetWithToken, buildRequestAgentTreeCommand(), fetchImpl);
+    const headers = new Headers(calls[0]?.init?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer shh");
+  });
+
+  test("omits Authorization when no token is configured", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await sendCommand(target, buildRequestAgentTreeCommand(), fetchImpl);
+    const headers = new Headers(calls[0]?.init?.headers);
+    expect(headers.has("Authorization")).toBe(false);
+  });
+
+  test("throws CommandError on a non-ok HTTP status", async () => {
+    const { fetch: fetchImpl } = fakeFetch(401, { ok: false, error: "unauthorized" });
+    await expect(sendCommand(target, buildRequestAgentTreeCommand(), fetchImpl)).rejects.toThrow(
+      CommandError,
+    );
+  });
+
+  test("throws CommandError when the ack body reports ok: false", async () => {
+    const { fetch: fetchImpl } = fakeFetch(200, { ok: false, error: "agent not found" });
+    await expect(sendCommand(target, buildStopAgentCommand("missing"), fetchImpl)).rejects.toThrow(
+      "agent not found",
+    );
+  });
+
+  test("resolves with the parsed body on success", async () => {
+    const tree: AgentTreeResponse = { ok: true, tree: [] };
+    const { fetch: fetchImpl } = fakeFetch(200, tree);
+    const result = await sendCommand<AgentTreeResponse>(
+      target,
+      buildRequestAgentTreeCommand(),
+      fetchImpl,
+    );
+    expect(result).toEqual(tree);
+  });
+});
+
+describe("sendMessage / requestAgentTree / stopAgent", () => {
+  test("sendMessage delegates to sendCommand with a send_message command", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await sendMessage(target, "root-1", "hi", fetchImpl);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "send_message",
+      agentId: "root-1",
+      message: "hi",
+    });
+  });
+
+  test("requestAgentTree returns the tree response", async () => {
+    const tree: AgentTreeResponse = { ok: true, tree: [] };
+    const { fetch: fetchImpl } = fakeFetch(200, tree);
+    expect(await requestAgentTree(target, fetchImpl)).toEqual(tree);
+  });
+
+  test("stopAgent posts a stop_agent command", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await stopAgent(target, "a1", fetchImpl);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "stop_agent",
+      agentId: "a1",
+    });
+  });
+});
+
+describe("requestLogDownload", () => {
+  test("returns the raw Response on success without parsing it as JSON", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response("jsonl-bytes", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const res = await requestLogDownload(target, "a1", fetchImpl);
+    expect(await res.text()).toBe("jsonl-bytes");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "download_logs",
+      agentId: "a1",
+    });
+  });
+
+  test("omits agentId in the body for a full-bundle download", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response("bundle-bytes", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await requestLogDownload(target, undefined, fetchImpl);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ type: "download_logs" });
+  });
+
+  test("throws CommandError with the server's JSON error detail on failure", async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ ok: false, error: "no such agent" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    await expect(requestLogDownload(target, "missing", fetchImpl)).rejects.toThrow("no such agent");
+  });
+
+  test("throws CommandError with a bare status when the error body isn't JSON", async () => {
+    const fetchImpl = (async () =>
+      new Response("plain text error", { status: 500 })) as unknown as typeof fetch;
+
+    await expect(requestLogDownload(target, "a1", fetchImpl)).rejects.toThrow(
+      "Log download failed with status 500",
+    );
+  });
+});
+
+describe("CommandError", () => {
+  test("carries an optional HTTP status", () => {
+    const err = new CommandError("bad", 400);
+    expect(err.message).toBe("bad");
+    expect(err.status).toBe(400);
+    expect(err.name).toBe("CommandError");
+  });
+});
