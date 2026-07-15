@@ -4,13 +4,16 @@ import {
   appendTranscript,
   buildShell,
   hideError,
+  hideGapBanner,
   renderAgentHeader,
   renderComposer,
   renderConnectionStatus,
+  renderErrorLog,
   renderSessionSummary,
   renderSidebar,
   renderTranscript,
   showError,
+  showGapBanner,
 } from "./render.ts";
 import {
   type AgentNode,
@@ -18,6 +21,7 @@ import {
   type WebState,
   applyEvent,
   createInitialState,
+  logError,
 } from "./state.ts";
 import { createTestDom } from "./test-dom.ts";
 
@@ -86,6 +90,20 @@ describe("buildShell", () => {
     expect(root.querySelector(".main-pane")).not.toBeNull();
     expect(shell.jumpToLatest.classList.contains("hidden")).toBe(true);
     expect(shell.errorBanner.classList.contains("hidden")).toBe(true);
+    expect(shell.gapBanner.classList.contains("hidden")).toBe(true);
+    expect(shell.errorLogPanel.classList.contains("hidden")).toBe(true);
+  });
+
+  test("DH-0029 (#39): wires ARIA live regions onto the connection pill, transcript, and error banner", () => {
+    const { document, root } = createTestDom();
+    const shell = buildShell(document, root);
+
+    expect(shell.connectionPill.getAttribute("role")).toBe("status");
+    expect(shell.connectionPill.getAttribute("aria-live")).toBe("polite");
+    expect(shell.output.getAttribute("role")).toBe("log");
+    expect(shell.output.getAttribute("aria-live")).toBe("polite");
+    expect(shell.errorBanner.getAttribute("role")).toBe("alert");
+    expect(shell.gapBanner.getAttribute("role")).toBe("status");
   });
 });
 
@@ -125,6 +143,53 @@ describe("renderSidebar", () => {
     const { document, root } = createTestDom();
     renderSidebar(document, root, createInitialState(), () => {});
     expect(root.querySelectorAll(".agent-row").length).toBe(0);
+  });
+
+  test("DH-0029 (#38): rows are keyboard-focusable and reachable list options", () => {
+    const { document, root } = createTestDom();
+    renderSidebar(document, root, stateWithRootAndChild(), () => {});
+
+    const list = root.querySelector(".agent-tree");
+    expect(list?.getAttribute("role")).toBe("listbox");
+
+    const rows = root.querySelectorAll(".agent-row");
+    for (const row of rows) {
+      expect((row as HTMLElement).tabIndex).toBe(0);
+      expect(row.getAttribute("role")).toBe("option");
+    }
+    expect(rows[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(rows[1]?.getAttribute("aria-selected")).toBe("false");
+  });
+
+  test("DH-0029 (#38): pressing Enter or Space on a focused row selects it", () => {
+    const { document, root, dispatchKey } = createTestDom();
+    const selected: string[] = [];
+    renderSidebar(document, root, stateWithRootAndChild(), (id) => selected.push(id));
+
+    const rows = root.querySelectorAll(".agent-row");
+    dispatchKey(rows[1] as HTMLElement, "keydown", { key: "Enter", cancelable: true });
+    dispatchKey(rows[1] as HTMLElement, "keydown", { key: " ", cancelable: true });
+    expect(selected).toEqual(["child-1", "child-1"]);
+  });
+
+  test("pressing an unrelated key does nothing", () => {
+    const { document, root, dispatchKey } = createTestDom();
+    const selected: string[] = [];
+    renderSidebar(document, root, stateWithRootAndChild(), (id) => selected.push(id));
+
+    const rows = root.querySelectorAll(".agent-row");
+    dispatchKey(rows[1] as HTMLElement, "keydown", { key: "Tab", cancelable: true });
+    expect(selected).toEqual([]);
+  });
+
+  test("DH-0029 (#40): the status dot is aria-hidden and the row carries an aria-label naming the status", () => {
+    const { document, root } = createTestDom();
+    renderSidebar(document, root, stateWithRootAndChild(), () => {});
+
+    const rows = root.querySelectorAll(".agent-row");
+    const dot = rows[0]?.querySelector(".status-dot");
+    expect(dot?.getAttribute("aria-hidden")).toBe("true");
+    expect(rows[0]?.getAttribute("aria-label")).toContain("status:");
   });
 });
 
@@ -485,5 +550,70 @@ describe("showError / hideError", () => {
 
     hideError(banner);
     expect(banner.classList.contains("hidden")).toBe(true);
+  });
+});
+
+describe("showGapBanner / hideGapBanner (DH-0024)", () => {
+  test("shows a dismissible reconnected-gap message and reveals the banner", () => {
+    const { document, root, dispatch } = createTestDom();
+    const banner = document.createElement("div");
+    banner.className = "gap-banner hidden";
+    root.appendChild(banner);
+
+    let dismissed = false;
+    showGapBanner(banner, () => {
+      dismissed = true;
+    });
+    expect(banner.classList.contains("hidden")).toBe(false);
+    expect(banner.textContent).toContain("Reconnected");
+
+    const dismissBtn = banner.querySelector(".gap-banner-dismiss") as HTMLElement;
+    dispatch(dismissBtn, "click");
+    expect(dismissed).toBe(true);
+  });
+
+  test("hideGapBanner re-hides it", () => {
+    const { document, root } = createTestDom();
+    const banner = document.createElement("div");
+    root.appendChild(banner);
+    showGapBanner(banner, () => {});
+    hideGapBanner(banner);
+    expect(banner.classList.contains("hidden")).toBe(true);
+  });
+});
+
+describe("renderErrorLog (DH-0029 #34)", () => {
+  test("hides the panel when the log is empty", () => {
+    const { document, root } = createTestDom();
+    const panel = document.createElement("details");
+    panel.className = "error-log-panel";
+    const list = document.createElement("ul");
+    list.className = "error-log-list";
+    panel.appendChild(list);
+    root.appendChild(panel);
+
+    renderErrorLog(document, panel, createInitialState());
+    expect(panel.classList.contains("hidden")).toBe(true);
+  });
+
+  test("renders every entry newest-first once the log has entries", () => {
+    const { document, root } = createTestDom();
+    const panel = document.createElement("details");
+    panel.className = "error-log-panel";
+    const list = document.createElement("ul");
+    list.className = "error-log-list";
+    panel.appendChild(list);
+    root.appendChild(panel);
+
+    let state = createInitialState();
+    state = logError(state, "first error", "2026-01-01T00:00:00Z");
+    state = logError(state, "second error", "2026-01-01T00:01:00Z");
+
+    renderErrorLog(document, panel, state);
+    expect(panel.classList.contains("hidden")).toBe(false);
+    const entries = panel.querySelectorAll(".error-log-entry");
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.textContent).toContain("second error");
+    expect(entries[1]?.textContent).toContain("first error");
   });
 });

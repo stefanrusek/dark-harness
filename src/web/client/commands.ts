@@ -45,25 +45,64 @@ function authHeaders(target: ServerTarget): HeadersInit {
   return target.token ? { Authorization: `Bearer ${target.token}` } : {};
 }
 
+/** DH-0029 (#37): a hung command send previously left the operator with no feedback at
+ *  all — the composer just looked like it did nothing, forever. `sendCommand` now races the
+ *  fetch against a timeout and reports a clear "still waiting" `CommandError` instead of
+ *  hanging silently. This is a UI-visible timeout, not a network-level cancellation: the
+ *  underlying `fetch` isn't aborted (no `AbortSignal` plumbed through the injectable
+ *  `fetchImpl`, which test doubles and some environments don't honor), so a very late
+ *  response is simply ignored once the timeout has already reported failure. */
+export interface SendCommandOptions {
+  /** How long to wait before reporting a timeout. Defaults to 15000ms. */
+  timeoutMs?: number;
+  setTimeoutImpl?: typeof setTimeout;
+  clearTimeoutImpl?: typeof clearTimeout;
+}
+
+const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
+
 /** Sends any `ClientCommand` and parses a JSON `CommandAck`-shaped response. */
 export async function sendCommand<T extends CommandAck = CommandAck>(
   target: ServerTarget,
   command: ClientCommand,
   fetchImpl: FetchLike = fetch,
+  options: SendCommandOptions = {},
 ): Promise<T> {
-  const res = await fetchImpl(commandUrl(target), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders(target) },
-    body: JSON.stringify(command),
+  const timeoutMs = options.timeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+  const setTimeoutFn = options.setTimeoutImpl ?? setTimeout;
+  const clearTimeoutFn = options.clearTimeoutImpl ?? clearTimeout;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeoutFn(() => {
+      reject(
+        new CommandError(
+          `No response after ${Math.round(timeoutMs / 1000)}s — the server may be unresponsive.`,
+        ),
+      );
+    }, timeoutMs);
   });
-  if (!res.ok) {
-    throw new CommandError(`Command failed with status ${res.status}`, res.status);
+
+  try {
+    const res = await Promise.race([
+      fetchImpl(commandUrl(target), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders(target) },
+        body: JSON.stringify(command),
+      }),
+      timeout,
+    ]);
+    if (!res.ok) {
+      throw new CommandError(`Command failed with status ${res.status}`, res.status);
+    }
+    const body = (await res.json()) as T;
+    if (!body.ok) {
+      throw new CommandError(body.error ?? "Command reported failure");
+    }
+    return body;
+  } finally {
+    if (timer !== undefined) clearTimeoutFn(timer);
   }
-  const body = (await res.json()) as T;
-  if (!body.ok) {
-    throw new CommandError(body.error ?? "Command reported failure");
-  }
-  return body;
 }
 
 export function sendMessage(
@@ -71,23 +110,26 @@ export function sendMessage(
   agentId: string,
   message: string,
   fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
 ): Promise<CommandAck> {
-  return sendCommand(target, buildSendMessageCommand(agentId, message), fetchImpl);
+  return sendCommand(target, buildSendMessageCommand(agentId, message), fetchImpl, options);
 }
 
 export function requestAgentTree(
   target: ServerTarget,
   fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
 ): Promise<AgentTreeResponse> {
-  return sendCommand<AgentTreeResponse>(target, buildRequestAgentTreeCommand(), fetchImpl);
+  return sendCommand<AgentTreeResponse>(target, buildRequestAgentTreeCommand(), fetchImpl, options);
 }
 
 export function stopAgent(
   target: ServerTarget,
   agentId: string,
   fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
 ): Promise<CommandAck> {
-  return sendCommand(target, buildStopAgentCommand(agentId), fetchImpl);
+  return sendCommand(target, buildStopAgentCommand(agentId), fetchImpl, options);
 }
 
 /**

@@ -211,3 +211,47 @@ coordinator's task description implies exists before assuming something's broken
 `bun run test:coverage` (796 tests, 100% funcs/lines on every touched `src/web/` file). `bun
 run e2e`: 20/24 — the 4 failures are this same sandbox's tooling gaps (no `tmux`, no Chromium
 binary, one bearer-token-matrix timeout), not a regression.
+
+### 2026-07-15 — Round 5: closed DH-0024 and DH-0029 (Web side)
+
+Closed two `tracking/` tickets this round: DH-0024 (SSE reconnect backoff + gap indication) and
+DH-0029 (keyboard/ARIA accessibility, missing `stopped` color, persistent error history, hung-
+command timeout). Full technical detail is in `docs/handoffs/web.md`'s Round 5 status entry —
+this file is the durable part.
+
+**The judgment call worth remembering: closing a ticket doesn't require every user story in it
+to be fully satisfiable by Web alone, as long as that's said plainly.** Both tickets are framed
+as spanning "both clients," and DH-0024 additionally depends on DH-0019 (a server-side
+`resync`/`gap` wire event that isn't built yet). I closed my half of each with `resolution:
+done` and a `## Notes` entry naming exactly what's Web-only-and-done vs. what's genuinely
+blocked on someone else's work (TUI's own pass on DH-0024/DH-0029, or DH-0009/DH-0017 adding a
+provider-error-detail field to `src/contracts/events.ts` for DH-0029's #35). The alternative —
+leaving both `implementing` until every cross-domain dependency resolves — would leave a
+completed, tested, gated piece of work permanently unmarked as done, which seemed like the
+wrong trade. If a future round disagrees with that call, the per-ticket notes make it easy to
+see exactly what was and wasn't covered and reopen the specific gap as a new ticket rather than
+relitigating the whole thing.
+
+**A concrete instance of "don't add data that isn't there yet":** DH-0029's #35 asks for a
+human-readable reason when an agent goes `failed`. I did not fabricate one from whatever's in
+the transcript or fudge it from the `CommandAck.error` path (a different, already-working
+code path — command failures, not agent-status-transition failures) — `AgentStatusEvent` has
+no error field, so there's nothing honest to render yet. Named DH-0009/DH-0017 as the likely
+owners of adding that wire field rather than guessing at my own shape for it unilaterally.
+
+**Test-infrastructure fix worth flagging for whoever touches `app.test.ts` next:** its shared
+harness used to serve the *same* fake SSE stream body for every `/api/events` fetch, which
+happened to work only because no existing test ever drove a genuine reconnect-then-reopen
+sequence. Testing DH-0024's gap banner required a real reconnect, which exposed that a second
+`getReader()` on an already-fully-read stream hangs/throws. Fixed by minting a fresh stream per
+fetch (mirroring `sse.test.ts`'s own lower-level harness) with a `get stream()` accessor so
+every pre-existing test — which only ever touches the first connection — sees no behavior
+change. Worth remembering if a future round needs to simulate SSE reconnects at the `app.ts`
+level again: check whether the harness's stream is shared or fresh before assuming a hang is a
+real bug.
+
+**Gates:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` — 100% funcs/lines on
+every `src/web/` file (`src/cli.ts` remains the only sub-100% file project-wide, untouched).
+`bun run e2e`: 21/25 — the 4 failures are the same sandbox tooling gaps as every prior round
+(no `tmux`, no Chromium binary, one bearer-token-matrix timeout), not a regression; nothing
+this round touches routes, auth, or the wire protocol.

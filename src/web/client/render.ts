@@ -39,6 +39,10 @@ export interface ShellRefs {
   jumpToLatest: HTMLElement;
   composer: HTMLElement;
   errorBanner: HTMLElement;
+  /** DH-0024: dismissible "reconnected — history may be incomplete" banner. */
+  gapBanner: HTMLElement;
+  /** DH-0029: persistent, reviewable log of past errors (the banner above auto-hides). */
+  errorLogPanel: HTMLElement;
 }
 
 /**
@@ -55,6 +59,11 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
   sidebarPane.appendChild(brand);
 
   const connectionPill = el(doc, "div", "connection-pill");
+  // DH-0029 (#39): connection state changes (connecting/reconnecting/open/closed) had no
+  // way to reach a screen-reader user — `role="status"` + `aria-live="polite"` announces
+  // each change without interrupting whatever the user is doing.
+  connectionPill.setAttribute("role", "status");
+  connectionPill.setAttribute("aria-live", "polite");
   sidebarPane.appendChild(connectionPill);
 
   const sidebar = el(doc, "div", "sidebar-tree");
@@ -69,6 +78,12 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
 
   const scrollRegion = el(doc, "div", "output-scroll");
   const output = el(doc, "div", "agent-transcript");
+  // DH-0029 (#39): streamed agent output previously updated the DOM with no announcement
+  // at all — a screen-reader user had no way to know new content had arrived.
+  // `role="log"` + `aria-live="polite"` announces additions without re-reading the whole
+  // transcript on every chunk.
+  output.setAttribute("role", "log");
+  output.setAttribute("aria-live", "polite");
   scrollRegion.appendChild(output);
   main.appendChild(scrollRegion);
 
@@ -80,8 +95,31 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
   const composer = el(doc, "div", "composer-region");
   main.appendChild(composer);
 
+  // DH-0024: dismissible banner shown after any SSE reconnect, since a reconnect may have
+  // missed events (see sse.ts's `onReconnected` doc comment for why this is conservative).
+  const gapBanner = el(doc, "div", "gap-banner hidden");
+  gapBanner.setAttribute("role", "status");
+  gapBanner.setAttribute("aria-live", "polite");
+  main.appendChild(gapBanner);
+
   const errorBanner = el(doc, "div", "error-banner hidden");
+  // DH-0029 (#39): an error banner is exactly the kind of urgent, out-of-band change
+  // `role="alert"` exists for — announced immediately, unlike `aria-live="polite"`.
+  errorBanner.setAttribute("role", "alert");
   main.appendChild(errorBanner);
+
+  // DH-0029 (#34): both clients previously showed only a transient (auto-hiding) error
+  // banner with no way to review what was missed. This panel is the persistent history —
+  // always in the DOM (collapsed by CSS until there's something to show), listing every
+  // reported error with a timestamp, newest first.
+  const errorLogPanel = el(doc, "details", "error-log-panel hidden");
+  const errorLogSummary = el(doc, "summary", "error-log-summary");
+  errorLogSummary.textContent = "Errors";
+  errorLogPanel.appendChild(errorLogSummary);
+  const errorLogList = el(doc, "ul", "error-log-list");
+  errorLogList.setAttribute("role", "log");
+  errorLogPanel.appendChild(errorLogList);
+  main.appendChild(errorLogPanel);
 
   root.appendChild(sidebarPane);
   root.appendChild(main);
@@ -96,6 +134,8 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
     jumpToLatest,
     composer,
     errorBanner,
+    gapBanner,
+    errorLogPanel,
   };
 }
 
@@ -107,6 +147,52 @@ export function showError(banner: HTMLElement, message: string): void {
 
 export function hideError(banner: HTMLElement): void {
   banner.classList.add("hidden");
+}
+
+/** DH-0024: shows the "reconnected — history may be incomplete" banner. */
+export function showGapBanner(banner: HTMLElement, onDismiss: () => void): void {
+  banner.textContent = "";
+  const text = el(banner.ownerDocument, "span");
+  text.textContent = "Reconnected — history may be incomplete.";
+  banner.appendChild(text);
+  const dismiss = el(banner.ownerDocument, "button", "gap-banner-dismiss");
+  dismiss.type = "button";
+  dismiss.textContent = "Dismiss";
+  dismiss.addEventListener("click", onDismiss);
+  banner.appendChild(dismiss);
+  banner.classList.remove("hidden");
+}
+
+export function hideGapBanner(banner: HTMLElement): void {
+  banner.classList.add("hidden");
+}
+
+/**
+ * DH-0029 (#34): renders the persistent error-history panel from `state.errorLog`, newest
+ * first. Hidden (via CSS) whenever the log is empty so it never occupies space with nothing
+ * to show.
+ */
+export function renderErrorLog(doc: Document, panel: HTMLElement, state: WebState): void {
+  const list = panel.querySelector<HTMLElement>(".error-log-list");
+  if (!list) return;
+  list.textContent = "";
+
+  if (state.errorLog.length === 0) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+
+  for (const entry of [...state.errorLog].reverse()) {
+    const item = el(doc, "li", "error-log-entry");
+    const time = el(doc, "span", "error-log-time");
+    time.textContent = new Date(entry.timestamp).toLocaleTimeString();
+    item.appendChild(time);
+    const message = el(doc, "span", "error-log-message");
+    message.textContent = entry.message;
+    item.appendChild(message);
+    list.appendChild(item);
+  }
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -128,18 +214,33 @@ export function renderSidebar(
   now: number = Date.now(),
 ): void {
   container.textContent = "";
+  // DH-0029 (#38): the agent tree was a plain <ul> of <li>s with only a click handler — no
+  // way to reach it from a keyboard at all. `role="listbox"` + per-row `role="option"`
+  // (below) with `tabindex="0"` and Enter/Space handling makes it a standard keyboard-
+  // operable single-select list.
   const list = el(doc, "ul", "agent-tree");
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Agents");
 
   for (const agent of orderedAgents(state)) {
     const style = agentStatusStyle(agent.status);
     const item = el(doc, "li", "agent-row");
     item.dataset.agentId = agent.agentId;
     item.dataset.status = agent.status;
-    if (agent.agentId === state.selectedAgentId) item.classList.add("selected");
+    item.setAttribute("role", "option");
+    item.tabIndex = 0;
+    const selected = agent.agentId === state.selectedAgentId;
+    item.setAttribute("aria-selected", String(selected));
+    if (selected) item.classList.add("selected");
     if (isRoot(state, agent.agentId)) item.classList.add("root");
 
     const dot = el(doc, "span", `status-dot status-${style.token}`);
+    // DH-0029 (#40): the status dot's only description was a hover-only `title` tooltip —
+    // invisible to keyboard/screen-reader users. `aria-label` (plus `aria-hidden` so the
+    // dot itself isn't announced as an unlabeled second copy) puts the same text on the row
+    // instead, which already carries the accessible name via its own content.
     dot.title = style.label;
+    dot.setAttribute("aria-hidden", "true");
     item.appendChild(dot);
 
     const label = el(doc, "span", "agent-label");
@@ -157,7 +258,19 @@ export function renderSidebar(
     tokens.textContent = formatTokenCount(agent.inputTokens + agent.outputTokens);
     item.appendChild(tokens);
 
-    item.addEventListener("click", () => onSelect(agent.agentId));
+    item.setAttribute(
+      "aria-label",
+      `${isRoot(state, agent.agentId) ? "root" : agent.model || "agent"}, status: ${style.label}`,
+    );
+
+    const select = () => onSelect(agent.agentId);
+    item.addEventListener("click", select);
+    item.addEventListener("keydown", (evt: KeyboardEvent) => {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        select();
+      }
+    });
     list.appendChild(item);
   }
 
