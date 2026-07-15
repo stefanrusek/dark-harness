@@ -1603,3 +1603,104 @@ real running server, the way Round 5's fix was verified — this is exactly the 
 that looks fine in unit tests but needs a real multi-agent conversation to prove.
 
 Append a dated status entry here and update `docs/roster/grace.md` when done.
+
+---
+
+## Round 13 — OPEN — tool-fidelity fixes from the Claude Code conformance audit
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+Fable (architect-on-call) ran a full tool-by-tool audit of all 12 tools against real Claude
+Code behavior, per HANDOFF.md §4's explicit "semantics mirror Claude Code" requirement.
+Full findings in the coordinator's conversation record; this round covers the audit's P1
+(fix now) and P2 (decide-and-do, decision already made) items. P3 (ToolSearch's `select:`/
+`+term` query grammar) is correctly deferred to a future MCP-client round, not this one.
+
+### P1 — behavioral bugs
+
+1. **Bash: no output cap.** Real Claude Code caps output (~30,000 chars) with a truncation
+   notice; `dh`'s `bash.ts`/`tasks.ts` buffer unbounded. Cap what's returned to the model,
+   with a notice stating the total size when truncated.
+2. **Bash: `timeout_ms` silently ignores the real `timeout` parameter name.** Real Claude
+   Code's Bash tool uses `timeout` (milliseconds); `dh` uses `timeout_ms`, and unknown
+   properties are silently dropped — a model trained on the real convention emitting
+   `timeout: 600000` gets silently ignored and runs with the 120s default. Accept `timeout`
+   as the primary name (`timeout_ms` as an alias is fine for back-compat, your call).
+3. **Bash: undocumented statelessness.** Every call is a fresh `bash -c` at `ctx.cwd` — `cd`
+   never persists across calls, contradicting the tool description's claim to "mirror Claude
+   Code's Bash tool." Fable's recommendation (adopted): don't build a persistent shell —
+   document the divergence explicitly in the tool description and add a system-prompt note
+   that working directory resets every call, use absolute paths. This matches how real
+   Claude Code handles its own *subagent* Bash threads (same posture, not a novel decision).
+4. **`SendMessage` silently drops messages to finished agents while falsely reporting
+   success.** The registered message sink stays on the task record after the loop returns;
+   `tasks.sendMessage()` succeeds, the tool reports "Message delivered," and the message
+   lands in a `pendingMessages` array nobody reads again. Minimum fix: check terminal status
+   first and return a clear "task already finished" error instead of a false-success report.
+   (Full continue-a-finished-conversation semantics are bigger future work — not this round.)
+5. **`TaskOutput` re-sends the full buffer every call instead of incrementally.** Real
+   Claude Code returns only new output since the last check; `dh` returns everything every
+   poll, so polling a chatty long-running task re-feeds the whole transcript into context
+   each time (quadratic). Add a per-caller read cursor in `tasks.ts` (delta + "N chars total,
+   showing new output"; keep a full-buffer opt-in param if useful).
+6. **Read: no truncation indicator.** When a file exceeds the read slice, `dh` just stops
+   with no signal — the model can't tell EOF from truncation. Add a notice when lines remain.
+7. **Read: no binary detection.** UTF-8-decodes anything, including binary files. Detect
+   binary content and return a clear error ("binary file, N bytes") instead of decoded
+   garbage.
+8. **`Agent` tool missing a `description` param.** Real Task/Agent has a short human-readable
+   description used for display; `dh`'s `Bash` tool already has this pattern, `Agent` doesn't
+   — and three surfaces (TUI/Web agent tree, Monitor output, JSONL header) currently can only
+   show `agent-<id> model=<name>` with no human-readable label. Add optional `description` to
+   `agent.ts`, thread through `StartTaskParams`/`TaskSnapshot` into Monitor output, agent-tree
+   events, and the log header.
+9. **`TaskStop` conflates "stopped" with "failed."** A deliberately stopped task currently
+   gets `status: "failed"`, indistinguishable from a genuine failure in JSONL post-analysis
+   ("did it fail, or did I stop it?"). **Contracts change, architect sign-off already given by
+   Fable in this audit — no further round-trip needed:** add a distinct terminal
+   `AgentStatus` value (`"stopped"`) in `src/contracts/`. Also fix: stopping an
+   already-finished task currently reports "Stopped `<id>`" untruthfully — report "already
+   finished" instead.
+
+### P2 — decided, implement as designed
+
+10. **Read-before-Edit/Write enforcement.** Real Claude Code refuses to `Edit`/overwrite-
+    `Write` a file that wasn't `Read` first in the same conversation (and refuses if the file
+    changed on disk since the read). `dh` has neither. Fable's recommendation (adopted): this
+    is *more* valuable in `dh`'s operating model, not less (all-permissions, no human review,
+    concurrent sub-agents sharing one filesystem — blind edits and stale-read races are
+    exactly the failure mode this exists to prevent). Implement: a per-agent read registry in
+    `ToolContext` (path → mtime/size at read time), populated by `Read`, checked by `Edit`
+    ("not read yet" / "modified since read") and by `Write` when overwriting an existing path
+    (creating a brand-new file needs no prior read).
+11. **`Skill` missing an `args` param.** Real Skill accepts optional arguments passed through
+    to the skill. Add optional `args: string` to `skill.ts`, surfaced with the returned
+    content. Cheap, low-risk, ride along with this round.
+
+### Gates
+
+The standard four. Conformance tests — write these as concrete assertions, not vague checks
+(a new `src/agent/tools/conformance.test.ts`, or distributed into each tool's existing test
+file, your call):
+- Bash: output past the cap → returned length ≤ cap, notice present with true total size;
+  `{ timeout: 50 }` on a long-running command → actually times out at 50ms (proves the real
+  param name is honored); two sequential calls (`cd /tmp` then `pwd`) → asserts the
+  *documented* reset (cwd does NOT persist); tool description text contains the cwd-reset
+  warning.
+- Read: a 2500-line file with no `limit` → exactly 2000 numbered lines + a truncation
+  indicator naming the remaining count; every returned line matches cat-n format; a binary
+  file → clear error, not decoded garbage (empty-file case is already tested — keep it).
+- Edit/Write: `Edit` without a prior `Read` in the same agent context → clear "not read yet"
+  error; `Read` → external modify → `Edit` → stale-file error; `Write` over an existing
+  unread path → error; `Write` to a brand-new path → succeeds without any read.
+- `Agent`: `description` accepted and appears in Monitor output / `TaskSnapshot`.
+- `SendMessage`: to a `done` task → `isError: true`, message names "already finished," no
+  false "delivered" claim.
+- `TaskOutput`: call, task produces more output, call again → second result contains only
+  the delta, not the full history again.
+- `TaskStop`: stopping a done task → "already finished"; stopping a running task → status
+  `"stopped"`, not `"failed"`.
+
+Append a dated status entry here and update `docs/roster/grace.md` when done. This is a
+large round — if you have to defer any specific item, say so explicitly rather than silently
+dropping it; this round can span more than one pass if needed.
