@@ -61,3 +61,29 @@ the updated prompt and can report back whether the polling behavior actually imp
 
 Gates (`typecheck`, `lint`, `test:coverage`) all pass, 100% coverage retained on
 `src/prompt/system-prompt.ts`.
+
+### 2026-07-15 — Round 3: TASK_FAILED convention + polling cadence
+
+Closed two gaps an architect-level review (Fable) found: `TASK_FAILED` (the marker
+`src/agent/loop.ts` scans for to detect self-reported failure, per ADR 0006's exit-code
+contract) had never actually been taught to the model in the prompt — only implemented in
+detection code. Added a "Report failure with `TASK_FAILED`" bullet to `BASE_PROMPT` stating
+it as a hard requirement, with the success/failure semantics spelled out explicitly (no
+marker + no tool call = success; marker = failure; never emit it on success). Also added a
+"Pace your polling" bullet for the predictable next failure mode after Round 2's
+fire-and-forget fix: telling a model to check back doesn't say how often, so it now spells
+out do-other-work-or-wait-a-reasonable-interval, don't-tight-loop-Monitor.
+
+**Judgment call:** put the polling-cadence bullet immediately after the fire-and-forget
+bullet and had it explicitly reference "not too fast" so the two read as complementary
+(check back — but don't spin) rather than in tension. Kept `TASK_FAILED` as its own bullet
+rather than folding it into an existing one, since it's a distinct mechanism (final-response
+text convention) from the tool-call-discipline bullets around it.
+
+**Honesty note carried forward again:** still no way to behaviorally verify either addition
+against a live small-model session from this environment — flagging as before rather than
+overclaiming test coverage of prompt-text effectiveness.
+
+Gates: `typecheck` and `test:coverage` pass (693/693 tests, 100% coverage on
+`system-prompt.ts`). `lint` has one pre-existing failure on an untracked root `dh.json`
+unrelated to `src/prompt/` — not touched, out of scope.

@@ -79,6 +79,9 @@ describe("buildDefaultSystemPrompt", () => {
     expect(prompt).toContain("Write self-contained handoffs.");
     expect(prompt).toContain("No silent truncation.");
     expect(prompt).toContain("A tool call is never fire-and-forget.");
+    expect(prompt).toContain("Pace your polling.");
+    expect(prompt).toContain("Report failure with `TASK_FAILED`.");
+    expect(prompt).toContain("TASK_FAILED");
     expect(prompt).toMatch(/logged\s+automatically/);
     expect(prompt).toContain("## Available skills");
     expect(prompt).toContain("- **cli-tools**:");

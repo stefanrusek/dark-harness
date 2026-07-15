@@ -274,3 +274,34 @@ and check back later, or wait a reasonable interval before polling again; don't 
 both additions. As with Round 2, you can't fully behaviorally prove either fix against a real
 small model in this environment — that's fine, note it honestly rather than overclaiming.
 Append a dated status entry here and update `docs/roster/iris.md` when done.
+
+### 2026-07-15 — Round 3 status: done
+
+Added two more bullets to `BASE_PROMPT`'s "Working discipline" list in
+`src/prompt/system-prompt.ts`, same style as Round 2 (bolded lead phrase, concrete and
+directive):
+
+- **Pace your polling** (3b): after starting a background task, either go do other
+  independent work and check back once there's something to show for it, or wait a
+  reasonable interval before polling again — explicitly names tight-loop `Monitor` polling
+  as the failure mode to avoid, while cross-referencing the Round 2 rule so the two don't
+  read as contradictory (check back, but not too fast).
+- **Report failure with `TASK_FAILED`** (3a): states the literal marker requirement as a
+  hard rule, not a suggestion — a final response with no tool call and no marker is success;
+  the marker means failure; never include it on a successful completion. This directly
+  closes the gap Fable found: `TASK_FAILED` detection existed in `src/agent/loop.ts` but was
+  never taught to the model anywhere in the prompt.
+
+Updated `system-prompt.test.ts` with three new assertions covering both additions
+(`"Pace your polling."`, `"Report failure with \`TASK_FAILED\`."`, and a bare `"TASK_FAILED"`
+containment check).
+
+**Gates:** `bun run typecheck` passes. `bun run test:coverage` passes — 693/693 tests,
+100% coverage on `src/prompt/system-prompt.ts` (and all other files touched by other
+domains' parallel work). `bun run lint` reports one pre-existing failure on an untracked
+`dh.json` at the repo root (a formatting issue unrelated to and predating this task, not
+under `src/prompt/` — left untouched per scope).
+
+**Honesty note carried forward from Round 2:** both are prompt-text changes, not
+behaviorally verified against a live small-model session — no way to test that from this
+environment. Worth confirming later against an actual model run.

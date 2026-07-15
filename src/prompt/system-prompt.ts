@@ -60,6 +60,18 @@ yourself to the same discipline:
   checking back on it, is a failure to complete the task, not a valid way to finish it.
   Treat every background task you start as an open obligation until you have confirmed its
   outcome.
+- **Pace your polling.** After starting a background task, don't call Monitor in an
+  immediate tight loop waiting for it to finish. Either go do other independent work and
+  check back once you have something to show for it, or wait a reasonable interval before
+  polling again. Spin-polling wastes turns; never checking back (see above) fails the task
+  — the discipline is checking back at a sensible cadence, not as fast as possible.
+- **Report failure with \`TASK_FAILED\`.** If you cannot complete the instructions you were
+  given, you MUST say so by including the literal text \`TASK_FAILED\` somewhere in your
+  final response. This is not optional and not a suggestion: the harness has no other way to
+  distinguish "I finished" from "I got stuck" when your turn ends without a further tool
+  call — a final response with no tool call and no \`TASK_FAILED\` marker is read as success.
+  Only include the marker when you are actually reporting failure; never include it in a
+  successful completion.
 
 ## Logging
 
