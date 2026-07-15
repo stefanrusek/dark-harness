@@ -6,28 +6,23 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ExitCode } from "../src/contracts/exit-codes.ts";
 import type { AgentTreeResponse, CommandAck } from "../src/contracts/index.ts";
-import { spawnDh } from "./support/dh-process.ts";
+import { createCleanupRegistry } from "./support/cleanup.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
-import { findFreePort } from "./support/port.ts";
+import { startDhServer } from "./support/port.ts";
 import { connectSse } from "./support/sse-client.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
 
-const cleanups: (() => void)[] = [];
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
-});
+const cleanups = createCleanupRegistry();
+afterEach(() => cleanups.runAll());
 
 async function startServer() {
   const provider = startMockAnthropicProvider([successTurn("Server protocol says hi.")]);
-  cleanups.push(provider.stop);
+  cleanups.addProcess(provider.stop);
   const ws = createWorkspace();
-  cleanups.push(ws.cleanup);
+  cleanups.addWorkspace(ws.cleanup);
   ws.writeConfig(baseConfig(provider.baseURL));
-  const port = await findFreePort();
-
-  const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
-  cleanups.push(proc.kill);
-  await proc.waitForStdout(/listening on port/);
+  const { proc, port } = await startDhServer({ cwd: ws.dir });
+  cleanups.addProcess(proc.kill);
 
   return { baseUrl: `http://localhost:${port}`, proc, provider };
 }
@@ -78,7 +73,7 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
     const { baseUrl, provider } = await startServer();
 
     const sse = await connectSse(baseUrl);
-    cleanups.push(sse.close);
+    cleanups.addProcess(sse.close);
 
     const postRes = await fetch(new URL("/api/commands", baseUrl), {
       method: "POST",
@@ -160,7 +155,7 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
     const firstEventId = first.events[0]?.id;
     expect(firstEventId).toBeDefined();
     const resumed = await connectSse(baseUrl, { lastEventId: firstEventId as string });
-    cleanups.push(resumed.close);
+    cleanups.addProcess(resumed.close);
     const replayedStatus = await resumed.waitFor(
       (e) => e.type === "agent_status" && e.status === "waiting",
     );
@@ -176,19 +171,16 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
       successTurn("Nice to meet you, Ada."),
       successTurn("Yes, I remember your name is Ada."),
     ]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(baseConfig(provider.baseURL));
-    const port = await findFreePort();
-
-    const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
-    cleanups.push(proc.kill);
-    await proc.waitForStdout(/listening on port/);
+    const { proc, port } = await startDhServer({ cwd: ws.dir });
+    cleanups.addProcess(proc.kill);
     const baseUrl = `http://localhost:${port}`;
 
     const sse = await connectSse(baseUrl);
-    cleanups.push(sse.close);
+    cleanups.addProcess(sse.close);
 
     // First exchange.
     const firstRes = await fetch(new URL("/api/commands", baseUrl), {
@@ -265,7 +257,7 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
       body: JSON.stringify({ type: "send_message", agentId: "agent-root", message: "hi" }),
     });
     const sse = await connectSse(baseUrl);
-    cleanups.push(sse.close);
+    cleanups.addProcess(sse.close);
     // Round 5: wait for the turn to complete ("waiting" for the next message) rather than
     // session_ended, which no longer fires after a single exchange in an interactive session.
     await sse.waitFor((e) => e.type === "agent_status" && e.status === "waiting");
@@ -316,12 +308,12 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
       },
       successTurn("Root heard back from the sub-agent."),
     ]);
-    cleanups.push(rootProvider.stop);
+    cleanups.addProcess(rootProvider.stop);
     const subProvider = startMockAnthropicProvider([successTurn("Sub-agent reporting in.")]);
-    cleanups.push(subProvider.stop);
+    cleanups.addProcess(subProvider.stop);
 
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig({
       options: { defaultModel: "mock" },
       provider: [
@@ -333,15 +325,12 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
         { name: "sub", provider: "sub-provider", model: "mock-model" },
       ],
     });
-    const port = await findFreePort();
-
-    const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
-    cleanups.push(proc.kill);
-    await proc.waitForStdout(/listening on port/);
+    const { proc, port } = await startDhServer({ cwd: ws.dir });
+    cleanups.addProcess(proc.kill);
     const baseUrl = `http://localhost:${port}`;
 
     const sse = await connectSse(baseUrl);
-    cleanups.push(sse.close);
+    cleanups.addProcess(sse.close);
 
     const postRes = await fetch(new URL("/api/commands", baseUrl), {
       method: "POST",

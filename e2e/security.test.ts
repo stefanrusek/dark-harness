@@ -6,16 +6,14 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import type { AgentTreeResponse, SecurityConfig } from "../src/contracts/index.ts";
 import { REPO_ROOT } from "./support/build.ts";
-import { spawnDh } from "./support/dh-process.ts";
+import { createCleanupRegistry } from "./support/cleanup.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
-import { findFreePort } from "./support/port.ts";
+import { startDhServer } from "./support/port.ts";
 import { connectSse } from "./support/sse-client.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
 
-const cleanups: (() => void)[] = [];
-afterEach(() => {
-  while (cleanups.length > 0) cleanups.pop()?.();
-});
+const cleanups = createCleanupRegistry();
+afterEach(() => cleanups.runAll());
 
 const TEST_CERT = resolve(REPO_ROOT, "src/server/testdata/test-cert.pem");
 const TEST_KEY = resolve(REPO_ROOT, "src/server/testdata/test-key.pem");
@@ -23,15 +21,12 @@ const TOKEN = "s3cret-test-token";
 
 async function startSecuredServer(security: SecurityConfig) {
   const provider = startMockAnthropicProvider([successTurn("Secured hello.")]);
-  cleanups.push(provider.stop);
+  cleanups.addProcess(provider.stop);
   const ws = createWorkspace();
-  cleanups.push(ws.cleanup);
+  cleanups.addWorkspace(ws.cleanup);
   ws.writeConfig(baseConfig(provider.baseURL, { security }));
-  const port = await findFreePort();
-
-  const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
-  cleanups.push(proc.kill);
-  await proc.waitForStdout(/listening on port/);
+  const { proc, port } = await startDhServer({ cwd: ws.dir });
+  cleanups.addProcess(proc.kill);
   return port;
 }
 
@@ -76,7 +71,7 @@ describe("security matrix", () => {
     expect(body.ok).toBe(true);
 
     const sse = await connectSse(baseUrl, { token: TOKEN });
-    cleanups.push(sse.close);
+    cleanups.addProcess(sse.close);
     expect((sse as unknown as { status?: number }).status ?? 200).toBe(200);
 
     await fetch(`${baseUrl}/api/commands`, {
@@ -90,18 +85,16 @@ describe("security matrix", () => {
 
   test("TLS: self-signed cert round trip over https://", async () => {
     const provider = startMockAnthropicProvider([successTurn("Hello over TLS.")]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(
       baseConfig(provider.baseURL, {
         security: { tls: { cert: TEST_CERT, key: TEST_KEY } },
       }),
     );
-    const port = await findFreePort();
-    const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
-    cleanups.push(proc.kill);
-    await proc.waitForStdout(/listening on port/);
+    const { proc, port } = await startDhServer({ cwd: ws.dir });
+    cleanups.addProcess(proc.kill);
 
     const res = await fetch(`https://localhost:${port}/api/commands`, {
       method: "POST",
@@ -130,18 +123,16 @@ describe("security matrix", () => {
 
   test("TLS + bearer token together: both protections apply independently", async () => {
     const provider = startMockAnthropicProvider([successTurn("Hello over TLS+token.")]);
-    cleanups.push(provider.stop);
+    cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
-    cleanups.push(ws.cleanup);
+    cleanups.addWorkspace(ws.cleanup);
     ws.writeConfig(
       baseConfig(provider.baseURL, {
         security: { token: TOKEN, tls: { cert: TEST_CERT, key: TEST_KEY } },
       }),
     );
-    const port = await findFreePort();
-    const proc = await spawnDh({ args: ["--server", "--port", String(port)], cwd: ws.dir });
-    cleanups.push(proc.kill);
-    await proc.waitForStdout(/listening on port/);
+    const { proc, port } = await startDhServer({ cwd: ws.dir });
+    cleanups.addProcess(proc.kill);
 
     const unauthed = await fetch(`https://localhost:${port}/api/commands`, {
       method: "POST",

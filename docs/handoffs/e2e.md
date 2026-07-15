@@ -657,3 +657,85 @@ Round 6 were not present in this round's tree (clean `typecheck`/`lint` from the
 presumably landed by whoever owned that by now). TUI/web tests still need real `tmux`/a
 Chromium binary in the sandbox to run — unrelated to this round, flagged every round since
 Round 1.
+
+### 2026-07-15 — Round 8 (fresh process again): closed DH-0033 and DH-0034
+
+Came online fresh to work two tickets, both already `status: implementing`:
+`tracking/DH-0033-mock-provider-cannot-simulate-errors-or-streaming.md` and
+`tracking/DH-0034-e2e-flakiness-risks-and-missing-connect-web-coverage.md`. Same recurring
+worktree-provenance bug, a fifth time (branched from the pre-domain-landing ancestor
+`12679e4`, zero unique commits); fast-forwarded to real HEAD (`33dc751`) before starting —
+now enough repeats across rounds that this really does look like something in the
+provisioning path for this role specifically, worth someone actually tracing rather than each
+fresh instance independently rediscovering and working around it every time.
+
+**DH-0033 (mock provider can't simulate errors/streaming):** gave `e2e/support/mock-provider.ts`
+an error-injection mode — `MockTurn.error` (status + JSON body, or a literal `rawBody` for a
+malformed non-JSON response), with `errorTurn(status, body?)`/`malformedTurn(rawBody?)`
+shorthands — and added five new scenarios to `e2e/exit-codes.test.ts`: 429, 500, a malformed
+200-body response, and a mid-multi-turn failure (tool_use turn succeeds, resume call fails
+with a 529). All assert `ExitCode.HarnessError` (>=2), proving the harness never raw-crashes
+on a provider failure.
+
+**Real discovery, not assumed going in:** first draft of these tests asserted
+`provider.callCount === 1` per the ticket's own framing ("neither adapter retries, so one
+failure kills the run") — every one of them failed with `callCount` of 3 or 4 instead. Traced
+it to the `@anthropic-ai/sdk` client itself: it already retries retryable HTTP statuses
+(429/5xx) up to its own default `maxRetries` (2) before the adapter's `try/catch` ever sees a
+rejection — real retry behavior already exists today, just at the SDK layer, independent of
+DH-0009 (harness-level retry/backoff/error taxonomy, still open). Fixed the assertions to
+match reality (3 calls for a single retryable failure, 4 for the two-turn scenario) rather
+than asserting what I'd assumed before running it, and rewrote the tests' own inline comment
+to describe the actual mechanism instead of the wrong assumption. Flagged in the ticket's
+Resolution that DH-0009 landing might reconfigure `maxRetries` and these counts should be
+revisited then — Core's call, not e2e's.
+
+**DH-0034 (port race / cleanup ordering / missing `--connect --web` coverage):** all three
+findings addressed.
+
+- `e2e/support/port.ts` gained `startDhServer` — wraps `findFreePort` + spawn + "listening on
+  port" wait in a retry loop (3 attempts default): if a spawned `dh --server` doesn't confirm
+  listening within 5s (losing the check-then-use race to a concurrently-running test file),
+  it's killed and retried with a freshly-checked port. Retrofitted onto all eight existing
+  `--server` call sites across `server-protocol.test.ts`, `security.test.ts`, `tui.test.ts`,
+  `build-stamp.test.ts`.
+- `e2e/support/cleanup.ts` (`createCleanupRegistry`) replaces the flat
+  `cleanups: (() => void)[]` + manual-push-order convention with two stacks (`addProcess`,
+  `addWorkspace`) — `runAll()` always drains every process cleanup before any workspace
+  cleanup regardless of registration order, so a future test author pushing in the "wrong"
+  order can no longer create the failure mode the ticket described. Retrofitted onto all
+  seven e2e files that spawn processes and/or create workspaces.
+- New `e2e/connect-web.test.ts`: a real `dh --server` (via `startDhServer`) plus a separate
+  real `dh --connect <host> --port <n> --web` client process, driven with the same
+  pre-installed-Chromium approach as `e2e/web.test.ts`. Asserts the connect-mode-specific
+  ready message (`"connected to http://localhost:<port>"`) and that the browser-rendered
+  output is genuinely the *remote* server's own SSE stream (the client process itself holds
+  no usable model config — a correct render can only have come over the wire).
+
+**Judgment call — mid-multi-turn error test's `Bash` tool call:** scripted the tool_use turn
+with a real `Bash` tool call (`{ command: "echo hi" }`) rather than an arbitrary tool name, so
+the scenario exercises a real tool execution before the provider error hits on resume, closer
+to what an actual mid-run failure looks like than a synthetic no-op tool.
+
+**What I could not verify in this sandbox:** no `tmux` and no Chromium binary at
+`/opt/pw-browsers/chromium`, same gaps every round has hit since Round 1. This blocks running
+`e2e/connect-web.test.ts` to actual completion — confirmed instead that everything short of
+the browser launch works (real server spawn, real `--connect --web` client spawn, ready-line
+parsing, the "connected to" assertion all pass; failure is exactly at `chromium.launch()`,
+"executable doesn't exist"), which is as far as this sandbox lets any web/browser e2e test go
+(same situation `e2e/web.test.ts` has always been in).
+
+**Gates:** `bun run typecheck`/`bun run lint` clean across all touched files. `bun run
+test:coverage`: 806/806 pass, 100% coverage unchanged (no `src/` touched this round). Full
+`bun run e2e`: 25 pass / 5 fail — all five pre-existing/expected gaps (2 `tmux`-dependent
+tests in `tui.test.ts`, 2 Chromium-dependent tests — `web.test.ts` and the new
+`connect-web.test.ts` — and the pre-existing `security.test.ts` bearer-token SSE timeout
+flagged since an earlier round) — no regressions introduced by this round's refactor of the
+eight `--server` call sites or the seven cleanup-registry retrofits.
+
+**Tickets closed:** DH-0033 and DH-0034, both front matter -> `status: closed`,
+`resolution: done`, Resolution sections added; `tracking/views/dark-harness-view.md`
+regenerated.
+
+**Open threads:** none newly introduced. `tmux`/Chromium sandbox gaps are unchanged and, as
+ever, not fixable from within this domain's own scope.

@@ -262,3 +262,44 @@ section added; `tracking/views/dark-harness-view.md` regenerated to reflect it.
 **Open threads:** none newly introduced. The domain's other long-standing open items (Bedrock
 README addition routed to Prompt; TUI/web tests needing a real `tmux`/Chromium in-sandbox)
 are unchanged and not this round's scope.
+
+### 2026-07-15 — Round 8 (fresh process again): closed DH-0033 and DH-0034
+
+Came online fresh for two tickets in `tracking/`, both already `status: implementing`:
+DH-0033 (mock provider can't simulate errors/streaming) and DH-0034 (port race, cleanup
+ordering, missing `--connect --web` coverage). Full detail in `docs/handoffs/e2e.md`'s Round
+8 entry. Fifth recurrence of the worktree-provenance issue (branched from `12679e4` again,
+zero unique commits, fast-forwarded to `33dc751`) — worth flagging loudly enough by now that
+someone actually traces the provisioning path for this role.
+
+**DH-0033:** added error-injection to `e2e/support/mock-provider.ts` (`MockTurn.error`,
+`errorTurn`/`malformedTurn` helpers) and five new exit-code-matrix scenarios. Real discovery:
+my first-draft assertions (`callCount === 1`, matching the ticket's own "no adapter retries"
+framing) were wrong — the `@anthropic-ai/sdk` client itself already retries 429/5xx up to its
+default `maxRetries` (2), independent of DH-0009 (harness-level retry, still open). Corrected
+the assertions and the inline reasoning to match observed reality rather than trusting the
+ticket's framing uncritically once the test itself proved it wrong.
+
+**DH-0034:** `e2e/support/port.ts` gained `startDhServer` (retry-on-bind-timeout mitigation
+for the port-allocation race), retrofitted onto all 8 existing `--server` call sites.
+`e2e/support/cleanup.ts` (`createCleanupRegistry`) replaces the flat-array +
+manual-push-order convention with structural process-before-workspace ordering, retrofitted
+onto all 7 files that need it. New `e2e/connect-web.test.ts` covers `dh --connect --web`
+against a real remote `dh --server`.
+
+**Judgment call — verifying what I can't fully run:** `connect-web.test.ts` needs a real
+Chromium binary this sandbox doesn't have (same gap `web.test.ts` has always had). Rather
+than leaving it entirely unverified, I ran it anyway and confirmed it gets all the way to
+`chromium.launch()` before failing — real server spawn, real `--connect --web` client spawn,
+ready-message parsing, and the connect-mode-specific assertion all pass first. That's the
+strongest verification available without the missing tooling, and I said so explicitly
+rather than implying full verification happened.
+
+**Gates:** `bun run typecheck`/`bun run lint` clean, `bun run test:coverage` 806/806 pass
+(100% coverage, no `src/` touched), full `bun run e2e` 25 pass / 5 fail — all five the
+same pre-existing/expected sandbox gaps (2 `tmux`, 2 Chromium — including the new file — and
+the pre-existing `security.test.ts` bearer-token timeout) — no regressions from retrofitting
+15 call sites across 8 files.
+
+**Both tickets closed.** No new open threads; `tmux`/Chromium sandbox gaps remain, as every
+round has noted since Round 1.

@@ -23,36 +23,32 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
+import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
 
 const CHROMIUM_PATH = "/opt/pw-browsers/chromium";
 
-const cleanups: (() => void)[] = [];
-afterEach(async () => {
-  while (cleanups.length > 0) {
-    const fn = cleanups.pop();
-    if (fn) await fn();
-  }
-});
+const cleanups = createCleanupRegistry();
+afterEach(() => cleanups.runAll());
 
 describe("web UI (dh --web) in a real headless browser", () => {
   test("status colors, live output, token/cost display, and log download", async () => {
     const provider = startMockAnthropicProvider([successTurn("Hello from the web e2e mock!")]);
-    cleanups.push(() => provider.stop());
+    cleanups.addProcess(() => provider.stop());
     const ws = createWorkspace();
-    cleanups.push(() => ws.cleanup());
+    cleanups.addWorkspace(() => ws.cleanup());
     ws.writeConfig(baseConfig(provider.baseURL));
 
     const proc = await spawnDh({ args: ["--web"], cwd: ws.dir });
-    cleanups.push(() => proc.kill());
+    cleanups.addProcess(() => proc.kill());
     const stdout = await proc.waitForStdout(/web UI ready at (\S+)/);
     const webUrl = /web UI ready at (\S+)\./.exec(stdout)?.[1];
     if (!webUrl) throw new Error(`could not parse web UI URL from stdout: ${stdout}`);
 
     const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
-    cleanups.push(() => browser.close());
+    cleanups.addProcess(() => browser.close());
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();
     await page.goto(webUrl);

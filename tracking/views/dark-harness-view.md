@@ -88,8 +88,6 @@ source: tracking/
 | [DH-0029](../DH-0029-web-accessibility-and-error-surfacing-gaps.md) | Web UI has no keyboard-reachable agent list, no ARIA live regions, a missing "stopped" status color, and both clients drop errors after a few seconds with no history | bug | stefan |
 | [DH-0030](../DH-0030-ci-coverage-gate-text-parsing-fragility.md) | CI's coverage/completeness/e2e gates rely on fragile text-parsing and a fail-open conditional, not structured checks | bug | stefan |
 | [DH-0032](../DH-0032-release-binaries-untested-on-real-target-os.md) | Windows and macOS release binaries are cross-compiled but never actually executed anywhere, and the e2e-tested binary isn't the same artifact as what ships | bug | stefan |
-| [DH-0033](../DH-0033-mock-provider-cannot-simulate-errors-or-streaming.md) | The e2e mock provider can't simulate provider errors or streaming, so the harness's failure-handling path is completely untested end-to-end | bug | stefan |
-| [DH-0034](../DH-0034-e2e-flakiness-risks-and-missing-connect-web-coverage.md) | E2E has a port-allocation race, an ordering-dependent cleanup convention, and no coverage of `dh --connect --web` | bug | stefan |
 | [DH-0036](../DH-0036-no-container-deployment-reference.md) | No reference Dockerfile or container/deployment documentation for the canonical dark-factory use case | feature | stefan |
 | [DH-0039](../DH-0039-git-credentials-and-workspace-convention-undocumented.md) | Git credential provisioning and workspace-directory convention are entirely undocumented | feature | stefan |
 | [DH-0041](../DH-0041-missing-user-facing-docs-bundle.md) | A cluster of user-facing documentation is entirely missing | feature | stefan |
@@ -100,6 +98,8 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0034](../DH-0034-e2e-flakiness-risks-and-missing-connect-web-coverage.md) | E2E has a port-allocation race, an ordering-dependent cleanup convention, and no coverage of `dh --connect --web` | done |
+| [DH-0033](../DH-0033-mock-provider-cannot-simulate-errors-or-streaming.md) | The e2e mock provider can't simulate provider errors or streaming, so the harness's failure-handling path is completely untested end-to-end | done |
 | [DH-0008](../DH-0008-adopt-spile-ops-skill.md) | Adopt (or build) a `spile-ops` skill for mechanical ticket operations | done |
 | [DH-0007](../DH-0007-server-round1-open-threads-verification.md) | Server's three Round-1 open threads — likely stale, never explicitly verified and closed | done |
 | [DH-0006](../DH-0006-e2e-multiturn-conversation-coverage.md) | No dedicated e2e test proves plain multi-turn conversation continuity over real HTTP | done |
