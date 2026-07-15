@@ -6,6 +6,8 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  type AgentStatus,
+  type AgentTreeNode,
   type DhConfig,
   ExitCode,
   type LogLine,
@@ -21,6 +23,12 @@ import { TaskRegistry } from "./tasks.ts";
 import { ALL_TOOLS, buildToolMap } from "./tools/index.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
+/** The root agent's fixed identifier — used both as the loop's own `agentId` (its SSE
+ * events/log lines) and as the "agentId" `AgentLoopHandle`'s wire-facing operations
+ * (sendMessage/stopAgent/the tree) address it by, exactly like every sub-agent's task id
+ * (see spawnAgent()'s doc comment for why those two id spaces are now unified). */
+export const ROOT_AGENT_ID = "agent-root";
+
 export interface AgentRuntimeOptions {
   config: DhConfig;
   systemPrompt: string;
@@ -28,13 +36,32 @@ export interface AgentRuntimeOptions {
   sessionId?: string;
   tools?: Tool[];
   onEvent?: (event: ServerSentEvent) => void;
-  onLogLine?: (line: LogLine) => void;
+  /** Cross-domain note (docs/handoffs/core.md Round 2 status log): takes `agentId` as a
+   * separate first argument — unlike `LogLine` itself, most `LogEvent` variants don't
+   * self-describe which agent produced them (only `LogHeader` does), and Server's
+   * `AgentLoopLogListener` (`(agentId, line) => void`) needs it to route to the right
+   * per-agent JSONL file. AgentRuntime is the layer that knows the agentId for every
+   * runAgentLoop() call (loop.ts's own onLogLine stays `(line) => void`), so it threads it
+   * through here rather than pushing that responsibility onto loop.ts or its caller. */
+  onLogLine?: (agentId: string, line: LogLine) => void;
 }
 
 export class ConfigModelError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ConfigModelError";
+  }
+}
+
+export class RootNotListeningError extends Error {
+  constructor() {
+    super(
+      "the root agent has not started yet, or is not currently listening for messages " +
+        "(it finished a turn and is between runAgentLoop() calls — this shouldn't normally " +
+        "be observable from outside since registerSendMessage is (re-)installed at the top " +
+        "of every runAgentLoop() invocation)",
+    );
+    this.name = "RootNotListeningError";
   }
 }
 
@@ -49,7 +76,24 @@ export class AgentRuntime {
   private readonly toolMap: Map<string, Tool>;
   private readonly providers = new Map<string, ModelProvider>();
   private readonly onEvent: ((event: ServerSentEvent) => void) | undefined;
-  private readonly onLogLine: ((line: LogLine) => void) | undefined;
+  private readonly onLogLine: ((agentId: string, line: LogLine) => void) | undefined;
+
+  // Root-agent bookkeeping: runRoot() isn't tracked in `tasks` (it IS the session, per its
+  // own doc comment below), so getAgentTree()/sendMessageToRoot() need their own small
+  // amount of state to mirror what TaskRegistry already tracks per sub-agent.
+  //
+  // Round 2 correction (docs/handoffs/core.md status log — found via a live integration
+  // test against a real DhServer, not a hypothetical): getAgentTree() must include a root
+  // node even before runRoot() has ever been called. Server's own command handler
+  // (src/server/commands.ts) validates a send_message's agentId against getAgentTree()
+  // *before* ever calling AgentLoopHandle.sendMessage() — an empty tree makes the very
+  // first message to the root agent unreachable through the real wire protocol, since
+  // there's nothing for `findAgent` to find yet. "waiting" (an existing AgentStatus value,
+  // not a new one) represents "not started yet" for this purpose.
+  private rootStarted = false;
+  private rootModel: string | undefined;
+  private rootStatus: AgentStatus = "waiting";
+  private rootSendMessage: ((message: string) => void) | undefined;
 
   constructor(options: AgentRuntimeOptions) {
     this.config = options.config;
@@ -100,7 +144,18 @@ export class AgentRuntime {
     };
   }
 
-  /** Spawns a sub-agent as a task; returns immediately with the task id. */
+  /** Spawns a sub-agent as a task; returns immediately with the task id.
+   *
+   * The task registry's id for this task IS the loop's own `agentId` (passed as
+   * `StartTaskParams.id`, overriding the registry's counter-based default) — deliberately
+   * unifying two identifier spaces that used to be independent (task ids like "agent-2" vs.
+   * loop-internal ids like "agent-<uuid>"). Cross-domain rationale (docs/handoffs/core.md
+   * Round 2 status log): Server's `AgentLoopHandle`/wire contract addresses agents by one
+   * "agentId" for everything — the tree, sendMessage, stopAgent, and every SSE
+   * event/log-line's own `agentId` field. Keeping two separate id spaces would have forced
+   * the cli.ts adapter to maintain a bidirectional translation table between them (task id
+   * <-> loop id), which is exactly the kind of extra state/bug surface worth designing
+   * away instead of working around. */
   spawnAgent(parentAgentId: string, params: { model: string; prompt: string }): string {
     const model = this.resolveModel(params.model);
     const provider = this.providerFor(model);
@@ -110,6 +165,7 @@ export class AgentRuntime {
       kind: "agent",
       parentAgentId,
       model: model.name,
+      id: agentId,
       run: async (handle) => {
         const result = await runAgentLoop({
           sessionId: this.sessionId,
@@ -126,7 +182,9 @@ export class AgentRuntime {
             if (event.type === "agent_output") handle.append(event.chunk);
             this.onEvent?.(event);
           },
-          ...(this.onLogLine ? { onLogLine: this.onLogLine } : {}),
+          ...(this.onLogLine
+            ? { onLogLine: (line: LogLine) => this.onLogLine?.(agentId, line) }
+            : {}),
         });
         if (!result.success) {
           throw new Error(result.finalOutput || "sub-agent reported failure");
@@ -143,28 +201,44 @@ export class AgentRuntime {
    * branch) subscribes to for `--job` mode. It does NOT cover a harness error that prevents
    * the loop from ever starting (bad config, provider/auth failure) — callers (src/cli.ts)
    * must still wrap this call in their own try/catch for that class of failure, exactly as
-   * src/server/exit.ts's own doc comment already assumes. */
+   * src/server/exit.ts's own doc comment already assumes.
+   *
+   * Also registers a root-level sendMessage sink (mirroring what spawnAgent() already does
+   * for sub-agents via the task registry) so a running root agent can be steered by
+   * sendMessageToRoot() — needed for interactive mode (TUI/Web), where the operator's input
+   * box delivers messages into an already-running root loop, not just a one-shot
+   * `--instructions` file. */
   async runRoot(
     instruction: string,
     modelName?: string,
   ): Promise<{ success: boolean; finalOutput: string }> {
     const model = this.resolveModel(modelName ?? this.config.options.defaultModel);
     const provider = this.providerFor(model);
-    const agentId = "agent-root";
+
+    this.rootStarted = true;
+    this.rootModel = model.name;
+    this.rootStatus = "running";
 
     const result = await runAgentLoop({
       sessionId: this.sessionId,
-      agentId,
+      agentId: ROOT_AGENT_ID,
       parentAgentId: null,
       model: model.name,
       systemPrompt: this.systemPrompt,
       instruction,
       provider,
       tools: this.toolMap,
-      toolContext: this.buildToolContext(agentId),
+      toolContext: this.buildToolContext(ROOT_AGENT_ID),
+      registerSendMessage: (fn) => {
+        this.rootSendMessage = fn;
+      },
       ...(this.onEvent ? { onEvent: this.onEvent } : {}),
-      ...(this.onLogLine ? { onLogLine: this.onLogLine } : {}),
+      ...(this.onLogLine
+        ? { onLogLine: (line: LogLine) => this.onLogLine?.(ROOT_AGENT_ID, line) }
+        : {}),
     });
+
+    this.rootStatus = result.success ? "done" : "failed";
     this.onEvent?.({
       version: 1,
       id: randomUUID(),
@@ -173,5 +247,76 @@ export class AgentRuntime {
       exitCode: result.success ? ExitCode.Success : ExitCode.TaskFailure,
     });
     return { success: result.success, finalOutput: result.finalOutput };
+  }
+
+  /** True once runRoot() has been called at least once (even if it has since finished) —
+   * lets a caller (the cli.ts AgentLoopHandle adapter) tell "root hasn't started" apart from
+   * "root already ran/is running," e.g. to decide whether an incoming sendMessage should
+   * lazily start the root agent or steer an already-running one. */
+  get rootHasStarted(): boolean {
+    return this.rootStarted;
+  }
+
+  /** Delivers a message into the currently-running root agent's conversation (mirrors
+   * TaskRegistry.sendMessage's semantics/error shape for sub-agents). Throws
+   * RootNotListeningError if runRoot() hasn't been called yet, or isn't currently between
+   * turns with its sink registered. */
+  sendMessageToRoot(message: string): void {
+    if (!this.rootSendMessage) {
+      throw new RootNotListeningError();
+    }
+    this.rootSendMessage(message);
+  }
+
+  /** Builds the nested AgentTreeNode[] shape Server's AgentLoopHandle.getAgentTree() needs,
+   * from the task registry's flat TaskSnapshot[] plus the root's own tracked state (the
+   * root isn't itself a task — see runRoot()'s doc comment).
+   *
+   * Judgment call (docs/handoffs/core.md Round 2 status log, flagged as asked): only
+   * agent-kind tasks appear in the tree, not bash-kind ones. The tree is specifically about
+   * the sub-agent hierarchy (what the TUI/Web agent-tree view and stopAgent/sendMessage
+   * target) — a `run_in_background` Bash call isn't an agent and was never addressable by
+   * agentId in the wire protocol to begin with (Bash tool output surfaces as a tool_result
+   * on its *parent* agent's own event/log stream, not as a node of its own).
+   *
+   * Always includes a root node, even before runRoot() has ever been called (status
+   * "waiting" until then) — see the `rootStatus` field's doc comment for why an empty tree
+   * pre-start is actually a bug, not a simplification: it makes the root unreachable by the
+   * very first send_message that's supposed to start it. */
+  getAgentTree(): AgentTreeNode[] {
+    const agentSnapshots = this.tasks.list().filter((task) => task.kind === "agent");
+    const nodeById = new Map<string, AgentTreeNode>();
+    for (const snapshot of agentSnapshots) {
+      nodeById.set(snapshot.id, {
+        agentId: snapshot.id,
+        parentAgentId: snapshot.parentAgentId,
+        model: snapshot.model ?? "",
+        status: snapshot.status,
+        children: [],
+      });
+    }
+    const rootChildren: AgentTreeNode[] = [];
+    for (const snapshot of agentSnapshots) {
+      // biome-ignore lint/style/noNonNullAssertion: snapshot.id was just set as a key above
+      const node = nodeById.get(snapshot.id)!;
+      const parent = nodeById.get(snapshot.parentAgentId);
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        // Either the root itself, or (not currently reachable — tasks are never evicted)
+        // an unknown parent; either way this node belongs directly under the root.
+        rootChildren.push(node);
+      }
+    }
+
+    return [
+      {
+        agentId: ROOT_AGENT_ID,
+        parentAgentId: null,
+        model: this.rootModel ?? this.config.options.defaultModel,
+        status: this.rootStatus,
+        children: rootChildren,
+      },
+    ];
   }
 }

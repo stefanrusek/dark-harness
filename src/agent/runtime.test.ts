@@ -8,8 +8,14 @@
 // loop -> tool dispatch without ever touching the network.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { type DhConfig, ExitCode, type LogLine, type ServerSentEvent } from "../contracts/index.ts";
-import { AgentRuntime, ConfigModelError } from "./runtime.ts";
+import {
+  type AgentTreeNode,
+  type DhConfig,
+  ExitCode,
+  type LogLine,
+  type ServerSentEvent,
+} from "../contracts/index.ts";
+import { AgentRuntime, ConfigModelError, ROOT_AGENT_ID, RootNotListeningError } from "./runtime.ts";
 import { bashTool } from "./tools/bash.ts";
 
 /** A minimal Anthropic Messages API-shaped mock server. Decides its response from the last
@@ -125,17 +131,22 @@ function baseConfig(overrides: Partial<DhConfig> = {}): DhConfig {
 function collectors() {
   const events: ServerSentEvent[] = [];
   const logLines: LogLine[] = [];
+  const loggedAgentIds: string[] = [];
   return {
     events,
     logLines,
+    loggedAgentIds,
     onEvent: (e: ServerSentEvent) => events.push(e),
-    onLogLine: (l: LogLine) => logLines.push(l),
+    onLogLine: (agentId: string, l: LogLine) => {
+      loggedAgentIds.push(agentId);
+      logLines.push(l);
+    },
   };
 }
 
 describe("AgentRuntime", () => {
   test("runRoot runs the default model end-to-end against the mock provider", async () => {
-    const { events, logLines, onEvent, onLogLine } = collectors();
+    const { events, logLines, loggedAgentIds, onEvent, onLogLine } = collectors();
     const runtime = new AgentRuntime({
       config: baseConfig(),
       systemPrompt: "you are a test agent",
@@ -147,6 +158,9 @@ describe("AgentRuntime", () => {
     expect(result.finalOutput).toBe("root done");
     expect(events.some((e) => e.type === "agent_spawned" && e.agentId === "agent-root")).toBe(true);
     expect(logLines[0]?.type).toBe("header");
+    // onLogLine's agentId param (a Round 2 addition) is threaded correctly for the root.
+    expect(loggedAgentIds.every((id) => id === ROOT_AGENT_ID)).toBe(true);
+    expect(loggedAgentIds.length).toBeGreaterThan(0);
     // Cross-domain contract: Server's waitForExitCode (src/server/exit.ts on main)
     // subscribes to this event to resolve --job's exit code.
     const sessionEnded = events.find((e) => e.type === "session_ended");
@@ -226,6 +240,27 @@ describe("AgentRuntime", () => {
     const snapshot = runtime.tasks.snapshot(taskId);
     expect(snapshot.status).toBe("failed");
     expect(snapshot.error).toContain("TASK_FAILED");
+  });
+
+  test("spawnAgent's returned task id IS the sub-agent's own SSE/log agentId (unified identifier space)", async () => {
+    const { events, loggedAgentIds, onEvent, onLogLine } = collectors();
+    const runtime = new AgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      onEvent,
+      onLogLine,
+    });
+    const taskId = runtime.spawnAgent("agent-root", {
+      model: "test-model",
+      prompt: "child instruction",
+    });
+    await runtime.tasks.awaitDone(taskId);
+    // Every event/log line this sub-agent produced carries `taskId` as its own agentId —
+    // not a different loop-internal id requiring translation.
+    const subAgentEvents = events.filter((e) => "agentId" in e && e.agentId === taskId);
+    expect(subAgentEvents.length).toBeGreaterThan(0);
+    expect(loggedAgentIds.filter((id) => id === taskId).length).toBeGreaterThan(0);
+    expect(runtime.tasks.snapshot(taskId).id).toBe(taskId);
   });
 
   test("spawnAgent throws ConfigModelError for an unknown model name", () => {
@@ -312,5 +347,162 @@ describe("AgentRuntime", () => {
     });
     const result = await runtime.runRoot("use-unknown-tool");
     expect(result.success).toBe(true);
+  });
+});
+
+describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 2)", () => {
+  test("rootHasStarted is false before runRoot() and true after", async () => {
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    expect(runtime.rootHasStarted).toBe(false);
+    await runtime.runRoot("please just answer");
+    expect(runtime.rootHasStarted).toBe(true);
+  });
+
+  test("getAgentTree() includes a 'waiting' root node before the root agent has started", () => {
+    // Round 2 correction (found via a live integration test against a real DhServer): an
+    // empty tree pre-start makes the root unreachable by Server's own send_message
+    // validation (src/server/commands.ts's findAgent check runs before AgentLoopHandle.
+    // sendMessage() is ever called) — see runtime.ts's rootStatus field doc comment.
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    expect(runtime.getAgentTree()).toEqual([
+      {
+        agentId: ROOT_AGENT_ID,
+        parentAgentId: null,
+        model: "test-model",
+        status: "waiting",
+        children: [],
+      },
+    ]);
+  });
+
+  test("getAgentTree() returns a lone root node once runRoot() completes, with no sub-agents", async () => {
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    await runtime.runRoot("please just answer");
+    const tree = runtime.getAgentTree();
+    expect(tree).toEqual([
+      {
+        agentId: ROOT_AGENT_ID,
+        parentAgentId: null,
+        model: "test-model",
+        status: "done",
+        children: [],
+      },
+    ]);
+  });
+
+  test("getAgentTree() reflects 'failed' root status after a self-reported failure", async () => {
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    await runtime.runRoot("fail please");
+    expect(runtime.getAgentTree()[0]?.status).toBe("failed");
+  });
+
+  test("getAgentTree() nests agent-kind sub-agents under their parent, excluding bash-kind tasks", async () => {
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    // A bash-kind task, spawned directly against the registry (as the Bash tool would for a
+    // run_in_background call) — must NOT appear in the tree (Round 2 judgment call: the
+    // tree is agent-kind only).
+    runtime.tasks.start({ kind: "bash", parentAgentId: ROOT_AGENT_ID, run: async () => {} });
+    const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+    });
+    await runtime.tasks.awaitDone(childTaskId);
+    // The tree reflects the task registry's current state regardless of whether runRoot()
+    // has been called yet — the root node's own status ("waiting" here) is independent of
+    // its children's. (This ordering — spawning a "sub-agent" before the root has run — is
+    // artificial, purely to isolate the bash-vs-agent filtering in one test; in production
+    // only a running root's own tool calls can spawn a sub-agent at all.)
+    const expectedChild: AgentTreeNode = {
+      agentId: childTaskId,
+      parentAgentId: ROOT_AGENT_ID,
+      model: "test-model",
+      status: "done",
+      children: [],
+    };
+    expect(runtime.getAgentTree()).toEqual([
+      {
+        agentId: ROOT_AGENT_ID,
+        parentAgentId: null,
+        model: "test-model",
+        status: "waiting",
+        children: [expectedChild],
+      },
+    ]);
+    await runtime.runRoot("please just answer");
+    const tree = runtime.getAgentTree();
+    expect(tree).toHaveLength(1);
+    expect(tree[0]?.status).toBe("done");
+    expect(tree[0]?.children).toEqual([expectedChild]);
+  });
+
+  test("sendMessageToRoot throws RootNotListeningError before the root agent has started", () => {
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    expect(() => runtime.sendMessageToRoot("hi")).toThrow(RootNotListeningError);
+  });
+
+  test("sendMessageToRoot delivers into the running root agent's next turn", async () => {
+    // A dedicated local mock server (not the shared one above) so this test can capture and
+    // assert on raw request bodies without disturbing the other tests' shared fixture.
+    const requestBodies: unknown[] = [];
+    const dedicatedServer = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const body = await req.json();
+        requestBodies.push(body);
+        const isFirstCall = requestBodies.length === 1;
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: isFirstCall
+            ? [
+                {
+                  type: "tool_use",
+                  id: "tu_1",
+                  name: "Bash",
+                  input: { command: "echo hi", run_in_background: false },
+                },
+              ]
+            : [{ type: "text", text: "done" }],
+          stop_reason: isFirstCall ? "tool_use" : "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+
+    try {
+      const runtime = new AgentRuntime({
+        config: baseConfig({
+          provider: [
+            {
+              name: "mock",
+              type: "anthropic",
+              baseURL: dedicatedServer.url.toString(),
+              apiKey: "sk-test",
+            },
+          ],
+        }),
+        systemPrompt: "sp",
+      });
+      const rootPromise = runtime.runRoot("use-bash-pwd");
+      // runAgentLoop registers its sendMessage sink synchronously at the top of the call
+      // (before its first `await provider.complete(...)` resolves), so this is safe to call
+      // right away — it lands in `pendingMessages` in time for turn 2's request.
+      runtime.sendMessageToRoot("steer this way");
+      const result = await rootPromise;
+      expect(result.success).toBe(true);
+      expect(requestBodies.length).toBe(2);
+      const secondRequest = requestBodies[1] as {
+        messages: { content: { type: string; text?: string }[] }[];
+      };
+      const sawInjected = secondRequest.messages.some((m) =>
+        m.content.some((c) => c.type === "text" && c.text?.includes("steer this way")),
+      );
+      expect(sawInjected).toBe(true);
+    } finally {
+      dedicatedServer.stop(true);
+    }
   });
 });
