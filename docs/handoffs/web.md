@@ -93,6 +93,38 @@ building on whatever component/logic tests you leave here.
 
 _(Append dated entries here. Status supersedes.)_
 
+---
+
+## Round 2 — OPEN — fix the interactive bootstrap deadlock
+
+**Addressed to:** Web (Susan, resumed — read `docs/roster/susan.md` first).
+
+Hedy (E2E), driving a real headless browser, found the same class of bug TUI has: a fresh
+web session can never send its first message. `src/web/client/state.ts` only ever sets
+`rootAgentId`/`selectedAgentId` inside the `agent_spawned` SSE event handler (around line
+90) — but that event only fires once the loop starts, which only happens once someone sends
+the first message, which the UI can't do without knowing the root's id yet. Unlike the TUI,
+the web client **never calls `request_agent_tree` at all**, so there's no path to learn the
+root id pre-start. A real operator cannot start a fresh `dh --web`/`dh --connect --web`
+session at all. Full detail and how it was confirmed live (a direct API call worked around
+it for the rest of Hedy's test coverage) is in `docs/handoffs/e2e.md`'s status log.
+
+**Fix, two parts:**
+1. Issue a `request_agent_tree` command on connect/boot (Server already synthesizes a root
+   node pre-start with `status: "waiting"`, `parentAgentId: null` — confirmed in
+   `e2e/server-protocol.test.ts`).
+2. Handle the response by seeding `rootAgentId`/`selectedAgentId` from the tree entry with
+   `parentAgentId === null` — same principle as the TUI's fix (also open, `docs/handoffs/tui.md`
+   Round 3): treat "the node with no parent" as the root, don't hardcode the id string.
+
+**Gates:** same three commands, plus re-run `bun run e2e` (`e2e/web.test.ts`) once this
+lands.
+
+**Definition of done:** a regression test proves a fresh web session can send its first
+message through the actual UI (composer + click/enter) without any workaround, driven
+purely by the tree-response bootstrap. Append a dated status entry here and update
+`docs/roster/susan.md` when done.
+
 ### 2026-07-15 — Susan (Web domain lead), first round complete
 
 **Identity:** naming myself Susan (she/her, after Susan Kare — designer of the original

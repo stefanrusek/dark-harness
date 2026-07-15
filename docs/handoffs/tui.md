@@ -104,6 +104,43 @@ does it. No token in a URL, ever (same constraint as Web's ADR 0004 amendment).
 proves it (e.g. asserting the `Authorization` header on an injected fetch double). Append a
 dated status entry here when done, and update `docs/roster/mary.md`.
 
+---
+
+## Round 3 — OPEN — fix the interactive bootstrap deadlock
+
+**Addressed to:** TUI (Mary, resumed — read `docs/roster/mary.md` first).
+
+Hedy (E2E), driving a real PTY, found a genuine deadlock blocking every fresh interactive
+session: `src/tui/state.ts`'s `applyTreeResponse` (around line 113) sets `next.tree` from a
+`request_agent_tree` response but never seeds `rootAgentId` from it — `rootAgentId` is only
+ever set in the `agent_spawned` SSE event handler (around line 91). But `agent_spawned` only
+fires once the loop actually starts, which only happens once someone sends the *first*
+message, which nobody can do because `handleRootKey`'s `enter` case (around line 153) checks
+`state.rootAgentId === null` and refuses with "No root agent yet — please wait." A real
+operator cannot start a fresh `dh`/`dh --connect` session through the TUI at all. Full
+detail and how it was confirmed live in `docs/handoffs/e2e.md`'s status log.
+
+**Fix, two parts:**
+1. `applyTreeResponse` should seed `rootAgentId` (when still `null`) from the tree response's
+   root node — the entry with `parentAgentId === null` (Server already synthesizes this
+   pre-start, confirmed in `e2e/server-protocol.test.ts`: `agentId: "agent-root"`,
+   `status: "waiting"`). This avoids hardcoding the literal id string anywhere in this
+   domain — treat "the node with no parent" as the root, not a magic constant.
+2. `request_agent_tree` currently only fires on left-arrow (`handleRootKey`'s `left` case).
+   Fire it automatically on startup too, so `rootAgentId` is populated before the operator
+   ever types anything — check `app.ts`'s init sequence for where to add this (an initial
+   effect alongside whatever `initialState`/`runSseClient` already kick off).
+
+**Gates:** same four commands, plus re-run `bun run e2e` (`e2e/tui.test.ts`) once this
+lands — Hedy's test currently works around the bug by sending the first message via a
+direct API call; once fixed, consider (your call) whether that test should be tightened to
+prove the real UI flow works unaided, though that's E2E's file to touch, not yours.
+
+**Definition of done:** a regression test proves a fresh TUI session can send its first
+message through the actual UI (typing + enter) without the "please wait" message, driven
+purely by the tree-response bootstrap, not a live `agent_spawned` event. Append a dated
+status entry here and update `docs/roster/mary.md` when done.
+
 ### 2026-07-15 — Mary (TUI domain lead), Round 2: bearer-token passthrough
 
 Worked in a fresh worktree off `claude/coordinator-onboarding-kab9ls` (`34e49a1`, after
