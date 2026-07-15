@@ -1303,3 +1303,39 @@ prior round has hit) — 15/19 tests pass; the 4 failures are exactly the tmux-P
 Chromium-launch tests failing for missing-binary reasons, not assertion failures — confirmed
 by reading each failure's own error message (`Executable not found in $PATH: "tmux"`,
 `Failed to launch chromium because executable doesn't exist`).
+
+---
+
+## Round 9 — OPEN — scripts/build.ts silently ignores `--target=<value>` (`=` form)
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+Found by CI/Release round 2 while wiring `release.yml` to use `scripts/build.ts`:
+`parseArgs()`'s hand-rolled arg parser only recognizes `--target <value>` (space-separated,
+exact string match on `"--target"`) — the equally-conventional `--target=<value>` form isn't
+recognized at all, and since there's no "unknown argument" rejection, it's silently
+swallowed: `target` stays `undefined`, and the build silently proceeds for the **host
+architecture** instead of the requested cross-compile target. Confirmed by hand: Nightingale
+caught this only by checking the output binary's actual file format (`file` showed a native
+arm64 Mach-O instead of the requested Linux ELF), not from any error message — the script's
+own printed "stamped build" line looked entirely successful. This is exactly the kind of
+silent-wrong-output failure that's dangerous in a release pipeline.
+
+**Fix:** two changes, both small:
+1. Accept both `--target <value>` and `--target=<value>` forms (same for `--outfile`/
+   `--release-tag` if they don't already — check `src/cli.ts`'s `parseArgs` for the existing
+   convention this project uses elsewhere, if any, and match it for consistency. If `src/
+   cli.ts` only supports the space form too, at minimum add the `=` form to
+   `scripts/build.ts` since release tooling silently building the wrong architecture is a
+   worse failure mode than a CLI flag typo).
+2. Reject unrecognized arguments loudly (throw/exit non-zero with a clear message) rather
+   than silently ignoring them — mirrors `src/cli.ts`'s own `parseArgs`'s "unknown flag"
+   convention, and would have caught this exact bug immediately instead of needing a
+   file-format inspection to discover it.
+
+**Gates:** the standard four (or whatever subset applies — this is `scripts/`, not `src/`,
+per Round 8's own note that it doesn't need the 100% coverage gate the same way, but do add
+a test or a documented manual verification either way). Confirm by hand: `bun scripts/
+build.ts --target=bun-linux-x64 --outfile /tmp/dh-test` actually produces a Linux ELF binary
+(check with `file`), and an actually-unrecognized flag exits non-zero with a clear message.
+Append a dated status entry here and update `docs/roster/grace.md` when done.
