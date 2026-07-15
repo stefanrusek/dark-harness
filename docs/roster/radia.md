@@ -66,3 +66,22 @@ before "fixing" phantom gaps elsewhere in the codebase):
 
 **Deferred, not done:** SSE persistence across restarts, periodic SSE heartbeat/keep-alive
 beyond the one-time `: connected` flush comment, rate limiting/connection caps.
+
+### 2026-07-15 — Round 2: periodic SSE heartbeat
+
+Fixed the deferred item above. `handleSse` now sends a `: ping\n\n` comment every 20s
+(`DEFAULT_HEARTBEAT_INTERVAL_MS` in `src/server/server.ts`) on every open connection, via
+`setInterval`/`clearInterval` in the stream's `start`/`cancel` callbacks — same lifecycle
+the existing live-event `unsubscribe` already used, so no new pattern introduced. Full
+rationale and test approach are in `docs/handoffs/server.md`'s Round 2 status entry; the
+durable bit worth remembering here:
+
+- Added `DhServerOptions.heartbeatIntervalMs` as a test-only override rather than
+  hardcoding the interval — same shape as `eventBufferSize`, keeps `server.ts`'s public
+  surface testable without a fake-clock dependency.
+- Confirmed this is *not* a security-posture or contract change (no new wire type, no new
+  route) — no escalation needed, routine coordinator-level fix.
+- Still deferred: SSE persistence across restarts, rate limiting/connection caps. The three
+  open threads from Round 1 (`AgentLoopHandle` reconciliation, EventSource+bearer-token
+  escalation, Core's `session_ended` confirmation) are unrelated to this round and remain
+  open — check their status before assuming resolved.

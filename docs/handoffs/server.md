@@ -271,3 +271,34 @@ timers).
 open connection over time (using a fake/injectable clock or timer, not a real multi-second
 sleep in the test suite). Append a dated status entry here and update `docs/roster/radia.md`
 when done.
+
+### 2026-07-15 — Round 2 status: DONE
+
+Added a periodic `: ping\n\n` SSE comment to `handleSse` in `src/server/server.ts`, started
+via `setInterval` in the stream's `start()` callback right after the existing one-time
+`: connected` comment and live-event subscription, and cleared via `clearInterval` in the
+stream's `cancel()` callback alongside the existing `unsubscribe?.()` call — so a closed/
+cancelled connection leaves no dangling timer.
+
+- **Interval: 20s** (`DEFAULT_HEARTBEAT_INTERVAL_MS` in `server.ts`), the middle of the
+  15-30s range suggested above — comfortably under common intermediary idle-timeout
+  defaults (many L7 proxies/load balancers default around 60s) without adding meaningful
+  overhead to an otherwise-quiet connection.
+- **No `id:` field** on the ping comment, per the ask — it's invisible to
+  `Last-Event-ID`/`EventBuffer` resume semantics, exactly like the existing `: connected`
+  comment.
+- **Test-only override:** `DhServerOptions.heartbeatIntervalMs` (optional, defaults to
+  `DEFAULT_HEARTBEAT_INTERVAL_MS`) lets tests set a tiny interval (5ms) instead of waiting
+  real seconds for a real timer to fire multiple times — not a fake/mocked clock, but not a
+  multi-second sleep either. New tests in `src/server/server.test.ts`'s
+  `"GET /api/events (SSE)"` block: one reads three raw SSE records off an open connection
+  and asserts they are `: connected`, `: ping`, `: ping` in order (proving the timer fires
+  repeatedly); a second cancels a connection and documents why a leaked timer would show up
+  as a hung test process rather than as a directly observable assertion.
+- Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass;
+  `src/server/server.ts` is 100%/100% funcs/lines. No other domain's files touched.
+
+Open thread carried forward: none new. The three open threads listed in
+`docs/roster/radia.md`'s Round 1 memory (AgentLoopHandle reconciliation, the
+EventSource+bearer-token escalation, and the Core `session_ended` confirmation request)
+are untouched by this round and still need checking against Core's current state.
