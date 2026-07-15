@@ -272,3 +272,54 @@ Open thread for a future round: none blocking on TUI's side. Nice-to-have: check
 Susan's parallel Web-side transcript work coalesces streamed chunks the same way (one turn per
 streamed response, not one per chunk) — the handoff asked for conceptual consistency, not
 identical code.
+
+### 2026-07-15 — Round 7, three Spile tickets: input editing, tree scroll, reconnect backoff
+
+Came back to work three tickets already `status: implementing` from `tracking/`: DH-0026
+(input box cursor movement, bracketed paste, dead keys), DH-0027 (tree view scroll-follows-
+selection), DH-0024 (SSE reconnect backoff/gap indication — shared with Web, TUI side only).
+Full technical detail is in this round's `docs/handoffs/tui.md` entry; durable judgment calls
+worth keeping here:
+
+- **A shared ticket only gets closed by the domain that finishes its whole scope.** DH-0024
+  is explicitly a joint TUI+Web ticket, and Web was fixing her own client in parallel while I
+  worked. I implemented everything achievable TUI-side (backoff+jitter, a reconnect notice)
+  and left the ticket at `status: implementing` rather than closing it — closing a
+  two-domain ticket unilaterally from one domain's completed half would misrepresent the
+  ticket's actual state to whoever reads `tracking/` next. DH-0026 and DH-0027 are
+  single-domain (`src/tui/` only), so those I did close.
+
+- **A ticket depending on another unlanded ticket doesn't mean "do nothing."** DH-0024
+  `depends_on: [DH-0019]` (a server-side gap-signal event that doesn't exist in
+  `src/contracts/events.ts` yet). Rather than treating the whole ticket as blocked, I split
+  what genuinely needs DH-0019 (precisely distinguishing an actual missed-event gap or
+  session restart from a normal resume) from what doesn't (exponential backoff with jitter,
+  and a best-effort "something happened, take a look" notice on any reconnect-after-failure).
+  Documented the honest limitation directly in the field's doc comment (`TuiState
+  .reconnectNotice`) rather than either overclaiming precision or refusing to build the
+  achievable part.
+
+- **Scroll-following the tree selection needed no new state field.** The obvious naive
+  approach is a `scrollTop` in `TuiState`, updated imperatively as selection moves. Instead
+  `renderTree` computes a scroll window purely from `selectedIndex` each frame (centered,
+  clamped to valid range) — consistent with every prior round's insistence that `render.ts`
+  stay a pure `TuiState -> string[]` function with no hidden view state of its own. Worth
+  remembering as the default instinct next time a "scroll position" feels like it wants
+  state: check whether it's actually a pure function of what's already there first.
+
+- **Cursor movement changed real reducer behavior, not just added new keys** — left-arrow's
+  old "always open the tree" behavior only holds when `input === ""` now. This broke a few
+  existing tests that manually seeded `state.input` without a matching `inputCursor` (e.g.
+  the old "backspace removes the last character" test implicitly assumed the cursor was
+  always at the end). Updated those specific tests to set `inputCursor` explicitly to match
+  realistic post-typing state, rather than leaving cursor-desync test setups that would have
+  papered over the real behavior change.
+
+- **Worktree was stale again — third round in a row (see Rounds 5, 6).** Same fix as Round 6:
+  `git fetch` + `git merge --ff-only` to the tracked branch tip. This is now a consistent
+  enough pattern that it's worth flagging up to the coordinator as a provisioning issue
+  rather than just re-fixing it silently each time, if it keeps happening.
+
+Open thread for a future round: DH-0024 needs a revisit once DH-0019's server-side gap event
+lands — swap the current best-effort "any reconnect after a failure" notice for one gated on
+an actual detected gap or session restart. Not blocking anything else.

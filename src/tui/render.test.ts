@@ -107,6 +107,21 @@ describe("renderFrame", () => {
     expect(rows).toHaveLength(15);
   });
 
+  test("header shows the reconnect notice when set, regardless of the current view (DH-0024)", () => {
+    const state = baseState({
+      reconnectNotice: "Reconnected — history may be incomplete.",
+      view: { kind: "tree", selectedIndex: 0 },
+      tree: [],
+    });
+    const rows = renderFrame(state);
+    expect(rows[0]).toContain("Reconnected — history may be incomplete.");
+  });
+
+  test("header omits the reconnect notice when unset", () => {
+    const rows = renderFrame(baseState());
+    expect(rows[0]).not.toContain("Reconnected");
+  });
+
   test("root view shows a waiting placeholder before any root agent is known", () => {
     const rows = renderFrame(baseState());
     expect(rows.join("\n")).toContain("Waiting for root agent to start");
@@ -115,16 +130,28 @@ describe("renderFrame", () => {
   test("root view renders the root agent's output and an input line", () => {
     let state = baseState();
     state.agents.set("root", agentInfo({ transcript: [assistantTurn("hello world")] }));
-    state = { ...state, rootAgentId: "root", input: "typing" };
+    state = { ...state, rootAgentId: "root", input: "typing", inputCursor: 6 };
     const rows = renderFrame(state);
     expect(rows.join("\n")).toContain("hello world");
     expect(rows.some((row) => row.includes("> typing"))).toBe(true);
   });
 
-  test("root view's input line ends with a visible cursor marker", () => {
-    const state = baseState({ input: "typing" });
+  test("root view's input line ends with a visible cursor marker when the cursor is at the end", () => {
+    const state = baseState({ input: "typing", inputCursor: 6 });
     const rows = renderFrame(state);
     expect(rows.some((row) => row.endsWith(`> typing${CURSOR_MARKER}`))).toBe(true);
+  });
+
+  test("root view's input line renders the cursor marker mid-string when the cursor is not at the end", () => {
+    const state = baseState({ input: "typing", inputCursor: 2 });
+    const rows = renderFrame(state);
+    expect(rows.some((row) => row.endsWith(`> ty${CURSOR_MARKER}ping`))).toBe(true);
+  });
+
+  test("an embedded newline from a paste renders as a visible glyph on the one-line input display", () => {
+    const state = baseState({ input: "a\nb", inputCursor: 3 });
+    const rows = renderFrame(state);
+    expect(rows.some((row) => row.endsWith(`> a⏎b${CURSOR_MARKER}`))).toBe(true);
   });
 
   test("root view shows the cursor marker even with empty input", () => {
@@ -180,6 +207,46 @@ describe("renderFrame", () => {
     const state = baseState({ view: { kind: "tree", selectedIndex: 0 }, tree });
     const rows = renderFrame(state);
     expect(rows.some((row) => row.includes("a1 (sonnet)"))).toBe(true);
+  });
+
+  test("tree view scrolls to keep a selection below the fold visible (DH-0027)", () => {
+    // 10 total rows: HEADER_ROWS(2) + footer(1) leaves 7 content rows for the tree.
+    const tree = Array.from({ length: 20 }, (_, i) => treeNode(`agent-${i}`));
+    const state = baseState({
+      size: { rows: 10, cols: 40 },
+      view: { kind: "tree", selectedIndex: 19 },
+      tree,
+    });
+    const rows = renderFrame(state);
+    // The old bottom-anchored `tailLines` behavior would have also shown the last entry, so
+    // assert the marker is actually visible, not just present somewhere by coincidence.
+    expect(rows.some((row) => row.includes("> ") && row.includes("agent-19"))).toBe(true);
+  });
+
+  test("tree view scrolls up to follow a selection moved back above the fold (DH-0027)", () => {
+    const tree = Array.from({ length: 20 }, (_, i) => treeNode(`agent-${i}`));
+    const state = baseState({
+      size: { rows: 10, cols: 40 },
+      view: { kind: "tree", selectedIndex: 0 },
+      tree,
+    });
+    const rows = renderFrame(state);
+    // A pure bottom-anchored view (the pre-fix behavior) would never show entry 0 once the
+    // tree is taller than the viewport — this is exactly the bug DH-0027 reports.
+    expect(rows.some((row) => row.includes("> ") && row.includes("agent-0 "))).toBe(true);
+  });
+
+  test("tree view shows the full tree without scrolling when it fits the viewport", () => {
+    const tree = [treeNode("a"), treeNode("b")];
+    const state = baseState({
+      size: { rows: 10, cols: 40 },
+      view: { kind: "tree", selectedIndex: 0 },
+      tree,
+    });
+    const rows = renderFrame(state);
+    const joined = rows.join("\n");
+    expect(joined).toContain("a (sonnet)");
+    expect(joined).toContain("b (sonnet)");
   });
 
   test("agent view shows a placeholder when the agent has no output yet", () => {
