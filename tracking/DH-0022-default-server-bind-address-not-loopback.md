@@ -1,11 +1,11 @@
 ---
 spile: ticket
 id: DH-0022
-type: bug
-status: draft
+type: feature
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: []
 created: 2026-07-15
 relations:
   depends_on: []
@@ -15,52 +15,48 @@ implementation:
   - repo: dark-harness
 ---
 
-# DH-0022: `Bun.serve()` never sets `hostname`, so `dh --server` defaults to binding all interfaces, not loopback
+# DH-0022: Add a `dh.json` field to configure the server/web bind address (default unchanged)
 
 ## Summary
 
 Neither `src/server/server.ts` nor `src/web/server.ts` ever passes a `hostname` option to
-`Bun.serve`, so both default to Bun's own default bind (`0.0.0.0`, all interfaces) rather than
-`127.0.0.1`. Given ADR 0004's plaintext-by-default, no-auth posture and its explicit framing that
-"air-gapping remains the primary posture," a server that silently listens on every network
-interface by default materially widens the real-world blast radius of that documented posture: any
-device on the same network segment can reach an unauthenticated `dh --server` instance, not just
-the local machine. This isn't itself a violation of the plaintext/no-auth ADR (which is about the
-wire, not the interface) but interacts with it in a way ADR 0004 never actually discusses or pins
-down, and no test in `server.test.ts` asserts/pins the bind address. Independently confirmed by
-both the Server domain sweep and the security audit as one of the highest-impact findings.
+`Bun.serve`, so both default to Bun's own default bind (`0.0.0.0`, all interfaces). Owner
+decision (2026-07-15): **the default stays as-is** — `dh` most commonly runs inside a
+container behind a firewall, where binding all interfaces is exactly what's needed for the
+container's network to reach it, and defaulting to loopback would break that common case.
+What's actually needed is an **opt-in `dh.json` config field** for operators who want to
+restrict the bind address (e.g. running directly on a shared host, not in a container) —
+config, not a CLI flag, per the owner's preference.
 
 ## User Stories
 
-### As an operator running `dh --server` on a shared network, I want the default bind to be loopback-only unless I explicitly opt into wider exposure
+### As an operator who wants to restrict `dh --server`/the web UI to loopback (or a specific interface), I want a `dh.json` field to configure that
 
-- Given no explicit `--host`/config override, when `dh --server` starts, then it binds to
-  `127.0.0.1`/`localhost` by default.
-- Given an operator genuinely needs LAN/remote exposure (e.g. for `--connect` from another host),
-  when they want that, then an explicit flag/config opts in, and the choice is documented.
+- Given a `security.hostname` field (or similarly-named — implementer's call, follow existing
+  `SecurityConfig` naming conventions) set in `dh.json`, when `dh --server`/the web-serving
+  process starts, then `Bun.serve` binds to that address instead of the platform default.
+- Given the field is unset (the common case), when either process starts, then behavior is
+  **byte-for-byte unchanged** from today — still binds all interfaces, no regression for the
+  container deployment model.
 
 ## Functional Requirements
 
-- Given the fix, when a test is added, then it pins the default bind address so a future
-  regression is caught.
-
-## Risks
-
-- This is a security-posture-adjacent change (default network exposure). Per CLAUDE.md §6 trigger
-  4, this should get architect sign-off before implementation, not be decided unilaterally by a
-  domain lead.
+- Given the fix, when a test is added, then it pins both the unset-field (default, unchanged)
+  behavior and the configured-field (custom bind address honored) behavior.
 
 ## Notes
 
 > [!NOTE]
-> Source: Server domain sweep finding #18 (explicitly flagged as "the single most impactful
-> finding in this sweep... should likely be escalated") and Security audit finding #4 (same root
-> cause, independently discovered). Both sweeps agree this warrants an architect decision, not a
-> routine fix.
+> Source: Server domain sweep finding #18 and Security audit finding #4 (same root cause,
+> independently discovered) — originally proposed changing the *default* to loopback. Owner
+> reviewed and chose config-opt-in instead, keeping the current default, given the canonical
+> deployment (containerized, behind a firewall) needs all-interfaces binding to work at all.
 
 > [!NOTE]
-> Reconciled with DH-0023 (2026-07-15): that ticket's token-leak concern (`/api/config` handing
-> the bearer token to any caller of the web port) is the *same root cause* as this ticket, not
-> an independent issue — `src/web/server.ts`'s `Bun.serve()` has the identical missing-`hostname`
-> bug. Fixing this ticket's default bind (loopback) resolves that half of DH-0023 too; DH-0023
-> was trimmed to just its genuinely independent CORS/Host-header/CSP/clickjacking scope.
+> Consequence for DH-0023, made explicit: since the default bind is **not** changing, that
+> ticket's original token-leak-via-`/api/config` concern is only mitigated for operators who
+> *affirmatively* set the new `security.hostname` field to something loopback-restricted —
+> it does not resolve automatically the way it would have under the originally-proposed
+> default change. The owner's reasoning (containerized/firewalled deployment is the common
+> case) already accounts for this; documented here for anyone revisiting this later rather
+> than silently relying on the earlier (now-superseded) reconciliation note.
