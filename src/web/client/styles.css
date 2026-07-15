@@ -1,0 +1,510 @@
+/*
+  Dark Harness web UI — visual design.
+
+  Design intent (see docs/handoffs/web.md status log for the full rationale):
+  - Dark-first "factory floor at night" palette: near-black panels, one warm amber accent
+    (indicator-light warmth), cool blue for "running" so streaming agents read as active
+    without the alarm connotation red would carry.
+  - Status is never color-only: each status also gets a distinct label and (for "running") a
+    motion cue, so the UI holds up for color-blind users and works fine in a screenshot.
+  - Motion is restrained and purposeful: a soft pulse on running dots, a fade-in for newly
+    spawned agents, smooth output auto-scroll — nothing that fights readability of a wall of
+    streaming text.
+  - Light theme mirrors the same structure via `prefers-color-scheme`, since operators will
+    run this on all kinds of setups.
+*/
+
+:root {
+  color-scheme: dark;
+  --bg: #0b0d12;
+  --panel: #12151c;
+  --panel-raised: #171b24;
+  --border: #232838;
+  --border-strong: #2f3648;
+  --text: #e7e9ee;
+  --text-dim: #8b93a7;
+  --text-faint: #5b6478;
+  --accent: #f5a524;
+  --accent-contrast: #17130a;
+  --danger: #f2545b;
+  --danger-contrast: #2a0d0f;
+
+  --status-running: #4f8cff;
+  --status-waiting: #f5a524;
+  --status-done: #35c469;
+  --status-failed: #f2545b;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --panel-raised: #fbfbfd;
+    --border: #e1e4ea;
+    --border-strong: #ccd1dc;
+    --text: #1a1d24;
+    --text-dim: #5b6478;
+    --text-faint: #8b93a7;
+    --accent: #b5730a;
+    --accent-contrast: #ffffff;
+    --danger: #c8323a;
+    --danger-contrast: #ffffff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100vh;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- App shell ---------- */
+
+.dh-app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+}
+
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.brand {
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-size: 15px;
+}
+
+.brand::before {
+  content: "◆ ";
+  color: var(--accent);
+}
+
+.main-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+/* ---------- Connection pill ---------- */
+
+.connection-pill {
+  margin: 0 var(--space-4) var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: 999px;
+  font-size: 12px;
+  width: fit-content;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.connection-pill::before {
+  content: "●";
+  margin-right: var(--space-1);
+}
+
+.connection-open {
+  color: var(--status-done);
+  border-color: var(--status-done);
+}
+
+.connection-connecting,
+.connection-reconnecting {
+  color: var(--status-waiting);
+  border-color: var(--status-waiting);
+}
+
+.connection-connecting::before,
+.connection-reconnecting::before {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.connection-closed {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ---------- Agent tree ---------- */
+
+.sidebar-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+.agent-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-dim);
+  animation: fade-in-up 0.25s var(--ease);
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.agent-row:hover {
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.agent-row.selected {
+  background: var(--panel-raised);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.agent-row.root .agent-label {
+  font-weight: 600;
+}
+
+.agent-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tokens {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ---------- Status dots / badges ---------- */
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+
+.status-dot.status-running {
+  background: var(--status-running);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.status-dot.status-waiting {
+  background: var(--status-waiting);
+}
+
+.status-dot.status-done {
+  background: var(--status-done);
+}
+
+.status-dot.status-failed {
+  background: var(--status-failed);
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.status-badge.status-running {
+  color: var(--status-running);
+}
+
+.status-badge.status-waiting {
+  color: var(--status-waiting);
+}
+
+.status-badge.status-done {
+  color: var(--status-done);
+}
+
+.status-badge.status-failed {
+  color: var(--status-failed);
+}
+
+/* ---------- Session summary ---------- */
+
+.session-summary {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.session-stats {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.session-banner {
+  font-size: 12px;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  animation: fade-in-up 0.3s var(--ease);
+}
+
+.session-banner-ok {
+  background: color-mix(in srgb, var(--status-done) 16%, transparent);
+  color: var(--status-done);
+}
+
+.session-banner-fail {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+
+/* ---------- Agent header ---------- */
+
+.agent-header {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.agent-header-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.agent-header-stats {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.agent-header-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.empty-state {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: var(--panel-raised);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: transform 0.1s var(--ease), background 0.15s var(--ease), border-color 0.15s
+    var(--ease);
+}
+
+.btn:hover {
+  border-color: var(--text-faint);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+.btn-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: transparent;
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* ---------- Output pane ---------- */
+
+.output-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  scroll-behavior: smooth;
+}
+
+.agent-output {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.jump-to-latest {
+  position: absolute;
+  bottom: 88px;
+  right: var(--space-5);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: none;
+  border-radius: 999px;
+  padding: var(--space-2) var(--space-4);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.3);
+  animation: fade-in-up 0.2s var(--ease);
+}
+
+/* ---------- Composer ---------- */
+
+.composer-region {
+  border-top: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4);
+}
+
+.composer {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.composer-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 40px;
+  max-height: 200px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: var(--space-2) var(--space-3);
+  font-family: inherit;
+  font-size: 13px;
+  transition: border-color 0.15s var(--ease);
+}
+
+.composer-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ---------- Error banner ---------- */
+
+.error-banner {
+  position: absolute;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--danger-contrast);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: 12px;
+  animation: fade-in-up 0.2s var(--ease);
+}
+
+/* ---------- Motion ---------- */
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

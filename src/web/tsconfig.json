@@ -1,0 +1,22 @@
+{
+  // Web's own TS program, split out from the root tsconfig.json rather than adding "DOM" to
+  // its shared `lib` array. Reason: this project's root program mixes `@types/bun` (needed
+  // by every domain, including src/web's own server.ts/*.test.ts, which use Bun.serve etc.)
+  // with the browser DOM lib (needed only by src/web's client code — Document, HTMLElement,
+  // ReadableStreamDefaultController, ...). Loading both in *one* TS program produces
+  // overlapping global declarations (e.g. `Response`/`BodyInit`) that silently change type
+  // resolution project-wide — concretely, it broke a typecheck-clean call in
+  // src/server/server.ts (outside this domain's ownership) that passes a `Uint8Array` as a
+  // `BodyInit`. Rather than editing another domain's file to work around a side effect of a
+  // shared config change, this file gives src/web its own isolated `tsc` program with DOM
+  // lib enabled, so the root program (everyone else) never sees DOM types at all.
+  //
+  // `bun run typecheck` (package.json) runs both programs — the root one (excludes
+  // src/web — see its "exclude") and this one — so the gate still covers every file.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["**/*"],
+  "exclude": []
+}

@@ -92,3 +92,134 @@ building on whatever component/logic tests you leave here.
 ## Status log
 
 _(Append dated entries here. Status supersedes.)_
+
+### 2026-07-15 — Susan (Web domain lead), first round complete
+
+**Identity:** naming myself Susan (she/her, after Susan Kare — designer of the original
+Macintosh's icons/UI, a fitting namesake for the one domain where "make it a joy to use" is
+an explicit requirement), persistent for this build. Added to `CLAUDE.md` §7's roster
+table; memory file at `docs/roster/susan.md`.
+
+**Picked up mid-task.** A prior (unnamed) instance of this role had already built
+essentially the complete `src/web/` scope as uncommitted, untracked work in this worktree —
+protocol/route definitions, the full client (state reducer, SSE client, command builders,
+DOM rendering, download handling), the static bundle (`index.html`/`styles.css`), and
+`serveWebUi`. It was stopped before it could report, name itself, or reconcile with
+in-flight decisions from other domains. I did not start over — I read all of it, then
+finished/reconciled it. Full credit for the architecture and the "joy to use" visual design
+below belongs to that instance; my own work was the EventSource/auth reconciliation, a
+state-reducer bug fix, closing coverage gaps, and a cross-domain typecheck fix.
+
+**The one substantive rework: EventSource → fetch()-based SSE.** The inherited code used
+the browser's native `EventSource`, with the bearer token carried as a `?token=` query
+parameter (documented inline as a cross-domain assumption pending Server's route
+confirmation). By the time I read Radia's (Server) status log, I could see she'd already
+flagged this exact interoperability gap — `EventSource` cannot set the `Authorization`
+header, and she explicitly declined to unilaterally add a query-string-token fallback
+(security-posture-adjacent, CLAUDE.md §6 trigger 4) — and escalated three options instead.
+I independently reached the same option she'd flagged as cleanest (a `fetch()`-based SSE
+reader, real `Authorization` header, no token ever in a URL) and was mid-rewrite when the
+coordinator's message arrived confirming this is now locked: a 2026-07-15 amendment to ADR
+0004, decided by the architect-on-call. So: rewrote `client/sse.ts` from a thin
+`EventSource` wrapper to a `fetch()`-based reader — `SseStreamParser` (incremental
+`id:`/`data:`/comment-line/blank-line-terminated parsing, CRLF-tolerant, joins multi-line
+`data:` per spec even though our own server never emits it) plus `connectEvents` (manual
+reconnect with a fixed backoff, resending `Last-Event-ID` from the highest id seen,
+`Authorization: Bearer <token>` header when configured). I also fixed `protocol.ts`:
+`COMMAND_PATH` was `/api/command` (singular) — Radia's real server route is
+`/api/commands` (plural) — and dropped the `?token=`/`?lastEventId=` query-param plumbing
+entirely now that both travel as headers. I read Mary's (TUI) independently-built
+`src/tui/sse-parser.ts` + `sse-client.ts` for comparison (same problem, same fetch-based
+solution, arrived at independently) — **judged extracting a shared parser into
+`src/contracts/` as not worth it this round**: it's a ~40-line parser, would need architect
+sign-off as a contracts change (CLAUDE.md §6 trigger 2), and TUI has already shipped/tested
+its own copy. Noting it as a real opportunity for a later cleanup pass, not silently
+dropping it.
+
+**A real bug found and fixed in the inherited code:** `client/state.ts`'s `applyEvent`
+reducer had an exhaustiveness check (`const _exhaustive: never = event`) in its `default`
+switch case that then `return`ed `_exhaustive` — which, at runtime, is just the raw
+unrecognized event object, not the correctly-computed next state. A forward-incompatible
+server build sending an event type this client predates would have had the reducer replace
+`WebState` with an arbitrary event payload, corrupting the whole UI. Fixed to return the
+already-computed `next` (bumps `lastEventId`, otherwise unchanged) and added a regression
+test (`state.test.ts`: "tolerates an event type this client build doesn't recognize").
+
+**A cross-domain typecheck regression I found and fixed without touching another domain's
+files.** The inherited `tsconfig.json` diff added `"DOM"`/`"DOM.Iterable"` to the shared
+root `lib` array (needed for `Document`/`HTMLElement`/etc. in `src/web`'s client code).
+After merging in the other domains' landed work, `bun run typecheck` failed in
+`src/server/server.ts` (outside my ownership) — `new Response(result.body, ...)` no longer
+typechecked, because loading DOM's `BodyInit` into the *same* TS program as `bun-types`
+changes global type resolution project-wide, not just for the files that need it. Rather
+than editing Radia's file to work around a side effect of my own config change, I gave
+`src/web` its **own isolated TS program**: reverted the root `tsconfig.json`'s `lib` back
+to `["ESNext"]` and added `"exclude": ["src/web"]`; added `src/web/tsconfig.json`
+(`extends` the root config, adds the DOM libs, `include: ["**/*"]`, explicit
+`"exclude": []` to cancel the inherited exclude). `package.json`'s `typecheck` script is
+now `tsc --noEmit && tsc --noEmit -p src/web` — both programs run, gate coverage is
+unchanged, but DOM types no longer leak into anyone else's compilation. Verified: with this
+split, `bun run typecheck` is clean project-wide (I ran it against the full merged tree,
+all domains, 373 tests across 30 files still green). Flagging this prominently since it
+touches shared root config files (`tsconfig.json`, `package.json`) that aren't listed under
+any single owner in CLAUDE.md §3 — sanity-check welcome, but I judged it as a routine
+"my gate broke someone else's file, so fix the shared config instead of their file" call,
+not an invariant/ADR-class change (§6 doesn't list build tooling as a trigger).
+
+**Route contract reconciled against Server's real implementation** (`docs/handoffs/server.md`
+status log): `GET /api/events`, `POST /api/commands`, both authenticated via a real
+`Authorization: Bearer <token>` header (never a query string). Confirmed via a real
+`Bun.serve` smoke test (not just unit tests) that `serveWebUi` actually boots, bundles
+`main.ts`/`styles.css` through Bun's native HTML-import bundler, and serves `/dh-config.json`
+correctly.
+
+**Gates: all green, project-wide.**
+
+```
+bun run typecheck      # tsc --noEmit && tsc --noEmit -p src/web — clean, both programs
+bun run lint            # biome check . — clean
+bun run test:coverage   # 100% funcs / 100% lines on every file in src/web/, 141 web tests
+                         # (373 across the whole merged tree)
+```
+
+Coverage note: reached 100% funcs/lines on the *logic* layer including DOM-driving code
+(`render.ts`, `app.ts`, `download.ts`) via `happy-dom` (`client/test-dom.ts`) rather than
+exempting pure-rendering markup as the handoff's gate note allows — the test setup could
+drive a DOM, so I held it to the same bar. Two more of Radia's documented Bun
+coverage-instrumentation quirks recurred here (see `docs/roster/radia.md`): a class with
+only field initializers showed 0/1 function coverage on its synthetic constructor
+(`SseStreamParser` — fixed with an explicit empty constructor + `biome-ignore`); and several
+"function not hit" gaps turned out to be real (arrow callbacks/catch handlers genuinely
+never exercised — jump-to-latest click, output-pane scroll, failed stop/download-log/
+download-bundle commands), not instrumentation noise — added targeted tests for each rather
+than assuming they were spurious.
+
+**Design note — "joy to use" choices** (from the inherited work, reviewed and endorsed,
+not changed): dark-first "factory floor at night" palette (near-black panels, warm amber
+accent, cool blue for "running" so streaming agents read as active without red's alarm
+connotation), status conveyed via label + shape/motion as well as color (color-blind-safe,
+holds up in a screenshot), restrained purposeful motion only (pulse on running dots,
+fade-in on newly spawned agents, smooth auto-scroll with a "jump to latest" affordance that
+appears only once the user has scrolled away — never fights readability of a wall of
+streaming text), `prefers-reduced-motion` respected, light theme mirrors the same structure
+via `prefers-color-scheme`. I judged this well-executed and didn't second-guess it further
+this round; see `src/web/client/styles.css`'s header comment for the fuller rationale
+in-place.
+
+**Deferred, not done:**
+- Extracting a shared SSE parser between `src/web` and `src/tui` (see above — judged not
+  worth it this round, flagged for a later cleanup pass).
+- No exponential backoff on SSE reconnect (fixed 2s delay) — fine for a local/air-gapped
+  deployment target, worth revisiting if this is ever used over a flakier link.
+- Real browser-driven e2e (headless browser against a real compiled binary) is explicitly
+  the E2E domain's job per this handoff; what's here is `happy-dom` + fake `fetch`/streams
+  at the unit/integration level, plus one manual `Bun.serve` smoke test I ran by hand (not
+  part of the automated gate) to confirm the real bundle boots.
+
+**Cross-domain requests / flags for the coordinator:**
+1. Please sanity-check the `tsconfig.json`/`package.json` split above — it's the one change
+   in this round that reaches outside `src/web/`'s own files (though not outside its
+   *effects*: it exists purely to stop `src/web`'s own needs from leaking into other
+   domains' compilation).
+2. Route/auth reconciliation against Server's actual implementation (`/api/commands`
+   plural, header-based auth) is done on my side; no outstanding ask there.
