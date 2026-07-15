@@ -38,3 +38,26 @@ way) — check whether Core resolved this before assuming it's still open.
 
 **Deferred, not done:** logo/wordmark, skills beyond `cli-tools`, a generated (vs.
 hand-maintained) `dh.json` reference in the README.
+
+### 2026-07-15 — Round 2: tool-call fire-and-forget discipline point
+
+Added a sixth "Working discipline" bullet to `BASE_PROMPT` in `src/prompt/system-prompt.ts`:
+**a tool call is never fire-and-forget** — named `Monitor`/`TaskOutput` explicitly as the
+required follow-up action, and stated the failure mode negatively ("ending your turn right
+after... is a failure") to match the exact behavior real testing observed in small/local
+models (starting a backgrounded Bash call, then ending the turn without ever checking the
+result). Full text and rationale logged in `docs/handoffs/prompt-docs.md` Round 2 status
+entry.
+
+**Judgment call:** kept the bullet in the same terse, bolded-phrase style as the other five
+rather than a longer explainer — the handoff was explicit that burying this in a long
+paragraph risks a small model missing it. Named the tools by name so the model has a
+concrete action, not just an abstract obligation.
+
+**Honesty note carried forward:** this is a prompt-text change, not a live-verified
+behavioral fix — no way to test against an actual local model session from this
+environment. Worth revisiting if someone later runs the same LM Studio test setup against
+the updated prompt and can report back whether the polling behavior actually improved.
+
+Gates (`typecheck`, `lint`, `test:coverage`) all pass, 100% coverage retained on
+`src/prompt/system-prompt.ts`.

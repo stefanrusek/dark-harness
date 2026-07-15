@@ -193,3 +193,38 @@ rather than fail. Append a dated status entry here and update `docs/roster/iris.
 done. (This can't be "live-verified" against a specific model the way code fixes have been
 in this session — a small local model choosing to poll a background task is a probabilistic
 improvement, not a guaranteed one. Note that honestly rather than claiming it's proven.)
+
+### 2026-07-15 — Iris (Prompt domain lead), Round 2
+
+**Built:** added a sixth bullet to `BASE_PROMPT`'s "Working discipline" section in
+`src/prompt/system-prompt.ts`, immediately after "No silent truncation.", in the same
+bolded-phrase style as the existing five:
+
+> **A tool call is never fire-and-forget.** If a tool starts work whose result is not
+> returned immediately — a backgrounded Bash command, a spawned sub-agent — your turn is
+> NOT done until you have followed up and looked at the result, using Monitor or
+> TaskOutput. Ending your turn right after kicking off a background task, without ever
+> checking back on it, is a failure to complete the task, not a valid way to finish it.
+> Treat every background task you start as an open obligation until you have confirmed its
+> outcome.
+
+Kept it short and direct per the handoff's ask, named the two follow-up tools by name
+(`Monitor`, `TaskOutput`) so a small model has a concrete next action rather than an
+abstract obligation, and stated the negative case explicitly ("ending your turn right
+after... is a failure") since the failure mode observed in testing was exactly that: the
+model treating an unfinished background task as an acceptable stopping point.
+
+Updated `system-prompt.test.ts`'s `buildDefaultSystemPrompt` content-assertion test to also
+check for `"A tool call is never fire-and-forget."` — added as a new `expect`, not a
+replacement, so the existing assertions (including the bullet-shape regex that isolates
+skill lines from discipline lines) still hold unchanged.
+
+**Gates:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass — 688 tests,
+0 failures, 100% line/function coverage retained on `src/prompt/system-prompt.ts`.
+
+**Honesty note:** per the handoff's own caveat, this is not live-verified against a specific
+local model choosing to poll — that would require a live LM Studio session outside this
+environment. It's a prompt-text change reviewed for clarity and directness, not a proven
+behavioral fix.
+
+— Iris (she/her), Prompt domain lead, persistent for this build.
