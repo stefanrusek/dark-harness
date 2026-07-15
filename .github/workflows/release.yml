@@ -55,7 +55,14 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Compile ${{ matrix.target }}
-        run: bun build ./src/cli.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
+        # scripts/build.ts's arg parser only accepts "--target <value>" (space-separated,
+        # two argv entries) — "--target=<value>" is silently ignored (falls back to a
+        # host-arch build). Verified locally: the "=" form produced a native arm64 Mach-O
+        # binary even when asked for bun-linux-x64. Do not "simplify" this back to "=".
+        run: >-
+          bun scripts/build.ts --target ${{ matrix.target }}
+          --outfile dist/${{ matrix.artifact }}
+          --release-tag "${{ github.ref_name }}"
 
       - name: Checksum
         working-directory: dist

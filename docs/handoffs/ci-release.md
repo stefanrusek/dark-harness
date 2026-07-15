@@ -300,3 +300,72 @@ what you can locally: run `bun scripts/build.ts --target=<a-real-target> --outfi
 `--version` output shows `v9.9.9-test` as the release tag, mirroring exactly what the
 workflow will invoke. Append a dated status entry here and update
 `docs/roster/nightingale.md` when done.
+
+---
+
+## Round 2 — CLOSED — 2026-07-15 (Nightingale)
+
+Done, with one correction to the fix as specified above: **the `=` form of the flag
+(`--target=<value>`) does not work with `scripts/build.ts`.** Its hand-rolled `parseArgs`
+only recognizes `--target` as a standalone argv token followed by a separate value token
+(`if (arg === "--target") { i += 1; target = argv[i]; }`) — `"--target=bun-linux-x64"` never
+matches that exact-equality check, so `target` stays `undefined` and bun silently falls back
+to a host-arch build. I caught this only by actually running the command locally and
+checking the output binary's format (`file`), not by reading the script: my first attempt
+(`bun scripts/build.ts --target=bun-linux-x64 --outfile /tmp/dh-test ...`) on this
+arm64 Mac produced a native **Mach-O arm64** executable instead of the requested Linux ELF
+x86-64 — it "succeeded" (exit 0, plausible-looking log line) with no error, which is exactly
+the kind of silent failure that would have shipped 5 identical host-arch-labeled release
+artifacts had I only checked exit codes. Re-running with the space-separated form
+(`--target bun-linux-x64`) produced the correct `ELF 64-bit LSB executable, x86-64 ...`
+binary. Filed this as a one-line comment directly above the `run:` step in `release.yml` so
+nobody "simplifies" it back to `=` later; did not touch `scripts/build.ts` itself since
+`scripts/` is Core-owned (CLAUDE.md §3) and the space-separated form is a fully valid,
+unambiguous way to invoke the script as written — this is a call-site fix, not a script bug
+fix, so no cross-domain request is needed. Flagging here anyway in case Core wants to make
+`parseArgs` accept `=` too for ergonomics; not blocking.
+
+**What changed:** `.github/workflows/release.yml`'s `Compile ${{ matrix.target }}` step now
+runs `bun scripts/build.ts --target ${{ matrix.target }} --outfile dist/${{ matrix.artifact
+}} --release-tag "${{ github.ref_name }}"` instead of calling `bun build --compile`
+directly, so every release artifact gets real build-identity stamping (git SHA, dirty flag,
+release tag) per ADR 0005's amendment.
+
+**Verification performed (this worktree, after fast-forwarding onto the coordinator branch
+tip to pick up Core's round 8 — my branch was several commits stale, see
+`docs/roster/nightingale.md` for that reconciliation):**
+- `bun run typecheck` and `bun run lint`: both pass clean (workflow-YAML-only change,
+  `src/` untouched).
+- `python3 -c "import yaml; yaml.safe_load(...)"` (via `pip install --break-system-packages
+  pyyaml`, since a bare `pip3 install pyyaml` hit an externally-managed-environment error in
+  this sandbox) on `release.yml`: parses clean. `actionlint` was not available in this
+  worktree (no Go module cache present here, unlike the round-1 session) — recommend a spot
+  check with it before the first real release if it's available in whichever environment
+  runs that check next.
+- `bun scripts/build.ts --target bun-linux-x64 --outfile /tmp/dh-test --release-tag
+  v9.9.9-test`: exit 0, log line `scripts/build.ts: stamped build /tmp/dh-test
+  (037952c570ae, dirty, v9.9.9-test)`, `file /tmp/dh-test` reports a genuine Linux
+  x86-64 ELF binary (bun downloaded the cross toolchain on demand, matching the existing
+  workflow comment's claim).
+- `bun scripts/build.ts --outfile /tmp/dh-test-host --release-tag v9.9.9-test` (host target,
+  so it actually runs here): `/tmp/dh-test-host --version` printed `dh 0.1.0
+  (037952c570aef8ceae8db0ff46102dd5ceaed6d4 dirty, v9.9.9-test)` — confirms the release tag
+  and git SHA both make it end-to-end into the running binary's `--version` output, which is
+  the load-bearing claim of this round.
+- Confirmed the shallow-checkout claim rather than assuming it: `git clone --depth 1
+  --branch <this-worktree-branch> file:///...` (forcing a real shallow clone, since Bun/git
+  silently ignores `--depth` on same-filesystem local clones) — `git rev-parse HEAD` and
+  `git status --porcelain` both work fine against the resulting single-commit shallow repo,
+  matching what `actions/checkout@v4`'s default (no `fetch-depth: 0`) produces on the
+  `build` job. No `fetch-depth` change needed, as the round-2 note suspected.
+- `git diff --stat` against the fast-forwarded base shows exactly one file changed
+  (`.github/workflows/release.yml`, +8/-1) — no accidental scope creep from the
+  fast-forward merge.
+
+**Open threads unchanged from round 1** (still true, re-checked file-level, not re-verified
+line-by-line this round): coverage-completeness gate still red pending Contracts-domain
+fix (not mine to make); action version pins still unverified live; `NPM_TOKEN` secret still
+absent; npm package still linux-x64-only. See `docs/roster/nightingale.md` round-1 entry for
+detail on each.
+
+— Nightingale (she/her), CI/Release domain lead
