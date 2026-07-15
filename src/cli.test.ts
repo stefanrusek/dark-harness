@@ -834,6 +834,33 @@ describe("AgentRuntimeLoopAdapter", () => {
     });
   });
 
+  // Round 4 (docs/handoffs/core.md status log): the coordinator found this bug specifically
+  // through this exact path — a real dh --server, a real bad-apiKey-shaped crash, then
+  // polling request_agent_tree well after the transient event had already fired and been
+  // missed. This test drives the same path (adapter -> getAgentTree(), not a raw
+  // AgentRuntime call) with real delays between polls, matching that manual repro.
+  test("getAgentTree() reports 'failed' when polled well after a real provider crash, not stuck 'running'", async () => {
+    const unauthorizedServer = Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      },
+    });
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(unauthorizedServer),
+        systemPrompt: "sp",
+      });
+      adapter.sendMessage(ROOT_AGENT_ID, "hello"); // lazily starts the root; the crash is async
+      for (let i = 0; i < 3; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        expect(adapter.getAgentTree()[0]?.status).toBe("failed");
+      }
+    } finally {
+      unauthorizedServer.stop(true);
+    }
+  });
+
   test("sendMessage on a non-root agentId delegates to the task registry", () => {
     const server = startMockAnthropicServer();
     try {

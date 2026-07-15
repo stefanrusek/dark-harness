@@ -620,3 +620,60 @@ probably the smallest correct fix — centralize it here rather than pushing the
 the root as `"failed"` afterward, not stuck `"running"` — polled after the fact, not just
 observed via a transient event. Append a dated status entry here and update
 `docs/roster/grace.md` when done.
+
+### 2026-07-15 — Grace, Round 4 (fix: rootStatus stuck on a runRoot() crash)
+
+Worked in a fresh worktree (`grace-round4`, branched from
+`origin/claude/coordinator-onboarding-kab9ls` at `abe2a78`). The coordinator's own trace was
+precise and complete before I started — exact line, exact mechanism, exact suggested fix —
+so this was implementation + verification, not diagnosis.
+
+**Fix** (`src/agent/runtime.ts`'s `runRoot()`): wrapped the `await runAgentLoop(...)` call
+in a `try/catch`. On catch: `this.rootStatus = "failed"`, fire the same `session_ended`
+event shape the normal-completion path already uses (`exitCode: ExitCode.HarnessError`),
+then rethrow. Exactly the fix the handoff suggested — centralized in `runtime.ts` rather
+than `src/cli.ts`, so every caller of `runRoot()` gets the correctness for free, not just
+the interactive adapter path. `src/cli.ts` needed no changes at all: the standalone
+`--instructions` path's own try/catch (already mapping to `ExitCode.HarnessError`) and the
+adapter's `sendMessage()` `.catch()` (already emitting a transient `agent_status: failed`
+event) both still see the rethrown error exactly as before — this fix only makes
+`AgentRuntime`'s own persisted state (what `getAgentTree()` reads) consistent, it doesn't
+change what any existing caller observes.
+
+**Scope check — is there a second, related gap?** `resolveModel()`/`providerFor()` (called
+*before* `rootStatus` is ever set to `"running"`) can also throw `ConfigModelError`, but
+that's a different, narrower case: (a) `rootStatus` stays whatever it was before (`"waiting"`
+on a fresh runtime), not misleadingly `"running"` — not the same zombie symptom; (b) it's
+validated away at config-load time already (`src/config/validate.ts` rejects an unknown
+`options.defaultModel`/an unknown provider reference per ADR 0006), and `src/cli.ts` never
+calls `runRoot()` with an explicit out-of-config `modelName` — so in practice this path is
+unreachable in production usage, only exercised by an artificial test config. Left it as-is;
+expanding the `try/catch` to cover it too would be scope beyond what the bug report actually
+needs, for a case that doesn't reproduce the reported symptom and isn't reachable from any
+real caller.
+
+**Regression tests** (`runtime.test.ts`, `cli.test.ts`) — a mock HTTP server returning a real
+401 (matching how a real Anthropic-shaped endpoint responds to a bad `apiKey`, the
+coordinator's actual repro, not a synthetic throw):
+- `runRoot()` rejects, but `getAgentTree()[0]?.status` reads `"failed"` immediately
+  afterward — polled after the throw has already been handled by the caller, not observed
+  via any event.
+- The crash path fires `session_ended` with `exitCode: ExitCode.HarnessError`.
+- Polled 3x with real delays between calls (mirroring an operator's client polling loop, not
+  a single check) — never reports `"running"` again.
+- The same scenario driven through `AgentRuntimeLoopAdapter.sendMessage()` +
+  `.getAgentTree()` (the actual wire-protocol-shaped path the coordinator's manual repro
+  went through, not a raw `AgentRuntime` call), also polled 3x with real delays.
+
+**Live verification** (real compiled/dev binary, not just tests) — reproduced the
+coordinator's exact manual repro: real `dh --server`, a real mock server returning 401 for
+every request (simulating the bad-`apiKey` crash), `send_message` to start root, then polled
+`request_agent_tree` four times over ~20 seconds via `curl`. Every poll after the crash
+reported `"status":"failed"` — confirmed the fix holds over the same real timescale the
+coordinator used to find the bug, not just immediately after.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean, `bun run test:coverage` — 672
+tests passing, 99.95%/100% funcs/lines aggregate (same single pre-existing explained gap as
+rounds 2-3: `cli.ts`'s real `startTui` default needs an actual PTY). `bun run e2e` — 18
+tests passing, unchanged (no `e2e/` file touched this round — the bug and its fix are both
+fully within `src/agent/`, no new cross-domain wire-protocol behavior to verify there).
