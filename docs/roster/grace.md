@@ -547,3 +547,41 @@ same function with near-identical object literals but are genuinely separate cal
 remembering next time I touch either `emitEvent` or `emitLog` in `loop.ts`: if one call site
 gets a new optional field, check whether its sibling call a few lines away needs the same
 field, and add a test on *both* arrays, not just the one that's easiest to assert on.
+
+### 2026-07-15 — Round 11 (fix: every provider call was sending the config alias, not the real model id)
+
+Full technical writeup in `docs/handoffs/core.md`'s dated Round 11 entry. Process notes for a
+future me.
+
+**Why this shipped invisibly for ten rounds, and the actual lesson:** every existing test
+fixture across the suite that happened to need a `ModelConfig` used a `name`/`model` pair that
+either matched, or was never actually asserted on at the wire-request layer. `runtime.test.ts`'s
+own `baseConfig()` fixture already had `name: "test-model"` vs `model: "mock-1"` deliberately
+different since early rounds (for other reasons — distinguishing model-lookup-by-name from the
+id sent over the wire never came up because nothing read the mock server's *request* body's
+`model` field, only its response). The bug was reachable through the existing fixtures the
+whole time; nothing was looking. Worth generalizing: a fixture that deliberately varies two
+fields doesn't guarantee coverage of every place that could confuse them — only an assertion
+that actually reads the value at the point of use does. I'll be more suspicious in future
+rounds of "this config already has different name/model values, so it must be covered" as a
+substitute for grepping every actual read site.
+
+**Design call: a second field on the loop's own internal params, not a `src/contracts/`
+change.** `AgentLoopParams` lives entirely in `src/agent/loop.ts` — it's Core's own internal
+shape, never re-exported as wire truth, so adding `providerModel` needed no architect
+round-trip (CLAUDE.md §6.2 only gates `src/contracts/` edits). Kept `model`'s existing meaning
+untouched (friendly alias, display-only) rather than repurposing it, so the SSE event/log
+header display paths needed zero code changes at their own call sites — only the two
+`runtime.ts` construction sites and the one `provider.complete()` read site changed, which
+kept the diff small and made "did I break display" trivially checkable by re-reading those
+three untouched lines rather than needing new display-path tests.
+
+**Verification discipline, continued — the fourth-plus round in a row where a live
+subprocess check was the actual closing proof, not a supplement to it.** Same standing habit
+as rounds 2/3/4/7: real `bun run src/cli.ts`, a real local mock HTTP server that logs the
+literal `model` field of every request it receives, a `dh.json` with a deliberately-different
+alias/id pair. This is exactly the class of bug the coordinator found by doing the equivalent
+against real AWS Bedrock — a fake/mock that never inspects the field it's supposedly testing
+against is indistinguishable from no test at all for that specific claim. Confirming this
+directly at the real-HTTP-request layer (not just `provider.calls[]` in a unit test) is what
+would have caught this bug before it shipped, and is what closes it out now.

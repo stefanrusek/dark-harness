@@ -39,13 +39,15 @@ function newAgentRuntime(
 /** A minimal Anthropic Messages API-shaped mock server. Decides its response from the last
  * message's content, independent of call ordering, so it stays correct under the
  * concurrent sub-agent scenarios this suite exercises. */
-function startMockAnthropicServer() {
+function startMockAnthropicServer(onRequest?: (body: { model: string }) => void) {
   return Bun.serve({
     port: 0,
     async fetch(req) {
       const body = (await req.json()) as {
+        model: string;
         messages: { role: string; content: { type: string; text?: string }[] }[];
       };
+      onRequest?.(body);
       const lastMessage = body.messages[body.messages.length - 1];
       const content = lastMessage?.content ?? [];
       const text = content
@@ -148,9 +150,12 @@ function startMockAnthropicServer() {
 }
 
 let server: ReturnType<typeof startMockAnthropicServer>;
+let receivedModels: string[] = [];
 
 beforeAll(() => {
-  server = startMockAnthropicServer();
+  server = startMockAnthropicServer((req) => {
+    receivedModels.push(req.model);
+  });
 });
 
 afterAll(() => {
@@ -212,6 +217,22 @@ describe("AgentRuntime", () => {
     // subscribes to this event to resolve --job's exit code.
     const sessionEnded = events.find((e) => e.type === "session_ended");
     expect(sessionEnded).toMatchObject({ type: "session_ended", exitCode: ExitCode.Success });
+  });
+
+  // Round 11 regression (docs/handoffs/core.md status log): every provider call was sending
+  // ModelConfig.name (the friendly config alias) instead of ModelConfig.model (the real
+  // provider-side id) — confirmed live against real AWS Bedrock, masked everywhere else
+  // (LM Studio ignores the field; Anthropic tests failed on auth first). baseConfig()'s
+  // fixture deliberately has name "test-model" != model "mock-1" so this can't pass by
+  // accident the way it would if the two happened to match.
+  test("runRoot sends the config's provider-side model id, not the friendly alias, to the real HTTP request", async () => {
+    receivedModels = [];
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "you are a test agent" });
+    const result = await runtime.runRoot("please just answer");
+    expect(result.success).toBe(true);
+    expect(receivedModels.length).toBeGreaterThan(0);
+    expect(receivedModels.every((m) => m === "mock-1")).toBe(true);
+    expect(receivedModels.some((m) => m === "test-model")).toBe(false);
   });
 
   test("runRoot emits session_ended with TaskFailure when the root agent self-reports failure", async () => {

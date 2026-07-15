@@ -70,7 +70,18 @@ export interface AgentLoopParams {
   sessionId: string;
   agentId: string;
   parentAgentId: string | null;
+  /** The friendly config alias (`ModelConfig.name`) — used only for display/diagnostics
+   * (the `agent_spawned` SSE event's `model` field, the JSONL log header's `model` field).
+   * Never sent to the provider — see `providerModel` for that. */
   model: string;
+  /** Round 11 fix (docs/handoffs/core.md status log): the real provider-side model
+   * identifier (`ModelConfig.model`) — this, not `model` (the friendly alias), is what
+   * actually gets sent to `provider.complete()`. Before this fix, every provider call sent
+   * the config alias instead of the real upstream model id, silently masked by LM Studio
+   * (ignores the field) and by auth failures in earlier Anthropic testing; confirmed live
+   * against real AWS Bedrock, which rejected every call with "invalid model identifier"
+   * regardless of what was actually configured. */
+  providerModel: string;
   systemPrompt: string;
   instruction: string;
   provider: ModelProvider;
@@ -316,7 +327,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     try {
       completion = await params.provider.complete(
         {
-          model: params.model,
+          model: params.providerModel,
           system: params.systemPrompt,
           messages,
           tools: toolDefs,

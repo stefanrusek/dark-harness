@@ -1498,3 +1498,58 @@ human-readability — if so, make sure that display path is unaffected by the fi
 **Given the severity (every real provider call has been sending the wrong identifier), treat
 this as blocking** — flag immediately if you find it's more involved than described above.
 Append a dated status entry here and update `docs/roster/grace.md` when done.
+
+### 2026-07-15 — Grace, Round 11 (fix: provider calls now send `model.model`, not `model.name`)
+
+Confirmed round 10 already merged (`git log --oneline -5` showed it at HEAD before starting).
+Traced every read of the loop's `model` field before changing anything, per the round's own
+instruction not to blanket-replace: `AgentLoopParams.model` (`src/agent/loop.ts`) feeds
+exactly three places — the `agent_spawned` SSE event's `model` field (line ~266), the JSONL
+`header` log line's `model` field (line ~275), both genuinely display/diagnostic fields per
+`src/contracts/events.ts`/`log.ts` (TUI/Web tree, log readability) — and `provider.complete()`'s
+own request (line ~319), the one place that actually talks to a real provider. Only the third
+one was wrong.
+
+**Fix:** added a second, purpose-built field to `AgentLoopParams` — `providerModel: string`
+(internal to `src/agent/loop.ts`, not a `src/contracts/` type, so no architect round-trip
+needed). `model` keeps its existing meaning (the friendly config alias, used only for
+display) exactly as before; `provider.complete()`'s call site now reads `params.providerModel`
+instead of `params.model`. `src/agent/runtime.ts`'s two call sites (`spawnAgent()` ~line 229,
+`runRoot()` ~line 336) each gained a `providerModel: model.model` alongside the pre-existing
+`model: model.name` — one line added per site, nothing removed, so the display paths (SSE
+event, log header) are provably unaffected by construction, not just by inspection.
+
+**Regression tests, at both the layer where the bug lived and the layer that actually talks
+over HTTP:**
+- `src/agent/loop.test.ts`: a new test with `model: "bedrock-sonnet"` /
+  `providerModel: "anthropic.claude-3-5-sonnet-20241022-v2:0"` deliberately different —
+  asserts the scripted fake provider's recorded `.model` equals the real id and explicitly
+  `not.toBe` the alias, plus asserts the `agent_spawned` event and log header's own `model`
+  fields still show the friendly alias, unaffected.
+- `src/agent/runtime.test.ts`: extended the shared mock Anthropic-shaped HTTP server to record
+  every request body's `model` field (`receivedModels`); a new test using the suite's existing
+  `baseConfig()` fixture (which already has `name: "test-model"` != `model: "mock-1"` — no
+  fixture change needed, this exact mismatch is why the bug was reachable in the first place)
+  asserts every real HTTP request received `"mock-1"`, never `"test-model"`.
+- **Live subprocess verification** (this identity's standing habit, and the one that would
+  have caught this bug the same way the coordinator's real-Bedrock test did): started a real
+  local mock Anthropic-shaped server logging the exact `model` field of every incoming
+  request, a `dh.json` with `name: "friendly-alias"` / `model: "real-provider-id-123"`
+  deliberately different, and ran `bun run src/cli.ts --config ... --instructions ... --job`
+  against it. Server logged `RECEIVED MODEL: real-provider-id-123` — confirmed the real
+  outbound HTTP request carries the provider id, not the alias — and the process exited 0 as
+  expected.
+
+**Scope check — is this the whole bug, or is there a third call site?** Searched every
+`model.name`/`model.model`/`params.model` reference across `src/agent/`; the two `runtime.ts`
+call sites and `loop.ts`'s three consumers above are the complete set. `anthropic.ts`/
+`bedrock.ts` both just forward whatever `request.model` they're given straight to their SDK
+call — no independent bug there, they were always correctly wired to whatever the loop passed
+them; the loop was passing them the wrong thing.
+
+**Gates:** `bun run typecheck` clean (both TS programs), `bun run lint` clean, `bun run
+test:coverage` — 745 tests passing, 99.96%/100% funcs/lines aggregate (the sole shortfall is
+`src/cli.ts`'s pre-existing, unrelated `if (import.meta.main)` process-entry gap from round 1,
+not a regression this round introduced). `bun run e2e` not re-run this round (operational
+rules for this round said not to spawn sub-agents / kept to the standard four; no `e2e/` file
+touched — this is purely an `src/agent/` internal fix, no wire-protocol behavior changed).

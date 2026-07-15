@@ -46,6 +46,7 @@ function baseParams(overrides: Partial<Parameters<typeof runAgentLoop>[0]> = {})
       agentId: "agent-root",
       parentAgentId: null,
       model: "sonnet",
+      providerModel: "sonnet-real-id",
       systemPrompt: "you are a test agent",
       instruction: "do the thing",
       tools: buildToolMap(),
@@ -105,6 +106,40 @@ describe("runAgentLoop", () => {
       type: "tool_result",
       toolUseId: "tu_1",
     });
+  });
+
+  // Round 11 regression (docs/handoffs/core.md status log): the provider must receive
+  // `providerModel` (the config's real provider-side model id), never `model` (the friendly
+  // config alias used only for display in events/log headers). Deliberately uses a config
+  // where the two differ — this exact bug was invisible in any test/config where they
+  // happened to match, which is presumably why it shipped unnoticed.
+  test("provider.complete() receives providerModel, not the friendly display model alias", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, events, logLines } = baseParams({
+      provider,
+      model: "bedrock-sonnet",
+      providerModel: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    });
+    await runAgentLoop(params);
+
+    // The wire truth: the provider call itself uses the real provider-side id.
+    expect(provider.calls[0]?.model).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0");
+    expect(provider.calls[0]?.model).not.toBe("bedrock-sonnet");
+
+    // Display surfaces (SSE agent_spawned event, JSONL log header) still show the friendly
+    // config alias, unaffected by the fix.
+    const spawnedEvent = events.find((e) => e.type === "agent_spawned");
+    expect(spawnedEvent && spawnedEvent.type === "agent_spawned" && spawnedEvent.model).toBe(
+      "bedrock-sonnet",
+    );
+    const header = logLines.find((l) => l.type === "header");
+    expect(header && header.type === "header" && header.model).toBe("bedrock-sonnet");
   });
 
   test("TASK_FAILED marker in the final text reports self-reported failure", async () => {
