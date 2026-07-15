@@ -19,6 +19,15 @@ import { formatSseEvent } from "./sse.ts";
 const DEFAULT_PORT = 4000;
 const EVENTS_PATH = "/api/events";
 const COMMANDS_PATH = "/api/commands";
+// Round 2: real interactive testing (both TUI and Web UI) confirmed idle SSE connections
+// get dropped and reconnected — something in the network path (browser, OS, or an
+// intermediate proxy; the server side can't tell which) decides a quiet connection is
+// stale during a slow model turn or the idle stretch between messages. A periodic
+// keep-alive comment line resets whatever idle timer is doing that. 20s sits in the
+// typical 15-30s range for this kind of heartbeat: comfortably under common intermediary
+// idle-timeout defaults (many L7 proxies/load balancers default around 60s), without being
+// so frequent it's meaningful overhead on an otherwise-quiet connection.
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000;
 
 // Permissive CORS: `dh --connect <host> --web` runs the web UI as a separate local
 // process/origin talking to a remote `--server` (ADR 0003), so cross-origin browser
@@ -48,6 +57,12 @@ export interface DhServerOptions {
   security?: SecurityConfig;
   /** SSE resume retention window in event count. Default 1000 — see EventBuffer's doc. */
   eventBufferSize?: number;
+  /**
+   * Interval, in ms, between `: ping` keep-alive comments sent on every open SSE
+   * connection. Default `DEFAULT_HEARTBEAT_INTERVAL_MS` (20s). Test-only knob — production
+   * callers should not need to override this.
+   */
+  heartbeatIntervalMs?: number;
 }
 
 export class DhServer {
@@ -57,6 +72,7 @@ export class DhServer {
   private readonly eventBuffer: EventBuffer;
   private readonly security: SecurityConfig | undefined;
   private readonly requestedPort: number;
+  private readonly heartbeatIntervalMs: number;
   private bunServer: ReturnType<typeof Bun.serve> | undefined;
   private unsubscribeEvent: (() => void) | undefined;
   private unsubscribeLog: (() => void) | undefined;
@@ -68,6 +84,7 @@ export class DhServer {
     this.eventBuffer = new EventBuffer(options.eventBufferSize ?? 1000);
     this.security = options.security;
     this.requestedPort = options.port ?? DEFAULT_PORT;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
   }
 
   /** Starts listening and returns the bound port (useful when `port: 0` is requested). */
@@ -141,6 +158,7 @@ export class DhServer {
     const replay = this.eventBuffer.getEventsAfter(lastEventId);
     const encoder = new TextEncoder();
     let unsubscribe: (() => void) | undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
 
     const stream = new ReadableStream<Uint8Array>({
       start: (controller) => {
@@ -161,9 +179,20 @@ export class DhServer {
             // Controller already closed (client disconnected); cancel() below unsubscribes.
           }
         });
+        // Periodic keep-alive so idle connections don't get dropped (see Round 2 notes on
+        // DEFAULT_HEARTBEAT_INTERVAL_MS above). A comment line — no `id:` field — so it
+        // never touches `Last-Event-ID`/`EventBuffer` resume semantics.
+        heartbeat = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": ping\n\n"));
+          } catch {
+            // Controller already closed (client disconnected); cancel() below clears the timer.
+          }
+        }, this.heartbeatIntervalMs);
       },
       cancel: () => {
         unsubscribe?.();
+        clearInterval(heartbeat);
       },
     });
 

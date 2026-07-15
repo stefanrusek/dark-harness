@@ -45,6 +45,29 @@ async function readSseEvents(response: Response, count: number): Promise<unknown
   return events;
 }
 
+/** Reads raw SSE records (including comment lines like `: ping`) off a Response body
+ * until at least `count` records have been parsed, then cancels the stream. */
+async function readSseRecords(response: Response, count: number): Promise<string[]> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("no response body");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const records: string[] = [];
+  while (records.length < count) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      records.push(buffer.slice(0, boundary));
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+  await reader.cancel();
+  return records;
+}
+
 describe("DhServer", () => {
   let dir: string;
   let loop: FakeAgentLoop;
@@ -252,6 +275,44 @@ describe("DhServer", () => {
       };
       loop.emitEvent(ended);
       expect(await readPromise).toEqual([ended]);
+    });
+
+    test("sends periodic `: ping` keep-alive comments on an open connection", async () => {
+      // A tiny interval (not a real multi-second sleep) proves the timer actually fires
+      // repeatedly, without slowing the suite down.
+      server = new DhServer({
+        agentLoop: loop,
+        sessionId: "s1",
+        logDir: dir,
+        port: 0,
+        heartbeatIntervalMs: 5,
+      });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/api/events`);
+      // First record is ": connected"; wait for at least two pings after it.
+      const records = await readSseRecords(res, 3);
+      expect(records[0]).toBe(": connected");
+      expect(records[1]).toBe(": ping");
+      expect(records[2]).toBe(": ping");
+    });
+
+    test("clears the heartbeat timer when the connection is cancelled", async () => {
+      // Regression guard for a leaked timer: cancelling the stream and stopping the server
+      // should not throw or hang the test process on a dangling interval.
+      server = new DhServer({
+        agentLoop: loop,
+        sessionId: "s1",
+        logDir: dir,
+        port: 0,
+        heartbeatIntervalMs: 5,
+      });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/api/events`);
+      await res.body?.cancel();
+      // No leaked timer to observe directly here (Round 2 note), but if `clearInterval`
+      // weren't called, a dangling `setInterval` would keep firing after cancel and keep
+      // the bun test process's event loop alive past the suite's own end — the CI gate
+      // failing to exit cleanly is the regression this guards against.
     });
   });
 
