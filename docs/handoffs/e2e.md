@@ -77,3 +77,123 @@ would, with the model swapped for a deterministic mock provider.
 ## Status log
 
 _(Append dated entries here. Status supersedes.)_
+
+### 2026-07-15 — Round 1 (Hedy): mock provider + real-binary e2e suite, two cross-domain defects found
+
+**Built, all passing against the real compiled `dist/dh` binary** (`bun run e2e` — 18 tests,
+5 files, ~5s from a clean rebuild; `bun run typecheck` and `bun run lint` both clean):
+
+- `e2e/support/mock-provider.ts` — an Anthropic-compatible local HTTP server implementing
+  just `POST /v1/messages` (the only endpoint `src/agent/providers/anthropic.ts`'s
+  `AnthropicProvider` ever calls). Takes a scripted queue of `MockTurn`s (text and/or
+  `tool_use` calls, configurable `stop_reason`/usage); repeats the last turn on exhaustion as
+  a safety net. Point a `dh.json` `provider[].baseURL` at its `.baseURL` and the real,
+  unmodified `AnthropicProvider` drives the whole suite — no code changed in `src/agent/`.
+- `e2e/support/build.ts` — builds `dist/dh` once per `bun test e2e` run via a cached
+  module-level promise (all test files share it since `bun test` runs them in one process).
+- `e2e/support/workspace.ts`, `port.ts`, `dh-process.ts` — per-test tmpdir + `dh.json`
+  fixture writer, free-port picker (needed because `--server`/`--connect --port` reject `0`,
+  unlike the client-side ephemeral servers), and a real-subprocess spawn/wait helper.
+- `e2e/support/sse-client.ts` — a from-scratch `fetch`-based SSE client (hand-parses
+  `id:`/`data:` records per ADR 0002/`src/server/sse.ts`), deliberately independent of
+  `src/tui/sse-parser.ts` / `src/web/client/sse.ts` — this is a black-box test of the wire
+  protocol, not a reuse of either client domain's own parser.
+- `e2e/support/tmux-pty.ts` — **PTY harness decision: `tmux`, not `node-pty`.** Bun has no
+  built-in PTY module and no working native-build toolchain was confirmed available in this
+  environment; `tmux` was already present and verified interactively (`tmux new-session -d`
+  + `capture-pane`/`send-keys`) to give `dist/dh` a genuine pseudo-terminal (real
+  `process.stdout.columns/rows`, real raw-mode stdin) rather than a pipe. Documented per the
+  handoff's "document whichever approach you land on and why."
+- Playwright (`playwright`, not `@playwright/test`) launches with an explicit
+  `executablePath: "/opt/pw-browsers/chromium"` — the installed `playwright-core@1.61.1`
+  pins chromium revision 1228, but the environment's pre-installed browser is revision 1194,
+  so the version-matched default download path would 404; the symlink at that path resolves
+  straight to the `chrome` binary and works fine headless.
+
+**Test files (what actually runs and passes):**
+
+- `e2e/exit-codes.test.ts` (4 tests) — `--job`/`--instructions` exit-code matrix (ADR 0006):
+  self-reported success (0), self-reported `TASK_FAILED` (1), malformed `dh.json` JSON (2+),
+  and a semantically-invalid config (unknown model reference, 2+).
+- `e2e/server-protocol.test.ts` (5 tests) — real `dh --server` process driven by a plain
+  `fetch` client across an actual OS process boundary: pre-start `request_agent_tree` (root
+  node present with status "waiting" even before any message), unknown-agentId 404,
+  a full `send_message` → SSE `agent_spawned`/`agent_output`/`token_usage`/`agent_status`/
+  `session_ended` sequence, `Last-Event-ID` resume replaying buffered events, and
+  `download_logs` (both per-agent JSONL and the full tar bundle).
+- `e2e/security.test.ts` (6 tests) — ADR 0004 matrix against the real server: unauthenticated
+  POST/SSE both 401, wrong token 401, authenticated POST+SSE happy path through to
+  `session_ended`, a self-signed-cert TLS round trip (reusing `src/server/testdata/test-{cert,key}.pem`
+  — confirmed plain `http://` genuinely fails against a TLS-only listener), and TLS+token
+  together.
+- `e2e/tui.test.ts` (2 tests) — real PTY via tmux. One drives local `dh` (server+TUI in one
+  process): boots, alt-screen renders, left-arrow → real `request_agent_tree` round-trip
+  populates the tree view with the synthesized root node, keystrokes render in the input box.
+  The other spawns a **real second `dh --connect localhost --port <p>` process** against a
+  real `dh --server`, proving cross-process SSE rendering live in the actual console client.
+- `e2e/web.test.ts` (1 test) — real headless Chromium against `dh --web`: connection pill,
+  status-dot colors, live output text, token/cost display, session-ended banner, composer
+  visibility, and both log-download buttons.
+
+**Two confirmed cross-domain defects, found specifically because this is real-binary/real-browser
+testing (ADR 0008's whole rationale) — not fixed here, out of `e2e/`'s ownership per CLAUDE.md §3:**
+
+1. **Interactive-mode bootstrap deadlock (TUI + Web, blocks every fresh interactive session).**
+   Neither `src/tui/state.ts` nor `src/web/client/app.ts` ever learns the root agent's id
+   until an `agent_spawned` SSE event arrives — but that event only fires once
+   `runAgentLoop` starts, which only happens once an operator sends the *first* message,
+   which neither client can do because they don't know the root's id yet.
+   `request_agent_tree` *does* return a synthesized root node pre-start (verified directly in
+   `server-protocol.test.ts`'s first test — `agentId: "agent-root"`, `status: "waiting"`),
+   and the TUI's left-arrow tree view even fetches it, but
+   `applyTreeResponse` (`src/tui/state.ts`) never feeds it into `state.rootAgentId`, and the
+   Web client never calls `request_agent_tree` at all. Net effect, confirmed live in
+   `e2e/tui.test.ts`: type a message, press Enter, get "No root agent yet — please wait."
+   forever — a real operator cannot start a fresh `dh`, `dh --web`, or `dh --connect` session
+   through its own UI. `e2e/tui.test.ts` and `e2e/web.test.ts` both work around it for their
+   own coverage by sending the first `send_message` via a direct API call (learning the
+   target the same way the real client does — `/dh-config.json` for Web), then verify
+   everything downstream for real. **Requests fix from TUI (Mary) and Web (Susan)** — likely
+   a one-line-ish fix each (seed `rootAgentId`/`selectedAgentId` from the
+   `request_agent_tree` response, and/or issue it automatically on boot instead of only on
+   left-arrow); **Core (Grace)** may also want to weigh in on whether `ROOT_AGENT_ID` should
+   become a wire-level constant in `src/contracts/` instead of a Core-internal string both
+   clients would otherwise have to hardcode.
+2. **Missing `Access-Control-Expose-Headers: Content-Disposition` (Server, breaks the web
+   log-download filename).** `src/server/server.ts`'s `CORS_HEADERS` never exposes
+   `Content-Disposition`, so a real cross-origin browser `fetch` (the web UI and the dh
+   server are different origins even in local `--web` mode per ADR 0003) can't read it —
+   `src/web/client/download.ts`'s `filenameFromContentDisposition` always falls back to a
+   generic client-computed name. For per-agent downloads this coincidentally matches
+   (`${agentId}.jsonl`), masking the bug; for the full-session bundle it doesn't — every
+   session's bundle downloads as the same generic `dh-session-logs.tar.gz` instead of the
+   real `session-<sessionId>.tar`, losing the session id and implying (wrongly, via the
+   `.gz` suffix) gzip compression. `e2e/web.test.ts` asserts the actual current filenames
+   (documented inline) so the suite stays honest rather than asserting the intended
+   behavior. **Requests a one-line fix from Server (Radia):** add
+   `Access-Control-Expose-Headers: Content-Disposition` (and any other headers the download
+   flow needs) to `CORS_HEADERS`.
+
+**Explicitly deferred/unverified this round (no silent truncation, CLAUDE.md §8):**
+
+- Sub-agent spawning (`Agent` tool) / nested agent-tree rendering — every scenario here uses
+  a single-turn root agent; no test scripts a `tool_use` turn, so Bash/Read/Edit/Write tool
+  execution and the sub-agent tree UI are not driven end-to-end at all.
+- `stop_agent`/TaskStop not exercised.
+- Multi-turn conversation with a *second* user message to an already-*completed* root agent
+  is not covered — worth flagging separately from defect #1 above: once `runAgentLoop`
+  returns after a single no-tool-call turn, `AgentRuntime`'s `sendMessageToRoot` becomes a
+  silent no-op (the `pendingMessages` queue it pushes into is never drained again), so this
+  may be a related but distinct Core-domain gap worth a look, not just a client bug.
+- Windows PTY behavior — the tmux-based harness is Linux/macOS-only; not tested here, as
+  flagged as likely out-of-scope-this-round in the original handoff text.
+- `--config <path>` (non-default config file location) not explicitly exercised (every test
+  relies on the default `dh.json`-in-cwd resolution).
+- `bedrock`-type provider not exercised (only `anthropic`-type, via the mock).
+- Did not touch or verify `.github/workflows/` (Nightingale's domain) — have not confirmed
+  `bun run e2e` is actually wired into the CI gate; worth a cross-check with Nightingale/Ada.
+- Parallel/sharded `bun test` execution not stress-tested beyond running all 5 files together
+  once; port collisions are mitigated via `findFreePort()` but not adversarially tested.
+
+No changes made outside `e2e/` (mock-provider/build/workspace/port/dh-process/sse-client/tmux-pty
+support modules plus the five test files above) and this status-log entry + `docs/roster/hedy.md`.
