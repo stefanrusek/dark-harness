@@ -1177,11 +1177,19 @@ describe("AgentRuntimeLoopAdapter", () => {
         systemPrompt: "sp",
         client: "tui",
       });
+      const loggedLines: string[] = [];
+      adapter.onLog((_agentId, line) => {
+        if (line.type === "message") loggedLines.push(line.content);
+      });
       adapter.sendMessage(ROOT_AGENT_ID, "hello"); // lazily starts the root; the crash is async
       for (let i = 0; i < 3; i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 30));
         expect(adapter.getAgentTree()[0]?.status).toBe("failed");
       }
+      // DH-0017 fix: the real error reason reaches the log instead of being discarded — this
+      // used to be `.catch(() => { ...only a synthetic agent_status... })`, silently dropping
+      // the actual Error entirely, so an operator saw only an opaque "failed" with zero detail.
+      expect(loggedLines.some((l) => l.includes("Root agent failed to start"))).toBe(true);
     } finally {
       unauthorizedServer.stop(true);
     }
@@ -1233,10 +1241,11 @@ describe("AgentRuntimeLoopAdapter", () => {
         }, 5);
       });
       const statusEvent = events.find((e) => e.type === "agent_status");
+      // DH-0017 fix: a deliberate stop reports "stopped", not "failed".
       expect(statusEvent).toMatchObject({
         type: "agent_status",
         agentId: ROOT_AGENT_ID,
-        status: "failed",
+        status: "stopped",
       });
     } finally {
       neverRespondingServer.stop(true);

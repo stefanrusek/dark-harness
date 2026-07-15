@@ -645,8 +645,9 @@ describe("AgentRuntime.stopRoot / spawnAgent signal threading (Round 3: real can
       const result = await rootPromise;
       expect(result.success).toBe(false);
       const statusEvent = events.find((e) => e.type === "agent_status");
+      // DH-0017 fix: a deliberate stop reports "stopped", not "failed".
       expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe(
-        "failed",
+        "stopped",
       );
     } finally {
       slowServer.stop(true);
@@ -687,8 +688,9 @@ describe("AgentRuntime.stopRoot / spawnAgent signal threading (Round 3: real can
       // Before Round 3, tasks.stop() only ever updated registry bookkeeping — the loop
       // itself kept running (and the fetch kept hanging) regardless. awaitDone() resolving
       // at all here (rather than this test timing out) is the actual proof of the fix; the
-      // status assertion below is a secondary sanity check.
-      expect(runtime.tasks.snapshot(taskId).status).toBe("failed");
+      // status assertion below is a secondary sanity check. DH-0017 fix: reports "stopped",
+      // not "failed" — see loop.ts's reportStopped() doc comment for why this used to flip.
+      expect(runtime.tasks.snapshot(taskId).status).toBe("stopped");
     } finally {
       slowServer.stop(true);
     }
@@ -879,8 +881,10 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
 
       runtime.stopRoot();
       const result = await runPromise;
-      expect(result.success).toBe(false); // stopped, collapsed into "failed" per Round 3's convention
-      expect(runtime.getAgentTree()[0]?.status).toBe("failed");
+      // DH-0017 fix: a deliberate stop reports "stopped" everywhere, not "failed" — the root
+      // conversation didn't succeed, but it also wasn't a self-reported/harness failure.
+      expect(result.success).toBe(false);
+      expect(runtime.getAgentTree()[0]?.status).toBe("stopped");
     } finally {
       server.stop(true);
     }
@@ -961,7 +965,8 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
 
     runtime.tasks.stop(taskId);
     await runtime.tasks.awaitDone(taskId);
-    expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("failed");
+    // DH-0017 fix: a deliberately-stopped task reports "stopped" consistently, not "failed".
+    expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("stopped");
   });
 
   test("the Agent tool's blocking mode (run_in_background: false) actually resolves for a sub-agent spawned from an interactive root", async () => {
@@ -994,7 +999,7 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
 
     runtime.stopRoot();
     const result = await runPromise;
-    expect(result.success).toBe(false); // stopped, collapsed into "failed" per Round 3's convention
+    expect(result.success).toBe(false); // DH-0017: stopped, reported as "stopped", not "failed"
   });
 });
 

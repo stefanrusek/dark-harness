@@ -92,6 +92,11 @@ export type AgentStatus = "running" | "waiting" | "done" | "failed" | "stopped";
 export interface LogStatusChangeEvent extends LogEventBase {
   type: "status_change";
   status: AgentStatus;
+  /** DH-0017: optional human-readable reason, populated for a "stopped" transition (why it was
+   * stopped) so a JSONL reader can tell a deliberate TaskStop from any other status change
+   * without guessing from context. Additive/optional — absent on every status_change written
+   * before this fix, and on every non-"stopped" transition, which need no reason. */
+  reason?: string;
 }
 
 export interface LogCompletedEvent extends LogEventBase {

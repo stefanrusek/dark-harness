@@ -131,7 +131,7 @@ describe("Read tool", () => {
     expect(result.output).toContain(`${bigSize} bytes`);
   });
 
-    test("refuses to decode a binary file, returning a clear error instead of garbage", async () => {
+  test("refuses to decode a binary file, returning a clear error instead of garbage", async () => {
     const path = join(dir, "bin.dat");
     const bytes = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01,

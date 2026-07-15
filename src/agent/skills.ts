@@ -87,9 +87,7 @@ async function scanSkillPathsFor(
 
       if (options?.warnIfShadowsBuiltin && parsed.name === BUILTIN_CLI_TOOLS_NAME) {
         console.warn(
-          `dh: skill directory "${skillDir}" declares the reserved name ` +
-            `"${BUILTIN_CLI_TOOLS_NAME}"; the builtin skill of that name always takes ` +
-            "precedence and this on-disk one is unreachable via the Skill tool.",
+          `dh: skill directory "${skillDir}" declares the reserved name "${BUILTIN_CLI_TOOLS_NAME}"; the builtin skill of that name always takes precedence and this on-disk one is unreachable via the Skill tool.`,
         );
       }
 

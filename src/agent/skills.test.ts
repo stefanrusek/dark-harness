@@ -33,7 +33,10 @@ describe("loadSkillFromPaths", () => {
   test("searches subsequent skillPaths when earlier ones don't have the skill", async () => {
     const otherDir = await mkdtemp(join(tmpdir(), "dh-skills-test-other-"));
     try {
-      await Bun.write(join(otherDir, "greet", "SKILL.md"), skillMd("greet", "found in second path"));
+      await Bun.write(
+        join(otherDir, "greet", "SKILL.md"),
+        skillMd("greet", "found in second path"),
+      );
       const skill = await loadSkillFromPaths("greet", [dir, otherDir]);
       expect(skill?.content).toContain("found in second path");
     } finally {

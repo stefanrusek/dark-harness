@@ -356,9 +356,16 @@ describe("runAgentLoop — Round 3: cooperative cancellation via AbortSignal", (
     expect(result.finalOutput).toBe("");
     expect(providerCalled).toBe(false);
     const statusEvent = events.find((e) => e.type === "agent_status");
-    expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe("failed");
+    expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe(
+      "stopped",
+    );
     expect(
-      logLines.some((l) => l.type === "failed" && l.reason === STOPPED_BETWEEN_TURNS_REASON),
+      logLines.some(
+        (l) =>
+          l.type === "status_change" &&
+          l.status === "stopped" &&
+          l.reason === STOPPED_BETWEEN_TURNS_REASON,
+      ),
     ).toBe(true);
   });
 
@@ -399,7 +406,12 @@ describe("runAgentLoop — Round 3: cooperative cancellation via AbortSignal", (
     expect(result.finalOutput).toBe("partial thought");
     expect(provider.calls).toHaveLength(1);
     expect(
-      logLines.some((l) => l.type === "failed" && l.reason === STOPPED_BETWEEN_TURNS_REASON),
+      logLines.some(
+        (l) =>
+          l.type === "status_change" &&
+          l.status === "stopped" &&
+          l.reason === STOPPED_BETWEEN_TURNS_REASON,
+      ),
     ).toBe(true);
   });
 
@@ -424,7 +436,12 @@ describe("runAgentLoop — Round 3: cooperative cancellation via AbortSignal", (
     expect(result.success).toBe(false);
     expect(result.turns).toBe(1);
     expect(
-      logLines.some((l) => l.type === "failed" && l.reason === STOPPED_DURING_PROVIDER_CALL_REASON),
+      logLines.some(
+        (l) =>
+          l.type === "status_change" &&
+          l.status === "stopped" &&
+          l.reason === STOPPED_DURING_PROVIDER_CALL_REASON,
+      ),
     ).toBe(true);
   });
 
@@ -561,7 +578,10 @@ describe("runAgentLoop — Round 5: interactive mode pauses instead of ending on
     expect(result.finalOutput).toBe("waiting for you");
     expect(
       logLines.some(
-        (l) => l.type === "failed" && l.reason.includes("waiting for the next message"),
+        (l) =>
+          l.type === "status_change" &&
+          l.status === "stopped" &&
+          l.reason?.includes("waiting for the next message"),
       ),
     ).toBe(true);
   });

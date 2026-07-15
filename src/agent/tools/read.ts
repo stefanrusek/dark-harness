@@ -142,10 +142,7 @@ export const readTool: Tool = {
     // DH-0014: size cap enforced from metadata alone, before any byte is read.
     if (file.size > MAX_READABLE_BYTES) {
       return {
-        output:
-          `Read tool error: file is ${file.size} bytes, exceeding the ${MAX_READABLE_BYTES}-byte ` +
-          "readable limit. Use 'offset'/'limit' to read a smaller window, or search it with " +
-          "Bash (e.g. grep) instead of reading it whole.",
+        output: `Read tool error: file is ${file.size} bytes, exceeding the ${MAX_READABLE_BYTES}-byte readable limit. Use 'offset'/'limit' to read a smaller window, or search it with Bash (e.g. grep) instead of reading it whole.`,
         isError: true,
       };
     }

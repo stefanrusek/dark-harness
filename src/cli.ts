@@ -296,7 +296,24 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
       // onEvent/onLog as normal. A harness error before the loop ever gets going (bad
       // model/provider config) would otherwise be an unhandled rejection; surface it as a
       // synthetic agent_status instead of crashing the process.
-      this.runtime.runRoot(message).catch(() => {
+      this.runtime.runRoot(message).catch((err: unknown) => {
+        // DH-0017 fix: this used to discard `err` entirely (`.catch(() => { ... })`), so a
+        // root-start failure (bad model/provider config, an auth failure before the loop ever
+        // produced a self-report) surfaced to an operator as an opaque "failed" status with
+        // zero diagnostic detail — exactly the class of failure ADR 0005's JSONL logging
+        // exists to make diagnosable. Now logs the real error message (via onLogLine, tagged
+        // to the root agent) before/alongside the same synthetic agent_status this always
+        // emitted, so the reason reaches the durable log, not just a transient status flip.
+        const message = err instanceof Error ? err.message : String(err);
+        for (const listener of this.logListeners) {
+          listener(ROOT_AGENT_ID, {
+            version: 1,
+            timestamp: new Date().toISOString(),
+            type: "message",
+            role: "system",
+            content: `Root agent failed to start: ${message}`,
+          });
+        }
         const event = {
           version: 1 as const,
           id: randomUUID(),

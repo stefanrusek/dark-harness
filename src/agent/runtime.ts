@@ -399,7 +399,18 @@ export class AgentRuntime {
       throw err;
     }
 
-    this.rootStatus = result.success ? "done" : "failed";
+    // DH-0017 fix: this used to unconditionally set "failed" on any non-success result,
+    // clobbering the "stopped" status the loop's own reportStopped() (loop.ts) already wrote
+    // via the onEvent handler above moments earlier for a deliberate TaskStop/stopRoot(). Only
+    // fall back to "failed" when the loop didn't already report a more specific terminal
+    // status — mirrors TaskRegistry.start()'s own `if (task.status !== "stopped")` guard for
+    // exactly the same reason.
+    // Cast needed: TS narrows `this.rootStatus` to the literal type it was last assigned
+    // synchronously within this function ("running", a few lines up), not accounting for the
+    // onEvent handler above mutating it during the awaited runAgentLoop() call.
+    if ((this.rootStatus as AgentStatus) !== "stopped") {
+      this.rootStatus = result.success ? "done" : "failed";
+    }
     this.onEvent?.({
       version: 1,
       id: randomUUID(),

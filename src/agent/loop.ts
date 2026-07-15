@@ -172,13 +172,20 @@ function emitLog(params: AgentLoopParams, line: LogLine): void {
   params.onLogLine?.(line);
 }
 
-/** Reports a stopped-via-signal turn using the exact same shape a self-reported failure
- * already uses (`success: false`, `agent_status: failed`, a logged `failed` event) — Round
- * 3's docs/handoffs/core.md status log entry explains why a distinct "stopped" AgentStatus
- * wasn't introduced: TaskStop/stopAgent's existing task-registry bookkeeping for sub-agents
- * already collapses "stopped" into "failed" (`task.error = "stopped by TaskStop"`), so this
- * keeps the two mechanisms consistent instead of adding a status value only one of them
- * uses. */
+/** Reports a stopped-via-signal turn. DH-0017 fix: this used to report `agent_status:
+ * "failed"` (the same shape as a genuine self-reported failure) with the rationale that
+ * TaskRegistry.stop() also collapsed "stopped" into "failed" bookkeeping, so the two
+ * mechanisms were at least internally consistent — but that meant a deliberately-stopped
+ * agent was never actually distinguishable from a real failure anywhere downstream (JSONL log,
+ * SSE `agent_status`, TUI/Web display all read "failed"). TaskRegistry.stop() (tasks.ts) has
+ * since been the one recording a genuine "stopped" status on its own snapshot — but because
+ * this function fed "failed" back through the exact same onEvent path that
+ * AgentRuntime.spawnAgent()/runRoot() use to keep their own status bookkeeping in sync
+ * (`this.tasks.setStatus(agentId, event.status)` / `this.rootStatus = event.status`), that later
+ * "failed" event would silently overwrite the registry's already-correct "stopped" back to
+ * "failed" — the exact flip DH-0017 reports. Now reports "stopped" here too, so every reader of
+ * this status (JSONL, SSE, task registry, root bookkeeping) agrees, regardless of which of the
+ * two code paths (loop.ts's own signal check vs. TaskRegistry.stop()) observes the stop first. */
 function reportStopped(
   params: AgentLoopParams,
   finalText: string,
@@ -191,9 +198,15 @@ function reportStopped(
     timestamp: nowIso(),
     type: "agent_status",
     agentId: params.agentId,
-    status: "failed",
+    status: "stopped",
   });
-  emitLog(params, { version: 1, timestamp: nowIso(), type: "failed", reason });
+  emitLog(params, {
+    version: 1,
+    timestamp: nowIso(),
+    type: "status_change",
+    status: "stopped",
+    reason,
+  });
   return { success: false, finalOutput: finalText, turns };
 }
 
