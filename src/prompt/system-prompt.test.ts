@@ -6,6 +6,7 @@ import type { DhConfig } from "../contracts/index.ts";
 import type { Skill } from "./skills.ts";
 import {
   CLI_TOOLS_SKILL,
+  REQUIRED_CONTRACT,
   buildDefaultSystemPrompt,
   loadSystemPrompt,
   renderSkillsSection,
@@ -86,6 +87,10 @@ describe("buildDefaultSystemPrompt", () => {
     expect(prompt).toContain("TASK_FAILED");
     expect(prompt).toMatch(/re-read\s+your own final response/);
     expect(prompt).toMatch(/logged\s+automatically/);
+    expect(prompt).toContain("Redirect or stop a stuck sub-agent — don't just keep polling it.");
+    expect(prompt).toContain("SendMessage");
+    expect(prompt).toContain("TaskStop");
+    expect(prompt).toMatch(/unattended/);
     expect(prompt).toContain("## Available skills");
     expect(prompt).toContain("- **cli-tools**:");
     expect(prompt).toContain("- **custom-skill**: a project-specific skill");
@@ -120,13 +125,18 @@ describe("loadSystemPrompt", () => {
     expect(loaded).toBe(built);
   });
 
-  test("reads and trims an override file verbatim when systemPrompt is set", async () => {
+  test("reads and trims an override file, but always appends the TASK_FAILED/logging contract", async () => {
     const overridePath = join(root, "custom-prompt.txt");
     await writeFile(overridePath, "\n  You are a custom agent.  \n");
 
     const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }));
 
-    expect(prompt).toBe("You are a custom agent.");
+    expect(prompt).toBe(`You are a custom agent.\n\n${REQUIRED_CONTRACT}`);
     expect(prompt).not.toContain("Available skills");
+  });
+
+  test("REQUIRED_CONTRACT carries the TASK_FAILED marker and the logging notice on its own", () => {
+    expect(REQUIRED_CONTRACT).toContain("TASK_FAILED");
+    expect(REQUIRED_CONTRACT).toMatch(/logged\s+automatically/);
   });
 });

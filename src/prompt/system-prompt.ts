@@ -1,8 +1,15 @@
 // The built-in system prompt every dh agent (root and sub-agents) runs with, plus the
-// loader Core's agent loop calls. Overridable wholesale via `DhConfig.systemPrompt` (a file
-// path); otherwise this module builds the default prompt and appends the enumerated skills
-// (Claude-Code style: name + description only — tools themselves go through the model's
-// tools parameter, never prose-listed here).
+// loader Core's agent loop calls. `DhConfig.systemPrompt` overrides the working-discipline
+// preamble (a file path); otherwise this module builds the default prompt and appends the
+// enumerated skills (Claude-Code style: name + description only — tools themselves go
+// through the model's tools parameter, never prose-listed here).
+//
+// The override is NOT a full wholesale replacement of everything below: `REQUIRED_CONTRACT`
+// (the `TASK_FAILED` self-report convention and the automatic-logging notice) is always
+// appended after a custom prompt too. That contract is structurally load-bearing — ADR
+// 0006's exit-code contract depends on the model actually emitting `TASK_FAILED` — so an
+// operator supplying a domain-persona prompt for a legitimate reason must not silently lose
+// it. See DH-0018.
 
 import type { DhConfig } from "../contracts/index.ts";
 import { type Skill, discoverSkills, parseSkillFrontmatter } from "./skills.ts";
@@ -24,7 +31,7 @@ export const CLI_TOOLS_SKILL: Skill = {
   source: "builtin",
 };
 
-const BASE_PROMPT = `You are dh, an autonomous coding agent running inside Dark Harness. You are handed an
+const DISCIPLINE_PROMPT = `You are dh, an autonomous coding agent running inside Dark Harness. You are handed an
 instructions file (or a message from whoever spawned you) and you work it to completion
 without waiting for a human in the loop, unless you hit something only a human can resolve.
 
@@ -40,6 +47,20 @@ yourself to the same discipline:
   architectural invariant, a genuine ambiguity in scope, or anything you would otherwise be
   guessing at, write up the finding and the options and surface it — to whoever spawned you,
   or to the operator if you are the root agent — rather than silently picking a direction.
+  What "escalate" means depends on whether anyone is watching in real time. If you are
+  running **interactively** with a live operator, that can mean asking a question and
+  waiting for the answer. If you are running **unattended** (a \`--job\` run, or any
+  sub-agent whose spawner has already moved on and isn't polling), there is no one to wait
+  on: state the blocker plainly in your final output, proceed with the single most
+  reasonable interpretation you can defend, and only fall back to reporting \`TASK_FAILED\`
+  (below) if no reasonable path forward exists at all. Silently guessing and pressing on as
+  if nothing were ambiguous is wrong either way — the difference is what you do once you've
+  named the blocker, not whether you name it.
+- **Redirect or stop a stuck sub-agent — don't just keep polling it.** \`Monitor\`/
+  \`TaskOutput\` tell you what a sub-agent is doing; they are not the only tools for handling
+  what you learn. If a sub-agent is visibly looping, stuck, or has drifted from what you
+  asked for, use \`SendMessage\` to redirect it with corrected instructions, or \`TaskStop\`
+  to end it, rather than continuing to poll a task that isn't converging.
 - **Commit before you yield.** If you are working in a shared repository, never leave a
   dirty working tree or an unresolved handoff when you stop or hand control elsewhere;
   finish the unit of work, or explicitly flag it as incomplete and why.
@@ -64,8 +85,16 @@ yourself to the same discipline:
   immediate tight loop waiting for it to finish. Either go do other independent work and
   check back once you have something to show for it, or wait a reasonable interval before
   polling again. Spin-polling wastes turns; never checking back (see above) fails the task
-  — the discipline is checking back at a sensible cadence, not as fast as possible.
-- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
+  — the discipline is checking back at a sensible cadence, not as fast as possible.`;
+
+/**
+ * The part of the prompt that is structurally load-bearing for the harness itself — the
+ * `TASK_FAILED` self-report convention (ADR 0006's exit-code contract scans for this exact
+ * string) and the automatic-logging notice. Always appended, whether the discipline preamble
+ * above came from `DISCIPLINE_PROMPT` or a `config.systemPrompt` override, so a custom prompt
+ * can never silently drop the contract the rest of the harness depends on. See DH-0018.
+ */
+export const REQUIRED_CONTRACT = `- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
   If you cannot complete the instructions you were given, explaining that in your own words
   is NOT enough on its own. You MUST ALSO include the exact literal text \`TASK_FAILED\`
   (that precise spelling and casing) somewhere in your final response. Nothing reads or
@@ -93,6 +122,8 @@ need to call a logging tool or ask anyone to record what you did: your plain-tex
 *is* how you record your reasoning and status, and it is preserved whether or not anyone is
 watching in real time.`;
 
+const BASE_PROMPT = `${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`;
+
 /**
  * Renders the "Available skills" section of the default prompt: name + one-line description
  * per skill, sorted alphabetically for deterministic output. Always non-empty — the bundled
@@ -117,16 +148,19 @@ export async function buildDefaultSystemPrompt(config: DhConfig): Promise<string
 
 /**
  * Produces the system prompt Core's agent loop passes to the model. If `config.systemPrompt`
- * is set, it is a full override — read that file verbatim (the operator takes over prompt
- * authoring entirely). Otherwise builds the default prompt with skill enumeration.
+ * is set, the file's contents replace the working-discipline preamble, but
+ * `REQUIRED_CONTRACT` (the `TASK_FAILED` convention and logging notice) is always appended
+ * after it — this is the one part of the default prompt an operator cannot silently drop by
+ * overriding, because the harness's own exit-code contract depends on it (DH-0018).
+ * Otherwise builds the default prompt with skill enumeration.
  *
  * Sub-agents receive this same base prompt plus their spawn prompt; that composition happens
  * in `src/agent/` (Core's territory) — this function only produces the base text.
  */
 export async function loadSystemPrompt(config: DhConfig): Promise<string> {
   if (config.systemPrompt) {
-    const text = await Bun.file(config.systemPrompt).text();
-    return text.trim();
+    const text = (await Bun.file(config.systemPrompt).text()).trim();
+    return `${text}\n\n${REQUIRED_CONTRACT}`;
   }
   return buildDefaultSystemPrompt(config);
 }
