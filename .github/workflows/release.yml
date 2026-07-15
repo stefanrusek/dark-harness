@@ -1,0 +1,245 @@
+name: Release
+
+# HANDOFF.md §11 / docs/handoffs/ci-release.md scope 2: tag-driven release.
+# v* tag push -> full gate -> cross-compiled binaries -> GitHub Release (with a
+# conventional-commits changelog) -> npm publish (so `bunx dark-harness` works).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Gate
+    uses: ./.github/workflows/gate.yml
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: gate
+    runs-on: ubuntu-latest
+    # Cross-compilation is done entirely from a single Linux runner: `bun build
+    # --compile --target=<platform>` downloads the needed cross toolchain on demand.
+    # Verified locally (bun 1.3.11) for all five targets below — no per-OS runners
+    # needed, which keeps the release matrix cheap and simple.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            artifact: dh-linux-x64
+          - target: bun-linux-arm64
+            artifact: dh-linux-arm64
+          - target: bun-darwin-x64
+            artifact: dh-darwin-x64
+          - target: bun-darwin-arm64
+            artifact: dh-darwin-arm64
+          - target: bun-windows-x64
+            artifact: dh-windows-x64.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compile ${{ matrix.target }}
+        run: bun build ./src/cli.ts --compile --target=${{ matrix.target }} --outfile dist/${{ matrix.artifact }}
+
+      - name: Checksum
+        working-directory: dist
+        run: sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.artifact }}
+            dist/${{ matrix.artifact }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags: the changelog step below diffs against the previous
+          # tag, which a shallow/tag-less checkout can't do.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -la artifacts
+
+      - name: Combine checksums
+        working-directory: artifacts
+        run: cat -- *.sha256 > SHA256SUMS.txt
+
+      - name: Generate changelog
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO_URL: https://github.com/${{ github.repository }}
+        shell: bash
+        run: |
+          # Hand-rolled conventional-commits changelog (feat/fix/docs/... grouped,
+          # anything else in "Other Changes" so the notes are never empty). Chosen
+          # over a third-party changelog action (e.g. git-cliff) because this domain
+          # lead could actually execute and verify this exact script against the real
+          # repo history in-session (see docs/handoffs/ci-release.md status log for
+          # the test transcript) — an external action's default config behavior
+          # could not be verified the same way without a live Actions run.
+          set -euo pipefail
+          PREV_TAG="$(git tag --sort=-creatordate --merged "$TAG" | grep -vFx "$TAG" | head -n1 || true)"
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="$TAG"
+          else
+            RANGE="${PREV_TAG}..${TAG}"
+          fi
+
+          {
+            echo "## ${TAG}"
+            echo
+
+            LOG="$(git log --no-merges --pretty=format:'%h%x09%s' "$RANGE")"
+            if [ -z "$LOG" ]; then
+              echo "_No changes recorded for this range._"
+            else
+              echo "$LOG" | awk -F'\t' '
+              BEGIN {
+                n = split("feat fix perf refactor docs test build ci chore revert", order, " ");
+                title["feat"]="Features"; title["fix"]="Bug Fixes"; title["perf"]="Performance";
+                title["refactor"]="Refactoring"; title["docs"]="Documentation"; title["test"]="Testing";
+                title["build"]="Build System"; title["ci"]="CI/CD"; title["chore"]="Chores"; title["revert"]="Reverts";
+              }
+              {
+                hash=$1; subject=$2; matched=0;
+                for (i=1;i<=n;i++) {
+                  t=order[i];
+                  pat="^" t "(\\([^)]*\\))?!?:[ ]*";
+                  if (subject ~ pat) {
+                    rest=subject;
+                    sub(pat,"",rest);
+                    groups[t] = groups[t] "- " rest " (" hash ")\n";
+                    matched=1;
+                    break;
+                  }
+                }
+                if (!matched) other = other "- " subject " (" hash ")\n";
+              }
+              END {
+                for (i=1;i<=n;i++) {
+                  t=order[i];
+                  if (groups[t] != "") {
+                    print "### " title[t];
+                    print "";
+                    printf "%s", groups[t];
+                    print "";
+                  }
+                }
+                if (other != "") {
+                  print "### Other Changes";
+                  print "";
+                  printf "%s", other;
+                  print "";
+                }
+              }
+              '
+            fi
+
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full diff:** ${REPO_URL}/compare/${PREV_TAG}...${TAG}"
+            fi
+          } > CHANGELOG_RELEASE.md
+
+          cat CHANGELOG_RELEASE.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            artifacts/dh-linux-x64 \
+            artifacts/dh-linux-arm64 \
+            artifacts/dh-darwin-x64 \
+            artifacts/dh-darwin-arm64 \
+            artifacts/dh-windows-x64.exe \
+            artifacts/SHA256SUMS.txt \
+            --title "${{ github.ref_name }}" \
+            --notes-file CHANGELOG_RELEASE.md
+
+  publish-npm:
+    name: Publish to npm
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download linux-x64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dh-linux-x64
+          path: dist-download
+
+      - name: Stage npm package binary
+        run: |
+          mkdir -p dist
+          cp dist-download/dh-linux-x64 dist/dh
+          chmod +x dist/dh
+          # KNOWN v0.1 LIMITATION: package.json's "bin" currently points at a single
+          # binary (dist/dh), so this publishes a linux-x64-only npm package —
+          # `bunx dark-harness` will not work correctly on macOS/Windows. Real
+          # multi-platform npm distribution (per-platform optionalDependencies
+          # packages, or a postinstall downloader hitting this release's GitHub
+          # assets) is a package.json/packaging shape change outside this domain's
+          # ownership (.github/workflows/ only). Flagged in docs/handoffs/ci-release.md
+          # status log as a request to Core/coordinator rather than forked here.
+
+      - name: Require NPM_TOKEN
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::secrets.NPM_TOKEN is not set on this repository — npm publish cannot proceed."
+            echo "::error::This is an owner-authority gap: the CI/Release domain lead cannot create or set repository secrets (per its handoff constraints). An owner must add an npm automation token as the NPM_TOKEN repository secret (Settings > Secrets and variables > Actions) before this job can succeed."
+            exit 1
+          fi
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=\${NPM_TOKEN}" > .npmrc
+
+      - name: Publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish
