@@ -1404,3 +1404,44 @@ that's currently missing it.
 gap that let this ship unnoticed in Round 6b (its own regression tests apparently only
 checked the SSE event side). Append a dated status entry here and update
 `docs/roster/grace.md` when done.
+
+### 2026-07-15 — Round 10 closed — Grace (resumed)
+
+Fixed both halves of the gap, exactly as the handoff diagnosed:
+
+1. `src/contracts/log.ts`: added `costUsd?: number` to the `token_usage` variant of
+   `LogEvent` (same optional-field pattern as `cacheReadTokens`/`cacheWriteTokens` right
+   above it) — small additive contracts change, doesn't restructure or remove anything, so I
+   didn't loop in the architect per §6's own "additive is routine" framing, but flagging the
+   contracts touch here per policy.
+2. `src/agent/loop.ts`: the `emitLog` call for `token_usage` (the JSONL-bound one, right
+   below the SSE `emitEvent` call that already had it) now spreads
+   `...(costUsd !== undefined ? { costUsd } : {})` — identical shape to the SSE side, same
+   `costUsd` local variable, so both sides are now guaranteed to agree (no risk of the two
+   diverging again since they share the same computed value in the same function).
+
+**Regression tests added** (`src/agent/loop.test.ts`, right after the existing Round 6b SSE
+tests): two new tests targeting `logLines` (not `events`) from `baseParams()` — mirroring
+the existing SSE tests' shape exactly but asserting on the JSONL log line:
+- `"token_usage LOG LINES get a computed costUsd when pricing is configured"` — same
+  1M-input/500k-output/$3-$15-per-M fixture as the SSE test, asserts the **log line**
+  (`logLines.find(l => l.type === "token_usage")`) carries `costUsd: 10.5`. Before my fix this
+  failed with `costUsd` absent from the log line entirely (and wouldn't even have type-checked
+  before the contracts change, since `LogEvent`'s `token_usage` variant had no `costUsd`
+  field to narrow to).
+- `"token_usage LOG LINES leave costUsd undefined when pricing isn't configured (no
+  regression)"` — confirms unconfigured models still produce a log line with no `costUsd` key
+  at all (not `costUsd: undefined` sitting in the object), matching the existing SSE-side
+  no-regression test's assertion style.
+
+**Gates:** `bun run typecheck` and `bun run lint` both green (biome: 150 files, no fixes
+needed). `bun run test:coverage`: 743 tests pass (up from 741 in Round 9 — the two new tests),
+100% line/func coverage on every file except `src/cli.ts`'s pre-existing 97.44%
+`if (import.meta.main)` process-entry gap (same one Round 9 confirmed unrelated to its own
+changes; unrelated to this round too — this round never touched `cli.ts`). `bun run e2e`:
+same sandbox gap every prior round has hit, 17/21 pass, the 4 failures are the tmux-PTY and
+Chromium-launch tests failing on missing binaries (`Executable not found in $PATH: "tmux"`,
+`Failed to launch chromium because executable doesn't exist`), not assertion failures.
+
+No other files touched — this was a two-file fix (contracts + loop) plus its own test file,
+scoped exactly to what the handoff described.

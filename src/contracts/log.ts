@@ -71,6 +71,11 @@ export interface LogTokenUsageEvent extends LogEventBase {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Round 10: mirrors the SSE `token_usage` event's `costUsd` (see loop.ts's
+   * computeCostUsd()) so the durable JSONL log — not just the ephemeral live stream — carries
+   * cost, since the log is the only after-the-fact diagnostic record (ADR 0005/HANDOFF.md
+   * §7). Undefined when pricing wasn't configured for the model, same as the SSE side. */
+  costUsd?: number;
 }
 
 export type AgentStatus = "running" | "waiting" | "done" | "failed";

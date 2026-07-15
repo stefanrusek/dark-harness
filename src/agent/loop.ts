@@ -379,6 +379,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       ...(completion.usage.cacheWriteTokens !== undefined
         ? { cacheWriteTokens: completion.usage.cacheWriteTokens }
         : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
     });
 
     if (completion.stopReason !== "tool_use") {

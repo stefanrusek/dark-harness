@@ -526,3 +526,24 @@ is exempted from the 100% coverage gate per Round 8's own note, and this round's
 asked for documented manual verification as the alternative, which is what's recorded above
 and in `docs/handoffs/core.md`'s dated Round 9 entry. `bun run test:coverage`/`bun run e2e`
 not re-run this round since no `src/` file changed.
+
+### 2026-07-15 — Round 10 — costUsd reaches the JSONL log now, not just SSE
+
+Two-file fix: added `costUsd?: number` to `LogEvent`'s `token_usage` variant in
+`src/contracts/log.ts` (additive, same optional-field pattern as the two cache-token fields
+already there), then added the missing `...(costUsd !== undefined ? { costUsd } : {})` spread
+to the `emitLog` call in `src/agent/loop.ts` — it sits right next to the `emitEvent` call
+that already had this spread since Round 6b, so the two had simply drifted apart rather than
+one never being written. Added two regression tests in `loop.test.ts` mirroring the existing
+Round 6b SSE-event tests but asserting on `logLines` instead of `events` (configured-pricing
+case gets `costUsd: 10.5`; unconfigured case has no `costUsd` key at all). All four gates
+green: typecheck, lint, test:coverage (743 pass, 100% cov except cli.ts's pre-existing,
+unrelated process-entry gap), e2e (17/21, same sandbox tmux/Chromium gap every round hits).
+
+**Durable note for future me:** this bug shipped in Round 6b because that round's own tests
+only asserted on the SSE `events` array, never on `logLines` — the two are emitted from the
+same function with near-identical object literals but are genuinely separate calls
+(`onEvent` vs `onLogLine`), so nothing type-checks them into agreement automatically. Worth
+remembering next time I touch either `emitEvent` or `emitLog` in `loop.ts`: if one call site
+gets a new optional field, check whether its sibling call a few lines away needs the same
+field, and add a test on *both* arrays, not just the one that's easiest to assert on.
