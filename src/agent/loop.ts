@@ -101,6 +101,35 @@ export interface AgentLoopParams {
    * interactive sessions (server/TUI/Web) — see the module doc comment above for the full
    * design. Set once per AgentRuntime instance (runtime.ts), not per call. */
   interactive?: boolean;
+  /**
+   * Round 6b: optional per-model pricing (USD per million tokens), threaded from
+   * `ModelConfig.inputPricePerMToken`/`outputPricePerMToken` via runtime.ts. When present,
+   * every `token_usage` event/log line this call emits gets a computed `costUsd`; when
+   * absent, `costUsd` stays undefined exactly as before this round (no regression for
+   * unconfigured models — see computeCostUsd()'s own doc comment for the half-configured
+   * case).
+   */
+  pricing?: { inputPricePerMToken?: number; outputPricePerMToken?: number };
+}
+
+/** Computes a `token_usage` event's `costUsd`, or undefined if pricing wasn't configured at
+ * all for this model. If only one side of the split (input/output) is configured, the other
+ * side is treated as $0/MToken rather than making the whole result undefined — a partial
+ * price is still a real, deliberately-configured value, not "unconfigured". */
+function computeCostUsd(
+  pricing: AgentLoopParams["pricing"],
+  inputTokens: number,
+  outputTokens: number,
+): number | undefined {
+  if (
+    !pricing ||
+    (pricing.inputPricePerMToken === undefined && pricing.outputPricePerMToken === undefined)
+  ) {
+    return undefined;
+  }
+  const inputCost = ((pricing.inputPricePerMToken ?? 0) * inputTokens) / 1_000_000;
+  const outputCost = ((pricing.outputPricePerMToken ?? 0) * outputTokens) / 1_000_000;
+  return inputCost + outputCost;
 }
 
 export interface AgentLoopResult {
@@ -314,6 +343,11 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       finalText = text;
     }
 
+    const costUsd = computeCostUsd(
+      params.pricing,
+      completion.usage.inputTokens,
+      completion.usage.outputTokens,
+    );
     emitEvent(params, {
       version: 1,
       id: randomUUID(),
@@ -322,6 +356,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       agentId: params.agentId,
       inputTokens: completion.usage.inputTokens,
       outputTokens: completion.usage.outputTokens,
+      ...(costUsd !== undefined ? { costUsd } : {}),
     });
     emitLog(params, {
       version: 1,

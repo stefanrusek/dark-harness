@@ -57,6 +57,42 @@ export interface AgentRuntimeOptions {
   interactive?: boolean;
 }
 
+/** Builds loop.ts's `AgentLoopParams.pricing` from a model's optional config prices — round
+ * 6b. Returns undefined when neither price is configured (so `costUsd` stays undefined,
+ * per computeCostUsd()'s own doc comment in loop.ts), otherwise an object with only the
+ * configured keys present (exactOptionalPropertyTypes forbids passing `undefined` through
+ * explicitly). */
+function buildPricing(
+  model: ModelConfig,
+): { inputPricePerMToken?: number; outputPricePerMToken?: number } | undefined {
+  if (model.inputPricePerMToken === undefined && model.outputPricePerMToken === undefined) {
+    return undefined;
+  }
+  return {
+    ...(model.inputPricePerMToken !== undefined
+      ? { inputPricePerMToken: model.inputPricePerMToken }
+      : {}),
+    ...(model.outputPricePerMToken !== undefined
+      ? { outputPricePerMToken: model.outputPricePerMToken }
+      : {}),
+  };
+}
+
+/** Spreadable helper: `{ pricing: ... }` when configured, `{}` otherwise — kept as its own
+ * function (rather than inlining the ternary at each call site) because
+ * `exactOptionalPropertyTypes` rejects a ternary whose branches are `{ pricing: X }` and
+ * `{}` when `X` itself is `T | undefined` (it can't narrow the conditional's own type), so
+ * this needs the `undefined` check and the object literal built in one place. */
+function pricingOverride(
+  model: ModelConfig,
+):
+  | { pricing: { inputPricePerMToken?: number; outputPricePerMToken?: number } }
+  | Record<string, never> {
+  const pricing = buildPricing(model);
+  if (pricing === undefined) return {};
+  return { pricing };
+}
+
 export class ConfigModelError extends Error {
   constructor(message: string) {
     super(message);
@@ -203,6 +239,10 @@ export class AgentRuntime {
           // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
           signal: handle.signal,
           interactive: this.interactive,
+          ...(this.config.options.maxTurns !== undefined
+            ? { maxTurns: this.config.options.maxTurns }
+            : {}),
+          ...pricingOverride(model),
           onEvent: (event) => {
             if (event.type === "agent_output") handle.append(event.chunk);
             // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
@@ -292,6 +332,10 @@ export class AgentRuntime {
         },
         signal: this.rootController.signal,
         interactive: this.interactive,
+        ...(this.config.options.maxTurns !== undefined
+          ? { maxTurns: this.config.options.maxTurns }
+          : {}),
+        ...pricingOverride(model),
         onEvent: (event) => {
           // Round 5: keep rootStatus (what getAgentTree() reads) in sync with the loop's own
           // mid-conversation waiting/running transitions, the same way spawnAgent() keeps the

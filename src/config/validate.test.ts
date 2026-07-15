@@ -69,6 +69,45 @@ describe("validateConfig — happy paths", () => {
     expect(config.security).toEqual({ token: "abc123", tls: { cert: "/c.pem", key: "/k.pem" } });
   });
 
+  // Round 6c (docs/handoffs/core.md): options.maxTurns wasn't threadable from dh.json at all.
+  test("accepts options.maxTurns", () => {
+    const config = validateConfig(
+      baseConfig({ options: { defaultModel: "sonnet", maxTurns: 500 } }),
+    );
+    expect(config.options.maxTurns).toBe(500);
+  });
+
+  test("options.maxTurns is omitted (not defaulted here) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.options.maxTurns).toBeUndefined();
+  });
+
+  // Round 6b (docs/handoffs/core.md): per-model pricing, since costUsd was fully wired but
+  // nothing computed a real value.
+  test("accepts per-model inputPricePerMToken/outputPricePerMToken", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "sonnet-5",
+            inputPricePerMToken: 3,
+            outputPricePerMToken: 15,
+          },
+        ],
+      }),
+    );
+    expect(config.models[0]?.inputPricePerMToken).toBe(3);
+    expect(config.models[0]?.outputPricePerMToken).toBe(15);
+  });
+
+  test("model pricing fields are omitted (not defaulted) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.models[0]?.inputPricePerMToken).toBeUndefined();
+    expect(config.models[0]?.outputPricePerMToken).toBeUndefined();
+  });
+
   test("provider entries may carry extra type-specific fields", () => {
     const config = validateConfig(
       baseConfig({
@@ -235,5 +274,46 @@ describe("validateConfig — rejections", () => {
     expect(() => validateConfig(baseConfig({ security: { tls: { cert: "/c.pem" } } }))).toThrow(
       /security.tls.key/,
     );
+  });
+
+  test("rejects a non-integer options.maxTurns", () => {
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxTurns: 1.5 } })),
+    ).toThrow(/options.maxTurns must be a positive integer/);
+  });
+
+  test("rejects a non-positive options.maxTurns", () => {
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxTurns: 0 } })),
+    ).toThrow(/options.maxTurns must be a positive integer/);
+  });
+
+  test("rejects a negative models[].inputPricePerMToken", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", inputPricePerMToken: -1 },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].inputPricePerMToken must be a non-negative number/);
+  });
+
+  test("rejects a non-numeric models[].outputPricePerMToken", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              outputPricePerMToken: "free",
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].outputPricePerMToken must be a non-negative number/);
   });
 });

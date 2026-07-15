@@ -181,6 +181,43 @@ describe("runAgentLoop", () => {
     expect(result.turns).toBe(2);
   });
 
+  // Round 6b (docs/handoffs/core.md): costUsd was fully wired end-to-end (contracts + Web
+  // display) but nothing ever computed a real value. Proves the loop computes it when
+  // `pricing` is configured, and leaves it undefined (no regression) when it isn't.
+  test("token_usage events get a computed costUsd when pricing is configured", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1_000_000, outputTokens: 500_000 },
+      },
+    ]);
+    const { params, events } = baseParams({
+      provider,
+      pricing: { inputPricePerMToken: 3, outputPricePerMToken: 15 },
+    });
+    await runAgentLoop(params);
+    const usageEvent = events.find((e) => e.type === "token_usage");
+    expect(usageEvent?.type).toBe("token_usage");
+    // 1M input tokens @ $3/M + 0.5M output tokens @ $15/M = $3 + $7.5 = $10.5
+    expect(usageEvent && "costUsd" in usageEvent ? usageEvent.costUsd : undefined).toBe(10.5);
+  });
+
+  test("token_usage events leave costUsd undefined when pricing isn't configured (no regression)", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+    ]);
+    const { params, events } = baseParams({ provider });
+    await runAgentLoop(params);
+    const usageEvent = events.find((e) => e.type === "token_usage");
+    expect(usageEvent?.type).toBe("token_usage");
+    expect(usageEvent && "costUsd" in usageEvent ? usageEvent.costUsd : undefined).toBeUndefined();
+  });
+
   test("SendMessage injection is picked up as a user turn before the next completion", async () => {
     let sendFn: ((message: string) => void) | undefined;
     const provider = scriptedProvider([

@@ -36,6 +36,11 @@ function startMockAnthropicServer() {
         .map((c) => c.text)
         .join("");
       const hasToolResult = content.some((c) => c.type === "tool_result");
+      const firstMessage = body.messages[0];
+      const firstText = (firstMessage?.content ?? [])
+        .filter((c): c is { type: "text"; text: string } => c.type === "text")
+        .map((c) => c.text)
+        .join("");
 
       const message = (contentBlocks: unknown[], stopReason: string): Response =>
         Response.json({
@@ -48,6 +53,23 @@ function startMockAnthropicServer() {
           stop_sequence: null,
           usage: { input_tokens: 5, output_tokens: 5 },
         });
+
+      // Round 6c test support: keeps calling a tool forever, regardless of tool_result
+      // feedback, so the maxTurns safety valve is the only thing that can end the run —
+      // used to prove options.maxTurns actually threads from config into the loop.
+      if (firstText.includes("loop-forever")) {
+        return message(
+          [
+            {
+              type: "tool_use",
+              id: "tu_loop",
+              name: "Bash",
+              input: { command: "true", run_in_background: false },
+            },
+          ],
+          "tool_use",
+        );
+      }
 
       if (!hasToolResult) {
         if (text.includes("use-agent-tool")) {
@@ -844,5 +866,59 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
     } finally {
       server.stop(true);
     }
+  });
+});
+
+describe("AgentRuntime — Round 6b/6c: config-driven cost pricing and maxTurns", () => {
+  test("options.maxTurns from config actually changes when the loop's safety valve fires", async () => {
+    const { onEvent, onLogLine, events, logLines } = collectors();
+    const runtime = new AgentRuntime({
+      config: baseConfig({ options: { defaultModel: "test-model", maxTurns: 2 } }),
+      systemPrompt: "sp",
+      onEvent,
+      onLogLine,
+    });
+    const result = await runtime.runRoot("loop-forever please");
+    expect(result.success).toBe(false);
+    const failedLog = logLines.find((l) => l.type === "failed");
+    expect(failedLog && "reason" in failedLog ? failedLog.reason : undefined).toContain(
+      "exceeded max turns (2)",
+    );
+    const sessionEnded = events.find((e) => e.type === "session_ended");
+    expect(sessionEnded).toMatchObject({ exitCode: ExitCode.TaskFailure });
+  });
+
+  test("a configured model price produces a real (non-zero) costUsd on token_usage events", async () => {
+    const { onEvent, events } = collectors();
+    const runtime = new AgentRuntime({
+      config: baseConfig({
+        models: [
+          {
+            name: "test-model",
+            provider: "mock",
+            model: "mock-1",
+            inputPricePerMToken: 3,
+            outputPricePerMToken: 15,
+          },
+        ],
+      }),
+      systemPrompt: "sp",
+      onEvent,
+    });
+    await runtime.runRoot("please just answer");
+    const usageEvent = events.find((e) => e.type === "token_usage");
+    expect(usageEvent?.type).toBe("token_usage");
+    expect(usageEvent && "costUsd" in usageEvent ? usageEvent.costUsd : undefined).toBeGreaterThan(
+      0,
+    );
+  });
+
+  test("an unconfigured model's token_usage events still have costUsd undefined (no regression)", async () => {
+    const { onEvent, events } = collectors();
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp", onEvent });
+    await runtime.runRoot("please just answer");
+    const usageEvent = events.find((e) => e.type === "token_usage");
+    expect(usageEvent?.type).toBe("token_usage");
+    expect(usageEvent && "costUsd" in usageEvent ? usageEvent.costUsd : undefined).toBeUndefined();
   });
 });

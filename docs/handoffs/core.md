@@ -935,6 +935,63 @@ non-zero `costUsd` on a `token_usage` event, and an unconfigured one still produ
 safety-valve fires. Append a dated status entry here and update `docs/roster/grace.md` when
 done — note any of the three you have to defer, explicitly, rather than silently dropping.
 
+**Status (2026-07-15, Grace, resumed): all three gaps closed in one bundled pass.**
+
+**6a — JSONL logging on the standalone `--instructions`/`--job` path.** Added
+`createStandaloneRuntime()` in `src/cli.ts`, used by `defaultDeps().createRuntime`: generates
+a `sessionId`, constructs a `SessionLogger` (reused directly from `./server/index.ts` — no
+duplication, and no HTTP server started just to get a JSONL sink) at
+`.dh-logs/<sessionId>/`, and wires its `append` as `AgentRuntime`'s `onLogLine`.
+`CliDeps.createRuntime`'s public signature is unchanged (`(config, systemPrompt) => Pick<
+AgentRuntime, "runRoot">`), so no existing test override needed touching — only the default
+real implementation changed. `loop.ts` already emits its own `LogHeader` first line per
+agent, so no separate header-writing logic was needed. Regression test: `src/cli.test.ts`
+("the real (default) createRuntime dep writes a real per-agent JSONL log for a standalone
+run") runs an actual `--instructions --job` invocation against a real mock Anthropic HTTP
+endpoint with only `loadConfig`/`loadSystemPrompt`/`io` overridden (the real `createRuntime`
+default runs), `chdir`s into a temp dir, and asserts a `.dh-logs/<sessionId>/agent-root.jsonl`
+file exists with a `header` first line and a `token_usage` line.
+
+**6b — cost display always $0.00.** Added `ModelConfig.inputPricePerMToken` /
+`outputPricePerMToken` (both optional numbers, USD/million tokens) to
+`src/contracts/config.ts`, validated in `src/config/validate.ts` (non-negative number when
+present). `AgentLoopParams.pricing` (loop.ts) is the same shape; `computeCostUsd()` returns
+`undefined` when neither price is configured (current behavior for unconfigured models is
+unchanged) and treats an unset half of a partially-configured pair as $0/MToken rather than
+discarding the configured half. `runtime.ts` threads `model.inputPricePerMToken`/
+`outputPricePerMToken` into every `runAgentLoop()` call (`spawnAgent()` and `runRoot()`
+alike) via a small `buildPricing()`/`pricingOverride()` pair — factored out because
+`exactOptionalPropertyTypes` rejects a ternary whose branches are `{ pricing: X }` and `{}`
+when `X` itself is `T | undefined`. Regression tests: `src/agent/loop.test.ts` (configured
+pricing produces the exact expected `costUsd`; unconfigured pricing leaves it `undefined`)
+and `src/agent/runtime.test.ts` (real config -> real mock-provider `token_usage` event has a
+real non-zero `costUsd` when priced, `undefined` when not).
+
+**6c — `maxTurns` not configurable from `dh.json`.** Added `DhOptions.maxTurns` (optional
+positive integer) to `src/contracts/config.ts`, validated in `src/config/validate.ts`.
+`runtime.ts` threads `this.config.options.maxTurns` into every `runAgentLoop()` call the same
+way as pricing; omitted entirely (not defaulted here) when unset, so `loop.ts`'s own
+`DEFAULT_MAX_TURNS = 100` fallback is exactly preserved — no regression for configs that
+don't set it. Regression test: `src/agent/runtime.test.ts` — the mock Anthropic server got a
+new `loop-forever` branch (keyed off the *first* message's text, since a later turn's last
+message is a `tool_result`, not text) that always returns a tool call regardless of
+tool-result feedback, so the safety valve is the only thing that can end the run; with
+`options.maxTurns: 2` configured, `runRoot()` fails with a `failed` log line reasoning
+`"exceeded max turns (2) without completing"`.
+
+**Gates:** `bun run typecheck` clean (both TS programs). `bun run lint` clean (biome). `bun
+run test:coverage` — 707 tests passing, 99.96%/100% funcs/lines aggregate (same single
+pre-existing explained `cli.ts` gap as every prior round: the real `startTui` default needs
+an actual PTY — untouched by this round). `bun run e2e` **not run this round** — this
+sandbox has neither `tmux` nor a Chromium binary at `/opt/pw-browsers/chromium` (checked:
+`which tmux chromium chromium-browser` all fail, the Chromium path doesn't exist), the same
+pre-existing environment gap every prior round's status log has noted; none of this round's
+changes touch `e2e/` or anything `e2e/`'s non-PTY/non-browser suites (the ones that *do* run
+in this sandbox in prior rounds) would exercise differently, so I'm not aware of a reason
+this round would regress that suite, but it genuinely wasn't run here to confirm.
+
+No deferrals — all three sub-items (6a/6b/6c) implemented and covered.
+
 ---
 
 ## Round 7 — OPEN — sub-agents never reach "done" in interactive mode (found by E2E round 2)
