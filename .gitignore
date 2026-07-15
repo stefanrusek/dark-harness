@@ -4,3 +4,7 @@ coverage/
 *.log
 .DS_Store
 .dh-logs/
+
+# Local agent-harness tooling artifacts (isolated worktrees for parallel domain leads) —
+# not project deliverable content, never committed.
+.claude/
