@@ -270,6 +270,50 @@ describe("AnthropicProvider", () => {
       expect(calls).toBe(2);
     });
 
+    test("a genuine connection failure (unreachable host) classifies as network and retries", async () => {
+      const provider = new AnthropicProvider({
+        name: "anthropic",
+        type: "anthropic",
+        baseURL: "http://127.0.0.1:1",
+        apiKey: "sk-test",
+        retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 2 },
+      });
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).kind).toBe("network");
+      expect((err as ProviderError).retryable).toBe(true);
+    });
+
+    test("a malformed (non-JSON) response body classifies as other and is not retried, not network", async () => {
+      let calls = 0;
+      const malformedServer = Bun.serve({
+        port: 0,
+        fetch() {
+          calls += 1;
+          return new Response("not json{{{", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+      try {
+        const provider = new AnthropicProvider({
+          name: "anthropic",
+          type: "anthropic",
+          baseURL: malformedServer.url.toString(),
+          apiKey: "sk-test",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        });
+        const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+        expect(err).toBeInstanceOf(ProviderError);
+        expect((err as ProviderError).kind).toBe("other");
+        expect((err as ProviderError).retryable).toBe(false);
+        expect(calls).toBe(1);
+      } finally {
+        malformedServer.stop(true);
+      }
+    });
+
     test("a 4xx other than 401/403/429 classifies as other and is not retried", async () => {
       let calls = 0;
       const client: AnthropicClientLike = {

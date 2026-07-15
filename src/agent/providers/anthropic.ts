@@ -63,8 +63,13 @@ function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopRe
 
 /** DH-0009: classifies a raw thrown value from the Anthropic SDK. The SDK's own `APIError`
  * (and subclasses like `AuthenticationError`/`RateLimitError`/`InternalServerError`) carry a
- * `status` HTTP code; anything without one (a plain `TypeError`/`fetch` failure, DNS, TLS)
- * never reached the provider at all. */
+ * `status` HTTP code. Without one, two genuinely different situations are both possible —
+ * distinguished by the SDK's own error class, not just "no status means network":
+ * `Anthropic.APIConnectionError` means the request never reached the provider at all (DNS,
+ * connection refused, TLS) — retryable. Anything else with no status (e.g. a plain
+ * `SyntaxError` from `JSON.parse` when the provider responds 200 with a garbled/non-JSON
+ * body) got a response, just an unusable one — retrying the same malformed endpoint is
+ * unlikely to help, so this is `other`/not retryable rather than optimistically `network`. */
 function classifyAnthropicError(err: unknown): { kind: ProviderErrorKind; retryable: boolean } {
   const status = (err as { status?: unknown } | null)?.status;
   if (typeof status === "number") {
@@ -73,7 +78,10 @@ function classifyAnthropicError(err: unknown): { kind: ProviderErrorKind; retrya
     if (status >= 500) return { kind: "overloaded", retryable: true };
     return { kind: "other", retryable: false };
   }
-  return { kind: "network", retryable: true };
+  if (err instanceof Anthropic.APIConnectionError) {
+    return { kind: "network", retryable: true };
+  }
+  return { kind: "other", retryable: false };
 }
 
 export class AnthropicProvider implements ModelProvider {
@@ -86,6 +94,13 @@ export class AnthropicProvider implements ModelProvider {
       new Anthropic({
         apiKey: typeof config.apiKey === "string" ? config.apiKey : undefined,
         baseURL: config.baseURL,
+        // DH-0009: the SDK's own default retry behavior (maxRetries: 2, retrying 429/5xx
+        // before ever rejecting) would otherwise compound with this adapter's own withRetry
+        // below — each of *our* attempts silently becoming up to 3 real HTTP calls, a 3x (or
+        // with our default maxAttempts: 3, up to 9x) multiplier on real network requests, not
+        // the bounded retry policy an operator configured. This adapter now owns retry/backoff
+        // exclusively; the SDK makes exactly one real attempt per call.
+        maxRetries: 0,
       });
     this.retryPolicy = config.retry;
   }
