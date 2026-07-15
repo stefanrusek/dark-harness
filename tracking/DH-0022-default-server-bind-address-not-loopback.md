@@ -5,7 +5,7 @@ type: bug
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
 created: 2026-07-15
 relations:
   depends_on: []

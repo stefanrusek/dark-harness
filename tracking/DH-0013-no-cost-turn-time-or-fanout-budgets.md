@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0013
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []

@@ -177,6 +177,33 @@ What makes this work asynchronously across context resets is that agents coordin
    it stays in someone's attention — which, across context resets and parallel agents, is not
    long. See §11 for the failure mode this closes.
 
+### The ticket-triage workflow
+
+"Re-reads it and acts on it" needs its own concrete shape once the backlog has real volume
+(e.g. after a comprehensive gap-analysis dump per the anti-pattern fix in §9 — one such run
+can produce dozens of tickets at once). Sort every open, not-yet-dispatched item into exactly
+three buckets, in this order:
+
+1. **Ready to queue now.** Well-scoped, no real design ambiguity, doesn't touch a locked
+   decision or security-sensitive surface, doesn't need the owner's judgment first — a domain
+   lead could pick it up from the ticket alone and go. Transition it to the tracker's
+   "ready to implement" state and dispatch (or queue to dispatch) directly.
+2. **Needs the owner's input before it's dispatched.** Anything that would trip an
+   escalation trigger (§3) if it were code instead of a ticket: touches a locked decision or
+   invariant, is security/correctness-sensitive, requires a product/priority call, or has real
+   cross-cutting design ambiguity a domain lead shouldn't resolve alone. Mark it as blocked
+   (not silently left in a neutral status) so it surfaces distinctly from ordinary backlog —
+   the block reason should say what decision is needed, not just "waiting."
+3. **Do after the first two groups.** Real and worth doing, but lower urgency, needs more
+   definition before it's even ready to ask the owner about, or is a larger speculative
+   feature — leave it in the backlog's normal (unblocked, not-yet-ready) state.
+
+While triaging, also look for **overlap between findings** raised by different sub-agents or
+sweeps — cross-link related tickets (a `relates_to`-style reference) rather than letting near-
+duplicates sit unconnected; comprehensive capture (§9) means some redundancy across
+independent sweeps is expected, and it's the coordinator's job to notice and connect it, not
+silently ignore or merge away the record of it.
+
 ---
 
 ## 5. Handoff document conventions

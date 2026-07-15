@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0019
 type: bug
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []

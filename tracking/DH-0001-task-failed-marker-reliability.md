@@ -5,11 +5,11 @@ type: bug
 status: implementing
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["owner/architect decision needed on structured self-report mechanism (same question as DH-0050)"]
 created: 2026-07-15
 relations:
   depends_on: []
-  relates_to: []
+  relates_to: [DH-0050]
   supersedes: []
 implementation:
   - repo: dark-harness

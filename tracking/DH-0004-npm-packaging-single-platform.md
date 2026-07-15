@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: ["owner decision on packaging shape"]
+blocked_by: ["owner triage: packaging-shape decision needed before dispatch"]
 created: 2026-07-15
 relations:
   depends_on: []
