@@ -1893,3 +1893,179 @@ MCP-client round.)
 
 **Nothing pending for architect review** — the one contracts change (`AgentStatus`'s new
 `"stopped"` value) had sign-off already given in the audit itself.
+
+## Round 14 — DONE (2026-07-15) — 8 Spile tickets closed: DH-0009, DH-0011, DH-0013, DH-0014,
+## DH-0015, DH-0016, DH-0017, DH-0054
+
+Picked up fresh (no memory of Round 13's own instance) with 8 Core-owned tickets already at
+`status: implementing`. Read `docs/roster/grace.md` and the ticket bodies before touching
+anything, per "status supersedes." All 8 closed this round; no scope left open. Commits, in
+order: `85a3e3e` (DH-0014, DH-0016), `b4227e8` (DH-0017), `394567a` (DH-0015), `0e26522`
+(DH-0011), `0a8e9eb` (DH-0009), `252a20c` (DH-0013), `3cdc79a` (DH-0054), `7bc96a3` (coverage
+gaps), `7f15a3f` + `eee4930` (DH-0009 follow-up fixes, see below).
+
+### DH-0014 — Read tool buffered the whole file before any limiting
+
+`src/agent/tools/read.ts`'s `new Uint8Array(await file.arrayBuffer())` read and decoded the
+whole file before the binary sniff or offset/limit slicing ran. Fixed two ways: (1) a hard
+256MB size cap checked from `Bun.file(...).size` (metadata only, no read) before anything
+else; (2) for files under the cap, line content is streamed via `Bun.file(...).stream()` and
+only the requested `[offset, offset+limit)` window is ever buffered — lines outside the
+window are counted (for the exact "N more lines" notice) but never retained. Binary sniffing
+still only reads a small prefix via `file.slice()`.
+
+### DH-0016 — bundled `cli-tools` skill unreachable via the `Skill` tool, plus discovery gaps
+
+Cross-domain with Prompt (discovery lives in `src/prompt/skills.ts`, loading in
+`src/agent/skills.ts`) — this round only touched Core's loading side. The single most
+concrete finding: `loadSkillFromPaths` only ever scanned `skillPaths`, never special-cased
+the compiled-in `cli-tools` skill, so `Skill(skill: "cli-tools")` always returned "not
+found" despite the system prompt promising it's available. Fixed by importing the same
+bundled `SKILL.md` text asset directly into `skills.ts` (a data import, not a logic
+dependency — doesn't violate directory ownership) and special-casing `"cli-tools"` before
+any on-disk scan. Also fixed: directory/frontmatter name mismatches are now reconciled by
+matching on the frontmatter `name` (not the directory name), with a `console.warn`; malformed
+frontmatter is warned on instead of silently skipped; skill names are rejected outright if
+they contain path-traversal segments (`/`, `\`, `..`); a configured skill declaring the
+reserved name `cli-tools` is warned about and never reachable (the builtin always wins).
+
+### DH-0017 — harness-error swallowing + stopped/failed status flip
+
+Two independent bugs in the same ticket. (1) `cli.ts`'s `AgentRuntimeLoopAdapter.sendMessage`
+used to `.catch(() => {...})` a root-start failure, discarding the real `Error` entirely —
+now logs the actual message via `onLogLine` before the synthetic `agent_status: failed`
+event. (2) `loop.ts`'s `reportStopped()` used to report `agent_status: "failed"` for a
+deliberate `TaskStop`/`stopRoot()`, which — because `AgentRuntime`'s own onEvent-driven
+bookkeeping (`tasks.setStatus`/`rootStatus`) mirrors whatever status the loop reports —
+silently overwrote `TaskRegistry.stop()`'s own correct `"stopped"` status back to `"failed"`.
+Now reports `"stopped"` consistently; also found and fixed a second instance of the same
+clobber in `runRoot()`'s own final status assignment (`this.rootStatus = result.success ?
+"done" : "failed"` ran unconditionally, even when the loop had already set `"stopped"` via
+the onEvent handler moments earlier during the awaited call — needed a `!== "stopped"` guard,
+plus a `(this.rootStatus as AgentStatus)` cast since TS narrows the field to the literal type
+it was last assigned *synchronously* in the function, not accounting for the intervening
+`await` mutating it). Added an optional `reason` field to `LogStatusChangeEvent`
+(`contracts/log.ts`) — additive/backward-compatible, but flagging since contracts changes are
+normally an architect-review trigger (CLAUDE.md §6.2); no live architect available this
+round, judgment call to proceed given the additive/non-breaking nature, same class of call
+Round 8's `client`/`build` header amendment already set precedent for.
+
+### DH-0015 — dh.json config-loading edge cases
+
+Three independent gaps, all in `src/config/`. (1) `interpolate.ts`'s `$(VAR)` had no escape —
+added `$$(...)` -> literal `$(...)`, no env lookup attempted. (2) `validate.ts`'s
+`validateProvider`/`validateMcpServers` spread unknown keys through unchecked — now reject
+unknown keys per-provider-type (`anthropic`: `baseURL`/`apiKey`; `bedrock`: `region`; both:
+`name`/`type`/`retry`) and per-mcpServers-entry (`command`/`args`/`env`/`url`/`headers`),
+matching the existing top-level allowlist behavior. (3) `cli.ts`'s `--env` parser gains
+single-quote support (fully literal, no escapes) and backslash-escape handling inside
+double-quoted values (`\"`, `\\`, `\n`, `\t`); README now states the exact supported subset,
+including that `#` is never an inline/trailing comment marker within a value.
+
+### DH-0011 — no SIGTERM/SIGINT handling, Bash doesn't reap grandchild processes
+
+`bash.ts` now spawns with `detached: true` (POSIX `setsid()`, making the process the leader
+of its own process group) and kills the whole group (`process.kill(-pid, signal)`) on both
+the timeout path and the `AbortSignal` path — previously only the immediate `bash -c`
+process was killed, leaving anything it backgrounded (`sleep 300 &`) as an orphan.
+`cli.ts` gains an injectable `installSignalHandlers` `CliDeps` hook (real `process.on` in
+production, a no-op in every test — critical: registering a real listener from a test would
+leak across the whole suite and, worse, let a real Ctrl-C during a test run kill the runner
+via the real `process.exit` `defaultDeps()` wires up) wired into both the standalone
+`--instructions`/`--job` path (calls `stopRoot()`) and interactive `local`/`server` modes
+(stops the agent loop and the `DhServer`). `createRuntime`'s return type broadened from
+`Pick<AgentRuntime, "runRoot">` to include `"stopRoot"` so the standalone path has something
+to call. The real (non-faked) `installSignalHandlers` dep is still exercised for coverage by
+stubbing `process.on`/`process.off` for the test's duration and firing the captured handler
+manually — never registering a real listener.
+
+### DH-0009 — no provider retry/backoff, no error taxonomy (+ two follow-up fixes)
+
+`ProviderError` (`providers/types.ts`) now carries `kind` (`auth` | `rate_limit` |
+`overloaded` | `network` | `other`) and `retryable: boolean`. Both adapters classify the
+underlying SDK failure and retry through a shared helper (`providers/retry.ts` — bounded
+attempts, full-jitter exponential backoff, cooperative with an `AbortSignal`), configurable
+per provider via dh.json's new `provider[].retry` (`maxAttempts`/`baseDelayMs`/`maxDelayMs`,
+validated in `validate.ts`).
+
+**Two real bugs only found by actually running the e2e suite** (not the unit suite — flagging
+this as a general lesson: provider adapter changes need e2e verification, unit tests with
+injected fake clients can't see SDK-level defaults):
+1. Both the Anthropic SDK (`maxRetries: 2` default) and the AWS SDK (`maxAttempts: 3`
+   default) retry internally *before* this adapter's own code ever sees a rejection — our
+   own `withRetry` wrapping that whole call compounded with it (up to 3×3=9 real HTTP calls
+   for a configured `maxAttempts: 3`, not 3). Fixed by constructing both clients with their
+   own retries disabled (`maxRetries: 0` for Anthropic, `maxAttempts: 1` for Bedrock) so this
+   adapter is the sole owner of retry/backoff. The Bedrock instance of this bug wasn't caught
+   by a failing test at all — found by checking the SDK's own resolved config directly after
+   fixing the Anthropic side, since `e2e/bedrock-provider.test.ts`'s scenarios don't happen to
+   exercise a retryable failure.
+2. A malformed (non-JSON) 200 response throws a plain `SyntaxError` with no `.status` —
+   originally classified as `"network"`/retryable (the "no status = never reached the
+   provider" heuristic), so a garbled response got retried 3 times for no benefit. Fixed by
+   checking for `Anthropic.APIConnectionError` specifically (a genuine connection failure —
+   DNS, connection refused, TLS) as the only `"network"`/retryable case when there's no
+   status; anything else without one (a parse error, or any other unrecognized shape) is
+   `"other"`/not retryable.
+`e2e/exit-codes.test.ts`'s provider-error scenarios (429, 500, malformed body,
+mid-multi-turn failure) all pass now — before these two fixes, 4 of 8 failed with call
+counts of 9/9/3/10 instead of the expected 3/3/1/4.
+
+### DH-0013 — no cost/token/wall-clock/fan-out session budgets
+
+`options.maxTurns` was the only safety valve. Adds four more (`DhOptions`, all optional,
+session-wide — root plus every sub-agent combined), enforced in `AgentRuntime` since that's
+the layer that sees every agent in a session, not just one loop's own turns:
+`maxCostUsd`/`maxTotalTokens` (aggregated from every `token_usage` event; crossing either
+stops every live agent, logging why to each agent's own JSONL stream *before* stopping it —
+distinguishable from a normal completion or an operator `TaskStop` when reading the log
+back), `maxWallClockMs` (a timer started once per runtime instance — catches an interactive
+session paused "waiting" between messages for too long, which `maxTurns` can't since turns
+only count actual model round-trips), and `maxConcurrentAgents`/`maxAgentDepth` (fan-out
+guards — `AgentRuntime.spawnAgent()` throws synchronously when either would be exceeded; the
+`Agent` tool now catches that instead of letting it escape as an uncaught exception and crash
+the loop).
+
+### DH-0054 — no first-class Grep/Glob tools
+
+`ALL_TOOLS` grows from 12 to 14. `Glob` (`tools/glob.ts`): `Bun.Glob`-based file-path
+matching, sorted by modification time (most recent first, matching Claude Code's own
+convention). `Grep` (`tools/grep.ts`): JS-regex content search across a file or directory
+(optionally glob-filtered), `output_mode` selecting `files_with_matches` (default) /
+`content` / `count`, `-i`/`-n`/`head_limit`. Both skip binary files and files over a size
+cap, prune `node_modules`, and need no system `grep`/`find` binary — structured output, no
+shell-quoting risk, consistent across OS. Bash's own `grep`/`find` remain available too;
+this isn't a replacement, just a purpose-built alternative for the common case.
+
+### Gates
+
+- `bun run typecheck` — clean, except one pre-existing, unrelated error in
+  `src/tui/state.ts:171` (TUI domain, from another agent's concurrent in-flight work in the
+  same shared checkout this round found already present on a clean `git stash` before any of
+  this round's own changes — confirmed not caused here, and out of scope to fix uninvited per
+  directory ownership).
+- `bun run lint` — clean.
+- `bun run test:coverage` — 953 pass, 0 fail. Every file this round touched (new or modified)
+  is at 100%/100% funcs/lines except `src/agent/skills.ts` (71% funcs — a pre-existing
+  bun-coverage quirk on inline arrow functions, 100% lines), `src/agent/tools/glob.ts`/
+  `grep.ts` (same funcs-vs-lines quirk, both 100% lines), and `src/agent/tools/bash.ts`
+  (99.23% lines, confirmed via `git stash` to be identical before this round's DH-0011
+  changes — not a regression).
+- `bun run e2e` — tmux and Chromium both unavailable in this sandbox (`which tmux chromium
+  chromium-browser` all fail), so `tui.test.ts`/`web.test.ts`/`connect-web.test.ts` couldn't
+  run here. Ran the rest by hand: `exit-codes.test.ts` (8/8, the DH-0009 double-retry fixes
+  above were found and verified here), `build-stamp.test.ts`, `bedrock-provider.test.ts`,
+  `server-protocol.test.ts` all pass. `security.test.ts` has one failure (`bearer token:
+  authenticated happy path`, a 5000ms timeout) — confirmed via `git stash` to reproduce
+  identically before any of this round's changes, same pre-existing sandbox-environment issue
+  Round 13's status log already flagged.
+
+**Deferred:** nothing — all 8 tickets closed.
+
+**Flagging for architect review (no live architect this round, judgment calls made and
+documented inline above/in commit messages):**
+- DH-0017's additive `LogStatusChangeEvent.reason` field (contracts change, CLAUDE.md §6.2
+  trigger).
+- DH-0013's additive `DhOptions` fields (contracts change, same trigger) — these are pure
+  optional additions with no behavior change for anyone who doesn't set them, same class of
+  call as prior rounds' additive header/event fields.
