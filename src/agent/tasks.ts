@@ -33,7 +33,21 @@ export interface StartTaskParams {
   kind: TaskKind;
   parentAgentId: string;
   model?: string;
+  /** Caller-supplied id, overriding the registry's own counter-based generation. Used by
+   * AgentRuntime.spawnAgent() so the task registry's id for an agent-kind task IS the same
+   * identifier the agent loop uses for its own SSE events/log lines (see runtime.ts and
+   * docs/handoffs/core.md's Round 2 status log for why this unification matters — it's what
+   * lets Server's AgentLoopHandle.sendMessage/stopAgent/getAgentTree operate on one
+   * consistent "agentId" instead of needing a translation table). */
+  id?: string;
   run: (handle: TaskRunHandle) => Promise<void>;
+}
+
+export class DuplicateTaskIdError extends Error {
+  constructor(id: string) {
+    super(`task id already in use: ${id}`);
+    this.name = "DuplicateTaskIdError";
+  }
 }
 
 interface InternalTask {
@@ -76,7 +90,10 @@ export class TaskRegistry {
 
   /** Starts a task and returns its id immediately; `run` executes concurrently. */
   start(params: StartTaskParams): string {
-    const id = this.nextId(params.kind);
+    if (params.id !== undefined && this.tasks.has(params.id)) {
+      throw new DuplicateTaskIdError(params.id);
+    }
+    const id = params.id ?? this.nextId(params.kind);
     const controller = new AbortController();
     const task: InternalTask = {
       id,

@@ -271,3 +271,164 @@ against a real local `DhServer` + mock provider, and that `--web`/console modes 
 start without crashing — full PTY/browser-driven verification is still the E2E domain's
 job). Anything you can't finish this round, name explicitly in a new dated status entry
 below.
+
+### 2026-07-15 — Grace, Round 2 (integration: wire cli.ts to the real Server/TUI/Web)
+
+Worked in a fresh worktree (`grace-round2`, branched from `origin/claude/coordinator-onboarding-kab9ls`
+at commit `4fc7c5b`) per the coordinator's instruction — my round-1 worktree predates all
+five other domains landing. Full detail/judgment-call rationale lives in
+`docs/roster/grace.md`'s Memory section; this is the handoff-facing summary.
+
+**1. Identifier-space unification (the Round 2 scope's open question, resolved by
+construction, not by adding a translation layer).** `AgentRuntime.spawnAgent()` now passes
+its own loop-internal `agentId` (`agent-<uuid>`) as `StartTaskParams.id`, so the task
+registry's id for every agent-kind task *is* the same string the loop uses for its own SSE
+events/log lines — no bidirectional lookup table needed anywhere. `src/agent/tasks.ts`
+gained an optional caller-supplied `id` on `start()` (new `DuplicateTaskIdError` guards
+against reuse) to make this possible.
+
+**2. `AgentRuntimeOptions.onLogLine` signature change** — now `(agentId, line) => void`
+instead of `(line) => void`. Most `LogEvent` variants don't self-describe their agentId
+(only `LogHeader` does); Server's `AgentLoopLogListener` needs it to route to the right
+per-agent JSONL file, and `AgentRuntime` is the layer that already knows which agentId
+every `runAgentLoop()` call belongs to (root vs. a specific sub-agent), so it threads it
+through rather than pushing the burden onto `loop.ts` or its caller. `loop.ts`'s own
+`onLogLine` type is unchanged.
+
+**3. `AgentRuntime` root-agent additions** — `runRoot()` now also registers a root-level
+`sendMessage` sink (mirroring what `spawnAgent()` already did for sub-agents via the task
+registry), a new `sendMessageToRoot()` method to use it, a `rootHasStarted` getter, and a
+new `getAgentTree(): AgentTreeNode[]` method building the nested tree from the task
+registry's flat list plus the root's own tracked state. `AgentTreeNode`/`AgentStatus` are
+`src/contracts/` types already, so this needed zero dependency on `src/server/` — it lives
+entirely in Core.
+
+**Judgment call — tree scope:** only agent-kind tasks appear in the tree; a
+`run_in_background` Bash call was never addressable by agentId in the wire protocol to
+begin with (its output surfaces as a tool_result on its *parent's* own stream).
+
+**Real bug found and fixed via a live integration test, not a hypothetical:** my first pass
+had `getAgentTree()` return `[]` until `runRoot()` had been called at least once. Server's
+own `src/server/commands.ts` validates a `send_message`'s `agentId` against
+`getAgentTree()` *before* ever calling `AgentLoopHandle.sendMessage()` — so an empty tree
+made the very first message meant to *start* the root agent unreachable through the real
+HTTP command handler, 404ing with "unknown agentId: agent-root" before my adapter's lazy-
+start logic ever ran. Caught by curling a real running `dh --server` process by hand, not
+by a unit test (unit tests all used a hand-built fake `AgentLoopHandle`/`DhServer` combo
+that happened not to exercise `commands.ts`'s real validation path for this specific
+scenario — worth remembering: fakes can hide exactly this class of contract mismatch, real
+processes don't). Fixed by having `getAgentTree()` always include a root node — status
+`"waiting"` (an existing `AgentStatus` value, not a new one) before `runRoot()` has ever
+run. Added both a unit-level regression test and a real-HTTP integration test
+(`send_message to a not-yet-started root reaches the real HTTP command handler and starts
+it`, in `src/cli.test.ts`) driving an actual `DhServer` instance over `fetch()` so this
+can't silently regress.
+
+**4. `src/cli.ts`: the AgentLoopHandle adapter, landed in cli.ts per my own round-1 lean
+("(b) a thin wrapper in src/cli.ts")** — `AgentRuntimeLoopAdapter implements AgentLoopHandle`,
+fanning `AgentRuntime`'s single fixed `onEvent`/`onLogLine` callbacks out to `Set`-based
+multi-subscriber `onEvent`/`onLog`, delegating `getAgentTree()` straight to the new
+`AgentRuntime` method, and translating `sendMessage`/`stopAgent` for the root vs. everything
+else:
+- `sendMessage(ROOT_AGENT_ID, msg)`: lazily starts the root (`runtime.runRoot(msg)`,
+  fire-and-forget — a `.catch()` emits a synthetic `agent_status: failed` event rather than
+  crashing the process on an unhandled rejection) on the first call, steers the running loop
+  via `sendMessageToRoot()` after that.
+- `sendMessage`/`stopAgent` for any other id delegate straight to `runtime.tasks`.
+- `stopAgent(ROOT_AGENT_ID)` is a **documented no-op** — `loop.ts` has no cooperative
+  cancellation at all yet (pre-existing since round 1, not new this round: `TaskStop`'s
+  abort signal only ever interrupted a `run_in_background` Bash call, never a loop mid-turn,
+  for sub-agents either). A safe no-op is honest about what's actually supported instead of
+  throwing and failing the command handler for an operation the loop genuinely can't
+  perform. Flagged as a real future-work gap, not swept under the rug.
+
+**5. Wired the four real run modes**, replacing `runStubbedMode()`'s five stub functions
+entirely:
+- `--server`: real `DhServer` with the adapter, `config.security` passed through,
+  `.dh-logs/<sessionId>/` as the log directory (matches the `.gitignore` entry already
+  anticipating this convention), on the requested/default port.
+- Local console: same real `DhServer` on an **ephemeral port (0)**, then `startTui(baseUrl)`
+  — blocks until the operator quits, then stops the server.
+- Local `--web`: same real `DhServer` on an ephemeral port, `serveWebUi({port: 0,
+  targetBaseUrl, token})` on its own ephemeral port, prints the URL per HANDOFF.md §2's
+  "open/print the URL." Doesn't stop anything afterward (same as `--server` — the process
+  just keeps the sockets open).
+- `--connect [--web]`: no local `DhServer` at all; `startTui`/`serveWebUi` point straight at
+  the remote host/port.
+
+**Judgment call — `--port` scope:** only `--server`'s own listen port and `--connect`'s
+remote target port are operator-configurable via `--port`, exactly matching ADR 0001's
+"listen port for --server, target port for --connect." Every locally-started service that
+exists purely so an in-process TUI/Web client has something to talk to (local mode's own
+`DhServer`; either mode's web-UI static server) binds ephemeral (port 0) and prints/returns
+the URL instead — HANDOFF.md never documents `--port` as applying to local mode.
+
+**Judgment call — client-side TLS for `--connect`:** ADR 0004 says clients dial `https://`
+when the target uses TLS but leaves "auto-detect or a client-side flag" to the fleet. I
+reused `security.tls`'s presence on the *connecting side's own* `dh.json` (the same pattern
+ADR 0004 already establishes for the bearer token: "clients supply their own token via
+their own dh.json") rather than inventing a new flag or a probe-the-server-first mechanism.
+Flagged here in case a future round wants true auto-detection instead.
+
+**6. `--instructions` standalone path is unchanged in behavior** (per Round 2's explicit
+"don't regress" instruction) — still bypasses `AgentRuntimeLoopAdapter`/`DhServer` entirely,
+using the same direct `AgentRuntime` + `ExitCode` mapping from round 1. `--connect
+--instructions` remains rejected: the wire protocol's `ClientCommand` union has no "start a
+brand-new root agent remotely" command (only `send_message`/`stop_agent`/
+`request_agent_tree`/`download_logs` against an *already-running* session), so there's
+nothing to route it to yet. The non-`--job` fallthrough (instructions ran, process stays
+alive for inspection) now falls through to the real interactive wiring instead of a stub
+print — note this is a **fresh** `AgentRuntime`/session, not a continuation of the one that
+ran the instruction; unifying those is out of scope this round.
+
+**Cross-domain requests flagged, not guessed at:**
+- **TUI has no way to pass an auth token/header.** `startTui(baseUrl, io)`'s public
+  signature (checked `src/tui/app.ts`, `http-client.ts`, `sse-client.ts`) has no `headers`/
+  `token` parameter, even though `sendCommand`/`runSseClient` both already support a
+  `headers` option internally. This means **`security.token`-protected sessions don't work
+  with the console TUI at all** (commands/SSE will 401) — Web already handles this correctly
+  via `serveWebUi`'s `token` option. Requesting Mary extend `startTui`'s signature with an
+  optional token/headers passthrough; I didn't reach into `src/tui/` internals to patch it
+  myself per the ownership boundary.
+- **`AgentLoopHandle.stopAgent` can't truly interrupt a running loop** (see point 4 above) —
+  this is a `src/agent/loop.ts` limitation (no `AbortSignal` support in `runAgentLoop` at
+  all), not `src/cli.ts`'s to silently paper over. Worth a future round if true
+  mid-turn cancellation matters (currently `TaskStop`/`stopAgent` only ever abort a
+  `run_in_background` Bash call, or mark an already-finished task's bookkeeping).
+
+**Verification beyond unit tests (per the DoD's "verify... against a real local DhServer +
+mock provider" and "start without crashing"):**
+- `src/cli.test.ts` gained a dedicated `AgentRuntimeLoopAdapter + DhServer + waitForExitCode`
+  describe block: real `AgentRuntimeLoopAdapter` + real `DhServer` + a real local mock-
+  Anthropic HTTP server + real `waitForExitCode` (Server's own export), confirming the full
+  chain resolves `ExitCode.Success`/`TaskFailure` correctly from the root agent's
+  self-report — plus the real-HTTP regression test from point 3 above.
+- Live subprocess smoke tests (not just unit tests) for all four interactive modes plus the
+  standalone path, against a real local mock-provider HTTP server:
+  - `--server`: real headless server started, responded correctly to `request_agent_tree`
+    (`{"ok":true,"tree":[]}` — well, `[{"waiting"...}]` after the fix), served a working SSE
+    stream, and a real `download_logs` tar download.
+  - Local console (no flags): real ephemeral `DhServer` + real `startTui` — confirmed actual
+    alt-screen rendering and an SSE "connecting" → "open" status transition against the real
+    server.
+  - `--web`: real ephemeral `DhServer` + real `serveWebUi` — confirmed the static page
+    serves (200) and `/dh-config.json` correctly reports the internally-started server's
+    `baseUrl`.
+  - `--instructions --job`: unchanged from round 1, re-verified — exit 0 (success), exit 1
+    (`TASK_FAILED`), exit 2 (bad `--config` path).
+
+**Known, explained coverage gap:** `src/cli.ts` is 96.88% funcs (31/32), 100% lines. The one
+uncovered function is `defaultDeps()`'s real `startTui` wrapper — invoking it for real would
+require an actual PTY (raw-mode stdin, real terminal rendering), the same structural
+boundary as the `import.meta.main` gap from round 1. Confirmed via the same function-by-
+function `console.error` instrumentation technique as round 1 (temporarily marked every
+function in `cli.ts`, ran the suite, diffed which markers never fired — restored the file
+before committing, zero diff). Verified manually instead via the live subprocess smoke test
+above (local console mode). This is exactly the class of thing CLAUDE.md assigns to the E2E
+domain's PTY harness once it lands.
+
+**Gates:** `bun run typecheck` clean (both TS programs — root + `src/web`), `bun run lint`
+clean, `bun run test:coverage` — 633 tests passing across the full merged tree, 99.95%/
+100% funcs/lines aggregate (the one explained gap above). `bun run e2e` still has nothing to
+run — `e2e/` hasn't landed in this tree yet, consistent with round 1's "out of scope, E2E
+domain, sequenced after."

@@ -1,19 +1,25 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ROOT_AGENT_ID } from "./agent/runtime.ts";
 import {
+  AgentRuntimeLoopAdapter,
   type CliDeps,
   type CliIo,
   CliUsageError,
   DEFAULT_PORT,
   DEFAULT_SYSTEM_PROMPT,
+  type DhServerLike,
+  type WebUiHandleLike,
   composeMode,
   main,
   parseArgs,
 } from "./cli.ts";
-import type { DhConfig } from "./contracts/index.ts";
+import type { DhConfig, ServerSentEvent } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
+import { DhServer, waitForExitCode } from "./server/index.ts";
+import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
 
 const TEST_CONFIG: DhConfig = {
   options: { defaultModel: "sonnet" },
@@ -38,6 +44,41 @@ function fakeIo(): CliIo & { stdoutLines: string[]; stderrLines: string[]; exitC
 function baseOverrides(io: CliIo): Partial<CliDeps> {
   return {
     loadConfig: async () => TEST_CONFIG,
+    io,
+  };
+}
+
+/** A minimal AgentLoopHandle fake — used everywhere the real Server/TUI/Web wiring would
+ * otherwise open a real socket or block on real terminal I/O, which unit tests must avoid. */
+function fakeAgentLoop(overrides: Partial<AgentLoopHandle> = {}): AgentLoopHandle {
+  return {
+    onEvent: () => () => {},
+    onLog: () => () => {},
+    sendMessage: () => {},
+    stopAgent: () => {},
+    getAgentTree: () => [],
+    ...overrides,
+  };
+}
+
+function fakeServer(overrides: Partial<DhServerLike> = {}): DhServerLike {
+  return { start: () => 51234, stop: () => {}, ...overrides };
+}
+
+function fakeWebUi(overrides: Partial<WebUiHandleLike> = {}): WebUiHandleLike {
+  return { url: "http://localhost:9999", stop: () => {}, ...overrides };
+}
+
+/** Overrides that make every interactive run mode (server/local/connect, web or console)
+ * safe to drive in a unit test: no real sockets, no real terminal I/O. Individual tests
+ * override specific fields with instrumented fakes to assert on call arguments. */
+function interactiveOverrides(io: CliIo): Partial<CliDeps> {
+  return {
+    loadConfig: async () => TEST_CONFIG,
+    createAgentLoop: () => fakeAgentLoop(),
+    createServer: () => fakeServer(),
+    startTui: async () => {},
+    serveWebUi: () => fakeWebUi(),
     io,
   };
 }
@@ -160,7 +201,7 @@ describe("composeMode", () => {
   });
 });
 
-describe("main", () => {
+describe("main — usage/config/systemPrompt failures", () => {
   test("a usage error returns HarnessError without touching config", async () => {
     const io = fakeIo();
     const code = await main(["--nope"], baseOverrides(io));
@@ -181,49 +222,241 @@ describe("main", () => {
     expect(io.stderrLines[0]).toContain("bad config");
   });
 
-  test("no --instructions runs the stubbed local console mode", async () => {
+  test("a systemPrompt load failure (interactive path) returns HarnessError", async () => {
     const io = fakeIo();
-    const code = await main([], baseOverrides(io));
+    const code = await main([], {
+      ...baseOverrides(io),
+      loadSystemPrompt: async () => {
+        throw new Error("systemPrompt file not found: nope.md");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("systemPrompt file not found");
+  });
+});
+
+describe("main — interactive modes (real Server/TUI/Web wiring, driven via fakes)", () => {
+  test("no --instructions starts local console mode: server on an ephemeral port, then the TUI, then stops the server", async () => {
+    const io = fakeIo();
+    const calls: string[] = [];
+    let receivedBaseUrl: string | undefined;
+    const code = await main([], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        calls.push("createServer");
+        expect(options.port).toBe(0);
+        expect(options.sessionId.length).toBeGreaterThan(0);
+        expect(options.logDir).toContain(".dh-logs");
+        return fakeServer({
+          start: () => {
+            calls.push("start");
+            return 55123;
+          },
+          stop: () => calls.push("stop"),
+        });
+      },
+      startTui: async (baseUrl) => {
+        calls.push("startTui");
+        receivedBaseUrl = baseUrl;
+      },
+    });
     expect(code).toBe(ExitCode.Success);
-    expect(io.exitCodes).toEqual([]);
-    expect(io.stdoutLines[0]).toContain("console TUI");
+    expect(calls).toEqual(["createServer", "start", "startTui", "stop"]);
+    expect(receivedBaseUrl).toBe("http://localhost:55123");
   });
 
-  test("--web runs the stubbed local web mode", async () => {
+  test("--web starts local web mode: server + web UI on ephemeral ports, prints the URL, never calls startTui", async () => {
     const io = fakeIo();
-    const code = await main(["--web"], baseOverrides(io));
+    let startTuiCalled = false;
+    let receivedTargetBaseUrl: string | undefined;
+    const code = await main(["--web"], {
+      ...interactiveOverrides(io),
+      createServer: () => fakeServer({ start: () => 55124 }),
+      serveWebUi: (options) => {
+        expect(options.port).toBe(0);
+        receivedTargetBaseUrl = options.targetBaseUrl;
+        return fakeWebUi({ url: "http://localhost:60001" });
+      },
+      startTui: async () => {
+        startTuiCalled = true;
+      },
+    });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines[0]).toContain("web UI");
+    expect(receivedTargetBaseUrl).toBe("http://localhost:55124");
+    expect(io.stdoutLines[0]).toContain("http://localhost:60001");
+    expect(startTuiCalled).toBe(false);
   });
 
-  test("--server runs the stubbed headless server mode with the resolved port", async () => {
+  test("--server starts headless server mode on the given port; never calls startTui/serveWebUi", async () => {
     const io = fakeIo();
-    const code = await main(["--server", "--port", "5050"], baseOverrides(io));
+    let startTuiCalled = false;
+    let serveWebUiCalled = false;
+    const code = await main(["--server", "--port", "5050"], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        expect(options.port).toBe(5050);
+        return fakeServer({ start: () => 5050 });
+      },
+      startTui: async () => {
+        startTuiCalled = true;
+      },
+      serveWebUi: () => {
+        serveWebUiCalled = true;
+        return fakeWebUi();
+      },
+    });
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines[0]).toContain("5050");
+    expect(startTuiCalled).toBe(false);
+    expect(serveWebUiCalled).toBe(false);
   });
 
-  test("--server without --port stubs the default port", async () => {
+  test("--server without --port uses the default port", async () => {
     const io = fakeIo();
-    await main(["--server"], baseOverrides(io));
+    let receivedPort: number | undefined;
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        receivedPort = options.port;
+        return fakeServer({ start: () => DEFAULT_PORT });
+      },
+    });
+    expect(receivedPort).toBe(DEFAULT_PORT);
     expect(io.stdoutLines[0]).toContain(String(DEFAULT_PORT));
   });
 
-  test("--connect runs the stubbed console client mode", async () => {
+  test("--connect starts console client mode with no local server, targeting the given host/port", async () => {
     const io = fakeIo();
-    const code = await main(["--connect", "example.com"], baseOverrides(io));
+    let createServerCalled = false;
+    let createAgentLoopCalled = false;
+    let receivedBaseUrl: string | undefined;
+    const code = await main(["--connect", "example.com"], {
+      ...interactiveOverrides(io),
+      createAgentLoop: () => {
+        createAgentLoopCalled = true;
+        return fakeAgentLoop();
+      },
+      createServer: () => {
+        createServerCalled = true;
+        return fakeServer();
+      },
+      startTui: async (baseUrl) => {
+        receivedBaseUrl = baseUrl;
+      },
+    });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines[0]).toContain("example.com");
-    expect(io.stdoutLines[0]).toContain("console");
+    expect(receivedBaseUrl).toBe(`http://example.com:${DEFAULT_PORT}`);
+    expect(createServerCalled).toBe(false);
+    expect(createAgentLoopCalled).toBe(false);
   });
 
-  test("--connect --web runs the stubbed web client mode", async () => {
+  test("--connect --web starts web client mode targeting the remote host, printing the URL", async () => {
     const io = fakeIo();
-    await main(["--connect", "example.com", "--web", "--port", "9000"], baseOverrides(io));
-    expect(io.stdoutLines[0]).toContain("9000");
-    expect(io.stdoutLines[0]).toContain("web");
+    let receivedTargetBaseUrl: string | undefined;
+    await main(["--connect", "example.com", "--web", "--port", "9000"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedTargetBaseUrl = options.targetBaseUrl;
+        return fakeWebUi({ url: "http://localhost:60002" });
+      },
+    });
+    expect(receivedTargetBaseUrl).toBe("http://example.com:9000");
+    expect(io.stdoutLines[0]).toContain("http://localhost:60002");
+    expect(io.stdoutLines[0]).toContain("http://example.com:9000");
   });
 
+  test("--connect dials https:// when the connecting side's own security.tls is set", async () => {
+    const io = fakeIo();
+    let receivedBaseUrl: string | undefined;
+    await main(["--connect", "example.com"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({
+        ...TEST_CONFIG,
+        security: { tls: { cert: "/c.pem", key: "/k.pem" } },
+      }),
+      startTui: async (baseUrl) => {
+        receivedBaseUrl = baseUrl;
+      },
+    });
+    expect(receivedBaseUrl).toBe(`https://example.com:${DEFAULT_PORT}`);
+  });
+
+  test("security.token is passed through to serveWebUi when set, omitted when unset", async () => {
+    const io = fakeIo();
+    let receivedToken: string | undefined = "unset-sentinel";
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { token: "shh" } }),
+      serveWebUi: (options) => {
+        receivedToken = options.token;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedToken).toBe("shh");
+
+    let sawTokenKey = true;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        sawTokenKey = "token" in options;
+        return fakeWebUi();
+      },
+    });
+    expect(sawTokenKey).toBe(false);
+  });
+
+  test("config.security is passed through to createServer when set, omitted when unset", async () => {
+    const io = fakeIo();
+    let receivedSecurity: unknown = "unset-sentinel";
+    await main([], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { token: "shh" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ token: "shh" });
+
+    let sawSecurityKey = true;
+    await main([], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        sawSecurityKey = "security" in options;
+        return fakeServer();
+      },
+    });
+    expect(sawSecurityKey).toBe(false);
+  });
+
+  test("a startup failure (e.g. the requested port is already in use) maps to HarnessError, local mode", async () => {
+    const io = fakeIo();
+    const code = await main([], {
+      ...interactiveOverrides(io),
+      createServer: () => {
+        throw new Error("EADDRINUSE");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("failed to start local mode");
+    expect(io.stderrLines[0]).toContain("EADDRINUSE");
+  });
+
+  test("a startup failure maps to HarnessError, connect mode", async () => {
+    const io = fakeIo();
+    const code = await main(["--connect", "example.com"], {
+      ...interactiveOverrides(io),
+      startTui: async () => {
+        throw new Error("terminal not available");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("failed to start connect mode");
+    expect(io.stderrLines[0]).toContain("terminal not available");
+  });
+});
+
+describe("main — standalone --instructions path (bypasses Server/TUI/Web entirely)", () => {
   test("--instructions with --connect is rejected as unsupported this round", async () => {
     const io = fakeIo();
     const code = await main(["--connect", "host1", "--instructions", "plan.md"], baseOverrides(io));
@@ -243,25 +476,11 @@ describe("main", () => {
     expect(io.stderrLines[0]).toContain("instructions file not found");
   });
 
-  test("a missing systemPrompt file returns HarnessError", async () => {
-    const io = fakeIo();
-    const code = await main(["--instructions", "plan.md"], {
-      ...baseOverrides(io),
-      readInstructions: async () => "do the thing",
-      loadSystemPrompt: async () => {
-        throw new Error("systemPrompt file not found: nope.md");
-      },
-    });
-    expect(code).toBe(ExitCode.HarnessError);
-    expect(io.stderrLines[0]).toContain("systemPrompt file not found");
-  });
-
   test("a root-agent crash returns HarnessError with a clear prefix", async () => {
     const io = fakeIo();
     const code = await main(["--instructions", "plan.md"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
-      loadSystemPrompt: async () => "sp",
       createRuntime: () => ({
         runRoot: async () => {
           throw new Error("boom");
@@ -278,7 +497,6 @@ describe("main", () => {
     const code = await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
-      loadSystemPrompt: async () => "sp",
       createRuntime: () => ({ runRoot: async () => ({ success: true, finalOutput: "yay" }) }),
     });
     expect(code).toBe(ExitCode.Success);
@@ -291,24 +509,22 @@ describe("main", () => {
     const code = await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
-      loadSystemPrompt: async () => "sp",
       createRuntime: () => ({ runRoot: async () => ({ success: false, finalOutput: "nope" }) }),
     });
     expect(code).toBe(ExitCode.TaskFailure);
     expect(io.exitCodes).toEqual([ExitCode.TaskFailure]);
   });
 
-  test("without --job the process doesn't exit and falls through to the stubbed mode", async () => {
+  test("without --job the process doesn't exit and falls through to a real (faked) interactive mode", async () => {
     const io = fakeIo();
     const code = await main(["--instructions", "plan.md"], {
-      ...baseOverrides(io),
+      ...interactiveOverrides(io),
       readInstructions: async () => "do the thing",
-      loadSystemPrompt: async () => "sp",
       createRuntime: () => ({ runRoot: async () => ({ success: true, finalOutput: "yay" }) }),
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.exitCodes).toEqual([]);
-    expect(io.stdoutLines).toEqual(["yay", expect.stringContaining("console TUI")]);
+    expect(io.stdoutLines[0]).toBe("yay");
   });
 
   test("createRuntime is invoked with the loaded config and resolved system prompt", async () => {
@@ -403,9 +619,7 @@ describe("main — real filesystem-backed default deps", () => {
 
   test("the real loadSystemPrompt dep reports a clear error when the configured file is missing", async () => {
     const io = fakeIo();
-    const instructionsPath = join(dir, "plan.md");
-    await Bun.write(instructionsPath, "go");
-    const code = await main(["--instructions", instructionsPath], {
+    const code = await main([], {
       loadConfig: async () => ({ ...TEST_CONFIG, systemPrompt: join(dir, "nope.md") }),
       io,
     });
@@ -429,13 +643,42 @@ describe("main — real filesystem-backed default deps", () => {
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines[0]).toContain("root agent crashed");
   });
+
+  test("the real createAgentLoop + createServer defaults wire up without a real terminal (startTui faked)", async () => {
+    const io = fakeIo();
+    const code = await main([], {
+      loadConfig: async () => TEST_CONFIG,
+      startTui: async () => {},
+      io,
+    });
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  test("the real serveWebUi default serves a real ephemeral web UI", async () => {
+    const io = fakeIo();
+    const code = await main(["--web"], {
+      loadConfig: async () => TEST_CONFIG,
+      createAgentLoop: () => fakeAgentLoop(),
+      createServer: () => fakeServer(),
+      io,
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines[0]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
+    // Deliberately left running: main() doesn't expose the handle for cleanup (interactive
+    // "--web" mode never stops itself in production either — the process just keeps the
+    // socket open). Ephemeral port, harmless for the rest of this test run.
+  });
 });
 
 describe("main — default io wired to console/process.exit", () => {
   test("the default stdout dep writes to console.log", async () => {
     const logSpy = spyOn(console, "log").mockImplementation(() => {});
     try {
-      const code = await main([], { loadConfig: async () => TEST_CONFIG });
+      const code = await main(["--server"], {
+        loadConfig: async () => TEST_CONFIG,
+        createAgentLoop: () => fakeAgentLoop(),
+        createServer: () => fakeServer(),
+      });
       expect(code).toBe(ExitCode.Success);
       expect(logSpy).toHaveBeenCalled();
     } finally {
@@ -459,6 +702,345 @@ describe("main — default io wired to console/process.exit", () => {
     } finally {
       process.exit = originalExit;
       errorSpy.mockRestore();
+    }
+  });
+});
+
+describe("AgentRuntimeLoopAdapter", () => {
+  function startMockAnthropicServer() {
+    return Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as {
+          messages: { content: { type: string; text?: string }[] }[];
+        };
+        const text = body.messages
+          .at(-1)
+          ?.content.filter((c): c is { type: "text"; text: string } => c.type === "text")
+          .map((c) => c.text)
+          .join("");
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: [{ type: "text", text: `handled: ${text ?? ""}` }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+  }
+
+  function adapterConfig(server: ReturnType<typeof startMockAnthropicServer>): DhConfig {
+    return {
+      options: { defaultModel: "test-model" },
+      models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+      provider: [
+        { name: "mock", type: "anthropic", baseURL: server.url.toString(), apiKey: "sk-test" },
+      ],
+    };
+  }
+
+  test("getAgentTree() delegates to the wrapped runtime — a 'waiting' root node before start", () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+      });
+      // Round 2 fix: a "waiting" root node (not an empty tree) is what makes
+      // sendMessage(ROOT_AGENT_ID, ...) reachable at all through the real command handler
+      // (src/server/commands.ts validates against getAgentTree() before delegating) — see
+      // runtime.ts's rootStatus field doc comment for how this was found (a live
+      // integration test against a real DhServer, not a hypothetical).
+      expect(adapter.getAgentTree()).toEqual([
+        {
+          agentId: ROOT_AGENT_ID,
+          parentAgentId: null,
+          model: "test-model",
+          status: "waiting",
+          children: [],
+        },
+      ]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("sendMessage(ROOT_AGENT_ID, ...) lazily starts the root agent on the first call", async () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+      });
+      const events: ServerSentEvent[] = [];
+      const unsubscribe = adapter.onEvent((e) => events.push(e));
+      adapter.sendMessage(ROOT_AGENT_ID, "hello");
+      // Fire-and-forget: wait for the session to actually finish via session_ended.
+      await new Promise<void>((resolve) => {
+        const check = setInterval(() => {
+          if (events.some((e) => e.type === "session_ended")) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 5);
+      });
+      unsubscribe();
+      expect(
+        events.some((e) => e.type === "agent_output" && e.chunk.includes("handled: hello")),
+      ).toBe(true);
+      expect(adapter.getAgentTree()).toEqual([
+        {
+          agentId: ROOT_AGENT_ID,
+          parentAgentId: null,
+          model: "test-model",
+          status: "done",
+          children: [],
+        },
+      ]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("sendMessage(ROOT_AGENT_ID, ...) emits a synthetic failed status if the root agent can't even start", async () => {
+    const adapter = new AgentRuntimeLoopAdapter({
+      config: {
+        options: { defaultModel: "nope" },
+        models: [],
+        provider: [],
+      },
+      systemPrompt: "sp",
+    });
+    const events: ServerSentEvent[] = [];
+    adapter.onEvent((e) => events.push(e));
+    adapter.sendMessage(ROOT_AGENT_ID, "hello");
+    await new Promise<void>((resolve) => {
+      const check = setInterval(() => {
+        if (events.some((e) => e.type === "agent_status")) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 5);
+    });
+    const statusEvent = events.find((e) => e.type === "agent_status");
+    expect(statusEvent).toMatchObject({
+      type: "agent_status",
+      agentId: ROOT_AGENT_ID,
+      status: "failed",
+    });
+  });
+
+  test("sendMessage on a non-root agentId delegates to the task registry", () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+      });
+      expect(() => adapter.sendMessage("agent-unknown", "hi")).toThrow(/unknown task id/);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("stopAgent(ROOT_AGENT_ID) is a documented no-op (loop.ts has no cooperative cancellation yet)", () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+      });
+      expect(() => adapter.stopAgent(ROOT_AGENT_ID)).not.toThrow();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("stopAgent on a non-root agentId delegates to the task registry", () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+      });
+      expect(() => adapter.stopAgent("agent-unknown")).toThrow(/unknown task id/);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("onLog fans a single onLogLine callback out to every subscriber, with unsubscribe", async () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+      });
+      const seenByA: string[] = [];
+      const seenByB: string[] = [];
+      const listenerA: AgentLoopLogListener = (agentId) => seenByA.push(agentId);
+      const listenerB: AgentLoopLogListener = (agentId) => seenByB.push(agentId);
+      adapter.onLog(listenerA);
+      const unsubscribeB = adapter.onLog(listenerB);
+      unsubscribeB();
+      await adapter.runtime.runRoot("hi");
+      expect(seenByA.length).toBeGreaterThan(0);
+      expect(seenByA.every((id) => id === ROOT_AGENT_ID)).toBe(true);
+      expect(seenByB).toEqual([]);
+    } finally {
+      server.stop(true);
+    }
+  });
+});
+
+describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: real local DhServer + mock provider)", () => {
+  function startMockAnthropicServer(finalText: string) {
+    return Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: [{ type: "text", text: finalText }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+  }
+
+  test("waitForExitCode resolves 0 through a real DhServer once the root agent self-reports success", async () => {
+    const mockProvider = startMockAnthropicServer("all good");
+    const config: DhConfig = {
+      options: { defaultModel: "test-model" },
+      models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+      provider: [
+        {
+          name: "mock",
+          type: "anthropic",
+          baseURL: mockProvider.url.toString(),
+          apiKey: "sk-test",
+        },
+      ],
+    };
+    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp" });
+    const dhServer = new DhServer({
+      agentLoop: adapter,
+      sessionId: "s1",
+      logDir: `/tmp/dh-test-${Date.now()}`,
+    });
+    dhServer.start();
+    try {
+      const exitCodePromise = waitForExitCode(adapter);
+      const result = await adapter.runtime.runRoot("go");
+      expect(result.success).toBe(true);
+      expect(await exitCodePromise).toBe(ExitCode.Success);
+    } finally {
+      dhServer.stop();
+      mockProvider.stop(true);
+    }
+  });
+
+  test("waitForExitCode resolves 1 through a real DhServer when the root agent self-reports TASK_FAILED", async () => {
+    const mockProvider = startMockAnthropicServer("could not finish TASK_FAILED");
+    const config: DhConfig = {
+      options: { defaultModel: "test-model" },
+      models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+      provider: [
+        {
+          name: "mock",
+          type: "anthropic",
+          baseURL: mockProvider.url.toString(),
+          apiKey: "sk-test",
+        },
+      ],
+    };
+    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp" });
+    const dhServer = new DhServer({
+      agentLoop: adapter,
+      sessionId: "s2",
+      logDir: `/tmp/dh-test-${Date.now()}`,
+    });
+    dhServer.start();
+    try {
+      const exitCodePromise = waitForExitCode(adapter);
+      const result = await adapter.runtime.runRoot("go");
+      expect(result.success).toBe(false);
+      expect(await exitCodePromise).toBe(ExitCode.TaskFailure);
+    } finally {
+      dhServer.stop();
+      mockProvider.stop(true);
+    }
+  });
+
+  // Regression test for a real bug this Round 2 pass found via a live subprocess smoke
+  // test, not a hypothetical: src/server/commands.ts's send_message handler validates the
+  // target agentId against getAgentTree() *before* ever calling AgentLoopHandle.
+  // sendMessage() — so if getAgentTree() were empty until the root starts (the adapter's
+  // original design), the very first message meant to *start* the root would be rejected
+  // as "unknown agentId" by the real command handler, never reaching the adapter's lazy-
+  // start logic at all. Fixed in runtime.ts (root node is always present, "waiting" before
+  // start); this test drives the exact real HTTP path that caught it.
+  test("send_message to a not-yet-started root reaches the real HTTP command handler and starts it", async () => {
+    const mockProvider = startMockAnthropicServer("hello back");
+    const config: DhConfig = {
+      options: { defaultModel: "test-model" },
+      models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+      provider: [
+        {
+          name: "mock",
+          type: "anthropic",
+          baseURL: mockProvider.url.toString(),
+          apiKey: "sk-test",
+        },
+      ],
+    };
+    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp" });
+    const dhServer = new DhServer({
+      agentLoop: adapter,
+      sessionId: "s3",
+      logDir: `/tmp/dh-test-${Date.now()}`,
+    });
+    const port = dhServer.start();
+    try {
+      const treeBefore = await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "request_agent_tree" }),
+      }).then((r) => r.json());
+      expect(treeBefore).toMatchObject({
+        ok: true,
+        tree: [{ agentId: ROOT_AGENT_ID, status: "waiting" }],
+      });
+
+      const exitCodePromise = waitForExitCode(adapter);
+      const sendResult = await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "send_message", agentId: ROOT_AGENT_ID, message: "hi" }),
+      }).then((r) => r.json());
+      expect(sendResult).toEqual({ ok: true });
+      expect(await exitCodePromise).toBe(ExitCode.Success);
+
+      const treeAfter = await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "request_agent_tree" }),
+      }).then((r) => r.json());
+      expect(treeAfter).toMatchObject({
+        ok: true,
+        tree: [{ agentId: ROOT_AGENT_ID, status: "done" }],
+      });
+    } finally {
+      dhServer.stop();
+      mockProvider.stop(true);
     }
   });
 });

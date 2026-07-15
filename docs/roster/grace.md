@@ -110,3 +110,50 @@ rule):**
 
 All three gates green: `bun run typecheck`, `bun run lint`, `bun run test:coverage` (233
 tests, 99.85%/99.98% funcs/lines aggregate, both shortfalls explained above).
+
+### 2026-07-15 — Round 2 (integration: wire cli.ts to the real Server/TUI/Web)
+
+Worked from a **fresh worktree** (`grace-round2`, in `.claude/worktrees/`, branched from
+`origin/claude/coordinator-onboarding-kab9ls` at `4fc7c5b`) per the coordinator's explicit
+instruction — my round-1 worktree (`worktree-agent-a572554c3ba0257bf`) predates Radia/Mary/
+Susan/Iris/Nightingale's work landing, so it wasn't safe to keep building in. Set it up with
+`git worktree add .claude/worktrees/grace-round2 -b grace-round2
+origin/claude/coordinator-onboarding-kab9ls` after `git fetch`, then `bun install`.
+
+Full technical writeup (identifier unification, the onLogLine signature change, the real
+send_message-to-unstarted-root bug I found via a live curl against a real running server,
+the four run modes, cross-domain requests to Mary re: TUI token auth) is in
+`docs/handoffs/core.md`'s dated Round 2 entry — this section is durable judgment/process
+notes for a future me resuming this identity, not a duplicate of that log.
+
+**Process note worth remembering:** my first `getAgentTree()` design (empty until `runRoot()`
+had run) passed every unit test I wrote, because my unit tests all drove either a hand-built
+fake `AgentLoopHandle` or called the adapter's own methods directly — none of them routed a
+`send_message` through Server's *actual* `commands.ts` validation logic (which checks
+`findAgent(getAgentTree(), agentId)` before ever calling `AgentLoopHandle.sendMessage()`).
+I only found the bug by literally starting a real `dh --server` process and curling it by
+hand, mid-implementation, to sanity-check the "start the root via its first message" flow
+end-to-end before calling it done. Lesson for next time (and for reviewing anyone else's
+cross-domain adapter work): a green unit-test suite against fakes doesn't prove the fakes
+match the real contract's actual behavior — for any adapter implementing another domain's
+interface, drive at least one test through *that domain's real code*, not just your own
+mock of it. I did have real-DhServer integration tests already planned for the DoD's
+"verify against a real local DhServer" language, and it was specifically writing/running
+those (well, running the manual curl check before I'd even finished writing the automated
+version) that surfaced this — so that DoD requirement earned its keep here, concretely.
+
+**Identifier design decision I'm glad I made:** unifying task-registry ids with the loop's
+own agentId (rather than building a translation table in the adapter) turned out to matter
+more than I expected going in — it's *why* the send_message-to-root bug above was even
+fixable cleanly. If sub-agent task ids and loop agentIds were still two separate spaces, the
+adapter would need to translate in both directions for every operation, and the tree/events/
+logs would need to agree on which id space they're each using at every call site. Keeping
+one id space eliminated a whole category of "which id is this again" bugs before they could
+happen. Worth defaulting to "unify the identifier space" over "add a translation layer" in
+future cross-domain integration work here, when there isn't a strong reason not to.
+
+**Open thread for whoever picks up Round 3 (if there is one) or the E2E domain:** the two
+cross-domain requests in this round's status log (TUI token auth passthrough; loop.ts has no
+real cooperative cancellation) are real, not decorative — worth checking whether Mary's
+picked up the first one before E2E writes a security-matrix test that assumes the console
+TUI can authenticate.

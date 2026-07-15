@@ -1,18 +1,30 @@
 // CLI entry point (docs/handoffs/core.md §5). Parses flags, composes the run mode per
-// HANDOFF.md §2 / ADR 0001, and — for the `--instructions` autonomous path — runs the root
-// agent directly via AgentRuntime and maps its outcome onto the ExitCode contract.
-//
-// SCOPE NOTE (status log, docs/handoffs/core.md): this file *composes* the Server/TUI/Web
-// entry points but doesn't implement them — those domains haven't landed in this worktree
-// yet. Each real run mode below calls a clearly-marked stub instead of importing
-// src/server|tui|web (which would violate the ownership boundary even if they existed).
-// Replacing the stubs with real imports is a one-line change per TODO once those domains
-// land — nothing here should need to change shape.
+// HANDOFF.md §2 / ADR 0001, and either:
+//   - runs the root agent directly via AgentRuntime for the standalone `--instructions`
+//     dark-factory path (bypasses Server/TUI/Web entirely — see the Round 2 status log in
+//     docs/handoffs/core.md for why that's a deliberate choice, not an oversight), or
+//   - wires up the real Server/TUI/Web domains for the four interactive run modes (`--server`,
+//     local console, local `--web`, `--connect [--web]`), via a thin AgentLoopHandle adapter
+//     (AgentRuntimeLoopAdapter below) bridging Core's AgentRuntime to Server's own interface
+//     for exactly this purpose (src/server/agent-loop.ts's doc comment, and Grace's own
+//     round-1 status-log note, both call this out as the intended integration point).
 
-import { AgentRuntime } from "./agent/runtime.ts";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { AgentRuntime, ROOT_AGENT_ID } from "./agent/runtime.ts";
 import { ConfigError, DEFAULT_CONFIG_PATH, loadConfig } from "./config/index.ts";
-import type { DhConfig, ExitCode as ExitCodeType } from "./contracts/index.ts";
+import type { AgentTreeNode, DhConfig, ExitCode as ExitCodeType } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
+import {
+  type AgentLoopEventListener,
+  type AgentLoopHandle,
+  type AgentLoopLogListener,
+  DhServer,
+  type DhServerOptions,
+  type Unsubscribe,
+} from "./server/index.ts";
+import { startTui as startTuiClient } from "./tui/index.ts";
+import { serveWebUi as serveWebUiClient } from "./web/server.ts";
 
 export const DEFAULT_PORT = 4000;
 
@@ -133,47 +145,108 @@ async function loadSystemPrompt(config: DhConfig): Promise<string> {
   return file.text();
 }
 
-/** TODO(server domain): replace with src/server's real headless server entry point. */
-function startHeadlessServerStub(port: number, io: Pick<CliIo, "stdout">): void {
-  io.stdout(`dh: [stub] headless server would listen on port ${port} (src/server not landed yet).`);
-}
+/**
+ * Bridges Core's AgentRuntime (a single fixed onEvent/onLogLine callback pair, set at
+ * construction) to Server's AgentLoopHandle (multi-subscriber onEvent/onLog, plus
+ * sendMessage/stopAgent/getAgentTree) — the integration point flagged in both
+ * src/server/agent-loop.ts's doc comment and Grace's round-1 status-log note ("(b) a thin
+ * wrapper in src/cli.ts bridges Core's actual shape to this one").
+ *
+ * Identifier space (docs/handoffs/core.md Round 2 status log): "agentId" here is always the
+ * SAME string AgentRuntime already uses for its own SSE events/log lines — ROOT_AGENT_ID for
+ * the root, and (as of this round) the task registry's own id for every sub-agent, since
+ * AgentRuntime.spawnAgent() now passes its loop-internal id as the task's id too. No
+ * translation table needed.
+ *
+ * Root agent lifecycle: interactive mode has no `--instructions` file, so the root agent
+ * doesn't start until the operator's first message arrives (matches HANDOFF.md §8's "text
+ * input for sending it messages" — there's nothing to show until something is sent).
+ * sendMessage(ROOT_AGENT_ID, ...) lazily starts it on the first call (fire-and-forget; a
+ * synthetic `agent_status: failed` event covers a harness error that prevents it from ever
+ * starting, so a broken provider/config doesn't silently vanish) and steers the
+ * already-running loop on every call after that.
+ */
+export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
+  readonly runtime: AgentRuntime;
+  private readonly eventListeners = new Set<AgentLoopEventListener>();
+  private readonly logListeners = new Set<AgentLoopLogListener>();
 
-/** TODO(tui domain): replace with src/tui's console client entry point. */
-function startConsoleStub(io: Pick<CliIo, "stdout">): void {
-  io.stdout("dh: [stub] console TUI would start here (src/tui not landed yet).");
-}
-
-/** TODO(web domain): replace with src/web's client-served web UI entry point. */
-function startWebStub(io: Pick<CliIo, "stdout">): void {
-  io.stdout("dh: [stub] web UI would be served here (src/web not landed yet).");
-}
-
-/** TODO(tui/web domains): replace with the real console/web client connecting to a remote
- * headless server over HTTP+SSE (ADR 0002). */
-function startConnectStub(
-  mode: Extract<RunMode, { kind: "connect" }>,
-  io: Pick<CliIo, "stdout">,
-): void {
-  io.stdout(
-    `dh: [stub] would connect to ${mode.host}:${mode.port} with the ${mode.web ? "web" : "console"} client (src/${mode.web ? "web" : "tui"} not landed yet).`,
-  );
-}
-
-function runStubbedMode(mode: RunMode, io: Pick<CliIo, "stdout">): void {
-  if (mode.kind === "server") {
-    startHeadlessServerStub(mode.port, io);
-    return;
+  constructor(options: { config: DhConfig; systemPrompt: string }) {
+    this.runtime = new AgentRuntime({
+      config: options.config,
+      systemPrompt: options.systemPrompt,
+      onEvent: (event) => {
+        for (const listener of this.eventListeners) listener(event);
+      },
+      onLogLine: (agentId, line) => {
+        for (const listener of this.logListeners) listener(agentId, line);
+      },
+    });
   }
-  if (mode.kind === "connect") {
-    startConnectStub(mode, io);
-    return;
+
+  onEvent(listener: AgentLoopEventListener): Unsubscribe {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
   }
-  // mode.kind === "local"
-  if (mode.web) {
-    startWebStub(io);
-  } else {
-    startConsoleStub(io);
+
+  onLog(listener: AgentLoopLogListener): Unsubscribe {
+    this.logListeners.add(listener);
+    return () => this.logListeners.delete(listener);
   }
+
+  sendMessage(agentId: string, message: string): void {
+    if (agentId !== ROOT_AGENT_ID) {
+      this.runtime.tasks.sendMessage(agentId, message);
+      return;
+    }
+    if (!this.runtime.rootHasStarted) {
+      // Fire-and-forget: the command handler (POST /api/commands) shouldn't block on the
+      // whole root agent run just to acknowledge "message accepted" — progress streams via
+      // onEvent/onLog as normal. A harness error before the loop ever gets going (bad
+      // model/provider config) would otherwise be an unhandled rejection; surface it as a
+      // synthetic agent_status instead of crashing the process.
+      this.runtime.runRoot(message).catch(() => {
+        const event = {
+          version: 1 as const,
+          id: randomUUID(),
+          timestamp: new Date().toISOString(),
+          type: "agent_status" as const,
+          agentId: ROOT_AGENT_ID,
+          status: "failed" as const,
+        };
+        for (const listener of this.eventListeners) listener(event);
+      });
+      return;
+    }
+    this.runtime.sendMessageToRoot(message);
+  }
+
+  stopAgent(agentId: string): void {
+    if (agentId === ROOT_AGENT_ID) {
+      // Known limitation, not new this round (docs/handoffs/core.md Round 2 status log):
+      // loop.ts has no cooperative cancellation at all yet — TaskStop's abort signal only
+      // ever interrupted a run_in_background Bash call, never a loop mid-turn, for
+      // sub-agents either. A safe no-op here is honest about what's actually supported
+      // rather than throwing and failing the command handler for an operation the loop
+      // can't actually perform yet.
+      return;
+    }
+    this.runtime.tasks.stop(agentId);
+  }
+
+  getAgentTree(): AgentTreeNode[] {
+    return this.runtime.getAgentTree();
+  }
+}
+
+export interface DhServerLike {
+  start(): number;
+  stop(): void;
+}
+
+export interface WebUiHandleLike {
+  url: string;
+  stop(): void;
 }
 
 export interface CliIo {
@@ -186,7 +259,18 @@ export interface CliDeps {
   loadConfig: (path: string) => Promise<DhConfig>;
   readInstructions: (path: string) => Promise<string>;
   loadSystemPrompt: (config: DhConfig) => Promise<string>;
+  /** Used only by the standalone `--instructions` path (see the module doc comment above
+   * for why that path never goes through createAgentLoop/createServer). */
   createRuntime: (config: DhConfig, systemPrompt: string) => Pick<AgentRuntime, "runRoot">;
+  /** Used by every interactive mode (server/local/connect). */
+  createAgentLoop: (config: DhConfig, systemPrompt: string) => AgentLoopHandle;
+  createServer: (options: DhServerOptions) => DhServerLike;
+  startTui: (baseUrl: string) => Promise<void>;
+  serveWebUi: (options: {
+    port: number;
+    targetBaseUrl: string;
+    token?: string;
+  }) => WebUiHandleLike;
   io: CliIo;
 }
 
@@ -196,6 +280,11 @@ function defaultDeps(): CliDeps {
     readInstructions: readInstructionsFile,
     loadSystemPrompt,
     createRuntime: (config, systemPrompt) => new AgentRuntime({ config, systemPrompt }),
+    createAgentLoop: (config, systemPrompt) =>
+      new AgentRuntimeLoopAdapter({ config, systemPrompt }),
+    createServer: (options) => new DhServer(options),
+    startTui: (baseUrl) => startTuiClient(baseUrl),
+    serveWebUi: (options) => serveWebUiClient(options),
     io: {
       stdout: (message) => console.log(message),
       stderr: (message) => console.error(message),
@@ -208,6 +297,89 @@ function fail(io: CliIo, message: string): ExitCodeType {
   io.stderr(`dh: ${message}`);
   io.exit(ExitCode.HarnessError);
   return ExitCode.HarnessError;
+}
+
+/**
+ * Starts whichever of the four interactive run modes `mode` composes to and returns the
+ * exit code to report (Success unless starting the mode itself fails — e.g. the requested
+ * `--server`/`--connect` port is already in use, a harness-error class per ADR 0006, not a
+ * crash).
+ *
+ * Judgment call (docs/handoffs/core.md Round 2 status log, `--port` scope): only `--server`'s
+ * own listen port and `--connect`'s remote target port are operator-configurable via
+ * `--port`, matching ADR 0001's "listen port for --server, target port for --connect" — every
+ * locally-started service that exists purely so an in-process TUI/Web client has something
+ * to talk to (local mode's own DhServer; either mode's web-UI static server) binds an
+ * ephemeral port (0) and prints/returns the URL instead, since HANDOFF.md never documents
+ * `--port` as applying to local mode at all.
+ *
+ * Judgment call (client TLS): `--connect`'s targetBaseUrl dials `https://` when the
+ * *connecting side's own* `dh.json` sets `security.tls` — ADR 0004 says "clients connect
+ * with https:// when the target uses TLS" but leaves the "auto-detect or a client-side flag"
+ * choice to the fleet. Reusing `security.tls`'s presence (already how "clients supply their
+ * own token via their own dh.json" works for the bearer-token side) avoids inventing a new
+ * flag or a probe-the-server-first mechanism; flagged in the status log in case a future
+ * round wants true auto-detection instead.
+ */
+async function runInteractiveMode(
+  mode: RunMode,
+  config: DhConfig,
+  systemPrompt: string,
+  deps: CliDeps,
+): Promise<ExitCodeType> {
+  const { io } = deps;
+  try {
+    if (mode.kind === "connect") {
+      const scheme = config.security?.tls ? "https" : "http";
+      const targetBaseUrl = `${scheme}://${mode.host}:${mode.port}`;
+      if (mode.web) {
+        const handle = deps.serveWebUi({
+          port: 0,
+          targetBaseUrl,
+          ...(config.security?.token ? { token: config.security.token } : {}),
+        });
+        io.stdout(`dh: web UI ready at ${handle.url} (connected to ${targetBaseUrl}).`);
+        return ExitCode.Success;
+      }
+      await deps.startTui(targetBaseUrl);
+      return ExitCode.Success;
+    }
+
+    // mode.kind is "local" or "server" — both start a real local DhServer.
+    const agentLoop = deps.createAgentLoop(config, systemPrompt);
+    const sessionId = randomUUID();
+    const logDir = join(process.cwd(), ".dh-logs", sessionId);
+    const server = deps.createServer({
+      agentLoop,
+      sessionId,
+      logDir,
+      port: mode.kind === "server" ? mode.port : 0,
+      ...(config.security ? { security: config.security } : {}),
+    });
+    const boundPort = server.start();
+
+    if (mode.kind === "server") {
+      io.stdout(`dh: headless server listening on port ${boundPort} (session ${sessionId}).`);
+      return ExitCode.Success;
+    }
+
+    const baseUrl = `http://localhost:${boundPort}`;
+    if (mode.web) {
+      const handle = deps.serveWebUi({
+        port: 0,
+        targetBaseUrl: baseUrl,
+        ...(config.security?.token ? { token: config.security.token } : {}),
+      });
+      io.stdout(`dh: web UI ready at ${handle.url}.`);
+      return ExitCode.Success;
+    }
+
+    await deps.startTui(baseUrl);
+    server.stop();
+    return ExitCode.Success;
+  } catch (err) {
+    return fail(io, `failed to start ${mode.kind} mode: ${(err as Error).message}`);
+  }
 }
 
 /** Runs the CLI end to end. Returns the exit code it either passed to `deps.io.exit` (real
@@ -235,11 +407,23 @@ export async function main(
     return fail(io, (err as Error).message);
   }
 
-  if (options.instructions === null) {
-    runStubbedMode(mode, io);
-    return ExitCode.Success;
+  let systemPrompt: string;
+  try {
+    systemPrompt = await deps.loadSystemPrompt(config);
+  } catch (err) {
+    return fail(io, (err as Error).message);
   }
 
+  if (options.instructions === null) {
+    return runInteractiveMode(mode, config, systemPrompt, deps);
+  }
+
+  // Standalone dark-factory path: deliberately bypasses Server/TUI/Web entirely, even in
+  // this round with all three landed (docs/handoffs/core.md Round 2 status log, point 3 —
+  // "don't regress the exit-code path you already built and verified via live subprocess
+  // runs"). `--connect` has no wire-protocol command to start a brand-new root agent
+  // remotely (ClientCommand only covers send_message/stop_agent/request_agent_tree/
+  // download_logs against an *already-running* session), so it stays unsupported here.
   if (mode.kind === "connect") {
     return fail(
       io,
@@ -251,13 +435,6 @@ export async function main(
   let instructionText: string;
   try {
     instructionText = await deps.readInstructions(options.instructions);
-  } catch (err) {
-    return fail(io, (err as Error).message);
-  }
-
-  let systemPrompt: string;
-  try {
-    systemPrompt = await deps.loadSystemPrompt(config);
   } catch (err) {
     return fail(io, (err as Error).message);
   }
@@ -275,11 +452,10 @@ export async function main(
 
   if (!options.job) {
     // Without --job the process stays alive after completion for inspection (HANDOFF.md
-    // §2). There's no real interactive surface to keep it alive with yet — TODO(server/tui/
-    // web domains): once those land, this falls through to the same runStubbedMode() call
-    // the no-instructions path uses, now with the root agent already having run.
-    runStubbedMode(mode, io);
-    return ExitCode.Success;
+    // §2) — now via the same real interactive surface the no-instructions path uses. Note
+    // this is a fresh AgentRuntime/session, not a continuation of the one that just ran the
+    // instruction (unifying those is out of scope this round — see the status log).
+    return runInteractiveMode(mode, config, systemPrompt, deps);
   }
 
   const code = result.success ? ExitCode.Success : ExitCode.TaskFailure;

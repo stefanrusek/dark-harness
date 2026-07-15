@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TaskNotFoundError, TaskRegistry } from "./tasks.ts";
+import { DuplicateTaskIdError, TaskNotFoundError, TaskRegistry } from "./tasks.ts";
 
 describe("TaskRegistry", () => {
   test("start assigns incrementing ids per kind", () => {
@@ -54,5 +54,42 @@ describe("TaskRegistry", () => {
   test("awaitDone on an unknown id throws TaskNotFoundError", async () => {
     const registry = new TaskRegistry();
     await expect(registry.awaitDone("bash-999")).rejects.toThrow(TaskNotFoundError);
+  });
+
+  test("start() honors a caller-supplied id instead of generating one (Round 2: identifier unification)", async () => {
+    const registry = new TaskRegistry();
+    const id = registry.start({
+      kind: "agent",
+      parentAgentId: "root",
+      id: "agent-custom-uuid",
+      run: async () => {},
+    });
+    expect(id).toBe("agent-custom-uuid");
+    await registry.awaitDone(id);
+    expect(registry.snapshot(id).id).toBe("agent-custom-uuid");
+  });
+
+  test("start() rejects a caller-supplied id that's already in use", () => {
+    const registry = new TaskRegistry();
+    registry.start({
+      kind: "agent",
+      parentAgentId: "root",
+      id: "agent-dup",
+      run: () => new Promise(() => {}),
+    });
+    expect(() =>
+      registry.start({
+        kind: "agent",
+        parentAgentId: "root",
+        id: "agent-dup",
+        run: async () => {},
+      }),
+    ).toThrow(DuplicateTaskIdError);
+  });
+
+  test("start() still auto-generates ids for callers that don't supply one, unaffected by the id option existing", () => {
+    const registry = new TaskRegistry();
+    const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+    expect(id).toBe("bash-1");
   });
 });
