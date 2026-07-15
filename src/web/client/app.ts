@@ -41,6 +41,8 @@ import {
 
 const NEAR_BOTTOM_THRESHOLD_PX = 48;
 const ERROR_BANNER_DURATION_MS = 5000;
+/** How often the "time in current status" indicator ticks forward with no new event. */
+const LIVENESS_TICK_MS = 1000;
 
 export interface AppDeps {
   doc: Document;
@@ -51,6 +53,13 @@ export interface AppDeps {
    *  to both the SSE reconnect backoff (sse.ts) and the error-banner hide timer below. */
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
+  /** Injectable clock for the liveness indicator (docs/handoffs/web.md Round 3); defaults to
+   *  `Date.now`. Tests supply a fake clock instead of sleeping in real time. */
+  nowFn?: () => number;
+  /** Injectable interval timer driving the liveness indicator's live tick; defaults to the
+   *  real `setInterval`/`clearInterval`. */
+  setIntervalImpl?: typeof setInterval;
+  clearIntervalImpl?: typeof clearInterval;
 }
 
 export class AppView {
@@ -60,6 +69,7 @@ export class AppView {
   private renderedOutputLength = 0;
   private renderedOutputForAgentId: string | null = null;
   private errorTimer: ReturnType<typeof setTimeout> | undefined;
+  private livenessTimer: ReturnType<typeof setInterval> | undefined;
 
   private readonly callbacks: AppCallbacks = {
     onSelectAgent: (agentId) => {
@@ -116,6 +126,18 @@ export class AppView {
       },
     );
     this.bootstrapAgentTree();
+    this.startLivenessTicker();
+  }
+
+  /**
+   * Keeps the "time in current status" indicator (docs/handoffs/web.md Round 3) advancing
+   * even when no new SSE event arrives — the whole point is showing a silent, stalled
+   * `running` turn as visibly aging in real time rather than looking identical to a fresh
+   * one. Re-renders on a fixed tick; injectable clock/timer so tests never sleep for real.
+   */
+  private startLivenessTicker(): void {
+    const setIntervalFn = this.deps.setIntervalImpl ?? setInterval;
+    this.livenessTimer = setIntervalFn(() => this.renderAll(), LIVENESS_TICK_MS);
   }
 
   /**
@@ -132,7 +154,8 @@ export class AppView {
   private bootstrapAgentTree(): void {
     requestAgentTree(this.deps.target, this.deps.fetchImpl)
       .then((res) => {
-        this.state = seedFromTree(this.state, res.tree);
+        const nowFn = this.deps.nowFn ?? Date.now;
+        this.state = seedFromTree(this.state, res.tree, new Date(nowFn()).toISOString());
         this.renderAll();
       })
       .catch((err) => this.reportError(err));
@@ -141,6 +164,11 @@ export class AppView {
   stop(): void {
     this.connection?.close();
     this.connection = null;
+    if (this.livenessTimer !== undefined) {
+      const clearIntervalFn = this.deps.clearIntervalImpl ?? clearInterval;
+      clearIntervalFn(this.livenessTimer);
+      this.livenessTimer = undefined;
+    }
   }
 
   getState(): WebState {
@@ -170,10 +198,12 @@ export class AppView {
 
   private renderAll(): void {
     const { doc } = this.deps;
-    renderSidebar(doc, this.shell.sidebar, this.state, this.callbacks.onSelectAgent);
+    const nowFn = this.deps.nowFn ?? Date.now;
+    const now = nowFn();
+    renderSidebar(doc, this.shell.sidebar, this.state, this.callbacks.onSelectAgent, now);
     renderConnectionStatus(this.shell.connectionPill, this.state);
     renderSessionSummary(doc, this.shell.sessionSummary, this.state);
-    renderAgentHeader(doc, this.shell.agentHeader, this.state, this.callbacks);
+    renderAgentHeader(doc, this.shell.agentHeader, this.state, this.callbacks, now);
     renderComposer(doc, this.shell.composer, this.state, this.callbacks.onSendMessage);
     this.updateOutput();
   }

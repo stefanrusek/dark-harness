@@ -143,3 +143,44 @@ exhaustive-switch code in this codebase.
 **Gates this round:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100%
 funcs/lines on every `src/web/` file), and `bun run e2e` (18/18, including the fixed
 `web.test.ts`) — all green. Full detail in the handoff status log.
+
+### 2026-07-15 — Round 3: liveness indicator ("time in current status")
+
+Added `statusSince` (ISO timestamp) to `AgentNode`, bumped only on an actual status
+transition (`event.status !== node.status`), seeded on first sight of an agent from the
+triggering event's own `timestamp` — every `ServerSentEvent` already carries one, so this
+needed no wire-protocol change. Rendered as a coarse elapsed label ("just now" / "42s" /
+"3m 12s" / "1h 05m", via new `format.ts:formatElapsed`) in both the sidebar row and the
+detail header, ticking live via a new injected `setInterval` in `app.ts` (mirrors the
+existing `setTimeoutImpl` pattern used for SSE backoff/error-banner-hide) so a stalled
+`running` turn visibly ages even with zero new SSE events arriving.
+
+**Judgment call: "time in current status," not "last event at."** The handoff left the
+framing open. I picked "time in current status" because the Anthropic provider adapter
+calls `messages.create` non-streaming — no incremental `agent_output` arrives mid-turn — so
+in this codebase's current form the two framings measure the same thing, and "time in
+current status" is the more honest/general label (it stays meaningful if a future provider
+adapter starts streaming output, where "last event at" would then measure something
+different and arguably less useful for the "is it stalled" question).
+
+**Pattern worth reusing: threading one injected clock through both the ticking interval and
+the elapsed-time seed.** `AppDeps.nowFn` feeds both `renderAll()`'s `now` (passed to
+`renderSidebar`/`renderAgentHeader`) and `bootstrapAgentTree()`'s `nowIso` (passed to
+`seedFromTree`) — one source of truth for "what time does this app think it is," so a test
+can hold time fixed, fire the injected interval tick directly, and assert the rendered
+elapsed text moved by exactly the expected delta. No real sleeps anywhere in the new tests.
+
+**Environment note for whoever runs this role's gate next:** the worktree I was launched
+into (a fresh `worktree-agent-*` branch) only had the two founding-doc commits — none of the
+built `src/` tree that's already merged into `origin/claude/coordinator-onboarding-kab9ls`.
+Fast-forward-merged onto that branch before starting (working tree was clean, so lossless).
+Also: `bun run e2e` in this sandbox has no `tmux` binary and no Chromium at the expected
+install path, so 4/18 e2e tests fail for environment reasons unrelated to any code change —
+worth checking whether that's expected here or whether the sandbox needs re-provisioning
+before trusting a red `e2e` run in this kind of environment again.
+
+**Gates:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100% funcs/lines,
+every `src/web/` file, 695 tests project-wide) — all green. `bun run e2e`: 14/18, the 4
+failures are the sandbox tooling gaps above, not a regression (nothing this round touches
+routes, auth, or the wire protocol). Full detail in `docs/handoffs/web.md`'s Round 3 status
+entry.

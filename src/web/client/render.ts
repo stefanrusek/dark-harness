@@ -6,6 +6,7 @@ import {
   agentStatusStyle,
   connectionStatusLabel,
   formatCostUsd,
+  formatElapsed,
   formatExitCode,
   formatTokenCount,
   shortAgentId,
@@ -123,6 +124,7 @@ export function renderSidebar(
   container: HTMLElement,
   state: WebState,
   onSelect: (agentId: string) => void,
+  now: number = Date.now(),
 ): void {
   container.textContent = "";
   const list = el(doc, "ul", "agent-tree");
@@ -144,6 +146,11 @@ export function renderSidebar(
       ? "root"
       : `${agent.model || "agent"} · ${shortAgentId(agent.agentId)}`;
     item.appendChild(label);
+
+    const elapsed = el(doc, "span", "agent-elapsed");
+    elapsed.textContent = formatElapsed(now - Date.parse(agent.statusSince));
+    elapsed.title = `Time in "${style.label}"`;
+    item.appendChild(elapsed);
 
     const tokens = el(doc, "span", "agent-tokens");
     tokens.textContent = formatTokenCount(agent.inputTokens + agent.outputTokens);
@@ -190,6 +197,7 @@ export function renderAgentHeader(
   container: HTMLElement,
   state: WebState,
   callbacks: AppCallbacks,
+  now: number = Date.now(),
 ): void {
   container.textContent = "";
   const agent = selectedAgent(state);
@@ -212,6 +220,10 @@ export function renderAgentHeader(
   const badge = el(doc, "span", `status-badge status-${style.token}`);
   badge.textContent = style.label;
   title.appendChild(badge);
+  const elapsed = el(doc, "span", "status-elapsed");
+  elapsed.textContent = `for ${formatElapsed(now - Date.parse(agent.statusSince))}`;
+  elapsed.title = `Time since this agent last changed status — helps tell "still thinking" from "stalled" during a long turn`;
+  title.appendChild(elapsed);
   container.appendChild(title);
 
   const stats = el(doc, "div", "agent-header-stats");

@@ -229,6 +229,16 @@ button {
   color: var(--text-faint);
 }
 
+/* Liveness indicator (docs/handoffs/web.md Round 3): "time in current status", so a long
+   silence during `running` reads visibly distinct from a normal short turn instead of
+   looking identical to a fresh one. */
+.agent-elapsed {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
 /* ---------- Status dots / badges ---------- */
 
 .status-dot {
@@ -280,6 +290,12 @@ button {
 
 .status-badge.status-failed {
   color: var(--status-failed);
+}
+
+.status-elapsed {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
 }
 
 /* ---------- Session summary ---------- */
