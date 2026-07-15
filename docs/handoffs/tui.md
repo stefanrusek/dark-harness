@@ -141,6 +141,95 @@ message through the actual UI (typing + enter) without the "please wait" message
 purely by the tree-response bootstrap, not a live `agent_spawned` event. Append a dated
 status entry here and update `docs/roster/mary.md` when done.
 
+### 2026-07-15 — Mary (TUI domain lead), Round 3: fix the interactive bootstrap deadlock
+
+Worked in a fresh worktree off the latest `claude/coordinator-onboarding-kab9ls` (`1a0cb39`,
+past my Round 2 merge, the E2E domain landing, and Ada's small fixes), per the coordinator's
+instruction. Read `docs/roster/mary.md` then this handoff section, then `e2e/tui.test.ts`'s
+header comment (Hedy's own confirmation of the deadlock, with a precise root-cause trace)
+before touching code, to make sure my fix addressed the actual mechanism, not just the
+symptom.
+
+**Fix, both parts exactly as scoped:**
+1. `src/tui/state.ts`'s `applyTreeResponse` now seeds `rootAgentId` (only when it's still
+   `null`, never overwriting a value a live `agent_spawned` event already set) from the tree
+   response — via `flattenTree(tree).find((entry) => entry.node.parentAgentId === null)`, i.e.
+   "the node with no parent," not a hardcoded id. Server happens to call it `agent-root`
+   (confirmed in `e2e/server-protocol.test.ts`) but nothing in `src/tui/` needed to know
+   that literal string.
+2. `src/tui/app.ts` now fires `{ type: "send_command", command: { type: "request_agent_tree" } }`
+   through the existing `runEffect` path once, unconditionally, right alongside the
+   `runSseClient` kickoff at startup — before the first `draw()`. This doesn't touch the view
+   (still boots on the root view, not the tree view); it just gets the tree round-trip
+   in flight immediately so `rootAgentId` is populated by the time an operator could
+   plausibly finish typing a first message. Left-arrow still also fires it (unchanged,
+   still useful for refreshing the tree view later), so a session now issues
+   `request_agent_tree` twice if the operator ever opens the tree — harmless, same command,
+   same handler, and now confirmed as intentional/tested behavior rather than an oversight.
+
+**Test changes:**
+- `src/tui/state.test.ts`: five new unit tests directly on `applyTreeResponse`/`reducer`
+  covering the seeding logic — sets `rootAgentId` from the root node, does not clobber an
+  already-known one, finds the root by `parentAgentId === null` regardless of array position
+  (not just "trust `tree[0]`"), leaves it `null` when no node qualifies, and (the actual
+  definition-of-done assertion at the reducer level) that seeding via `tree_response` alone
+  is sufficient for a subsequent `enter` keypress to produce a `send_message` effect instead
+  of the "please wait" status message. Extended the existing `treeNode()` test helper with an
+  optional `parentAgentId` parameter (default `null`, so every pre-existing call site is
+  unaffected) so non-root nodes could be constructed for these tests.
+- `src/tui/app.test.ts`: added the definition-of-done regression test end to end through
+  `startTui` — types a message and presses enter with **no `agent_spawned` SSE event ever
+  injected**, only the automatic startup tree fetch, and asserts the `send_message` command
+  goes out and "please wait" never appears. Also added a direct "fires request_agent_tree
+  automatically on startup" test. Updated the two Round-2 token-header tests, which broke
+  because they counted on exactly one command POST happening — now there are two (the
+  automatic startup one plus their own left-arrow-triggered one); tightened rather than
+  loosened, both requests are now asserted to carry the header, not just one.
+
+**Gates:**
+```
+bun run typecheck      # tsc --noEmit && tsc --noEmit -p src/web — clean
+bun run lint            # biome check . — 145 files, no issues
+bun run test:coverage   # 642 pass / 0 fail, 100.00% lines repo-wide; src/tui/* 100.00%
+                         # funcs+lines. src/cli.ts's pre-existing 96.88% funcs figure is
+                         # unchanged and unrelated (not touched by this change).
+bun run e2e             # 17 pass, 1 fail — see below, expected and anticipated.
+```
+
+**The one e2e failure is the fix working as intended, not a regression.**
+`e2e/tui.test.ts`'s "boots, renders the alt-screen shell, and responds to real keystrokes"
+test was written by Hedy to *document* this exact deadlock: its final assertion
+(`await session.waitFor((screen) => screen.includes("No root agent yet"))`, line 75) treats
+the broken behavior as the expected outcome. Now that the deadlock is fixed, pressing Enter
+after typing a message actually sends it — the real footer never shows "No root agent yet",
+so that `waitFor` times out. This is exactly what this round's handoff anticipated ("Hedy's
+test currently works around the bug... consider whether that test should be tightened...
+though that's E2E's file to touch, not yours"). Per `CLAUDE.md` §3's ownership map, `e2e/` is
+Hedy's directory — I did not edit `e2e/tui.test.ts`, even though the needed change is
+obvious from here (replace the `"No root agent yet"` wait with one for real send/render
+behavior, matching how `e2e/tui.test.ts`'s own `--connect` test already asserts
+`"Hello from the remote server!"` after a real send). Flagging as a cross-domain follow-up
+for Hedy below rather than crossing the ownership boundary, consistent with how I handled
+Round 2's `src/cli.ts` gap.
+
+**Cross-domain request (for Hedy / E2E):** `e2e/tui.test.ts`'s local-TUI test (line ~37-76)
+and its file-header comment (lines 6-22) both describe the now-fixed defect as current
+behavior and need updating: the header comment should note the fix and point at this
+handoff's Round 3 entry; the test's tail (from `session.sendKeys("Enter")` at line 72 through
+the end) should assert the real send/receive path instead of `"No root agent yet"` — e.g.
+wait for the mock provider's turn text to render, the way the `--connect` test in the same
+file already does at line 123. Not a blocker for merging this round's fix; the deadlock is
+genuinely gone and proven by unit tests either way, this is just E2E's coverage catching up
+to match.
+
+**Correction to Round 2's open thread:** the `src/cli.ts` token-wiring gap flagged at the end
+of my Round 2 entry below is already resolved — commit `9ba7ab3` ("Wire security.token into
+startTui per Mary's round-2 spec") applied exactly the one-line diff I'd suggested. Confirmed
+by reading `src/cli.ts` directly this round (`CliDeps.startTui` is now
+`(baseUrl: string, token?: string) => Promise<void>` and both call sites pass
+`config.security?.token`). Noting the correction here per "status supersedes" rather than
+leaving the Round 2 entry's now-stale "open thread" as the last word.
+
 ### 2026-07-15 — Mary (TUI domain lead), Round 2: bearer-token passthrough
 
 Worked in a fresh worktree off `claude/coordinator-onboarding-kab9ls` (`34e49a1`, after

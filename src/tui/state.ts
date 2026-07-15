@@ -110,12 +110,27 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
   }
 }
 
+/**
+ * Applies a `request_agent_tree` response to state. Also seeds `rootAgentId` (when not
+ * already known) from the tree itself — the entry with `parentAgentId === null` — rather
+ * than waiting on a live `agent_spawned` SSE event. Without this, a fresh session deadlocks:
+ * `agent_spawned` doesn't fire until the loop actually starts, which requires sending a
+ * first message, which `handleRootKey`'s `enter` case refuses without a known
+ * `rootAgentId` (see Round 3 in docs/handoffs/tui.md). `app.ts` fires `request_agent_tree`
+ * automatically on startup so this runs before the operator ever types anything.
+ */
 function applyTreeResponse(state: TuiState, tree: TuiState["tree"]): TuiState {
   let next: TuiState = { ...state, tree };
-  if (next.view.kind === "tree" && tree) {
-    const flatLen = flattenTree(tree).length;
-    const clamped = flatLen === 0 ? 0 : Math.min(next.view.selectedIndex, flatLen - 1);
-    next = { ...next, view: { kind: "tree", selectedIndex: clamped } };
+  if (tree) {
+    const flat = flattenTree(tree);
+    if (next.rootAgentId === null) {
+      const rootEntry = flat.find((entry) => entry.node.parentAgentId === null);
+      if (rootEntry) next = { ...next, rootAgentId: rootEntry.node.agentId };
+    }
+    if (next.view.kind === "tree") {
+      const clamped = flat.length === 0 ? 0 : Math.min(next.view.selectedIndex, flat.length - 1);
+      next = { ...next, view: { kind: "tree", selectedIndex: clamped } };
+    }
   }
   return next;
 }
