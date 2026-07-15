@@ -21,6 +21,7 @@ import {
   type AgentLoopLogListener,
   DhServer,
   type DhServerOptions,
+  SessionLogger,
   type Unsubscribe,
 } from "./server/index.ts";
 import { startTui as startTuiClient } from "./tui/index.ts";
@@ -347,6 +348,29 @@ export interface CliDeps {
   io: CliIo;
 }
 
+/**
+ * Round 6a (docs/handoffs/core.md): the standalone `--instructions`/`--job` path never went
+ * through Server's DhServer, so it never got a SessionLogger attached — a crashed or failed
+ * unattended container run left no JSONL trail at all, for exactly the headless/unattended/
+ * hours-long scenario the product is built around (HANDOFF.md §7 treats logging as
+ * first-class, same weight as the agent loop itself). Fix: attach the same JSONL sink here,
+ * directly, without starting an HTTP server just to get one — `SessionLogger` (Server's own
+ * per-agent JSONL writer, already exported from `./server/index.ts`) is reused rather than
+ * reimplemented; `loop.ts` already emits its own `LogHeader` first line per agent, so no
+ * separate header-writing logic is needed here either.
+ */
+function createStandaloneRuntime(config: DhConfig, systemPrompt: string): AgentRuntime {
+  const sessionId = randomUUID();
+  const logDir = join(process.cwd(), ".dh-logs", sessionId);
+  const logger = new SessionLogger(logDir);
+  return new AgentRuntime({
+    config,
+    systemPrompt,
+    sessionId,
+    onLogLine: (agentId, line) => logger.append(agentId, line),
+  });
+}
+
 function defaultDeps(): CliDeps {
   return {
     loadConfig,
@@ -354,7 +378,7 @@ function defaultDeps(): CliDeps {
     readEnvFile,
     applyEnv: (vars) => Object.assign(process.env, vars),
     loadSystemPrompt,
-    createRuntime: (config, systemPrompt) => new AgentRuntime({ config, systemPrompt }),
+    createRuntime: (config, systemPrompt) => createStandaloneRuntime(config, systemPrompt),
     createAgentLoop: (config, systemPrompt) =>
       new AgentRuntimeLoopAdapter({ config, systemPrompt }),
     createServer: (options) => new DhServer(options),

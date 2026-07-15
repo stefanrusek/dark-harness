@@ -8,6 +8,17 @@ export interface ModelConfig {
   provider: string;
   /** Provider-side model identifier. */
   model: string;
+  /**
+   * Optional per-model pricing, USD per million tokens (HANDOFF.md §9's "token and cost
+   * display" requirement — round 6b). No public fixed price exists for local/Bedrock
+   * models, so this must come from config, never a hardcoded table. When either is
+   * unset, cost for that side of the split is treated as $0 rather than making the whole
+   * event's `costUsd` undefined — but if *neither* is set, `costUsd` stays undefined
+   * entirely (current behavior for unconfigured models is preserved, not silently
+   * reported as $0.00).
+   */
+  inputPricePerMToken?: number;
+  outputPricePerMToken?: number;
 }
 
 export type ProviderType = "anthropic" | "bedrock";
@@ -47,6 +58,13 @@ export interface DhOptions {
   defaultModel: string;
   /** Overrides the default `run_in_background: true` for every async-capable tool. */
   runInBackgroundDefault?: boolean;
+  /**
+   * Overrides `loop.ts`'s `DEFAULT_MAX_TURNS` (100) safety valve for every agent loop this
+   * runtime runs (root and every sub-agent alike) — round 6c. HANDOFF.md §1/§4 describes
+   * unattended dark-factory runs lasting hours with hundreds of tool calls; the default cap
+   * exists to bound a pathological loop, not to constrain a legitimate long-running task.
+   */
+  maxTurns?: number;
 }
 
 export interface DhConfig {

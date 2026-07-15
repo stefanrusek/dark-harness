@@ -316,3 +316,55 @@ sequence, `download_logs` afterward showing both exchanges as one JSONL history 
 exist"). This is the fourth round in a row where a real-process check was the actual
 closing proof, not a supplement to it — I'm now treating this as load-bearing methodology
 for this identity, not just a nice-to-have.
+
+### 2026-07-15 — Round 6 (three architect-flagged gaps: JSONL logging, cost pricing, maxTurns config)
+
+Bundled round, three independent fixes sharing the same three touched files
+(`src/contracts/config.ts`, `src/cli.ts`, `src/agent/runtime.ts`) — Fable's gap analysis
+against `HANDOFF.md` found all three, and pre-approved the `config.ts` shape as architect
+sign-off (CLAUDE.md §6.2), so no separate contracts round-trip was needed this time. Full
+technical writeup in `docs/handoffs/core.md`'s dated Round 6 status log entry. Judgment/
+process notes for a future me:
+
+**6a's key design call: reuse Server's `SessionLogger` directly rather than reimplementing
+a JSONL sink in Core.** `SessionLogger` was already exported from `src/server/index.ts` and
+`src/cli.ts` already imports several Server-domain types/classes (`DhServer`,
+`AgentLoopHandle`, etc.) for the interactive path — importing `SessionLogger` too for the
+standalone path is consistent with that existing pattern, not a new cross-boundary edit (I
+never touched a file under `src/server/`). The alternative — writing a second, subtly
+different JSONL writer inside `src/agent/` or `src/cli.ts` — would have created exactly the
+kind of drift ADR 0005 is trying to prevent (one logging format, one implementation). Also
+confirmed `loop.ts` already emits its own `LogHeader` line per agent, so this round didn't
+need to write any header logic by hand — genuinely just a wiring gap, not a missing
+capability.
+
+**6b's `exactOptionalPropertyTypes` friction, worth remembering:** a ternary of the shape
+`cond ? { pricing: X } : {}` fails to typecheck when `X`'s own declared type is `T |
+undefined`, even inside the true branch where `X` is provably defined at that point —
+TypeScript can't correlate the ternary's condition with a *different* expression's
+narrowing. Solution used here (and in the `maxTurns` sibling case) was a small named helper
+function that computes the value once, checks it for `undefined` with an early return, and
+only then builds the object literal — `pricingOverride(model)`. Slightly more verbose than
+I'd like, but it's the actually-correct way to satisfy this compiler flag rather than
+reaching for an `as` cast to paper over it (a cast would have hidden a real case: what if a
+future price field is added and someone forgets to update this helper?).
+
+**Test-writing quirk in 6c's regression test:** the existing mock Anthropic server in
+`runtime.test.ts` branches on `lastMessage`'s text, but after any tool call the *last*
+message is a `tool_result` block (no text), so a naive "keep returning tool_use forever"
+branch keyed on `text.includes(...)` would silently stop matching after the first turn. Had
+to key the new `loop-forever` branch off `body.messages[0]` (the original instruction) —
+the first message in the array — instead, since that's always still text no matter how many
+tool-call round-trips have happened since. Worth remembering for any future maxTurns-related
+mock-provider test: "keeps going forever" scripting needs to ignore later-turn tool_result
+noise and look at the original instruction.
+
+**Verification discipline, continued:** all three sub-items got dedicated regression tests
+at the layer that actually proves the fix — 6a via a real `--instructions --job` CLI
+invocation against a real mock HTTP provider (not a stubbed runtime) asserting a real file
+exists on disk; 6b/6c via `AgentRuntime`-level tests against the same real mock-provider
+pattern already established in this suite, not just `loop.ts`-level unit tests, so the
+config-to-loop threading itself is covered, not just `loop.ts`'s pre-existing internal
+logic. `bun run e2e` was not run this round (sandbox still lacks `tmux`/Chromium, the same
+gap every prior round has hit) — noted explicitly in the handoff rather than silently
+skipped.

@@ -63,7 +63,29 @@ function validateModel(raw: unknown, index: number, providerNames: Set<string>):
       `models[${index}] ("${name}") references unknown provider "${provider}"; known providers: ${[...providerNames].join(", ") || "(none)"}`,
     );
   }
-  return { name, provider, model };
+  const inputPricePerMToken = validateOptionalPrice(
+    raw.inputPricePerMToken,
+    `models[${index}].inputPricePerMToken`,
+  );
+  const outputPricePerMToken = validateOptionalPrice(
+    raw.outputPricePerMToken,
+    `models[${index}].outputPricePerMToken`,
+  );
+  return {
+    name,
+    provider,
+    model,
+    ...(inputPricePerMToken !== undefined ? { inputPricePerMToken } : {}),
+    ...(outputPricePerMToken !== undefined ? { outputPricePerMToken } : {}),
+  };
+}
+
+function validateOptionalPrice(value: unknown, path: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || Number.isNaN(value) || value < 0) {
+    throw new ConfigError(`${path} must be a non-negative number when present`);
+  }
+  return value;
 }
 
 function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | undefined {
@@ -106,6 +128,13 @@ export function validateConfig(raw: unknown): DhConfig {
   const runInBackgroundDefault = raw.options.runInBackgroundDefault;
   if (runInBackgroundDefault !== undefined && typeof runInBackgroundDefault !== "boolean") {
     throw new ConfigError("options.runInBackgroundDefault must be a boolean when present");
+  }
+  const maxTurns = raw.options.maxTurns;
+  if (
+    maxTurns !== undefined &&
+    (typeof maxTurns !== "number" || !Number.isInteger(maxTurns) || maxTurns <= 0)
+  ) {
+    throw new ConfigError("options.maxTurns must be a positive integer when present");
   }
 
   if (!Array.isArray(raw.provider)) {
@@ -173,6 +202,7 @@ export function validateConfig(raw: unknown): DhConfig {
     options: {
       defaultModel,
       ...(runInBackgroundDefault !== undefined ? { runInBackgroundDefault } : {}),
+      ...(maxTurns !== undefined ? { maxTurns } : {}),
     },
     models,
     provider: providers,

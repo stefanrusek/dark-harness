@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -775,6 +776,70 @@ describe("main — real filesystem-backed default deps", () => {
     });
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines[0]).toContain("root agent crashed");
+  });
+
+  // Round 6a (docs/handoffs/core.md): the standalone --instructions/--job path used to
+  // construct a bare AgentRuntime with no SessionLogger attached at all — a crashed or
+  // failed unattended run left no JSONL trail. Proves the real (default) createRuntime dep
+  // now writes a real per-agent JSONL file under .dh-logs/<sessionId>/, using a real mock
+  // Anthropic-compatible HTTP endpoint (not a faked runtime), from the actual default dep
+  // (no createRuntime override at all) so this exercises the exact code path a real `dh
+  // --instructions --job` invocation would.
+  test("the real (default) createRuntime dep writes a real per-agent JSONL log for a standalone run", async () => {
+    const mockProvider = Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: [{ type: "text", text: "all done" }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 3, output_tokens: 5 },
+        });
+      },
+    });
+    const instructionsPath = join(dir, "plan.md");
+    await Bun.write(instructionsPath, "do the thing");
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const io = fakeIo();
+      const code = await main(["--instructions", instructionsPath, "--job"], {
+        loadConfig: async () => ({
+          options: { defaultModel: "mock-model" },
+          models: [{ name: "mock-model", provider: "mock", model: "mock-1" }],
+          provider: [
+            {
+              name: "mock",
+              type: "anthropic",
+              baseURL: mockProvider.url.toString(),
+              apiKey: "sk-test",
+            },
+          ],
+        }),
+        loadSystemPrompt: async () => "sp",
+        io,
+      });
+      expect(code).toBe(ExitCode.Success);
+
+      const logsRoot = join(dir, ".dh-logs");
+      const sessions = readdirSync(logsRoot);
+      expect(sessions.length).toBe(1);
+      const rootLogPath = join(logsRoot, sessions[0] ?? "", "agent-root.jsonl");
+      const contents = await Bun.file(rootLogPath).text();
+      const lines = contents
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(lines[0].type).toBe("header");
+      expect(lines.some((line: { type: string }) => line.type === "token_usage")).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+      mockProvider.stop(true);
+    }
   });
 
   test("the real createAgentLoop + createServer defaults wire up without a real terminal (startTui faked)", async () => {
