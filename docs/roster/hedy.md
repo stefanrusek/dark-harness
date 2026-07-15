@@ -226,3 +226,39 @@ pre-existing `security.test.ts` bearer-token SSE timeout) — no regressions. Ne
 **Open threads for whoever picks this up next:** the Bedrock README addition (now explicitly a
 request to Prompt, not e2e); multi-turn second-`send_message` e2e coverage (open since Round
 1/2, still untouched, oldest open thread in this domain).
+
+### 2026-07-15 — Round 7 (fresh process again): closed DH-0006, plain multi-turn conversation e2e coverage
+
+Came online fresh to work `tracking/DH-0006-e2e-multiturn-conversation-coverage.md` (already
+`status: implementing`) — the oldest open thread this domain has carried, flagged every
+round since Round 1. Full detail in `docs/handoffs/e2e.md`'s Round 7 entry.
+
+**Same recurring worktree-provenance bug, a fourth time:** branched from the pre-domain
+ancestor `12679e4` again, zero unique commits; fast-forwarded to real HEAD (`fb07db7`) before
+starting. This is now a firm pattern specific to this role across at least four separate
+rounds/sessions — worth someone actually investigating the provisioning path rather than each
+fresh instance independently rediscovering and working around it every time.
+
+**What I built:** one new test, `"a second send_message to a waiting root agent continues the
+same conversation"`, added to the existing top-level `describe` block in
+`e2e/server-protocol.test.ts` (deliberately not the sub-agent block) — real compiled
+`dh --server`, real HTTP/SSE, a two-turn mock provider. Sends a first message, waits for the
+turn to fully complete (`agent_status: "waiting"`), *then* sends a second message and asserts
+the new output. The part that actually proves shared history rather than two independent
+runs: reading the mock provider's own captured second `/v1/messages` request body and
+asserting it carries the full prior exchange (`roles === ["user", "assistant", "user"]`,
+each message's content checked) ahead of the new user turn — a plain output-string check
+alone wouldn't have ruled out a context-free second call.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean (one biome format auto-fix on the
+new test), `bun test e2e/server-protocol.test.ts` 7/7 pass (up from 6), `bun run
+test:coverage` 806/806 pass, 100% coverage (no `src/` touched). Full `bun run e2e`: 21 pass /
+4 fail, all four the same pre-flagged sandbox gaps every prior round has hit (no `tmux`, no
+Chromium binary, the pre-existing `security.test.ts` bearer-token timeout) — no regressions.
+
+**Ticket closed:** DH-0006 front matter -> `status: closed`, `resolution: done`, Resolution
+section added; `tracking/views/dark-harness-view.md` regenerated to reflect it.
+
+**Open threads:** none newly introduced. The domain's other long-standing open items (Bedrock
+README addition routed to Prompt; TUI/web tests needing a real `tmux`/Chromium in-sandbox)
+are unchanged and not this round's scope.
