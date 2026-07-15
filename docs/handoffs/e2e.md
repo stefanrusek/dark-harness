@@ -373,3 +373,20 @@ test timing out at 5000ms in this sandbox — confirmed pre-existing and unrelat
 untouched by this round's diff, `git diff --stat` shows only `server-protocol.test.ts`
 changed); not investigated further since it's outside this round's scope, but worth a future
 round's attention if it's not just sandbox flakiness.
+
+### 2026-07-15 — Round 3: close out the sub-agent "waiting" cross-domain finding
+
+Core's Round 7 (commit `2768976`) fixed the bug flagged above: sub-agents no longer inherit
+the root's `interactive` flag, so a spawned sub-agent that has already delivered its final
+output now correctly reaches `"done"` instead of hanging in `"waiting"` forever. Confirmed
+this broke `server-protocol.test.ts`'s "sub-agent spawning over real HTTP/SSE (Round 2, gap
+2a)" test (status `"done"` now, not the previously-asserted `"waiting"`).
+
+Updated the test: both assertions of the child's status now expect `"done"`, and the large
+comment block documenting the bug as open/unfixed was replaced with a short pointer to this
+fix (Core round 7, commit `2768976`) for future readers. Nothing else in the test changed.
+
+**Gates:** `bun test e2e/server-protocol.test.ts` — 6 pass, 0 fail, 32 `expect()` calls.
+`bun run typecheck` clean. `bunx biome check e2e/server-protocol.test.ts` clean (the repo-wide
+`bun run lint` currently fails on an untracked, unrelated `dh.json` scratch file at repo root
+that predates this round's work and isn't part of `e2e/`).

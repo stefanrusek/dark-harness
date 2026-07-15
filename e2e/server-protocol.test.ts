@@ -307,24 +307,11 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
     // hand-built fixture — this is the first time the wire-level tree shape has been asserted
     // with depth > 1 against the real compiled binary.
     //
-    // CROSS-DOMAIN FINDING for Core (not fixed here, out of e2e's ownership per CLAUDE.md §3):
-    // the child's status below is asserted as "waiting", not "done", and that is a real bug,
-    // not the intended behavior. AgentRuntime.spawnAgent() (src/agent/runtime.ts) threads
-    // `interactive: this.interactive` into every sub-agent's own runAgentLoop() call, exactly
-    // like the root's. Round 5's "interactive sessions pause 'waiting' instead of ending"
-    // convention was designed for the *root* agent, where a human keeps typing follow-up
-    // messages into the same session. Applied to a sub-agent spawned via the Agent tool, it
-    // means a sub-agent that already delivered its final output over SSE (and whose one
-    // provider call is done — subProvider.callCount stays 1 forever) never reaches "done": it
-    // sits "waiting" indefinitely, because nothing will ever call sendMessage() on it. This
-    // silently breaks the Agent tool's own `run_in_background: false` (blocking) mode in any
-    // interactive/server context: `ctx.tasks.awaitDone(taskId)` in src/agent/tools/agent.ts
-    // would hang forever, since the task's status transition to "done"/"failed" (which is
-    // what unblocks awaitDone — see TaskRegistry) never happens. Confirmed directly: scripting
-    // this same scenario with `run_in_background: false` reproduces the hang (verified by hand
-    // while building this test, not included as a passing/failing test itself since a hanging
-    // test isn't useful CI signal — flagging here is the more valuable move, mirroring how the
-    // Round 1 E2E instance handled the TUI/Web bootstrap deadlock and CORS findings).
+    // Previously this test asserted the child's status as "waiting" instead of "done",
+    // documenting a real cross-domain bug: AgentRuntime.spawnAgent() was threading
+    // `interactive: this.interactive` into sub-agents, so a spawned child never reached
+    // "done" even after delivering its final output. Fixed by Core round 7 (commit 2768976);
+    // the child now correctly reaches "done".
     const treeRes = await fetch(new URL("/api/commands", baseUrl), {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -342,7 +329,7 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
             agentId: childAgentId,
             parentAgentId: "agent-root",
             model: "sub",
-            status: "waiting",
+            status: "done",
             children: [],
           },
         ],
