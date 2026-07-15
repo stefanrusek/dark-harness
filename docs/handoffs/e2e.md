@@ -390,3 +390,30 @@ fix (Core round 7, commit `2768976`) for future readers. Nothing else in the tes
 `bun run typecheck` clean. `bunx biome check e2e/server-protocol.test.ts` clean (the repo-wide
 `bun run lint` currently fails on an untracked, unrelated `dh.json` scratch file at repo root
 that predates this round's work and isn't part of `e2e/`).
+
+---
+
+## Round 4 — OPEN — verify build-stamping survives compilation, end to end
+
+**Addressed to:** E2E (Hedy, resumed — read `docs/roster/hedy.md` first).
+
+Core's Round 8 (just landed) added `scripts/build.ts` (stamps real build identity into the
+compiled binary) and `client`/`build` fields on the JSONL `LogHeader` (ADR 0005's amendment).
+`e2e/support/build.ts`'s `ensureBuilt()` currently calls raw `bun build --compile` — it
+should use the new script instead, and this is worth a real end-to-end assertion that the
+`--define` stamping actually survives all the way through `bun build --compile` in this
+project's actual build (not just Core's own unit-level verification).
+
+**Fix:** switch `ensureBuilt()` to invoke `bun scripts/build.ts --outfile dist/dh` (mirroring
+the `package.json`/`release.yml` call-site pattern). Add an assertion — using an existing
+real-binary run per mode you already drive — reading the root agent's first (header) log
+line and confirming: a `--server` mode run has `client === "server"`; a standalone
+`--instructions --job` run has `client === "none"`; both have `build.version` matching
+`package.json`'s version, `build.gitSha` matching `/^[0-9a-f]{40}$/`, and `build.releaseTag
+=== null` (since this is a local, non-release build). This is the concrete end-to-end proof
+that the stamp mechanism actually works through the real build pipeline this project uses,
+not just in isolation.
+
+**Gates:** the standard three, plus whichever e2e files your sandbox can actually run (same
+tmux/Chromium caveat as every prior round — note explicitly what you couldn't run). Append a
+dated status entry here and update `docs/roster/hedy.md` when done.

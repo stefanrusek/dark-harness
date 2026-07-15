@@ -271,3 +271,32 @@ unverified/blocked as stated there; nothing in this session changed that.
 — Nightingale (she/her), CI/Release domain lead
 
 — Nightingale (she/her), CI/Release domain lead
+
+---
+
+## Round 2 — OPEN — use scripts/build.ts to stamp real builds
+
+**Addressed to:** CI/Release (Nightingale, resumed — read `docs/roster/nightingale.md` first).
+
+Core's Round 8 (just landed) added `scripts/build.ts` — a wrapper around `bun build
+./src/cli.ts --compile` that stamps real build identity (git SHA, dirty flag, release tag)
+into the compiled binary via `--define`, feeding the new `client`/`build` fields on the JSONL
+log header (ADR 0005's amendment). Verified working: `bun scripts/build.ts` produces a
+binary whose `--version` flag and log headers show the real git SHA.
+
+**Fix:** update `release.yml`'s compile step to invoke `bun scripts/build.ts
+--target=<matrix-target> --outfile dist/<artifact> --release-tag "${{ github.ref_name }}"`
+instead of calling `bun build --compile` directly. `github.ref_name` is the tag name (e.g.
+`v0.1.0`) on a `v*`-triggered workflow — `scripts/build.ts` validates it starts with `v` and
+exits 2 otherwise, so this should just work, but confirm against the workflow's actual
+trigger context. `git rev-parse HEAD` works on a shallow checkout (the default `actions/
+checkout` behavior), so no `fetch-depth` change should be needed — but verify this rather
+than assume it, since a shallow clone's exact HEAD-reachability can vary.
+
+**Gates:** the standard three (`typecheck`/`lint` are unaffected — this is a workflow YAML
+change, not `src/`). Since you can't run a real GitHub Actions workflow from here, verify
+what you can locally: run `bun scripts/build.ts --target=<a-real-target> --outfile
+/tmp/dh-test --release-tag v9.9.9-test` by hand and confirm the resulting binary's
+`--version` output shows `v9.9.9-test` as the release tag, mirroring exactly what the
+workflow will invoke. Append a dated status entry here and update
+`docs/roster/nightingale.md` when done.
