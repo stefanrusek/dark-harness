@@ -44,6 +44,17 @@ export interface AgentRuntimeOptions {
    * runAgentLoop() call (loop.ts's own onLogLine stays `(line) => void`), so it threads it
    * through here rather than pushing that responsibility onto loop.ts or its caller. */
   onLogLine?: (agentId: string, line: LogLine) => void;
+  /** Round 5 (docs/handoffs/core.md status log): selects the mode every `runAgentLoop()` call
+   * this runtime makes — root (`runRoot()`) and every sub-agent it spawns (`spawnAgent()`)
+   * alike, since they must behave consistently (see loop.ts's module doc comment). `false`
+   * (the default) is the standalone `--instructions`/`--job` dark-factory path — a
+   * non-tool-use turn ends the run, unchanged from before this round. `true` is for
+   * interactive sessions (server/TUI/Web, via `src/cli.ts`'s `AgentRuntimeLoopAdapter`,
+   * which always constructs its `AgentRuntime` with `interactive: true`) — a non-tool-use
+   * turn instead marks the agent "waiting" and pauses for the next message. This is a
+   * per-runtime-instance setting, not per-call, because a single `AgentRuntime` is always
+   * entirely one or the other in practice (one process, one CLI invocation, one mode). */
+  interactive?: boolean;
 }
 
 export class ConfigModelError extends Error {
@@ -77,6 +88,7 @@ export class AgentRuntime {
   private readonly providers = new Map<string, ModelProvider>();
   private readonly onEvent: ((event: ServerSentEvent) => void) | undefined;
   private readonly onLogLine: ((agentId: string, line: LogLine) => void) | undefined;
+  private readonly interactive: boolean;
 
   // Root-agent bookkeeping: runRoot() isn't tracked in `tasks` (it IS the session, per its
   // own doc comment below), so getAgentTree()/sendMessageToRoot() need their own small
@@ -108,6 +120,7 @@ export class AgentRuntime {
     this.toolMap = buildToolMap(options.tools ?? ALL_TOOLS);
     this.onEvent = options.onEvent;
     this.onLogLine = options.onLogLine;
+    this.interactive = options.interactive ?? false;
   }
 
   private resolveModel(name: string): ModelConfig {
@@ -189,8 +202,17 @@ export class AgentRuntime {
           // run_in_background subprocess handling. Passing it through here is what makes
           // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
           signal: handle.signal,
+          interactive: this.interactive,
           onEvent: (event) => {
             if (event.type === "agent_output") handle.append(event.chunk);
+            // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
+            // turn, so the task registry's own status (what getAgentTree() actually reads —
+            // see TaskRegistry.snapshot()) needs to track the loop's mid-conversation
+            // waiting/running transitions explicitly instead of only being set once when
+            // `run()` resolves/rejects.
+            if (event.type === "agent_status" && event.agentId === agentId) {
+              this.tasks.setStatus(agentId, event.status);
+            }
             this.onEvent?.(event);
           },
           ...(this.onLogLine
@@ -269,7 +291,17 @@ export class AgentRuntime {
           this.rootSendMessage = fn;
         },
         signal: this.rootController.signal,
-        ...(this.onEvent ? { onEvent: this.onEvent } : {}),
+        interactive: this.interactive,
+        onEvent: (event) => {
+          // Round 5: keep rootStatus (what getAgentTree() reads) in sync with the loop's own
+          // mid-conversation waiting/running transitions, the same way spawnAgent() keeps the
+          // task registry in sync for sub-agents — runRoot() isn't a TaskRegistry entry, so it
+          // needs the same bookkeeping done by hand here.
+          if (event.type === "agent_status" && event.agentId === ROOT_AGENT_ID) {
+            this.rootStatus = event.status;
+          }
+          this.onEvent?.(event);
+        },
         ...(this.onLogLine
           ? { onLogLine: (line: LogLine) => this.onLogLine?.(ROOT_AGENT_ID, line) }
           : {}),

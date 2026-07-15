@@ -13,6 +13,34 @@
 // truncated, not a deliberate completion). The system prompt must instruct the model to
 // emit `TASK_FAILED` when it cannot complete its instructions — that's a request to the
 // Prompt domain, not implemented here.
+//
+// MODE DISTINCTION (Round 5, docs/handoffs/core.md status log): the self-report convention
+// above is exactly right for the standalone `--instructions`/`--job` dark-factory path (a
+// one-shot autonomous task genuinely should exit the first time the model stops calling
+// tools) but wrong for interactive sessions (root/sub-agents reachable via SendMessage under
+// server/TUI/Web) — a conversational turn with no tool call routinely just means "waiting
+// for the human's next message," not "task complete." `AgentLoopParams.interactive` (set by
+// AgentRuntime, per-runtime-instance — see runtime.ts) switches this: when true, a
+// non-tool-use turn does NOT end the loop. Instead it marks the agent "waiting" (an existing
+// AgentStatus value) and the loop pauses (without returning, so `registerSendMessage`'s sink
+// stays installed and the in-memory `messages` history stays intact) until either a new
+// message arrives via that sink or the loop is aborted. TASK_FAILED/max_tokens self-report
+// checking is skipped entirely on this path — there's no natural "done" state for an
+// ongoing conversation, only a genuine stop (AbortSignal, already wired in Round 3) ends it.
+// This applies identically to sub-agents (spawnAgent()) and the root (runRoot()) — both
+// route through this same function, so there's exactly one implementation of "what does a
+// non-tool-use turn mean" per runtime, not a root-only special case.
+//
+// maxTurns in interactive mode (Round 5 judgment call): kept as a single whole-conversation
+// cap, not reset per exchange. `turns` only increments once per actual model round-trip, so
+// time spent paused in "waiting" between messages never counts against it — a long-running
+// but sparse conversation isn't penalized by wall-clock time, only by how many turns of
+// actual model work it has consumed in total. Hitting the cap still ends the session as a
+// failure (`"exceeded max turns"`), the same safety valve as before — this is intentionally
+// the one exception to "only a genuine stop ends an interactive session," since letting a
+// pathological loop run forever isn't a real feature. A per-message budget was considered
+// and rejected: it would let a conversation consisting of many short exchanges each doing a
+// bounded amount of tool-calling work forever, which defeats the point of a safety cap.
 
 import { randomUUID } from "node:crypto";
 import type { LogLine, ServerSentEvent } from "../contracts/index.ts";
@@ -32,6 +60,10 @@ const DEFAULT_MAX_TURNS = 100;
 export const STOPPED_BETWEEN_TURNS_REASON = "stopped by operator before starting the next turn";
 export const STOPPED_DURING_PROVIDER_CALL_REASON =
   "stopped by operator while waiting for the model";
+// Round 5: a third distinct point — paused in "waiting" for the human's next message
+// (interactive mode only), not actively between turns or mid-provider-call.
+export const STOPPED_WHILE_WAITING_REASON =
+  "stopped by operator while waiting for the next message";
 
 export interface AgentLoopParams {
   sessionId: string;
@@ -63,6 +95,12 @@ export interface AgentLoopParams {
    * chosen minimum-viable scope — see docs/handoffs/core.md's Round 3 status log for the
    * reasoning and what a deeper fix would need to touch. */
   signal?: AbortSignal;
+  /** Round 5: selects which mode this loop invocation runs in. `false`/omitted (the default)
+   * preserves the original standalone `--instructions`/`--job` behavior exactly: a
+   * non-tool-use turn ends the loop via the TASK_FAILED self-report convention. `true` is for
+   * interactive sessions (server/TUI/Web) — see the module doc comment above for the full
+   * design. Set once per AgentRuntime instance (runtime.ts), not per call. */
+  interactive?: boolean;
 }
 
 export interface AgentLoopResult {
@@ -166,8 +204,20 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     { role: "user", content: [{ type: "text", text: params.instruction }] },
   ];
   const pendingMessages: string[] = [];
+  // Round 5: when the loop is paused in "waiting" (interactive mode only — see below), a
+  // newly-arrived message wakes it up immediately instead of sitting unread until some other
+  // trigger polls for it. `waitingResolve` is only ever non-null while the loop is actually
+  // inside the wait, so this is a no-op (just queues into pendingMessages, picked up at the
+  // top of the next turn) whenever a message arrives mid-turn — the original round-1/round-4
+  // behavior, unchanged.
+  let waitingResolve: (() => void) | null = null;
   params.registerSendMessage?.((message: string) => {
     pendingMessages.push(message);
+    if (waitingResolve) {
+      const resolve = waitingResolve;
+      waitingResolve = null;
+      resolve();
+    }
   });
 
   emitEvent(params, {
@@ -288,31 +338,86 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     });
 
     if (completion.stopReason !== "tool_use") {
-      const success =
-        completion.stopReason !== "max_tokens" && !finalText.includes(TASK_FAILED_MARKER);
+      if (!params.interactive) {
+        const success =
+          completion.stopReason !== "max_tokens" && !finalText.includes(TASK_FAILED_MARKER);
+        emitEvent(params, {
+          version: 1,
+          id: randomUUID(),
+          timestamp: nowIso(),
+          type: "agent_status",
+          agentId: params.agentId,
+          status: success ? "done" : "failed",
+        });
+        emitLog(
+          params,
+          success
+            ? { version: 1, timestamp: nowIso(), type: "completed", success: true }
+            : {
+                version: 1,
+                timestamp: nowIso(),
+                type: "failed",
+                reason:
+                  completion.stopReason === "max_tokens"
+                    ? "response truncated at max_tokens before completion"
+                    : "model reported TASK_FAILED",
+              },
+        );
+        return { success, finalOutput: finalText, turns };
+      }
+
+      // Round 5, interactive mode: no self-report checking, no terminal return — pause and
+      // wait for the operator's next message (or a genuine stop).
       emitEvent(params, {
         version: 1,
         id: randomUUID(),
         timestamp: nowIso(),
         type: "agent_status",
         agentId: params.agentId,
-        status: success ? "done" : "failed",
+        status: "waiting",
       });
-      emitLog(
-        params,
-        success
-          ? { version: 1, timestamp: nowIso(), type: "completed", success: true }
-          : {
-              version: 1,
-              timestamp: nowIso(),
-              type: "failed",
-              reason:
-                completion.stopReason === "max_tokens"
-                  ? "response truncated at max_tokens before completion"
-                  : "model reported TASK_FAILED",
+      emitLog(params, {
+        version: 1,
+        timestamp: nowIso(),
+        type: "status_change",
+        status: "waiting",
+      });
+
+      if (pendingMessages.length === 0 && !params.signal?.aborted) {
+        await new Promise<void>((resolve) => {
+          waitingResolve = resolve;
+          params.signal?.addEventListener(
+            "abort",
+            () => {
+              if (waitingResolve === resolve) {
+                waitingResolve = null;
+                resolve();
+              }
             },
-      );
-      return { success, finalOutput: finalText, turns };
+            { once: true },
+          );
+        });
+      }
+
+      if (params.signal?.aborted) {
+        return reportStopped(params, finalText, turns, STOPPED_WHILE_WAITING_REASON);
+      }
+
+      emitEvent(params, {
+        version: 1,
+        id: randomUUID(),
+        timestamp: nowIso(),
+        type: "agent_status",
+        agentId: params.agentId,
+        status: "running",
+      });
+      emitLog(params, {
+        version: 1,
+        timestamp: nowIso(),
+        type: "status_change",
+        status: "running",
+      });
+      continue;
     }
 
     const toolUses = completion.content.filter(

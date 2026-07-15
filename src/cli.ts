@@ -241,6 +241,11 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
     this.runtime = new AgentRuntime({
       config: options.config,
       systemPrompt: options.systemPrompt,
+      // Round 5 (docs/handoffs/core.md status log): every interactive session — server/TUI/
+      // Web, root and sub-agents alike — pauses instead of ending on a non-tool-use turn.
+      // The standalone `--instructions`/`--job` path (defaultDeps().createRuntime) never sets
+      // this, preserving its original end-on-first-non-tool-call behavior exactly.
+      interactive: true,
       onEvent: (event) => {
         for (const listener of this.eventListeners) listener(event);
       },

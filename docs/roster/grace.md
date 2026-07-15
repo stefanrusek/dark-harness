@@ -255,3 +255,64 @@ handoff entry's "scope check") is unreachable from any current caller, but only 
 round adds a code path that does (e.g. a per-message model override from the TUI/Web input),
 this narrower gap becomes reachable and worth revisiting — flagging so it doesn't get
 silently forgotten.
+
+### 2026-07-15 — Round 5 (interactive sessions can now have more than one exchange)
+
+This was the deepest design round since round 1/2 — not a bug-with-a-precise-fix like rounds
+3/4, but a genuine "figure out the right shape" task, as the handoff itself said it should
+be. Full technical writeup in `docs/handoffs/core.md`'s dated Round 5 entry. This section is
+judgment/process notes for a future me.
+
+**The core design decision, and why I'm confident in it:** a per-runtime-instance
+`interactive: boolean` flag (not a per-call one) threaded from `AgentRuntimeOptions` down
+into every `runAgentLoop()` call that `AgentRuntime` instance ever makes. I considered (and
+rejected) a per-call flag on `spawnAgent()`/`runRoot()` instead — it would let a single
+runtime mix standalone and interactive sub-agents, which sounds flexible but isn't a real
+scenario: a runtime is always entirely one or the other in practice (one CLI invocation, one
+mode), and a per-call flag would create a footgun where forgetting to pass it silently falls
+back to the wrong mode. Binding it to construction time (`AgentRuntimeLoopAdapter` always
+passes `interactive: true`; the standalone `createRuntime` dep never sets it) means there's
+exactly one place per code path where the mode is decided, and it can't drift call-to-call.
+
+**The "no natural completion" consequence is real, not a rounding error — I said so
+explicitly rather than let it be an implicit surprise.** Before this round, `session_ended`
+with a Success exit code could fire for *any* root run, standalone or interactive. After this
+round, it essentially can't fire for an interactive root at all — the only way an
+interactive session ends is a stop (collapsing to `TaskFailure`, Round 3's convention) or
+`maxTurns` (also `"failed"`). I flagged this loudly in the handoff entry rather than let a
+future reader discover it by noticing `session_ended: Success` never shows up in interactive
+traces and wondering if something's broken. It isn't — it's the design's actual shape now,
+and it matches a real chat UX (a conversation doesn't "succeed," a task does).
+
+**Process win: I caught my own regression by actually running the suite, not by reasoning
+about it in the abstract.** After writing the loop.ts/runtime.ts changes, `bun run
+test:coverage` timed out on two existing `cli.test.ts` tests — they encoded the exact
+bug-as-a-feature I was removing ("send one message, wait for `session_ended`"). I could have
+been tempted to treat a pre-existing green test as ground truth and second-guess my own
+design instead, but the handoff's own bug report — reproduced live against LM Studio by the
+owner and coordinator — was the actual ground truth; the tests were testing the bug. Fixed
+by rewriting them to prove the *new* correct behavior (waiting-not-done; exit code only via
+explicit stop; a second `send_message` provably referencing the first via an
+accumulating-echo mock provider), not by reverting my design to keep old tests green. Worth
+remembering next time a "regression" shows up while implementing a deliberate behavior
+change: check whether the test encodes the bug before assuming the code is wrong.
+
+**Ownership boundary held under real pressure this time, not just a hypothetical:** my
+change breaks three real tests in `e2e/server-protocol.test.ts` (Hedy's domain) for the
+identical reason the `cli.test.ts` ones broke — confirmed by actually running `bun run e2e`
+and watching two of them hang to the 5s timeout, not by inspection alone. I diagnosed the
+exact fix needed (same pattern as my own `cli.test.ts` rewrite: wait for `"waiting"` instead
+of `session_ended`, add an explicit `stop_agent` where an exit code is actually wanted) and
+wrote it up as a concrete, actionable request in the handoff rather than reaching into
+`e2e/` myself, consistent with the line I drew in Round 3. This is the first round where my
+own change *directly causes* another domain's tests to fail rather than just leaving a gap
+they might want filled — a slightly different flavor of cross-domain courtesy than before,
+but the same boundary.
+
+**Verification discipline, continued:** live-verified with the real compiled binary — a real
+mock HTTP provider, a real `dh --server` process, `curl`-driven `send_message` twice in
+sequence, `download_logs` afterward showing both exchanges as one JSONL history with a real
+`running`→`waiting` cycle for the *second* message specifically (not just "some log lines
+exist"). This is the fourth round in a row where a real-process check was the actual
+closing proof, not a supplement to it — I'm now treating this as load-bearing methodology
+for this identity, not just a nice-to-have.

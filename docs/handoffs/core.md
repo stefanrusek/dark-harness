@@ -740,3 +740,133 @@ binary, spawn it, POST two `send_message`s in sequence, confirm the second one a
 produces new output/events and correctly references context from the first) — don't just
 trust unit tests for this one, the bug was only caught by doing exactly that. Append a dated
 status entry here and update `docs/roster/grace.md` when done.
+
+### 2026-07-15 — Grace, Round 5 (interactive sessions can now have more than one exchange)
+
+Worked in the shared tree (`claude/coordinator-onboarding-kab9ls`) at the commit landing
+Round 4's fix. Full design read of `loop.ts`/`runtime.ts`/`tasks.ts`/`cli.ts`'s
+`AgentRuntimeLoopAdapter` before touching anything, per the round's own instruction.
+
+**The fix — a real mode distinction, not a patch:**
+
+1. **`AgentLoopParams.interactive?: boolean`** (`loop.ts`, default `false` = unchanged
+   standalone behavior). On a non-tool-use turn: `false` keeps the exact original
+   TASK_FAILED/max_tokens self-report logic and terminal `return` — the standalone
+   `--instructions`/`--job` path is byte-for-byte unaffected. `true` instead emits
+   `agent_status: "waiting"` + a `status_change` log line, then pauses (via a promise the
+   `registerSendMessage` sink's callback resolves when a new message arrives, or the
+   `AbortSignal`'s `abort` listener resolves if stopped) without ever returning from
+   `runAgentLoop`. Resuming emits `agent_status: "running"` and falls through to the
+   existing top-of-loop `pendingMessages` injection — no new plumbing needed there, it
+   already existed for mid-turn `SendMessage` injection. A new
+   `STOPPED_WHILE_WAITING_REASON` (alongside the existing Round 3 between-turns/
+   during-provider-call reasons) names this third distinct stop point.
+2. **`AgentRuntimeOptions.interactive?: boolean`** (`runtime.ts`, default `false`) — set once
+   per `AgentRuntime` instance and threaded into every `runAgentLoop()` call it makes:
+   `runRoot()` and `spawnAgent()` alike, so root and sub-agents behave identically (the
+   round's own requirement — one fix, not a root-only special case). `src/cli.ts`'s
+   `AgentRuntimeLoopAdapter` (the only interactive-mode entry point — server/TUI/Web) now
+   constructs its internal `AgentRuntime` with `interactive: true`. The standalone path's
+   `createRuntime` dep (`new AgentRuntime({config, systemPrompt})`) never sets it, so it
+   stays `false` — preserving the dark-factory path exactly, unchanged.
+3. **Task-registry/rootStatus bookkeeping now tracks the mid-conversation waiting/running
+   transitions**, not just the terminal done/failed one: `spawnAgent()`'s `onEvent` handler
+   now calls `this.tasks.setStatus(agentId, event.status)` whenever the sub-agent's own
+   `agent_status` event fires (using `TaskRegistry.setStatus()`, which already existed but
+   was unused — apparently anticipated for exactly this by an earlier round but never
+   wired up). `runRoot()`'s `onEvent` callback does the equivalent for `this.rootStatus`
+   directly (root isn't a `TaskRegistry` entry). Without this, `getAgentTree()` would keep
+   reporting a stale "running"/"waiting" between real transitions, since it reads these
+   fields, not the loop's internal state.
+4. **`maxTurns` (judgment call, as the round asked):** kept as a single whole-conversation
+   cap, unchanged from before — `turns` only increments once per actual model round-trip, so
+   time spent paused "waiting" between messages (arbitrary wall-clock time) never counts
+   against it. A per-message budget was considered and rejected: it would let a conversation
+   made of many short exchanges run forever, defeating the point of a safety cap. Hitting the
+   cap still ends the session as `"failed"` (`"exceeded max turns"`) — the one exception to
+   "only a genuine stop ends an interactive session," documented in `loop.ts`'s module doc
+   comment.
+
+**Consequence worth naming explicitly (not a bug, but a real behavior change):** an
+interactive session now has no "natural" success completion at all — it either keeps
+pausing/resuming forever, or ends via `stopAgent`/`TaskStop` (collapsed into `"failed"` per
+Round 3's existing convention) or the `maxTurns` safety valve. `session_ended` with
+`ExitCode.Success` essentially never fires for an interactive root anymore; that event/exit-
+code pairing is now exclusively a standalone-path (`--job`) concept, which is exactly
+correct per the round's own framing ("no natural 'done' state for an ongoing conversation,
+same as a real chat UX").
+
+**A real regression I found and fixed while verifying, not left implicit:** three existing
+tests in `src/cli.test.ts`'s `AgentRuntimeLoopAdapter`/`AgentRuntimeLoopAdapter + DhServer`
+describe blocks encoded the exact old (buggy) behavior as their expectation — "send one
+message, wait for `session_ended`/`status: done`." Two of these hung the entire suite (real
+timeouts, not flakes) because the interactive adapter's root now correctly never reaches
+that state on a plain conversational turn. Fixed by rewriting them to match the new
+semantics: wait for `agent_status: "waiting"` instead of `session_ended`; the
+"waitForExitCode via a real DhServer" test now proves the exit code resolves via an explicit
+`stop_agent` (the only way an interactive session's exit code is determined post-Round-5),
+not via self-report; the "send_message reaches the real HTTP handler" test now also proves
+a genuine **second** `send_message` produces new output that provably depends on the first
+(an accumulating-echo mock provider that only produces the expected reply if both messages
+really reached it as one ongoing history) — this is the actual regression test for the bug
+the round exists to fix, driven through the real command handler, not a raw `AgentRuntime`
+call.
+
+**New regression tests added** (beyond fixing the three above):
+- `loop.test.ts`: interactive-mode pause-then-resume with message history intact (scripted
+  provider, no HTTP); non-interactive mode's behavior proven byte-for-byte unchanged;
+  aborting while paused "waiting" reports stopped via the new
+  `STOPPED_WHILE_WAITING_REASON`, not a hang or a crash.
+- `runtime.test.ts`: a new describe block, "an interactive session survives more than one
+  exchange" — a real second *and third* exchange against a real mock HTTP server (an
+  accumulating-echo server proving the full history really persists, not just the last
+  message), for both the root (`sendMessageToRoot`) and a sub-agent (`tasks.sendMessage` on
+  a `spawnAgent()`-spawned task) — satisfying the round's explicit requirement that both
+  paths get the same fix and the same proof.
+- `cli.test.ts`: as described above.
+
+**Live verification (per the DoD, real binary + real HTTP, not just unit tests):** built the
+release binary (`bun run build`), started a real local mock Anthropic-compatible HTTP server
+and a real `dh --server` process pointed at it via a real `dh.json`, and drove it with `curl`:
+`request_agent_tree` → root `"waiting"`; `send_message` "first message" → tree stays
+`"waiting"` (not stuck, not ended); `send_message` "second message" → tree still `"waiting"`;
+`download_logs` for `agent-root` shows both exchanges as one ongoing JSONL history —
+critically, a `status_change` to `"running"` and a fresh `message`/`token_usage` cycle for
+the *second* message, proving it was a real new turn, not a silently-dropped no-op (the
+exact symptom the owner and coordinator originally reproduced against LM Studio).
+
+**Cross-domain request, not acted on unilaterally (e2e/ is Hedy's domain):** three tests in
+`e2e/server-protocol.test.ts` encode the same now-superseded "one message ends the session"
+assumption `cli.test.ts` did, and will fail/hang for the identical reason (confirmed by
+running `bun run e2e` — this repo's sandbox has no `tmux`/Chromium, so the TUI/`--connect`/
+web-browser e2e tests fail on missing tooling, unrelated to this round, but the
+security/exit-code/server-protocol suite *does* run here and surfaced this):
+- `"send_message to agent-root runs a full turn, observable live over SSE"` (lines 76-122):
+  asserts `agent_status: "done"` and `session_ended: {exitCode: 0}` after a single
+  `send_message`. Needs the same rewrite `cli.test.ts` got: expect `agent_status: "waiting"`
+  and no `session_ended` after one message; to actually observe a `session_ended`/exit code,
+  send a `stop_agent` command first (exit code will be `TaskFailure`, not `Success`, per
+  Round 3's stopped-collapses-into-failed convention — see this round's `cli.test.ts` fix for
+  the exact pattern to mirror).
+- `"SSE resume via Last-Event-ID replays buffered events"` (lines 124-145) and
+  `"download_logs: per-agent JSONL and full session tar bundle"` (lines 147-179): both use
+  `sse.waitFor((e) => e.type === "session_ended")` as their synchronization point after a
+  single `send_message` — this now hangs forever (confirmed: both timed out at bun's 5s
+  default in this run). Fix: wait for `agent_status: "waiting"` (or a `status_change` log
+  line, if the download_logs test wants to assert on `type: "message"`/`"header"` content
+  instead) as the "the turn has completed" signal instead of `session_ended`; neither test's
+  actual point (SSE resume semantics; log/tar download shape) depends on the session having
+  *ended*, only on a turn having *completed*, so this should be a small, mechanical fix once
+  reframed. Did not edit `e2e/` myself — out of Core's ownership per `CLAUDE.md` §3, same
+  boundary held in Round 3 even when a handoff explicitly offered the option to cross it.
+
+**Gates:** `bun run typecheck` clean (both TS programs). `bun run lint` clean except for a
+pre-existing untracked `dh.json` in the repo root (present before this round started, not
+part of this change — left untouched). `bun run test:coverage` — 688 tests passing,
+99.96%/100% funcs/lines aggregate (same single pre-existing explained `cli.ts` gap as every
+prior round: the real `startTui` default needs an actual PTY). `bun run e2e` — 11 pass / 7
+fail: 4 failures are pre-existing environment gaps (no `tmux`, no Chromium at
+`/opt/pw-browsers/chromium` in this sandbox — unrelated to this round, noted per the round's
+own instruction that this might not be runnable here); 3 failures are the real, now-stale
+`server-protocol.test.ts` expectations described above, flagged to Hedy rather than fixed
+directly.

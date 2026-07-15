@@ -351,3 +351,106 @@ describe("runAgentLoop — Round 3: cooperative cancellation via AbortSignal", (
     expect(result.finalOutput).toBe("all good");
   });
 });
+
+describe("runAgentLoop — Round 5: interactive mode pauses instead of ending on a non-tool-use turn", () => {
+  test("without interactive: true, behavior is exactly unchanged — a non-tool-use turn still ends the loop", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, as before" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, events } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+    expect(result.success).toBe(true);
+    const statusEvent = events.find((e) => e.type === "agent_status");
+    expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe("done");
+  });
+
+  test("interactive: true pauses 'waiting' on a non-tool-use turn instead of returning, then resumes on the next message with history intact", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "here's my answer" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "here's my second answer" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    let sendFn: ((message: string) => void) | undefined;
+    const controller = new AbortController();
+    const { params, events } = baseParams({
+      provider,
+      interactive: true,
+      signal: controller.signal,
+      registerSendMessage: (fn) => {
+        sendFn = fn;
+      },
+    });
+    const resultPromise = runAgentLoop(params);
+
+    // The loop must pause "waiting", not return — the promise stays pending.
+    while (!events.some((e) => e.type === "agent_status" && e.status === "waiting")) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    let settled = false;
+    resultPromise.then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+
+    sendFn?.("a follow-up question");
+    // The pause resolves once the second message is delivered; the loop resumes and the
+    // provider's second scripted response is what the loop is waiting on next.
+    while (
+      !events.some((e) => e.type === "agent_output" && e.chunk.includes("here's my second answer"))
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    // The second provider call's own message history includes the injected follow-up.
+    expect(provider.calls).toHaveLength(2);
+    const secondCallHasFollowUp = provider.calls[1]?.messages.some((m) =>
+      m.content.some((c) => c.type === "text" && c.text.includes("a follow-up question")),
+    );
+    expect(secondCallHasFollowUp).toBe(true);
+
+    // Only a genuine stop ends the interactive loop — abort it to let the test finish
+    // cleanly rather than leaving the pending promise dangling past the test's own scope.
+    controller.abort();
+    await resultPromise;
+  });
+
+  test("aborting while paused 'waiting' for the next message reports stopped, not a crash or a hang", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "waiting for you" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const controller = new AbortController();
+    const { params, events, logLines } = baseParams({
+      provider,
+      interactive: true,
+      signal: controller.signal,
+    });
+    const resultPromise = runAgentLoop(params);
+    while (!events.some((e) => e.type === "agent_status" && e.status === "waiting")) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    controller.abort();
+    const result = await resultPromise;
+    expect(result.success).toBe(false);
+    expect(result.finalOutput).toBe("waiting for you");
+    expect(
+      logLines.some(
+        (l) => l.type === "failed" && l.reason.includes("waiting for the next message"),
+      ),
+    ).toBe(true);
+  });
+});

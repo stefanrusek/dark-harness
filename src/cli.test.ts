@@ -904,18 +904,26 @@ describe("AgentRuntimeLoopAdapter", () => {
 
   test("sendMessage(ROOT_AGENT_ID, ...) lazily starts the root agent on the first call", async () => {
     const server = startMockAnthropicServer();
+    const adapter = new AgentRuntimeLoopAdapter({
+      config: adapterConfig(server),
+      systemPrompt: "sp",
+    });
     try {
-      const adapter = new AgentRuntimeLoopAdapter({
-        config: adapterConfig(server),
-        systemPrompt: "sp",
-      });
       const events: ServerSentEvent[] = [];
       const unsubscribe = adapter.onEvent((e) => events.push(e));
       adapter.sendMessage(ROOT_AGENT_ID, "hello");
-      // Fire-and-forget: wait for the session to actually finish via session_ended.
+      // Round 5 (docs/handoffs/core.md status log): an interactive root never reaches a
+      // terminal "done"/session_ended on a plain conversational turn anymore — it pauses in
+      // "waiting" for the next message instead. Wait for that transition rather than
+      // session_ended, which correctly never fires here.
       await new Promise<void>((resolve) => {
         const check = setInterval(() => {
-          if (events.some((e) => e.type === "session_ended")) {
+          if (
+            events.some(
+              (e) =>
+                e.type === "agent_status" && e.agentId === ROOT_AGENT_ID && e.status === "waiting",
+            )
+          ) {
             clearInterval(check);
             resolve();
           }
@@ -925,16 +933,18 @@ describe("AgentRuntimeLoopAdapter", () => {
       expect(
         events.some((e) => e.type === "agent_output" && e.chunk.includes("handled: hello")),
       ).toBe(true);
+      expect(events.some((e) => e.type === "session_ended")).toBe(false);
       expect(adapter.getAgentTree()).toEqual([
         {
           agentId: ROOT_AGENT_ID,
           parentAgentId: null,
           model: "test-model",
-          status: "done",
+          status: "waiting",
           children: [],
         },
       ]);
     } finally {
+      adapter.stopAgent(ROOT_AGENT_ID);
       server.stop(true);
     }
   });
@@ -1075,7 +1085,15 @@ describe("AgentRuntimeLoopAdapter", () => {
       adapter.onLog(listenerA);
       const unsubscribeB = adapter.onLog(listenerB);
       unsubscribeB();
-      await adapter.runtime.runRoot("hi");
+      // Round 5: adapter.runtime is always interactive, so runRoot() on a plain conversational
+      // turn now pauses in "waiting" instead of resolving — stop it once it's produced some
+      // log lines rather than awaiting a completion that no longer happens.
+      const runPromise = adapter.runtime.runRoot("hi");
+      while (seenByA.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      adapter.runtime.stopRoot();
+      await runPromise;
       expect(seenByA.length).toBeGreaterThan(0);
       expect(seenByA.every((id) => id === ROOT_AGENT_ID)).toBe(true);
       expect(seenByB).toEqual([]);
@@ -1104,7 +1122,20 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
     });
   }
 
-  test("waitForExitCode resolves 0 through a real DhServer once the root agent self-reports success", async () => {
+  // Round 5 (docs/handoffs/core.md status log): before this round, a plain conversational
+  // turn (no tool call) ended the loop and fired session_ended — which is exactly the bug
+  // this round fixes for interactive sessions (server/TUI/Web). Interactive sessions no
+  // longer have any "natural" success/failure completion at all: they only end via a real
+  // stop (or the maxTurns safety valve). The old "resolves 0 ... self-reports success" and
+  // "resolves 1 ... self-reports TASK_FAILED" tests here tested exactly the removed
+  // behavior and have been replaced by the single test below, which proves waitForExitCode
+  // still resolves correctly through a real DhServer for the one way an interactive
+  // session's exit code is actually determined post-Round-5: an explicit stop. (The
+  // standalone `--instructions`/`--job` dark-factory path's own success/TASK_FAILED
+  // self-report handling is unaffected by this round — see loop.test.ts and
+  // runtime.test.ts's non-interactive-by-default coverage, and cli.test.ts's `--job` tests
+  // above using a real createRuntime dep.)
+  test("waitForExitCode resolves TaskFailure through a real DhServer when the operator stops an interactive root mid-conversation", async () => {
     const mockProvider = startMockAnthropicServer("all good");
     const config: DhConfig = {
       options: { defaultModel: "test-model" },
@@ -1124,43 +1155,31 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
       sessionId: "s1",
       logDir: `/tmp/dh-test-${Date.now()}`,
     });
-    dhServer.start();
+    const port = dhServer.start();
     try {
       const exitCodePromise = waitForExitCode(adapter);
-      const result = await adapter.runtime.runRoot("go");
-      expect(result.success).toBe(true);
-      expect(await exitCodePromise).toBe(ExitCode.Success);
-    } finally {
-      dhServer.stop();
-      mockProvider.stop(true);
-    }
-  });
+      await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "send_message", agentId: ROOT_AGENT_ID, message: "go" }),
+      });
+      // Wait until the conversational turn has actually completed and the root is paused
+      // "waiting" for its next message, proving it did NOT end the session on its own.
+      let tree: unknown;
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        tree = await fetch(`http://localhost:${port}/api/commands`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "request_agent_tree" }),
+        }).then((r) => r.json());
+      } while (!(tree as { tree: { status: string }[] }).tree.some((n) => n.status === "waiting"));
 
-  test("waitForExitCode resolves 1 through a real DhServer when the root agent self-reports TASK_FAILED", async () => {
-    const mockProvider = startMockAnthropicServer("could not finish TASK_FAILED");
-    const config: DhConfig = {
-      options: { defaultModel: "test-model" },
-      models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
-      provider: [
-        {
-          name: "mock",
-          type: "anthropic",
-          baseURL: mockProvider.url.toString(),
-          apiKey: "sk-test",
-        },
-      ],
-    };
-    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp" });
-    const dhServer = new DhServer({
-      agentLoop: adapter,
-      sessionId: "s2",
-      logDir: `/tmp/dh-test-${Date.now()}`,
-    });
-    dhServer.start();
-    try {
-      const exitCodePromise = waitForExitCode(adapter);
-      const result = await adapter.runtime.runRoot("go");
-      expect(result.success).toBe(false);
+      await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "stop_agent", agentId: ROOT_AGENT_ID }),
+      });
       expect(await exitCodePromise).toBe(ExitCode.TaskFailure);
     } finally {
       dhServer.stop();
@@ -1176,8 +1195,36 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
   // as "unknown agentId" by the real command handler, never reaching the adapter's lazy-
   // start logic at all. Fixed in runtime.ts (root node is always present, "waiting" before
   // start); this test drives the exact real HTTP path that caught it.
-  test("send_message to a not-yet-started root reaches the real HTTP command handler and starts it", async () => {
-    const mockProvider = startMockAnthropicServer("hello back");
+  //
+  // Round 5 addition: this is also the live-verification DoD for the actual bug this round
+  // fixes — proving a *second* send_message to the same root produces new output that
+  // references context from the first, i.e. it's really the same ongoing conversation, not
+  // two independent ones and not a silently-dropped no-op (the exact symptom the owner and
+  // coordinator reproduced against a real LM Studio instance).
+  test("send_message to a not-yet-started root reaches the real HTTP command handler, starts it, and a second send_message continues the same conversation", async () => {
+    const mockProvider = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as {
+          messages: { content: { type: string; text?: string }[] }[];
+        };
+        const text = body.messages
+          .at(-1)
+          ?.content.filter((c): c is { type: "text"; text: string } => c.type === "text")
+          .map((c) => c.text)
+          .join("");
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: [{ type: "text", text: `handled: ${text ?? ""}` }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
     const config: DhConfig = {
       options: { defaultModel: "test-model" },
       models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
@@ -1208,25 +1255,74 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
         tree: [{ agentId: ROOT_AGENT_ID, status: "waiting" }],
       });
 
-      const exitCodePromise = waitForExitCode(adapter);
+      const events: ServerSentEvent[] = [];
+      adapter.onEvent((e) => events.push(e));
+
       const sendResult = await fetch(`http://localhost:${port}/api/commands`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "send_message", agentId: ROOT_AGENT_ID, message: "hi" }),
+        body: JSON.stringify({
+          type: "send_message",
+          agentId: ROOT_AGENT_ID,
+          message: "first message",
+        }),
       }).then((r) => r.json());
       expect(sendResult).toEqual({ ok: true });
-      expect(await exitCodePromise).toBe(ExitCode.Success);
 
-      const treeAfter = await fetch(`http://localhost:${port}/api/commands`, {
+      // Round 5: this used to poll for session_ended/"done" — that's exactly the bug. The
+      // exchange completes by pausing "waiting", not by ending the session.
+      while (
+        !events.some((e) => e.type === "agent_output" && e.chunk.includes("handled: first message"))
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      const treeAfterFirst = await fetch(`http://localhost:${port}/api/commands`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ type: "request_agent_tree" }),
       }).then((r) => r.json());
-      expect(treeAfter).toMatchObject({
+      expect(treeAfterFirst).toMatchObject({
         ok: true,
-        tree: [{ agentId: ROOT_AGENT_ID, status: "done" }],
+        tree: [{ agentId: ROOT_AGENT_ID, status: "waiting" }],
+      });
+
+      // The actual bug this round fixes: before the fix, this second send_message returned
+      // {"ok":true} but silently did nothing — no new turn, no new output. Now it must
+      // produce real new output, and that output must be provably the same conversation:
+      // the mock provider echoes back the full concatenated text of every prior turn it
+      // received, so "second message" only appears in the response if the second message's
+      // text actually reached the provider as part of the same ongoing exchange history.
+      const secondSendResult = await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "send_message",
+          agentId: ROOT_AGENT_ID,
+          message: "second message",
+        }),
+      }).then((r) => r.json());
+      expect(secondSendResult).toEqual({ ok: true });
+
+      while (
+        !events.some(
+          (e) => e.type === "agent_output" && e.chunk.includes("handled: second message"),
+        )
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      const treeAfterSecond = await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "request_agent_tree" }),
+      }).then((r) => r.json());
+      expect(treeAfterSecond).toMatchObject({
+        ok: true,
+        tree: [{ agentId: ROOT_AGENT_ID, status: "waiting" }],
       });
     } finally {
+      adapter.stopAgent(ROOT_AGENT_ID);
       dhServer.stop();
       mockProvider.stop(true);
     }

@@ -677,3 +677,172 @@ describe("AgentRuntime.runRoot — Round 4: rootStatus/getAgentTree must not get
     }
   });
 });
+
+// Round 5 (docs/handoffs/core.md status log): confirmed live by the owner and coordinator
+// against a real LM Studio instance — a root (and, by the same code path, any sub-agent)
+// could only ever receive ONE message. A second send_message returned {"ok":true} but did
+// nothing: no new turn, no output, status stuck "done" forever. Root cause: loop.ts treated
+// any non-tool-use turn as terminal, which is right for the standalone `--instructions`/
+// `--job` path but wrong for an interactive conversation. This describe block proves the
+// fix for both the root and a sub-agent: a real second exchange, with message history
+// preserved (the mock provider below echoes back the exact concatenated text of every user
+// message it has ever seen for a given "conversation" key, so a correct third-message reply
+// containing all three original texts is only possible if the loop is actually accumulating
+// history across exchanges, not starting fresh each time).
+describe("AgentRuntime — Round 5: an interactive session survives more than one exchange", () => {
+  /** Doesn't just echo the last message — accumulates and echoes *every* user text it has
+   * ever seen, across calls, so a test can prove a later exchange's response genuinely
+   * depends on an earlier exchange's message, not just the most recent one. */
+  function startAccumulatingEchoServer() {
+    const seenTexts: string[] = [];
+    return Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as {
+          messages: { content: { type: string; text?: string }[] }[];
+        };
+        const text = body.messages
+          .at(-1)
+          ?.content.filter((c): c is { type: "text"; text: string } => c.type === "text")
+          .map((c) => c.text)
+          .join("");
+        if (text) seenTexts.push(text);
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: [{ type: "text", text: `seen so far: ${seenTexts.join(" | ")}` }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+  }
+
+  function interactiveConfig(server: ReturnType<typeof startAccumulatingEchoServer>): DhConfig {
+    return {
+      options: { defaultModel: "test-model" },
+      models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+      provider: [
+        { name: "mock", type: "anthropic", baseURL: server.url.toString(), apiKey: "sk-test" },
+      ],
+    };
+  }
+
+  test("an interactive root agent pauses 'waiting' (not 'done') after a conversational turn, and a real second exchange references the first", async () => {
+    const server = startAccumulatingEchoServer();
+    try {
+      const events: ServerSentEvent[] = [];
+      const runtime = new AgentRuntime({
+        config: interactiveConfig(server),
+        systemPrompt: "sp",
+        interactive: true,
+        onEvent: (e) => events.push(e),
+      });
+
+      const runPromise = runtime.runRoot("first message");
+      // The exchange completing means the root paused "waiting", not that runRoot() resolved.
+      while (!events.some((e) => e.type === "agent_status" && e.status === "waiting")) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(runtime.getAgentTree()[0]?.status).toBe("waiting");
+      expect(
+        events.some(
+          (e) => e.type === "agent_output" && e.chunk.includes("seen so far: first message"),
+        ),
+      ).toBe(true);
+
+      // This is the actual bug: before the fix, sendMessageToRoot would either throw
+      // RootNotListeningError (the sink was never re-armed) or, if it happened to succeed,
+      // nothing downstream would ever run again. Now it must produce a real second turn.
+      runtime.sendMessageToRoot("second message");
+      while (
+        !events.some(
+          (e) =>
+            e.type === "agent_output" &&
+            e.chunk.includes("seen so far: first message | second message"),
+        )
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(runtime.getAgentTree()[0]?.status).toBe("waiting");
+
+      // Only a genuine stop ends an interactive session — prove the loop is still the same
+      // ongoing one by continuing it a third time before finally stopping it.
+      runtime.sendMessageToRoot("third message");
+      while (
+        !events.some(
+          (e) =>
+            e.type === "agent_output" &&
+            e.chunk.includes("seen so far: first message | second message | third message"),
+        )
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      runtime.stopRoot();
+      const result = await runPromise;
+      expect(result.success).toBe(false); // stopped, collapsed into "failed" per Round 3's convention
+      expect(runtime.getAgentTree()[0]?.status).toBe("failed");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("the same multi-exchange behavior works for a sub-agent reachable via SendMessage (not just the root)", async () => {
+    const server = startAccumulatingEchoServer();
+    try {
+      const events: ServerSentEvent[] = [];
+      const runtime = new AgentRuntime({
+        config: interactiveConfig(server),
+        systemPrompt: "sp",
+        interactive: true,
+        onEvent: (e) => events.push(e),
+      });
+
+      const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+        model: "test-model",
+        prompt: "child first",
+      });
+
+      // Round 5 wiring: spawnAgent()'s onEvent handler now mirrors agent_status into the
+      // task registry (this.tasks.setStatus) — getAgentTree()/TaskSnapshot.status must
+      // reflect "waiting" for the sub-agent too, the same as the root.
+      while (runtime.getAgentTree()[0]?.children[0]?.status !== "waiting") {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(
+        events.some(
+          (e) =>
+            e.type === "agent_output" &&
+            e.agentId === taskId &&
+            e.chunk.includes("seen so far: child first"),
+        ),
+      ).toBe(true);
+
+      // The exact regression this round fixes, applied to a sub-agent: TaskRegistry.
+      // sendMessage() used to reach a loop that could no longer do anything with it once
+      // the first exchange had "finished" (task.sendMessage pointed at a dead closure).
+      runtime.tasks.sendMessage(taskId, "child second");
+      while (
+        !events.some(
+          (e) =>
+            e.type === "agent_output" &&
+            e.agentId === taskId &&
+            e.chunk.includes("seen so far: child first | child second"),
+        )
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("waiting");
+
+      runtime.tasks.stop(taskId);
+      await runtime.tasks.awaitDone(taskId);
+      expect(runtime.getAgentTree()[0]?.children[0]?.status).toBe("failed");
+    } finally {
+      server.stop(true);
+    }
+  });
+});
