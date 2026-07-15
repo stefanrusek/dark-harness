@@ -6,11 +6,12 @@ import {
   formatElapsed,
   frameToAnsi,
   renderFrame,
+  renderTranscript,
   tailLines,
   wrapText,
 } from "./render.ts";
 import { initialState } from "./state.ts";
-import type { AgentInfo, TuiState } from "./types.ts";
+import type { AgentInfo, TuiState, Turn } from "./types.ts";
 
 function treeNode(agentId: string, overrides: Partial<AgentTreeNode> = {}): AgentTreeNode {
   return {
@@ -29,7 +30,7 @@ function agentInfo(overrides: Partial<AgentInfo> = {}): AgentInfo {
     parentAgentId: null,
     model: "sonnet",
     status: "running",
-    output: "",
+    transcript: [],
     inputTokens: 0,
     outputTokens: 0,
     costUsd: null,
@@ -37,6 +38,10 @@ function agentInfo(overrides: Partial<AgentInfo> = {}): AgentInfo {
     statusSince: 0,
     ...overrides,
   };
+}
+
+function assistantTurn(text: string): Turn {
+  return { role: "assistant", text };
 }
 
 describe("wrapText", () => {
@@ -109,7 +114,7 @@ describe("renderFrame", () => {
 
   test("root view renders the root agent's output and an input line", () => {
     let state = baseState();
-    state.agents.set("root", agentInfo({ output: "hello world" }));
+    state.agents.set("root", agentInfo({ transcript: [assistantTurn("hello world")] }));
     state = { ...state, rootAgentId: "root", input: "typing" };
     const rows = renderFrame(state);
     expect(rows.join("\n")).toContain("hello world");
@@ -193,7 +198,7 @@ describe("renderFrame", () => {
         parentAgentId: "root",
         model: "haiku",
         status: "done",
-        output: "child output",
+        transcript: [assistantTurn("child output")],
       }),
     );
     const rows = renderFrame(state);
@@ -256,11 +261,63 @@ describe("renderFrame", () => {
   test("output longer than the content area shows only the tail", () => {
     const lines = Array.from({ length: 20 }, (_, i) => `line-${i}`).join("\n");
     let state = baseState({ size: { rows: 8, cols: 40 } });
-    state.agents.set("root", agentInfo({ output: lines }));
+    state.agents.set("root", agentInfo({ transcript: [assistantTurn(lines)] }));
     state = { ...state, rootAgentId: "root" };
     const rows = renderFrame(state);
     expect(rows.join("\n")).not.toContain("line-0\n");
     expect(rows.join("\n")).toContain("line-19");
+  });
+
+  test("root view shows the operator's own sent message as a distinct user turn", () => {
+    let state = baseState();
+    state.agents.set("root", {
+      ...agentInfo(),
+      transcript: [{ role: "user", text: "hello there" }, assistantTurn("hi, how can I help?")],
+    });
+    state = { ...state, rootAgentId: "root" };
+    const rows = renderFrame(state);
+    const joined = rows.join("\n");
+    expect(joined).toContain("> hello there");
+    expect(joined).toContain("hi, how can I help?");
+  });
+
+  test("multiple back-to-back assistant turns render as visually separate turns", () => {
+    let state = baseState();
+    state.agents.set("root", {
+      ...agentInfo(),
+      transcript: [assistantTurn("first turn"), assistantTurn("second turn")],
+    });
+    state = { ...state, rootAgentId: "root" };
+    const rows = renderFrame(state);
+    const firstIndex = rows.findIndex((row) => row.includes("first turn"));
+    const secondIndex = rows.findIndex((row) => row.includes("second turn"));
+    expect(firstIndex).toBeGreaterThanOrEqual(0);
+    expect(secondIndex).toBeGreaterThan(firstIndex);
+    // A blank separator row sits strictly between the two turns.
+    expect(rows.slice(firstIndex + 1, secondIndex).some((row) => row === "")).toBe(true);
+  });
+});
+
+describe("renderTranscript", () => {
+  test("renders a single turn as its wrapped text with no separator", () => {
+    expect(renderTranscript([assistantTurn("hello")], 40)).toEqual(["hello"]);
+  });
+
+  test("user turns are prefixed with the input-prompt marker", () => {
+    expect(renderTranscript([{ role: "user", text: "hi" }], 40)).toEqual(["> hi"]);
+  });
+
+  test("assistant turns are not prefixed", () => {
+    expect(renderTranscript([assistantTurn("hi")], 40)).toEqual(["hi"]);
+  });
+
+  test("inserts exactly one blank separator line between consecutive turns", () => {
+    const lines = renderTranscript([{ role: "user", text: "hi" }, assistantTurn("hello back")], 40);
+    expect(lines).toEqual(["> hi", "", "hello back"]);
+  });
+
+  test("an empty transcript renders no lines", () => {
+    expect(renderTranscript([], 40)).toEqual([]);
   });
 });
 

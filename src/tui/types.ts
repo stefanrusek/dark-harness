@@ -17,12 +17,26 @@ export type ViewState =
   | { kind: "tree"; selectedIndex: number }
   | { kind: "agent"; agentId: string };
 
+/** One turn of a conversation transcript. `"user"` turns are added client-side, immediately,
+ * the moment the operator hits Enter — the server never echoes the operator's own messages
+ * back over SSE, so this is the only place they're recorded (Round 6,
+ * docs/handoffs/tui.md). `"assistant"` turns accumulate streamed `agent_output` chunks:
+ * consecutive chunks with no intervening user turn append to the same turn's `text` rather
+ * than starting a new one, so one streamed model response reads as a single turn. */
+export interface Turn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 export interface AgentInfo {
   agentId: string;
   parentAgentId: string | null;
   model: string;
   status: AgentStatus;
-  output: string;
+  /** Ordered conversation turns, replacing the old flat `output: string` (Round 6) so the
+   * render layer can draw real turn separation and show the user's own messages instead of
+   * one unbroken wall of concatenated model output. */
+  transcript: Turn[];
   inputTokens: number;
   outputTokens: number;
   costUsd: number | null;

@@ -224,3 +224,51 @@ Durable notes:
 Open thread for a future round: none blocking. Didn't verify wording consistency with Web
 (Susan)'s parallel round-5 liveness indicator — the handoff flagged it as a nice-to-have, not
 required; worth a glance if a later round touches both clients' status/liveness display.
+
+### 2026-07-15 — Round 6, structured conversation transcript
+
+Fable's original calibration-example gap, finally dispatched: the owner confirmed via real
+screenshots that `dh`'s conversation view was an unbroken wall of concatenated model text with
+the operator's own messages never shown at all. Root cause was `AgentInfo.output: string` —
+a flat buffer with no turn boundaries and nothing ever written to it from the send-message
+path.
+
+Durable notes:
+
+- **`Turn[]` replaces the flat string, and the reducer decides turn boundaries, not the
+  renderer.** `state.ts`'s `appendOutput` merges a new `agent_output` chunk into the trailing
+  turn only if that turn is already `"assistant"`; otherwise it starts a new turn. This keeps
+  `render.ts` simple — it never has to guess where one model response ends and the next
+  begins, it just draws whatever turns already exist.
+- **The user turn is written in the same reducer call that builds the `send_message`
+  effect**, not in a follow-up action or an SSE handler. This was the one property genuinely
+  worth writing a dedicated test for (the handoff explicitly required "before any server
+  response arrives") — the natural failure mode of doing this wrong is adding the user turn as
+  an async side effect that could race with the first `agent_output` chunk of the reply.
+  Reducers are synchronous here, so getting it in `handleRootKey`'s `enter` branch was the only
+  way to actually guarantee ordering, not just usually get it right.
+- **A user turn never merges with anything, including a prior user turn.** Even though the
+  merge rule for assistant turns is "same role → same turn," a user send is always a discrete
+  event the operator chose to make — collapsing two consecutive sends into one turn would hide
+  that they were separate messages. Different roles get different merge rules on purpose, not
+  by symmetry.
+- **`MAX_OUTPUT_CHARS` became a total-transcript budget, not a per-string cap**, via a new
+  `trimTranscript` that evicts oldest turns first and only trims the oldest *surviving* turn's
+  front if it alone still exceeds the cap. Existing test only exercised the single-turn case
+  (a cap mid-turn); added a second test forcing full eviction of an older, smaller turn so both
+  branches of the eviction loop are actually covered — the 100% coverage gate caught the gap
+  immediately.
+- **Worktree was stale again** (see Round 5's note — this is now a two-for-two pattern for
+  this repo's worktree provisioning). This time `git reset --hard` was refused by the
+  environment's destructive-git guard; `git merge --ff-only origin/claude/coordinator-onboarding-kab9ls`
+  achieved the identical result non-destructively (verified zero unique commits on the stale
+  branch first, same check as Round 5) and didn't trip the guard. Prefer `merge --ff-only` over
+  `reset --hard` for this recurring fix from now on — same outcome, no permission friction.
+- **`bun run e2e` has 4 pre-existing environment failures** (no `tmux`, no headless Chromium at
+  `/opt/pw-browsers/chromium`, one bearer-token timeout) — confirmed via `git stash` that they
+  fail identically without this round's diff, so they're sandbox gaps, not regressions.
+
+Open thread for a future round: none blocking on TUI's side. Nice-to-have: check whether
+Susan's parallel Web-side transcript work coalesces streamed chunks the same way (one turn per
+streamed response, not one per chunk) — the handoff asked for conceptual consistency, not
+identical code.
