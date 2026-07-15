@@ -570,3 +570,53 @@ round-3 handoff explicitly left the call to me.
 tests passing, 99.95%/100% funcs/lines aggregate (same single explained gap as round 2:
 `cli.ts`'s real `startTui` default needs an actual PTY). `bun run e2e` — 18 tests passing,
 unchanged by this round's work (no e2e file touched, per the cross-domain request above).
+
+---
+
+## Round 4 — OPEN — fix `rootStatus` getting stuck on a runRoot() crash
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+While independently verifying Round 3's cancellation fix by hand (a real `dh --server` +
+real never-responding HTTP server, not the mock provider used in tests), I found a **real,
+separate bug** — not related to cancellation itself, which I confirmed works correctly with
+a valid `apiKey`. This one triggers on a harness-level crash (I hit it via a `dh.json`
+missing `apiKey` against a real Anthropic-shaped endpoint, but any `runAgentLoop` throw
+before it resolves would do it):
+
+`AgentRuntime.runRoot()` (`runtime.ts` ~line 227) sets `this.rootStatus = "running"` before
+calling `runAgentLoop`, but only updates it again (`"done"`/`"failed"`) on the **normal
+resolve path**, after `await runAgentLoop(...)`. If that call *throws* instead of
+resolving, `this.rootStatus` is never touched again — it stays `"running"` forever.
+`src/cli.ts`'s adapter (`sendMessage`, ~line 208) does catch this and emit a one-time SSE
+`agent_status: "failed"` event to whatever's currently listening, but that's a transient
+broadcast, not persisted state — a client that connects *after* the crash (or a fresh
+`request_agent_tree` poll) reads `getAgentTree()`, which derives from the never-updated
+`this.rootStatus`, and sees a permanently `"running"` zombie root agent. Confirmed live:
+status stayed `"running"` for 20+ seconds after the crash, no error surfaced anywhere a
+`request_agent_tree` poll could see.
+
+This matters a lot right now: the owner is about to test this interactively for the first
+time, and a `dh.json` typo (bad `apiKey`, wrong `baseURL`, etc.) is exactly the kind of
+thing a first-time user hits. Right now that looks like a silently stuck spinner, not a
+clear failure.
+
+Note this is scoped to the *interactive lazy-start* path specifically — the standalone
+`--instructions`/`--job` path (`src/cli.ts`'s `main()`) already wraps its own
+`runtime.runRoot(...)` call in a try/catch that maps to `ExitCode.HarnessError` correctly;
+that path is unaffected.
+
+**Fix:** `runRoot()` itself should update `this.rootStatus` (and probably still emit the
+`session_ended` event, since that's also currently skipped on this path) on *any* exit —
+normal or thrown — not just the resolve path. A `try/catch` (or `try/finally` with a
+success/failure flag) around the `runAgentLoop` call that sets `rootStatus = "failed"` and
+fires `session_ended` with `ExitCode.HarnessError`-shaped semantics before rethrowing (so
+`cli.ts`'s existing `.catch()` still sees the error and does whatever it already does) is
+probably the smallest correct fix — centralize it here rather than pushing the fix into
+`cli.ts`, since any other caller of `runRoot()` should get the same correctness for free.
+
+**Gates:** same four commands. **Definition of done:** a regression test proves that when
+`runAgentLoop` throws (a fake provider that rejects, or similar), `getAgentTree()` reports
+the root as `"failed"` afterward, not stuck `"running"` — polled after the fact, not just
+observed via a transient event. Append a dated status entry here and update
+`docs/roster/grace.md` when done.
