@@ -542,3 +542,45 @@ separate turns, not run together. Append a dated status entry here and update
 Note: Web (Susan) is getting the identical request for `src/web/` in parallel — same root
 cause (`output: string` in `src/web/client/state.ts` too), no shared files between your two
 changes, but keep the same turn-model concept in sync where practical.
+
+**Status — 2026-07-15, Mary:** Done. `AgentInfo.output: string` (`src/tui/types.ts`) replaced
+with `AgentInfo.transcript: Turn[]`, `Turn = { role: "user" | "assistant"; text: string }`.
+
+- `state.ts`: `appendOutput` now appends each `agent_output` chunk as an assistant turn,
+  merging into the trailing turn when it's already `"assistant"` (so one streamed response is
+  one turn, not one per SSE chunk) — same coalescing idea Web needs to match if theirs
+  currently makes one turn per chunk. New `appendUserTurn` fires synchronously inside
+  `handleRootKey`'s `enter` case, the same reducer step that builds the `send_message`
+  effect — so the operator's own message lands in `transcript` in the very same reducer call
+  that clears `input`, strictly before any server round-trip. A user turn never merges with
+  anything (not even a prior user turn) — each send is a distinct message. `MAX_OUTPUT_CHARS`
+  is now a total-transcript character budget (`trimTranscript`): oldest turns are dropped
+  first, and the oldest surviving turn is trimmed from its front if it alone still exceeds the
+  cap, so the cap always keeps the newest content in full, same "no silent truncation of live
+  content" property the old flat-string cap had.
+- `render.ts`: new exported `renderTranscript(transcript, cols)` wraps each turn to `cols`,
+  inserts exactly one blank separator line between turns, and prefixes only `"user"` turns
+  with `"> "` (mirroring the input box's own prompt marker) — assistant turns render as plain
+  text, matching real Claude Code's CLI convention of not re-labeling the model's own output.
+  `renderRoot`/`renderAgent` call this instead of `wrapText(agent.output, cols)`.
+- Tests added in `state.test.ts` (immediacy of the user turn on Enter, no merging with a
+  preceding assistant turn, the full-turn-eviction branch of `trimTranscript`) and
+  `render.test.ts` (`renderTranscript` unit tests plus `renderFrame` tests for a user turn
+  showing with its `"> "` prefix and for two back-to-back assistant turns landing on separate,
+  blank-line-separated rows). Gates: `bun run typecheck`, `bun run lint`,
+  `bun run test:coverage` (100% on `src/tui/`, 794 tests passing) all green.
+- **Worktree hygiene note (recurring — see Round 5):** this round's worktree was again
+  stale (only founding docs, `git log` showing 2 ancient commits). Fixed with
+  `git fetch origin claude/coordinator-onboarding-kab9ls` + `git merge --ff-only` (used
+  merge rather than Round 5's `reset --hard` since the environment's destructive-git guard
+  blocked the reset; a clean fast-forward achieved the identical result non-destructively and
+  didn't need an exception).
+- `bun run e2e` has 4 failing tests, confirmed pre-existing on this branch before my change
+  (verified via `git stash`): missing `tmux` binary, missing headless Chromium at
+  `/opt/pw-browsers/chromium`, and one unrelated bearer-token timeout — all environment gaps
+  in this sandbox, not caused by this round's diff.
+
+Open thread for a future round: none blocking from TUI's side. Worth a glance whether Susan's
+parallel Web-side turn model ended up with the same coalescing/eviction behavior, per the
+"keep in sync where practical" note above — not required, just a nice-to-have consistency
+check if a later round touches both clients.

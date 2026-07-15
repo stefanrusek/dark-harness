@@ -4,7 +4,7 @@
 
 import type { AgentStatus } from "../contracts/index.ts";
 import { flattenTree } from "./tree.ts";
-import type { AgentInfo, TuiState } from "./types.ts";
+import type { AgentInfo, TuiState, Turn } from "./types.ts";
 
 const HEADER_ROWS = 2;
 
@@ -65,6 +65,22 @@ export function wrapText(text: string, cols: number): string[] {
   return out;
 }
 
+/** Render a conversation transcript with real turn separation: each turn wrapped to `cols`,
+ * a blank line between consecutive turns, and a role label (`"> "`, matching the input
+ * prompt's own marker, so a user turn visually echoes what was typed) on user turns only —
+ * assistant turns render as plain text, same as real Claude Code's CLI. Without this, turns
+ * read as one unbroken wall of concatenated text with no visual boundary and no sign the
+ * user ever said anything (Round 6, docs/handoffs/tui.md). */
+export function renderTranscript(transcript: Turn[], cols: number): string[] {
+  const lines: string[] = [];
+  transcript.forEach((turn, index) => {
+    if (index > 0) lines.push("");
+    const text = turn.role === "user" ? `> ${turn.text}` : turn.text;
+    lines.push(...wrapText(text, cols));
+  });
+  return lines;
+}
+
 /** Keep only the last `maxLines` entries, preserving order. */
 export function tailLines(lines: string[], maxLines: number): string[] {
   const bound = Math.max(0, maxLines);
@@ -108,7 +124,7 @@ function renderRoot(
 ): { content: string[]; footer: string[] } {
   const agent = rootAgent(state);
   const content = agent
-    ? tailLines(wrapText(agent.output, cols), contentRows)
+    ? tailLines(renderTranscript(agent.transcript, cols), contentRows)
     : tailLines(["Waiting for root agent to start…"], contentRows);
   const hint = state.statusMessage ?? "[Enter] send   [←] agent tree   [Ctrl+C] quit";
   const inputLine = `> ${state.input}${CURSOR_MARKER}`;
@@ -148,7 +164,7 @@ function renderAgent(
   if (state.view.kind !== "agent") return { content: padRows([], contentRows), footer: [""] };
   const agent = state.agents.get(state.view.agentId) ?? null;
   const content = agent
-    ? tailLines(wrapText(agent.output, cols), contentRows)
+    ? tailLines(renderTranscript(agent.transcript, cols), contentRows)
     : tailLines(["(no output yet)"], contentRows);
   const meta = agent
     ? `Model: ${agent.model}   Status: ${colorizeStatus(agent.status, agent.status)}` +

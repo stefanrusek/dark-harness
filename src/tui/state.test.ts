@@ -147,27 +147,46 @@ describe("reducer: sse_event agent_output", () => {
       type: "sse_event",
       event: output({ agentId: "root", chunk: "hello" }),
     });
-    expect(state.agents.get("root")?.output).toBe("hello");
+    expect(state.agents.get("root")?.transcript).toEqual([{ role: "assistant", text: "hello" }]);
     expect(state.agents.get("root")?.status).toBe("waiting");
   });
 
-  test("appends across multiple events", () => {
+  test("appends across multiple events into a single assistant turn", () => {
     let state = initialState(size());
     ({ state } = reducer(state, { type: "sse_event", event: output({ chunk: "a" }) }));
     ({ state } = reducer(state, { type: "sse_event", event: output({ chunk: "b" }) }));
-    expect(state.agents.get("root")?.output).toBe("ab");
+    expect(state.agents.get("root")?.transcript).toEqual([{ role: "assistant", text: "ab" }]);
   });
 
-  test("caps output at MAX_OUTPUT_CHARS, keeping the tail", () => {
+  test("caps transcript at MAX_OUTPUT_CHARS total, keeping the tail", () => {
     let state = initialState(size());
     ({ state } = reducer(state, {
       type: "sse_event",
       event: output({ chunk: "x".repeat(MAX_OUTPUT_CHARS) }),
     }));
     ({ state } = reducer(state, { type: "sse_event", event: output({ chunk: "TAIL" }) }));
-    const out = state.agents.get("root")?.output ?? "";
-    expect(out.length).toBe(MAX_OUTPUT_CHARS);
-    expect(out.endsWith("TAIL")).toBe(true);
+    const transcript = state.agents.get("root")?.transcript ?? [];
+    const totalChars = transcript.reduce((sum, turn) => sum + turn.text.length, 0);
+    expect(totalChars).toBe(MAX_OUTPUT_CHARS);
+    const lastTurn = transcript[transcript.length - 1];
+    expect(lastTurn?.text.endsWith("TAIL")).toBe(true);
+  });
+
+  test("capping fully drops an older, smaller turn rather than only trimming the newest one", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "root", parentAgentId: null }),
+    }));
+    state = { ...state, input: "small" };
+    ({ state } = reducer(state, { type: "key", key: { kind: "enter" } }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: output({ agentId: "root", chunk: "x".repeat(MAX_OUTPUT_CHARS) }),
+    }));
+    const transcript = state.agents.get("root")?.transcript ?? [];
+    // The 5-char "small" user turn is entirely evicted, leaving just the assistant turn.
+    expect(transcript).toEqual([{ role: "assistant", text: "x".repeat(MAX_OUTPUT_CHARS) }]);
   });
 });
 
@@ -479,6 +498,35 @@ describe("reducer: key handling — root view", () => {
         type: "send_command",
         command: { type: "send_message", agentId: "root", message: "hello" },
       },
+    ]);
+  });
+
+  test("enter immediately appends the sent message as a user turn, before any server response", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "root", parentAgentId: null }),
+    }));
+    state = { ...state, input: "hello there" };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.agents.get("root")?.transcript).toEqual([{ role: "user", text: "hello there" }]);
+  });
+
+  test("a sent user turn never merges with a preceding assistant turn", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "root", parentAgentId: null }),
+    }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: output({ agentId: "root", chunk: "earlier reply" }),
+    }));
+    state = { ...state, input: "follow up" };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.agents.get("root")?.transcript).toEqual([
+      { role: "assistant", text: "earlier reply" },
+      { role: "user", text: "follow up" },
     ]);
   });
 

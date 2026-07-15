@@ -5,11 +5,34 @@
 import type { ServerSentEvent } from "../contracts/index.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";
-import type { Action, AgentInfo, ReducerResult, TuiState } from "./types.ts";
+import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.ts";
 
-/** Bound per-agent output buffer so a very long session doesn't grow memory unboundedly.
- * Documented, intentional cap — not a silent truncation of what the user can see live. */
+/** Bound per-agent transcript buffer (total chars across all turns) so a very long session
+ * doesn't grow memory unboundedly. Documented, intentional cap — not a silent truncation of
+ * what the user can see live: oldest turns are dropped first, newest content is always kept
+ * in full. */
 export const MAX_OUTPUT_CHARS = 200_000;
+
+/** Drop oldest turns (and, if needed, trim the oldest remaining turn's text) until the total
+ * character count across `transcript` is at or under `max`. */
+function trimTranscript(transcript: Turn[], max: number): Turn[] {
+  let total = transcript.reduce((sum, turn) => sum + turn.text.length, 0);
+  if (total <= max) return transcript;
+  const out = [...transcript];
+  while (out.length > 0 && total > max) {
+    const oldest = out[0];
+    if (!oldest) break;
+    const excess = total - max;
+    if (oldest.text.length <= excess) {
+      total -= oldest.text.length;
+      out.shift();
+    } else {
+      out[0] = { ...oldest, text: oldest.text.slice(excess) };
+      total -= excess;
+    }
+  }
+  return out;
+}
 
 export function initialState(size: { rows: number; cols: number }): TuiState {
   return {
@@ -41,7 +64,7 @@ function defaultAgent(agentId: string, at: number): AgentInfo {
     parentAgentId: null,
     model: "",
     status: "waiting",
-    output: "",
+    transcript: [],
     inputTokens: 0,
     outputTokens: 0,
     costUsd: null,
@@ -73,15 +96,45 @@ function withAgent(
   return { ...state, agents, agentOrder };
 }
 
+/** Appends a streamed `agent_output` chunk as an assistant turn. Consecutive chunks with no
+ * intervening user turn extend the existing trailing assistant turn's text rather than
+ * starting a new one — a single streamed response should read as one turn, not one per SSE
+ * chunk (Round 6, docs/handoffs/tui.md). */
 function appendOutput(state: TuiState, agentId: string, at: number, chunk: string): TuiState {
   const agents = new Map(state.agents);
   const existing = agents.get(agentId) ?? defaultAgent(agentId, at);
   const agentOrder = agents.has(agentId) ? state.agentOrder : [...state.agentOrder, agentId];
-  let output = existing.output + chunk;
-  if (output.length > MAX_OUTPUT_CHARS) {
-    output = output.slice(output.length - MAX_OUTPUT_CHARS);
-  }
-  agents.set(agentId, { ...existing, output, lastEventAt: at });
+  const trailing = existing.transcript[existing.transcript.length - 1];
+  const transcript =
+    trailing?.role === "assistant"
+      ? [
+          ...existing.transcript.slice(0, -1),
+          { role: "assistant" as const, text: trailing.text + chunk },
+        ]
+      : [...existing.transcript, { role: "assistant" as const, text: chunk }];
+  agents.set(agentId, {
+    ...existing,
+    transcript: trimTranscript(transcript, MAX_OUTPUT_CHARS),
+    lastEventAt: at,
+  });
+  return { ...state, agents, agentOrder };
+}
+
+/** Adds the operator's own message as a user turn, immediately and client-side — the server
+ * never sends it back over SSE, so this is the only place the user's side of the
+ * conversation is recorded (Round 6, docs/handoffs/tui.md). Always starts a fresh turn: a
+ * user turn never merges with anything, even a preceding user turn, since each send is a
+ * distinct message. */
+function appendUserTurn(state: TuiState, agentId: string, at: number, message: string): TuiState {
+  const agents = new Map(state.agents);
+  const existing = agents.get(agentId) ?? defaultAgent(agentId, at);
+  const agentOrder = agents.has(agentId) ? state.agentOrder : [...state.agentOrder, agentId];
+  const transcript = [...existing.transcript, { role: "user" as const, text: message }];
+  agents.set(agentId, {
+    ...existing,
+    transcript: trimTranscript(transcript, MAX_OUTPUT_CHARS),
+    lastEventAt: at,
+  });
   return { ...state, agents, agentOrder };
 }
 
@@ -197,8 +250,9 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
       return noEffects({ ...state, statusMessage: "No root agent yet — please wait." });
     }
     const message = state.input;
+    const withUserTurn = appendUserTurn(state, state.rootAgentId, state.now, message);
     return {
-      state: { ...state, input: "", statusMessage: null },
+      state: { ...withUserTurn, input: "", statusMessage: null },
       effects: [
         {
           type: "send_command",
