@@ -265,7 +265,7 @@ export interface CliDeps {
   /** Used by every interactive mode (server/local/connect). */
   createAgentLoop: (config: DhConfig, systemPrompt: string) => AgentLoopHandle;
   createServer: (options: DhServerOptions) => DhServerLike;
-  startTui: (baseUrl: string) => Promise<void>;
+  startTui: (baseUrl: string, token?: string) => Promise<void>;
   serveWebUi: (options: {
     port: number;
     targetBaseUrl: string;
@@ -283,7 +283,7 @@ function defaultDeps(): CliDeps {
     createAgentLoop: (config, systemPrompt) =>
       new AgentRuntimeLoopAdapter({ config, systemPrompt }),
     createServer: (options) => new DhServer(options),
-    startTui: (baseUrl) => startTuiClient(baseUrl),
+    startTui: (baseUrl, token) => startTuiClient(baseUrl, token),
     serveWebUi: (options) => serveWebUiClient(options),
     io: {
       stdout: (message) => console.log(message),
@@ -341,7 +341,7 @@ async function runInteractiveMode(
         io.stdout(`dh: web UI ready at ${handle.url} (connected to ${targetBaseUrl}).`);
         return ExitCode.Success;
       }
-      await deps.startTui(targetBaseUrl);
+      await deps.startTui(targetBaseUrl, config.security?.token);
       return ExitCode.Success;
     }
 
@@ -374,7 +374,7 @@ async function runInteractiveMode(
       return ExitCode.Success;
     }
 
-    await deps.startTui(baseUrl);
+    await deps.startTui(baseUrl, config.security?.token);
     server.stop();
     return ExitCode.Success;
   } catch (err) {
