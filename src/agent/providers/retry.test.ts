@@ -73,7 +73,7 @@ describe("withRetry", () => {
     expect(calls).toBe(3);
   });
 
-  test("aborting during the retry delay stops further attempts", async () => {
+  test("an already-aborted signal at the moment the retry delay starts rejects immediately", async () => {
     let calls = 0;
     const controller = new AbortController();
     const attempt = async () => {
@@ -90,5 +90,43 @@ describe("withRetry", () => {
       ),
     ).rejects.toThrow();
     expect(calls).toBe(1);
+  });
+
+  test("aborting while genuinely still waiting mid-delay stops further attempts", async () => {
+    let calls = 0;
+    const controller = new AbortController();
+    const attempt = async () => {
+      calls += 1;
+      throw new Error("retryable failure");
+    };
+    // Abort fires asynchronously, after sleep()'s timer has already started waiting (not
+    // synchronously before it, unlike the "already-aborted" test above) — exercises the
+    // addEventListener("abort", ...) callback path in retry.ts's sleep(), not just its
+    // upfront `signal?.aborted` check.
+    setTimeout(() => controller.abort(), 5);
+    await expect(
+      withRetry(
+        attempt,
+        () => true,
+        { maxAttempts: 5, baseDelayMs: 1000, maxDelayMs: 1000 },
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(calls).toBe(1);
+  });
+
+  test("maxAttempts: 0 rejects without ever calling attempt() (defensive fallback path)", async () => {
+    let calls = 0;
+    await expect(
+      withRetry(
+        async () => {
+          calls += 1;
+          return "unreachable";
+        },
+        () => true,
+        { maxAttempts: 0 },
+      ),
+    ).rejects.toBeUndefined();
+    expect(calls).toBe(0);
   });
 });

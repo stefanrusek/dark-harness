@@ -72,19 +72,12 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0001](../DH-0001-task-failed-marker-reliability.md) | `TASK_FAILED` marker is not reliably emitted despite being taught 🔒 | bug | stefan |
-| [DH-0009](../DH-0009-provider-retry-backoff-and-error-taxonomy.md) | No provider-level retry/backoff, and no error taxonomy, for transient failures | bug | stefan |
-| [DH-0011](../DH-0011-no-signal-handling-or-process-group-reaping.md) | No SIGTERM/SIGINT handling anywhere, and Bash tool doesn't reap grandchild processes | bug | stefan |
-| [DH-0013](../DH-0013-no-cost-turn-time-or-fanout-budgets.md) | No wall-clock, cost/token, or sub-agent fan-out budget — only a turn-count cap exists | feature | stefan |
-| [DH-0014](../DH-0014-read-tool-unbounded-memory-for-large-files.md) | `Read` tool buffers the entire file into memory before any size/line limiting applies | bug | stefan |
-| [DH-0015](../DH-0015-config-validation-gaps.md) | Several `dh.json` config-loading edge cases are unhandled or under-validated | bug | stefan |
-| [DH-0016](../DH-0016-skill-system-loading-and-discovery-gaps.md) | The bundled `cli-tools` skill is unreachable via the `Skill` tool, plus several other skill-system gaps | bug | stefan |
-| [DH-0017](../DH-0017-error-swallowing-and-status-inconsistencies.md) | Harness-level errors are silently discarded in one path, and "stopped" vs "failed" agent status can flip depending on event ordering | bug | stefan |
-| [DH-0054](../DH-0054-no-first-class-grep-glob-tools.md) | No first-class Grep/Glob tools — all search is delegated informally to Bash | feature | stefan |
 
 ## Recently Closed
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0054](../DH-0054-no-first-class-grep-glob-tools.md) | No first-class Grep/Glob tools — all search is delegated informally to Bash | done |
 | [DH-0042](../DH-0042-readme-config-reference-gaps.md) | README's config reference omits `options.maxTurns` and per-model pricing fields, with no automated check against `src/contracts/config.ts` | done |
 | [DH-0041](../DH-0041-missing-user-facing-docs-bundle.md) | A cluster of user-facing documentation is entirely missing | done |
 | [DH-0039](../DH-0039-git-credentials-and-workspace-convention-undocumented.md) | Git credential provisioning and workspace-directory convention are entirely undocumented | done |
@@ -99,4 +92,3 @@ source: tracking/
 | [DH-0024](../DH-0024-sse-reconnect-lacks-backoff-and-gap-indication.md) | Both TUI and Web SSE clients reconnect on a fixed delay with no backoff, and give no indication of a missed-event gap or session restart | done |
 | [DH-0021](../DH-0021-tar-bundle-name-length-limit-breaks-download.md) | `buildTar` throws and kills the entire session-bundle download if any single agent's encoded id exceeds 100 bytes | done |
 | [DH-0019](../DH-0019-sse-event-buffer-robustness.md) | SSE/EventBuffer has no backpressure handling and silently serves a gap when `Last-Event-ID` was evicted | done |
-| [DH-0018](../DH-0018-system-prompt-discipline-gaps.md) | `systemPrompt` override silently drops the `TASK_FAILED`/logging/discipline contract, and the prompt lacks guidance for unattended dead-ends | done |

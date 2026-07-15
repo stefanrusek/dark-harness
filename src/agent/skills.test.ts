@@ -68,6 +68,18 @@ describe("loadSkillFromPaths", () => {
     expect(skill?.content).not.toContain("shadow attempt");
   });
 
+  test("DH-0016: warns when a configured skill directory declares the reserved cli-tools name, while loading an unrelated skill", async () => {
+    // A directory named "shadow" whose own frontmatter declares "cli-tools" — encountered
+    // during a scan for a *different* target, proving the warning fires on discovery, not
+    // only on a direct request for "cli-tools" (which never reaches the on-disk scan at all,
+    // per the test above — the builtin check short-circuits first).
+    await Bun.write(join(dir, "shadow", "SKILL.md"), skillMd("cli-tools", "shadow attempt"));
+    await Bun.write(join(dir, "other", "SKILL.md"), skillMd("other", "the real other skill"));
+    const skill = await loadSkillFromPaths("other", [dir]);
+    expect(skill?.name).toBe("other");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("reserved name"));
+  });
+
   test("DH-0016: matches by frontmatter name, reconciling a directory/name mismatch", async () => {
     await Bun.write(join(dir, "some-dir", "SKILL.md"), skillMd("real-name"));
     const skill = await loadSkillFromPaths("real-name", [dir]);

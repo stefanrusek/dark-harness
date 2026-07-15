@@ -367,6 +367,76 @@ describe("validateConfig — rejections", () => {
     ).toThrow(/mcpServers\["foo"\] has unknown key "enviroment"/);
   });
 
+  test("DH-0013: accepts session budget options", () => {
+    const config = validateConfig(
+      baseConfig({
+        options: {
+          defaultModel: "sonnet",
+          maxCostUsd: 5.5,
+          maxTotalTokens: 100000,
+          maxWallClockMs: 3600000,
+          maxConcurrentAgents: 10,
+          maxAgentDepth: 3,
+        },
+      }),
+    );
+    expect(config.options.maxCostUsd).toBe(5.5);
+    expect(config.options.maxTotalTokens).toBe(100000);
+    expect(config.options.maxWallClockMs).toBe(3600000);
+    expect(config.options.maxConcurrentAgents).toBe(10);
+    expect(config.options.maxAgentDepth).toBe(3);
+  });
+
+  test("DH-0013: session budget options are omitted (not defaulted) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.options.maxCostUsd).toBeUndefined();
+    expect(config.options.maxTotalTokens).toBeUndefined();
+    expect(config.options.maxWallClockMs).toBeUndefined();
+    expect(config.options.maxConcurrentAgents).toBeUndefined();
+    expect(config.options.maxAgentDepth).toBeUndefined();
+  });
+
+  test("DH-0013: rejects a non-positive/non-numeric maxCostUsd (non-integer allowed)", () => {
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxCostUsd: 0 } })),
+    ).toThrow(/options.maxCostUsd must be a positive number/);
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxCostUsd: "free" } })),
+    ).toThrow(/options.maxCostUsd must be a positive number/);
+    // Unlike the integer-only budgets below, a fractional dollar amount is valid.
+    const config = validateConfig(
+      baseConfig({ options: { defaultModel: "sonnet", maxCostUsd: 1.25 } }),
+    );
+    expect(config.options.maxCostUsd).toBe(1.25);
+  });
+
+  test("DH-0013: rejects a non-positive-integer maxTotalTokens", () => {
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxTotalTokens: -1 } })),
+    ).toThrow(/options.maxTotalTokens must be a positive integer/);
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxTotalTokens: 1.5 } })),
+    ).toThrow(/options.maxTotalTokens must be a positive integer/);
+  });
+
+  test("DH-0013: rejects a non-positive-integer maxWallClockMs", () => {
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxWallClockMs: 0 } })),
+    ).toThrow(/options.maxWallClockMs must be a positive integer/);
+  });
+
+  test("DH-0013: rejects a non-positive-integer maxConcurrentAgents", () => {
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxConcurrentAgents: 0 } })),
+    ).toThrow(/options.maxConcurrentAgents must be a positive integer/);
+  });
+
+  test("DH-0013: rejects a non-positive-integer maxAgentDepth", () => {
+    expect(() =>
+      validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxAgentDepth: -2 } })),
+    ).toThrow(/options.maxAgentDepth must be a positive integer/);
+  });
+
   test("rejects a negative models[].inputPricePerMToken", () => {
     expect(() =>
       validateConfig(

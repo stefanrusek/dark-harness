@@ -1122,6 +1122,59 @@ describe("main — default io wired to console/process.exit", () => {
     }
   });
 
+  // DH-0011: exercises the REAL defaultDeps().installSignalHandlers implementation (not the
+  // fakeInstallSignalHandlers() test double every other test uses) — but stubs process.on/
+  // process.off for its duration so no real listener is ever registered on the actual
+  // process, keeping this test as safe as every other one in the file while still covering
+  // the production code path.
+  test("the default installSignalHandlers dep registers real process.on listeners and fires onSignal at most once", async () => {
+    const originalOn = process.on.bind(process);
+    const originalOff = process.off.bind(process);
+    const registered: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
+    const removed: string[] = [];
+    // biome-ignore lint/suspicious/noExplicitAny: stubbing process.on/off for this test only
+    (process as any).on = (event: string, handler: (...args: unknown[]) => void) => {
+      registered.push({ event, handler });
+      return process;
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: stubbing process.on/off for this test only
+    (process as any).off = (event: string) => {
+      removed.push(event);
+      return process;
+    };
+    try {
+      const io = fakeIo();
+      let signalsReceived = 0;
+      let stopAgentCalled = false;
+      await main(["--server"], {
+        loadConfig: async () => TEST_CONFIG,
+        createAgentLoop: () =>
+          fakeAgentLoop({
+            stopAgent: () => {
+              stopAgentCalled = true;
+            },
+          }),
+        createServer: () => fakeServer(),
+        io,
+      });
+      expect(registered.map((r) => r.event).sort()).toEqual(["SIGINT", "SIGTERM"]);
+      const sigterm = registered.find((r) => r.event === "SIGTERM");
+      expect(sigterm).toBeDefined();
+      // Simulate the real signal firing twice — proves "at most once" (the second call is a
+      // no-op, letting a second real signal fall through to the OS default per the dep's own
+      // doc comment) without ever sending a real OS signal.
+      sigterm?.handler();
+      sigterm?.handler();
+      signalsReceived += 1;
+      expect(signalsReceived).toBe(1);
+      expect(stopAgentCalled).toBe(true);
+      expect(io.stderrLines.filter((l) => l.includes("SIGTERM"))).toHaveLength(1);
+    } finally {
+      process.on = originalOn;
+      process.off = originalOff;
+    }
+  });
+
   test("the default stderr and exit deps write to console.error and process.exit", async () => {
     const errorSpy = spyOn(console, "error").mockImplementation(() => {});
     const originalExit = process.exit;
