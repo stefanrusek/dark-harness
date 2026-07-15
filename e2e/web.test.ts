@@ -119,22 +119,15 @@ describe("web UI (dh --web) in a real headless browser", () => {
 
     // Log download: per-agent JSONL.
     //
-    // CONFIRMED DEFECT (found by this real-browser test, not visible against Node's
+    // FIXED DEFECT (originally found by this real-browser test, not visible against Node's
     // unrestricted `fetch` in e2e/server-protocol.test.ts): `src/server/server.ts`'s
-    // `CORS_HEADERS` never sends `Access-Control-Expose-Headers: Content-Disposition`, so a
+    // `CORS_HEADERS` didn't send `Access-Control-Expose-Headers: Content-Disposition`, so a
     // real browser's cross-origin `fetch` (the web UI and the dh server are different
-    // origins/ports even in local `--web` mode, per ADR 0003) hides the
-    // `Content-Disposition` response header from JS entirely — `res.headers.get(...)`
-    // returns null. `src/web/client/download.ts`'s `filenameFromContentDisposition` then
-    // always falls back to `suggestedLogFilename` (`src/web/client/format.ts`), so the
-    // server's real suggested filename is never actually used by a real browser. For the
-    // per-agent case this fallback (`${agentId}.jsonl`) happens to coincide with the
-    // server's own naming, masking the bug; for the full-bundle case it doesn't — the
-    // browser always saves `dh-session-logs.tar.gz` (a generic, session-id-less name with
-    // the wrong extension: the real payload is a plain, non-gzipped tar) instead of the
-    // server's real `session-<sessionId>.tar`. Flagged in docs/handoffs/e2e.md's status log
-    // as a Server-domain fix (add the CORS expose-headers entry) — asserting the actual
-    // current behavior here, not the intended one, so this suite stays honest.
+    // origins/ports even in local `--web` mode, per ADR 0003) hid the `Content-Disposition`
+    // response header from JS entirely — `res.headers.get(...)` returned null and
+    // `src/web/client/download.ts`'s `filenameFromContentDisposition` always fell back to a
+    // generic client-computed name. Now that the header is exposed, the browser uses the
+    // server's real suggested filename — asserting that here.
     const [agentDownload] = await Promise.all([
       page.waitForEvent("download"),
       page.getByRole("button", { name: "Download log" }).click(),
@@ -145,20 +138,20 @@ describe("web UI (dh --web) in a real headless browser", () => {
     const firstLine = JSON.parse(readFileSync(agentLogPath, "utf8").split("\n")[0] ?? "{}");
     expect(firstLine).toMatchObject({ type: "header", agentId: "agent-root" });
 
-    // Log download: full session bundle (tar) — see the defect note above for why the
-    // filename doesn't match the server's real `Content-Disposition` header.
+    // Log download: full session bundle (tar) — this is where the CORS fix actually changes
+    // behavior visibly: a generic, session-id-less filename would mask nothing here (unlike
+    // the per-agent case above, which coincidentally matched either way).
     const [bundleDownload] = await Promise.all([
       page.waitForEvent("download"),
       page.getByRole("button", { name: "Download session bundle" }).click(),
     ]);
-    expect(bundleDownload.suggestedFilename()).toBe("dh-session-logs.tar.gz");
+    expect(bundleDownload.suggestedFilename()).toMatch(/^session-[0-9a-f-]+\.tar$/);
     const bundlePath = await bundleDownload.path();
     if (!bundlePath) throw new Error("bundle download did not materialize a local file");
     const bundleBytes = readFileSync(bundlePath);
     expect(bundleBytes.byteLength).toBeGreaterThan(0);
-    // The actual bytes on disk are still the server's real (non-gzip) tar payload — only the
-    // browser-visible filename is wrong. A tar's first 512-byte header block ends with a
-    // null-padded name field; the session's log filename should appear near the start.
+    // A tar's first 512-byte header block ends with a null-padded name field; the session's
+    // log filename should appear near the start.
     expect(bundleBytes.toString("utf8", 0, 100)).toContain("agent-root");
   }, 30_000);
 });

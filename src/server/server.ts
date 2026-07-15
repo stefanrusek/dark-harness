@@ -31,6 +31,11 @@ const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
   "access-control-allow-headers": "Authorization, Content-Type, Last-Event-ID",
+  // Cross-origin fetch() can't read a response header unless it's explicitly exposed — the
+  // web UI needs Content-Disposition to name downloaded log files correctly (ADR 0003: the
+  // web UI and dh server are different origins even in local --web mode). Found by the E2E
+  // domain's real cross-origin browser test; see docs/handoffs/e2e.md's status log.
+  "access-control-expose-headers": "Content-Disposition",
   "access-control-max-age": "86400",
 };
 
