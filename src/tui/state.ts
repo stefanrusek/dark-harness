@@ -42,10 +42,12 @@ export function initialState(size: { rows: number; cols: number }): TuiState {
     rootAgentId: null,
     tree: null,
     input: "",
+    inputCursor: 0,
     connection: "connecting",
     sessionEnded: null,
     size,
     statusMessage: null,
+    reconnectNotice: null,
     now: Date.now(),
   };
 }
@@ -154,6 +156,11 @@ export function reducer(state: TuiState, action: Action): ReducerResult {
       return noEffects({ ...state, size: { rows: action.rows, cols: action.cols } });
     case "connection":
       return noEffects({ ...state, connection: action.status });
+    case "reconnected":
+      return noEffects({
+        ...state,
+        reconnectNotice: "Reconnected — history may be incomplete.",
+      });
     case "key":
       return handleKey(state, action.key);
     case "tick":
@@ -231,18 +238,61 @@ function handleKey(state: TuiState, key: KeyEvent): ReducerResult {
   }
 }
 
+/** Insert `text` into `input` at `cursor`, returning the new string and the cursor position
+ * just past the inserted text. Shared by plain character entry and paste (DH-0026) so both
+ * go through one code path rather than duplicating splice logic. */
+function insertAt(input: string, cursor: number, text: string): { input: string; cursor: number } {
+  return {
+    input: input.slice(0, cursor) + text + input.slice(cursor),
+    cursor: cursor + text.length,
+  };
+}
+
 function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
+  // Left-arrow is only reserved for "open the agent tree" when the input box is empty —
+  // otherwise it repositions the cursor within typed text like every other editor (DH-0026).
   if (key.kind === "left" && state.input === "") {
     return {
       state: { ...state, view: { kind: "tree", selectedIndex: 0 }, statusMessage: null },
       effects: [{ type: "send_command", command: { type: "request_agent_tree" } }],
     };
   }
+  if (key.kind === "left") {
+    return noEffects({ ...state, inputCursor: Math.max(0, state.inputCursor - 1) });
+  }
+  if (key.kind === "right") {
+    return noEffects({
+      ...state,
+      inputCursor: Math.min(state.input.length, state.inputCursor + 1),
+    });
+  }
+  if (key.kind === "home") {
+    return noEffects({ ...state, inputCursor: 0 });
+  }
+  if (key.kind === "end") {
+    return noEffects({ ...state, inputCursor: state.input.length });
+  }
   if (key.kind === "char") {
-    return noEffects({ ...state, input: state.input + key.value });
+    const { input, cursor } = insertAt(state.input, state.inputCursor, key.value);
+    return noEffects({ ...state, input, inputCursor: cursor });
+  }
+  if (key.kind === "paste") {
+    // Literal insert, including any embedded newlines — never re-parsed as `enter`
+    // keystrokes, which is exactly the fragmentation bug DH-0026 exists to fix.
+    const { input, cursor } = insertAt(state.input, state.inputCursor, key.text);
+    return noEffects({ ...state, input, inputCursor: cursor });
   }
   if (key.kind === "backspace") {
-    return noEffects({ ...state, input: state.input.slice(0, -1) });
+    if (state.inputCursor === 0) return noEffects(state);
+    const input =
+      state.input.slice(0, state.inputCursor - 1) + state.input.slice(state.inputCursor);
+    return noEffects({ ...state, input, inputCursor: state.inputCursor - 1 });
+  }
+  if (key.kind === "delete") {
+    if (state.inputCursor >= state.input.length) return noEffects(state);
+    const input =
+      state.input.slice(0, state.inputCursor) + state.input.slice(state.inputCursor + 1);
+    return noEffects({ ...state, input });
   }
   if (key.kind === "enter") {
     if (state.input.trim() === "") return noEffects(state);
@@ -252,7 +302,7 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
     const message = state.input;
     const withUserTurn = appendUserTurn(state, state.rootAgentId, state.now, message);
     return {
-      state: { ...withUserTurn, input: "", statusMessage: null },
+      state: { ...withUserTurn, input: "", inputCursor: 0, statusMessage: null },
       effects: [
         {
           type: "send_command",
@@ -262,8 +312,10 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
     };
   }
   if (key.kind === "escape") {
-    return noEffects({ ...state, statusMessage: null });
+    return noEffects({ ...state, statusMessage: null, reconnectNotice: null });
   }
+  // "tab" is intentionally a no-op here — reserved for a possible future completion feature,
+  // not a dead/unhandled key (DH-0026 flagged it as unclear; this makes the intent explicit).
   return noEffects(state);
 }
 

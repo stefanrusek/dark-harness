@@ -59,10 +59,23 @@ export interface TuiState {
   rootAgentId: string | null;
   tree: AgentTreeNode[] | null;
   input: string;
+  /** Index into `input` where the next typed character / backspace / delete / paste applies.
+   * Always in `[0, input.length]`. Introduced for DH-0026: previously the input box only
+   * ever appended to (or trimmed from) the end of `input`, so there was no way to reposition
+   * within typed text — left/right/Home/End now move this instead. */
+  inputCursor: number;
   connection: ConnectionStatus;
   sessionEnded: { exitCode: number } | null;
   size: { rows: number; cols: number };
   statusMessage: string | null;
+  /** Set when the SSE client reconnects after one or more failed attempts (DH-0024). Client
+   * has no way yet to know for certain whether it actually missed events during the drop
+   * (that requires a server-side gap signal — see DH-0019, not yet landed) or whether the
+   * server itself restarted mid-session (a brand new event stream that happens to look like
+   * a normal resume), so this is an honest best-effort "something happened, take a look"
+   * flag rather than a precise diagnosis. Cleared on the next `enter`/`escape` in the root
+   * view, same lifecycle as `statusMessage`. */
+  reconnectNotice: string | null;
   /** Current wall-clock time (epoch ms), as known to the reducer. Set by `initialState`
    * (real `Date.now()`) and advanced only via the `tick` action — never read implicitly at
    * render time — so `render.ts` stays a pure function of state and tests can inject an
@@ -78,6 +91,7 @@ export type Action =
   | { type: "key"; key: KeyEvent }
   | { type: "resize"; rows: number; cols: number }
   | { type: "connection"; status: ConnectionStatus }
+  | { type: "reconnected" }
   | { type: "tick"; now: number };
 
 export type Effect = { type: "send_command"; command: ClientCommand } | { type: "quit" };

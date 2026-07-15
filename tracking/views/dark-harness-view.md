@@ -81,8 +81,6 @@ source: tracking/
 | [DH-0017](../DH-0017-error-swallowing-and-status-inconsistencies.md) | Harness-level errors are silently discarded in one path, and "stopped" vs "failed" agent status can flip depending on event ordering | bug | stefan |
 | [DH-0018](../DH-0018-system-prompt-discipline-gaps.md) | `systemPrompt` override silently drops the `TASK_FAILED`/logging/discipline contract, and the prompt lacks guidance for unattended dead-ends | bug | stefan |
 | [DH-0024](../DH-0024-sse-reconnect-lacks-backoff-and-gap-indication.md) | Both TUI and Web SSE clients reconnect on a fixed delay with no backoff, and give no indication of a missed-event gap or session restart | bug | stefan |
-| [DH-0026](../DH-0026-tui-input-editing-gaps.md) | TUI's input box has no cursor movement, no bracketed-paste support, and two dead keys | bug | stefan |
-| [DH-0027](../DH-0027-tui-tree-view-scroll-follows-selection-bug.md) | TUI's agent tree view doesn't scroll to follow selection — the highlighted entry can scroll off-screen with no way to see it | bug | stefan |
 | [DH-0029](../DH-0029-web-accessibility-and-error-surfacing-gaps.md) | Web UI has no keyboard-reachable agent list, no ARIA live regions, a missing "stopped" status color, and both clients drop errors after a few seconds with no history | bug | stefan |
 | [DH-0033](../DH-0033-mock-provider-cannot-simulate-errors-or-streaming.md) | The e2e mock provider can't simulate provider errors or streaming, so the harness's failure-handling path is completely untested end-to-end | bug | stefan |
 | [DH-0034](../DH-0034-e2e-flakiness-risks-and-missing-connect-web-coverage.md) | E2E has a port-allocation race, an ordering-dependent cleanup convention, and no coverage of `dh --connect --web` | bug | stefan |
@@ -98,6 +96,8 @@ source: tracking/
 | [DH-0036](../DH-0036-no-container-deployment-reference.md) | No reference Dockerfile or container/deployment documentation for the canonical dark-factory use case | done |
 | [DH-0032](../DH-0032-release-binaries-untested-on-real-target-os.md) | Windows and macOS release binaries are cross-compiled but never actually executed anywhere, and the e2e-tested binary isn't the same artifact as what ships | done |
 | [DH-0030](../DH-0030-ci-coverage-gate-text-parsing-fragility.md) | CI's coverage/completeness/e2e gates rely on fragile text-parsing and a fail-open conditional, not structured checks | done |
+| [DH-0027](../DH-0027-tui-tree-view-scroll-follows-selection-bug.md) | TUI's agent tree view doesn't scroll to follow selection — the highlighted entry can scroll off-screen with no way to see it | done |
+| [DH-0026](../DH-0026-tui-input-editing-gaps.md) | TUI's input box has no cursor movement, no bracketed-paste support, and two dead keys | done |
 | [DH-0021](../DH-0021-tar-bundle-name-length-limit-breaks-download.md) | `buildTar` throws and kills the entire session-bundle download if any single agent's encoded id exceeds 100 bytes | done |
 | [DH-0019](../DH-0019-sse-event-buffer-robustness.md) | SSE/EventBuffer has no backpressure handling and silently serves a gap when `Last-Event-ID` was evicted | done |
 | [DH-0008](../DH-0008-adopt-spile-ops-skill.md) | Adopt (or build) a `spile-ops` skill for mechanical ticket operations | done |

@@ -289,4 +289,167 @@ describe("runSseClient", () => {
 
     expect(call).toBe(2);
   });
+
+  test("backs off with growing delay on repeated failures (DH-0024)", async () => {
+    const controller = new AbortController();
+    const delays: number[] = [];
+    let call = 0;
+
+    const fetchImpl = asFetch(async () => {
+      call += 1;
+      if (call <= 3) return new Response(null, { status: 500 });
+      controller.abort();
+      return streamResponse([]);
+    });
+
+    await runSseClient({
+      baseUrl: "http://x",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      reconnectDelayMs: 1000,
+      randomImpl: () => 1, // full jitter at its max — makes the cap directly observable
+      delayImpl: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    // 1st failure: base * 2^0 = 1000. 2nd: base * 2^1 = 2000. 3rd: base * 2^2 = 4000.
+    expect(delays).toEqual([1000, 2000, 4000]);
+  });
+
+  test("backoff delay never exceeds the cap even after many consecutive failures", async () => {
+    const controller = new AbortController();
+    const delays: number[] = [];
+    let call = 0;
+
+    const fetchImpl = asFetch(async () => {
+      call += 1;
+      if (call <= 8) return new Response(null, { status: 500 });
+      controller.abort();
+      return streamResponse([]);
+    });
+
+    await runSseClient({
+      baseUrl: "http://x",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      reconnectDelayMs: 1000,
+      randomImpl: () => 1,
+      delayImpl: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    expect(Math.max(...delays)).toBe(30_000);
+    expect(delays.every((ms) => ms <= 30_000)).toBe(true);
+  });
+
+  test("jitter scales the delay down when randomImpl returns less than 1", async () => {
+    const controller = new AbortController();
+    const delays: number[] = [];
+    let call = 0;
+
+    const fetchImpl = asFetch(async () => {
+      call += 1;
+      if (call === 1) return new Response(null, { status: 500 });
+      controller.abort();
+      return streamResponse([]);
+    });
+
+    await runSseClient({
+      baseUrl: "http://x",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      reconnectDelayMs: 1000,
+      randomImpl: () => 0.25,
+      delayImpl: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    expect(delays).toEqual([250]);
+  });
+
+  test("does not call onReconnected for the first, successful connection of the session", async () => {
+    const controller = new AbortController();
+    let reconnectedCalls = 0;
+    const fetchImpl = asFetch(async () => {
+      controller.abort();
+      return streamResponse([]);
+    });
+
+    await runSseClient({
+      baseUrl: "http://x",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      onReconnected: () => {
+        reconnectedCalls += 1;
+      },
+      delayImpl: noDelay,
+    });
+
+    expect(reconnectedCalls).toBe(0);
+  });
+
+  test("calls onReconnected once a connection succeeds after one or more failures", async () => {
+    const controller = new AbortController();
+    let reconnectedCalls = 0;
+    let call = 0;
+
+    const fetchImpl = asFetch(async () => {
+      call += 1;
+      if (call === 1) return new Response(null, { status: 500 });
+      controller.abort();
+      return streamResponse([]);
+    });
+
+    await runSseClient({
+      baseUrl: "http://x",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      onReconnected: () => {
+        reconnectedCalls += 1;
+      },
+      delayImpl: noDelay,
+    });
+
+    expect(reconnectedCalls).toBe(1);
+  });
+
+  test("a second successful reconnect after a further failure calls onReconnected again", async () => {
+    const controller = new AbortController();
+    let reconnectedCalls = 0;
+    let call = 0;
+
+    const fetchImpl = asFetch(async () => {
+      call += 1;
+      // Fail, succeed-then-close (clean), fail again, succeed and stop.
+      if (call === 1) return new Response(null, { status: 500 });
+      if (call === 2) return streamResponse([]);
+      if (call === 3) return new Response(null, { status: 500 });
+      controller.abort();
+      return streamResponse([]);
+    });
+
+    await runSseClient({
+      baseUrl: "http://x",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      onReconnected: () => {
+        reconnectedCalls += 1;
+      },
+      delayImpl: noDelay,
+    });
+
+    expect(reconnectedCalls).toBe(2);
+  });
 });

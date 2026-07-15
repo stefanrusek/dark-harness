@@ -108,7 +108,11 @@ function headerRows(state: TuiState, cols: number): string[] {
   const sessionSuffix = state.sessionEnded
     ? `  session ended (exit ${state.sessionEnded.exitCode})`
     : "";
-  const title = `Dark Harness — ${viewLabel(state)} — ${state.connection}${sessionSuffix}`;
+  // Shown right in the always-visible header, not just the per-view footer hint, so a
+  // reconnect notice (DH-0024) can't be missed just because the operator is deep in the
+  // tree/agent view when it fires.
+  const reconnectSuffix = state.reconnectNotice ? `  ⚠ ${state.reconnectNotice}` : "";
+  const title = `Dark Harness — ${viewLabel(state)} — ${state.connection}${sessionSuffix}${reconnectSuffix}`;
   const separator = "─".repeat(Math.max(1, cols));
   return [title, separator];
 }
@@ -127,7 +131,13 @@ function renderRoot(
     ? tailLines(renderTranscript(agent.transcript, cols), contentRows)
     : tailLines(["Waiting for root agent to start…"], contentRows);
   const hint = state.statusMessage ?? "[Enter] send   [←] agent tree   [Ctrl+C] quit";
-  const inputLine = `> ${state.input}${CURSOR_MARKER}`;
+  // Cursor marker renders at `inputCursor`, not always at the end (DH-0026 added in-text
+  // cursor movement). Embedded newlines from a bracketed-paste (DH-0026) are shown as a
+  // visible "⏎" glyph on this one-line display only — the underlying `state.input` keeps the
+  // real newline characters, which is what actually gets sent as the message.
+  const before = state.input.slice(0, state.inputCursor).replace(/\n/g, "⏎");
+  const after = state.input.slice(state.inputCursor).replace(/\n/g, "⏎");
+  const inputLine = `> ${before}${CURSOR_MARKER}${after}`;
   return { content: padRows(content, contentRows), footer: [hint, inputLine] };
 }
 
@@ -138,20 +148,42 @@ function renderTree(
 ): { content: string[]; footer: string[] } {
   const flat = flattenTree(state.tree ?? []);
   const selectedIndex = state.view.kind === "tree" ? state.view.selectedIndex : -1;
-  const lines =
-    flat.length === 0
-      ? ["No agents yet."]
-      : flat.map((entry, index) => {
-          const marker = index === selectedIndex ? "> " : "  ";
-          const indent = "  ".repeat(entry.depth);
-          const glyph = colorizeStatus(entry.node.status, "●");
-          const label = `${entry.node.agentId} (${entry.node.model})`;
-          const lastEventAt = state.agents.get(entry.node.agentId)?.lastEventAt;
-          const elapsed =
-            lastEventAt === undefined ? "" : `  [${formatElapsed(state.now - lastEventAt)}]`;
-          return `${marker}${indent}${glyph} ${label}${elapsed}`;
-        });
-  const content = tailLines(wrapText(lines.join("\n"), cols), contentRows);
+  if (flat.length === 0) {
+    return {
+      content: padRows(["No agents yet."], contentRows),
+      footer: [state.statusMessage ?? "[↑/↓] navigate   [Enter] open   [Esc] back"],
+    };
+  }
+  const entryTexts = flat.map((entry, index) => {
+    const marker = index === selectedIndex ? "> " : "  ";
+    const indent = "  ".repeat(entry.depth);
+    const glyph = colorizeStatus(entry.node.status, "●");
+    const label = `${entry.node.agentId} (${entry.node.model})`;
+    const lastEventAt = state.agents.get(entry.node.agentId)?.lastEventAt;
+    const elapsed =
+      lastEventAt === undefined ? "" : `  [${formatElapsed(state.now - lastEventAt)}]`;
+    return `${marker}${indent}${glyph} ${label}${elapsed}`;
+  });
+  // Wrap each entry independently (rather than the old approach of wrapping the whole
+  // joined string) so the start line of every entry is known — needed to compute a
+  // selection-following scroll window below (DH-0027).
+  const entryLineRuns = entryTexts.map((text) => wrapText(text, cols));
+  const allLines: string[] = [];
+  const entryStartLine: number[] = [];
+  for (const run of entryLineRuns) {
+    entryStartLine.push(allLines.length);
+    allLines.push(...run);
+  }
+  const maxScroll = Math.max(0, allLines.length - contentRows);
+  const selectedStart = entryStartLine[selectedIndex] ?? 0;
+  // Center the selection in the viewport rather than bottom-anchoring the whole tree
+  // (the old `tailLines` behavior) — that anchoring let the highlighted entry scroll
+  // off-screen entirely the moment the operator moved selection above the visible top,
+  // with no indication of where it went. This is a pure function of `selectedIndex` alone,
+  // so no extra "scroll position" state is needed — render.ts stays a pure `TuiState ->
+  // string[]` function.
+  const scrollTop = Math.min(maxScroll, Math.max(0, selectedStart - Math.floor(contentRows / 2)));
+  const content = allLines.slice(scrollTop, scrollTop + contentRows);
   const hint = state.statusMessage ?? "[↑/↓] navigate   [Enter] open   [Esc] back";
   return { content: padRows(content, contentRows), footer: [hint] };
 }

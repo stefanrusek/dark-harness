@@ -413,6 +413,12 @@ describe("reducer: command_error / resize / connection", () => {
     const { state } = reducer(initialState(size()), { type: "connection", status: "open" });
     expect(state.connection).toBe("open");
   });
+
+  test("reconnected sets a visible notice that history may be incomplete (DH-0024)", () => {
+    const { state, effects } = reducer(initialState(size()), { type: "reconnected" });
+    expect(state.reconnectNotice).toBe("Reconnected — history may be incomplete.");
+    expect(effects).toEqual([]);
+  });
 });
 
 describe("reducer: key handling — global", () => {
@@ -439,26 +445,147 @@ describe("reducer: key handling — root view", () => {
     expect(effects).toEqual([{ type: "send_command", command: { type: "request_agent_tree" } }]);
   });
 
-  test("left-arrow with non-empty input is a no-op", () => {
+  test("left-arrow with non-empty input moves the cursor left instead of opening the tree", () => {
     let state = initialState(size());
-    state = { ...state, input: "hi" };
+    state = { ...state, input: "hi", inputCursor: 2 };
     const { state: next, effects } = reducer(state, { type: "key", key: { kind: "left" } });
     expect(next.view).toEqual({ kind: "root" });
+    expect(next.inputCursor).toBe(1);
     expect(effects).toEqual([]);
   });
 
-  test("typing characters appends to input", () => {
+  test("left-arrow clamps the cursor at the start of the input", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 0 };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "left" } });
+    expect(next.inputCursor).toBe(0);
+  });
+
+  test("right-arrow moves the cursor right within the input (previously a dead key)", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 0 };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "right" } });
+    expect(next.inputCursor).toBe(1);
+  });
+
+  test("right-arrow clamps the cursor at the end of the input", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 2 };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "right" } });
+    expect(next.inputCursor).toBe(2);
+  });
+
+  test("home moves the cursor to the start of the input", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 2 };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "home" } });
+    expect(next.inputCursor).toBe(0);
+  });
+
+  test("end moves the cursor to the end of the input", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 0 };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "end" } });
+    expect(next.inputCursor).toBe(2);
+  });
+
+  test("typing characters appends to input and advances the cursor", () => {
     let state = initialState(size());
     ({ state } = reducer(state, { type: "key", key: { kind: "char", value: "h" } }));
     ({ state } = reducer(state, { type: "key", key: { kind: "char", value: "i" } }));
     expect(state.input).toBe("hi");
+    expect(state.inputCursor).toBe(2);
   });
 
-  test("backspace removes the last character", () => {
+  test("typing a character mid-string inserts at the cursor rather than appending", () => {
     let state = initialState(size());
-    state = { ...state, input: "hi" };
+    state = { ...state, input: "hi", inputCursor: 1 };
+    const { state: next } = reducer(state, {
+      type: "key",
+      key: { kind: "char", value: "X" },
+    });
+    expect(next.input).toBe("hXi");
+    expect(next.inputCursor).toBe(2);
+  });
+
+  test("delete removes the character at the cursor, not before it", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 0 };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "delete" } });
+    expect(next.input).toBe("i");
+    expect(next.inputCursor).toBe(0);
+  });
+
+  test("delete at the end of the input is a no-op", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 2 };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "delete" } });
+    expect(next.input).toBe("hi");
+  });
+
+  test("escape in the root view clears both statusMessage and reconnectNotice", () => {
+    let state = initialState(size());
+    state = {
+      ...state,
+      statusMessage: "stale",
+      reconnectNotice: "Reconnected — history may be incomplete.",
+    };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "escape" } });
+    expect(next.statusMessage).toBeNull();
+    expect(next.reconnectNotice).toBeNull();
+  });
+
+  test("tab is an intentional no-op in the root view (previously a dead key)", () => {
+    const state = initialState(size());
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "tab" } });
+    expect(next).toEqual(state);
+    expect(effects).toEqual([]);
+  });
+
+  test("a bracketed paste inserts its literal text at the cursor, including newlines", () => {
+    let state = initialState(size());
+    state = { ...state, input: "ac", inputCursor: 1 };
+    const { state: next, effects } = reducer(state, {
+      type: "key",
+      key: { kind: "paste", text: "line1\nline2" },
+    });
+    expect(next.input).toBe("aline1\nline2c");
+    expect(next.inputCursor).toBe(1 + "line1\nline2".length);
+    // A paste never sends anything on its own — only Enter does.
+    expect(effects).toEqual([]);
+  });
+
+  test("a multi-line paste is not fragmented: enter is only sent once the operator presses it", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "root", parentAgentId: null }),
+    }));
+    ({ state } = reducer(state, {
+      type: "key",
+      key: { kind: "paste", text: "first line\nsecond line" },
+    }));
+    expect(state.input).toBe("first line\nsecond line");
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.input).toBe("");
+    expect(next.inputCursor).toBe(0);
+    expect(effects).toHaveLength(1);
+    expect(effects[0]).toEqual({
+      type: "send_command",
+      command: {
+        type: "send_message",
+        agentId: "root",
+        message: "first line\nsecond line",
+      },
+    });
+  });
+
+  test("backspace removes the character before the cursor", () => {
+    let state = initialState(size());
+    state = { ...state, input: "hi", inputCursor: 2 };
     const { state: next } = reducer(state, { type: "key", key: { kind: "backspace" } });
     expect(next.input).toBe("h");
+    expect(next.inputCursor).toBe(1);
   });
 
   test("backspace on empty input stays empty", () => {

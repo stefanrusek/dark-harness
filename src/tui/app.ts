@@ -17,6 +17,13 @@ const ALT_SCREEN_ENTER = "\x1b[?1049h";
 const ALT_SCREEN_EXIT = "\x1b[?1049l";
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
+// Bracketed-paste mode (DH-0026): while enabled, a terminal-initiated paste arrives wrapped
+// in \x1b[200~ / \x1b[201~ markers (parsed by keys.ts into a single "paste" KeyEvent) instead
+// of as a stream of ordinary characters/enters indistinguishable from real typing. Without
+// this, a multi-line paste gets parsed as individual `enter` keystrokes mid-paste, sending
+// the partial input as a separate message and fragmenting one paste into several sends.
+const BRACKETED_PASTE_ENABLE = "\x1b[?2004h";
+const BRACKETED_PASTE_DISABLE = "\x1b[?2004l";
 
 export interface StdinLike {
   on(event: "data", listener: (chunk: string) => void): unknown;
@@ -133,14 +140,14 @@ export async function startTui(
     function cleanup(): void {
       clearInterval(tickTimer);
       abortController.abort();
-      stdout.write(SHOW_CURSOR + ALT_SCREEN_EXIT);
+      stdout.write(BRACKETED_PASTE_DISABLE + SHOW_CURSOR + ALT_SCREEN_EXIT);
       stdin.setRawMode?.(false);
       stdin.pause?.();
       stdin.removeAllListeners?.("data");
       stdout.removeAllListeners?.("resize");
     }
 
-    stdout.write(ALT_SCREEN_ENTER + HIDE_CURSOR);
+    stdout.write(ALT_SCREEN_ENTER + HIDE_CURSOR + BRACKETED_PASTE_ENABLE);
     stdin.setRawMode?.(true);
     stdin.setEncoding?.("utf8");
     stdin.resume?.();
@@ -168,6 +175,7 @@ export async function startTui(
       signal: abortController.signal,
       onEvent: (event) => dispatch({ type: "sse_event", event }),
       onConnectionChange: (status) => dispatch({ type: "connection", status }),
+      onReconnected: () => dispatch({ type: "reconnected" }),
     });
 
     // Fire request_agent_tree on startup (not just on left-arrow) so rootAgentId gets

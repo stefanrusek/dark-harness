@@ -584,3 +584,78 @@ Open thread for a future round: none blocking from TUI's side. Worth a glance wh
 parallel Web-side turn model ended up with the same coalescing/eviction behavior, per the
 "keep in sync where practical" note above — not required, just a nice-to-have consistency
 check if a later round touches both clients.
+
+### 2026-07-15 — Round 7: DH-0026 (input editing gaps), DH-0027 (tree scroll bug), DH-0024 (TUI side of reconnect backoff)
+
+Three Spile tickets (`tracking/DH-0024`, `DH-0026`, `DH-0027`), all already `status:
+implementing`. DH-0024 is a shared TUI+Web ticket — Web (Susan) is fixing her own client in
+parallel; this round only touched `src/tui/`.
+
+**DH-0026 — input box editing gaps (closed, resolution: done).**
+- `types.ts`/`state.ts`: added `TuiState.inputCursor: number` (`[0, input.length]`). Left/
+  right/Home/End now move it; left-arrow is only reserved for "open the agent tree" when
+  `input === ""` (the old blanket reservation was the bug — it made left-arrow useless for
+  editing the moment there was any typed text). Backspace/delete/char-insert/paste all
+  operate at the cursor via a shared `insertAt` helper rather than always appending.
+- `keys.ts`: added CSI parsing for bare `H`/`F` (Home/End) and numeric `CSI <n>~` (Home 1/7,
+  End 4/8, Delete 3) sequences, plus bracketed-paste (`\x1b[200~...\x1b[201~`) parsed into one
+  `{ kind: "paste"; text }` event carrying the literal text (including embedded newlines) —
+  this is the actual fix for the ticket's most concrete bug: without it, a multi-line paste
+  gets re-parsed as individual `enter` keystrokes and fragments into several sent messages.
+  `app.ts` now enables/disables bracketed-paste mode (`\x1b[?2004h`/`l`) alongside the
+  alt-screen enter/exit.
+  `Tab` remains an intentional no-op in `handleRootKey` (documented explicitly now — reserved
+  for a possible future completion feature) rather than silently falling through as truly dead
+  code.
+- `render.ts`: the cursor marker (`CURSOR_MARKER`, from Round 4) now renders at `inputCursor`
+  instead of always at the end; a pasted newline displays as a visible `⏎` glyph on the
+  one-line input display only — `state.input` itself keeps the real `\n`, which is what's
+  actually sent.
+- Judgment call: kept the paste display single-line (glyph substitution) rather than growing
+  the input box to multiple real lines — the ticket's acceptance criterion is "one message,
+  not fragmented sends," not "multi-line input box rendering," and a real multi-line box would
+  have meant reworking `renderFrame`'s fixed header/content/footer row accounting for no
+  required benefit.
+
+**DH-0027 — tree view doesn't scroll to follow selection (closed, resolution: done).**
+- `render.ts`'s `renderTree`: replaced the old bottom-anchoring (`tailLines` over the whole
+  tree, unconditionally) with a per-entry-wrapped line index plus a scroll window centered on
+  the selected entry (`selectedStart - contentRows/2`, clamped to `[0, maxScroll]`). This is a
+  pure function of `selectedIndex` alone — no new state field needed, `render.ts` stays a pure
+  `TuiState -> string[]` function, consistent with every prior round's architecture choice
+  here.
+
+**DH-0024 — TUI side only (left `implementing`, not closed).**
+Depends on DH-0019 (server-side gap-signal event), which hasn't landed — `src/contracts/
+events.ts` has no gap/session-restart event type yet. Implemented everything achievable
+client-side without it:
+- `sse-client.ts`: full-jitter exponential backoff (`random() * min(30s cap, base * 2^n)`)
+  replacing the flat fixed reconnect delay, plus a new `onReconnected` callback fired when a
+  connection succeeds after one or more consecutive failures (never on the session's first,
+  successful connection). `randomImpl` is injectable for deterministic tests.
+- `types.ts`/`state.ts`/`render.ts`/`app.ts`: new `reconnected` action sets
+  `TuiState.reconnectNotice`, shown in the always-visible header (not just the root view's
+  footer, so it's visible from the tree/agent view too) as `"Reconnected — history may be
+  incomplete."`. Cleared on Escape in the root view, same lifecycle as `statusMessage`.
+- Documented in the field's own doc comment that this is a best-effort "something happened"
+  signal, not a precise diagnosis of an actual missed-event gap vs. a full session restart —
+  that precision is exactly what DH-0019's server-side signal would add. Left the ticket at
+  `status: implementing` rather than closing it: Web's half is still in flight in parallel,
+  and a shared ticket shouldn't be marked closed by only one of its two owning domains.
+
+Gates: `bun run typecheck`, `bun run lint` (one `useTemplate` fixup applied), 
+`bun run test:coverage` (100% on `src/tui/`, whole-repo run: 839 tests, 100% line coverage),
+`bun run e2e` — same 4 pre-existing environment failures as Round 6 (no `tmux`, no headless
+Chromium at `/opt/pw-browsers/chromium`, one bearer-token timeout), reconfirmed via
+`git stash` to be present identically without this round's diff.
+
+**Worktree hygiene note (recurring — see Rounds 5/6):** stale again on arrival (2 ancient
+commits only). Fixed with `git fetch origin claude/coordinator-onboarding-kab9ls` +
+`git merge --ff-only` — same non-destructive fix as Round 6.
+
+Open thread for a future round: DH-0024 needs a follow-up once DH-0019 lands, to make the
+reconnect notice precise (distinguish an actual gap / session restart from an ordinary clean
+resume) instead of firing on every successful reconnect-after-failure. Also worth a glance:
+whether Susan's parallel Web-side DH-0024 fix converges on similar language for the
+gap/restart notice, for operator-facing consistency across the two clients (not required,
+per the ticket's own framing — two independent implementations are fine).
