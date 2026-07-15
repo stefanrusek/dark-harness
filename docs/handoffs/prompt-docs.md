@@ -305,3 +305,29 @@ under `src/prompt/` — left untouched per scope).
 **Honesty note carried forward from Round 2:** both are prompt-text changes, not
 behaviorally verified against a live small-model session — no way to test that from this
 environment. Worth confirming later against an actual model run.
+
+---
+
+## Round 4 — OPEN — README: Bedrock setup section
+
+**Addressed to:** Prompt (Iris, resumed — read `docs/roster/iris.md` first).
+
+E2E's Round 5 (just landed) built real end-to-end coverage for the Bedrock provider, and
+flagged that README.md's Bedrock guidance is currently just the one-line sample config entry
+— no setup guidance for a real operator. Content to cover, per E2E's own notes:
+
+- The `provider.region` config field (`ProviderConfig.region` in `src/contracts/config.ts`).
+- Standard AWS credential-chain resolution — `bedrock.ts` does **no custom credential
+  handling**: env vars (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`),
+  shared config file (`~/.aws/credentials`), or an instance/container role all work via the
+  AWS SDK's own default chain — same as any AWS CLI tool.
+- Bedrock errors (invalid/legacy/deprecated model ids, access-denied, etc.) surface through
+  the same `ProviderError` wrapping as the Anthropic provider — nothing Bedrock-specific to
+  explain about error shape.
+- Worth mentioning (found via real testing this session): Bedrock model identifiers can be
+  region/account-specific and some are deprecated/legacy even when syntactically valid — a
+  real "invalid model" or "access denied" error from Bedrock is usually an account/model
+  availability issue, not a `dh` configuration problem.
+
+**Gates:** none beyond your existing ones — this is a docs-only addition. Append a dated
+status entry here and update `docs/roster/iris.md` when done.
