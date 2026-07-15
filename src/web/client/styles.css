@@ -419,13 +419,65 @@ button {
   scroll-behavior: smooth;
 }
 
-.agent-output {
-  margin: 0;
+/*
+  Conversation transcript (docs/handoffs/web.md Round 4). Each turn is its own block, styled
+  distinctly by role — the previous design concatenated every model chunk into one flat
+  `<pre>` with no turn separation and never showed what the operator had actually typed, which
+  read nothing like a real conversation. User turns are right-aligned and accent-tinted (an
+  outgoing chat bubble), assistant turns are left-aligned on a plain panel background — the
+  same left/right + color convention Claude Code's own CLI and most chat UIs use, so an
+  operator can tell speaker from position alone, not just the role label.
+*/
+.agent-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 88%;
+  animation: fade-in-up 0.15s var(--ease);
+}
+
+.turn-role {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.turn-text {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.turn-assistant {
+  align-self: flex-start;
+}
+
+.turn-assistant .turn-text {
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.turn-user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.turn-user .turn-text {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-raised));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   color: var(--text);
 }
 

@@ -13,6 +13,7 @@ import {
 } from "./format.ts";
 import {
   type AgentNode,
+  type Turn,
   type WebState,
   isRoot,
   orderedAgents,
@@ -67,7 +68,7 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
   main.appendChild(agentHeader);
 
   const scrollRegion = el(doc, "div", "output-scroll");
-  const output = el(doc, "pre", "agent-output");
+  const output = el(doc, "div", "agent-transcript");
   scrollRegion.appendChild(output);
   main.appendChild(scrollRegion);
 
@@ -258,25 +259,105 @@ export function renderAgentHeader(
 }
 
 /**
- * Renders the selected agent's output. Returns the number of characters now rendered so the
- * caller (AppView) can append-only on the next call instead of replacing the whole pane.
+ * Snapshot of how much of a transcript has been rendered into the DOM, so `appendTranscript`
+ * can extend the existing nodes instead of re-rendering every turn on each event (the
+ * streaming fast path — matters once a turn's text is large).
  */
-export function renderOutput(pre: HTMLElement, agent: AgentNode | null): number {
-  const text = agent?.output ?? "";
-  pre.textContent = text;
-  return text.length;
+export interface TranscriptRenderState {
+  /** How many turns have a DOM element in the container. */
+  turnCount: number;
+  /** Rendered text length of the last of those turns (it may still be growing — an
+   *  assistant turn accumulates more `agent_output` chunks without opening a new turn). */
+  lastTurnTextLength: number;
 }
 
-/** Appends only the new suffix of output to an already-rendered pane (streaming fast path). */
-export function appendOutput(
+const EMPTY_TRANSCRIPT_RENDER_STATE: TranscriptRenderState = {
+  turnCount: 0,
+  lastTurnTextLength: 0,
+};
+
+function turnRoleLabel(role: Turn["role"]): string {
+  return role === "user" ? "You" : "Agent";
+}
+
+function buildTurnElement(doc: Document, turn: Turn): HTMLElement {
+  const wrapper = el(doc, "div", `turn turn-${turn.role}`);
+  const role = el(doc, "div", "turn-role");
+  role.textContent = turnRoleLabel(turn.role);
+  wrapper.appendChild(role);
+  const text = el(doc, "div", "turn-text");
+  text.textContent = turn.text;
+  wrapper.appendChild(text);
+  return wrapper;
+}
+
+/**
+ * Fully rebuilds the transcript pane from scratch — one visually distinct block per turn,
+ * clearly separated by role (docs/handoffs/web.md Round 4: the previous flat `<pre>` of
+ * concatenated `output` had no turn separation and never showed the operator's own messages
+ * at all). Returns a `TranscriptRenderState` snapshot describing what's now rendered, so a
+ * subsequent call can use `appendTranscript` instead of paying for a full rebuild again.
+ */
+export function renderTranscript(
   doc: Document,
-  pre: HTMLElement,
-  fullText: string,
-  fromIndex: number,
-): number {
-  if (fromIndex >= fullText.length) return fromIndex;
-  pre.appendChild(doc.createTextNode(fullText.slice(fromIndex)));
-  return fullText.length;
+  container: HTMLElement,
+  agent: AgentNode | null,
+): TranscriptRenderState {
+  container.textContent = "";
+  const transcript = agent?.transcript ?? [];
+  for (const turn of transcript) {
+    container.appendChild(buildTurnElement(doc, turn));
+  }
+  return {
+    turnCount: transcript.length,
+    lastTurnTextLength: transcript.at(-1)?.text.length ?? 0,
+  };
+}
+
+/**
+ * Extends an already-rendered transcript pane with only what's new since `rendered` — the
+ * streaming fast path used on every event once the pane is first built. Handles both ways a
+ * transcript grows: appending more text to the still-open last turn (an assistant turn
+ * absorbing another `agent_output` chunk), and/or adding brand-new turns after it (a fresh
+ * user or assistant turn). Falls back to a full `renderTranscript` when there's nothing
+ * rendered yet, or the agent has no transcript at all (agent switch, or empty state).
+ */
+export function appendTranscript(
+  doc: Document,
+  container: HTMLElement,
+  agent: AgentNode | null,
+  rendered: TranscriptRenderState,
+): TranscriptRenderState {
+  const transcript = agent?.transcript ?? [];
+  if (transcript.length === 0) {
+    return rendered.turnCount === 0
+      ? EMPTY_TRANSCRIPT_RENDER_STATE
+      : renderTranscript(doc, container, agent);
+  }
+  if (rendered.turnCount === 0) {
+    return renderTranscript(doc, container, agent);
+  }
+
+  const lastRenderedTurn = transcript[rendered.turnCount - 1];
+  if (lastRenderedTurn && lastRenderedTurn.text.length > rendered.lastTurnTextLength) {
+    const lastTurnEl = container.children[rendered.turnCount - 1];
+    const textEl = lastTurnEl?.querySelector<HTMLElement>(".turn-text");
+    if (textEl) {
+      textEl.appendChild(
+        doc.createTextNode(lastRenderedTurn.text.slice(rendered.lastTurnTextLength)),
+      );
+    }
+  }
+
+  for (let i = rendered.turnCount; i < transcript.length; i++) {
+    const turn = transcript[i];
+    if (turn) container.appendChild(buildTurnElement(doc, turn));
+  }
+
+  return {
+    turnCount: transcript.length,
+    lastTurnTextLength: transcript.at(-1)?.text.length ?? 0,
+  };
 }
 
 /** Renders the root-agent message composer, or nothing when a non-root agent is selected. */

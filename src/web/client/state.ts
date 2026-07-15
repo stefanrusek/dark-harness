@@ -7,13 +7,33 @@ import type { AgentStatus, AgentTreeNode, ServerSentEvent } from "../../contract
 /** Compile-time-only exhaustiveness helper — see its call site in `applyEvent` below. */
 function assertNever(_value: never): void {}
 
+/**
+ * One turn in a conversation transcript (docs/handoffs/web.md Round 4). Replaces the old
+ * flat `output: string`, which concatenated every `agent_output` chunk into one
+ * undifferentiated blob and never recorded the operator's own sent messages at all — the
+ * conversation view rendered as a wall of text with no turn separation, unlike real Claude
+ * Code's turn-by-turn transcript.
+ *
+ * `"user"` turns are added client-side, immediately, at send time (see `addUserTurn` below)
+ * — they never arrive over SSE, since the server has no reason to echo back what the
+ * operator just typed. `"assistant"` turns accumulate `agent_output` chunks: consecutive
+ * chunks with no intervening user turn append to the same turn rather than opening a new one
+ * each time, since a single model response can stream in many small pieces.
+ */
+export interface Turn {
+  role: "user" | "assistant";
+  text: string;
+  /** ISO timestamp of the turn's first chunk (assistant) or the moment it was sent (user). */
+  timestamp: string;
+}
+
 export interface AgentNode {
   agentId: string;
   parentAgentId: string | null;
   model: string;
   status: AgentStatus;
-  /** Accumulated output chunks, concatenated in arrival order. */
-  output: string;
+  /** Ordered conversation turns for this agent. See `Turn` above. */
+  transcript: Turn[];
   /**
    * Cumulative token/cost totals for this agent. `TokenUsageEvent`s are treated as
    * incremental deltas (matching how per-call usage is reported by LLM APIs) and summed
@@ -79,7 +99,7 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
     parentAgentId: null,
     model: "",
     status: "waiting",
-    output: "",
+    transcript: [],
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
@@ -88,6 +108,39 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
   };
   state.agents.set(agentId, node);
   return node;
+}
+
+/**
+ * Appends a streamed chunk to a transcript: extends the last turn in place if it's already
+ * an assistant turn (the common case — one model response streams in many small chunks), or
+ * opens a new assistant turn otherwise (transcript empty, or the last turn was the
+ * operator's own message). Returns a new array; never mutates `transcript`.
+ */
+function appendAssistantChunk(transcript: Turn[], chunk: string, timestamp: string): Turn[] {
+  const last = transcript.at(-1);
+  if (last && last.role === "assistant") {
+    return [...transcript.slice(0, -1), { ...last, text: last.text + chunk }];
+  }
+  return [...transcript, { role: "assistant", text: chunk, timestamp }];
+}
+
+/**
+ * Adds the operator's own sent message to the transcript immediately, client-side — this is
+ * the local echo every real chat UI does at send time, never waiting on a server round-trip.
+ * Always opens a new user turn (never merged with a prior one, unlike assistant chunks: each
+ * send is a distinct, deliberate action, not a stream fragment).
+ */
+export function addUserTurn(
+  state: WebState,
+  agentId: string,
+  text: string,
+  timestamp: string = new Date().toISOString(),
+): WebState {
+  const next: WebState = { ...state, agents: new Map(state.agents) };
+  const node = { ...ensureAgent(next, agentId, timestamp) };
+  node.transcript = [...node.transcript, { role: "user", text, timestamp }];
+  next.agents.set(agentId, node);
+  return next;
 }
 
 /** Applies one SSE event to state, returning a new `WebState` (state is not mutated). */
@@ -114,7 +167,7 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     }
     case "agent_output": {
       const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
-      node.output += event.chunk;
+      node.transcript = appendAssistantChunk(node.transcript, event.chunk, event.timestamp);
       next.agents.set(event.agentId, node);
       return next;
     }
@@ -200,7 +253,7 @@ export function seedFromTree(
       parentAgentId: node.parentAgentId,
       model: node.model,
       status: node.status,
-      output: "",
+      transcript: [],
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,

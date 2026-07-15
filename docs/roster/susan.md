@@ -184,3 +184,30 @@ every `src/web/` file, 695 tests project-wide) — all green. `bun run e2e`: 14/
 failures are the sandbox tooling gaps above, not a regression (nothing this round touches
 routes, auth, or the wire protocol). Full detail in `docs/handoffs/web.md`'s Round 3 status
 entry.
+
+### 2026-07-15 — Round 4: structured conversation transcript (turn separation, user-message echo)
+
+Replaced `AgentNode.output: string` with `AgentNode.transcript: Turn[]` (`{role: "user" |
+"assistant", text, timestamp}`) — the flat-string design had no turn separation and never
+recorded the operator's own sent messages at all, confirmed against real screenshots vs.
+Claude Code's CLI. Full detail (helper names, render-path changes, visual design, judgment
+calls) is in `docs/handoffs/web.md`'s Round 4 status entry — this file is the durable part.
+
+**The one judgment call worth remembering if this comes up again:** the wire protocol has no
+explicit turn-end signal — `agent_output` is just a raw chunk stream. The only reliable
+client-side turn boundary is "did the role change since the last turn." I merge consecutive
+`agent_output` chunks into the same assistant turn (a streamed response arrives in many small
+pieces) but never merge two consecutive user turns (each send is a distinct, deliberate
+action) — asymmetric on purpose, not an oversight.
+
+**Environment note, third time now:** this round's worktree again started with only the two
+founding-doc commits, no built `src/` tree — same gap as Round 2/3. Fast-forward-merging
+`origin/claude/coordinator-onboarding-kab9ls` before starting is now the established fix; a
+future round landing in a bare worktree like this should check `git log` against what the
+coordinator's task description implies exists before assuming something's broken.
+
+**Gates:** `bun run typecheck`, `bun run lint` (biome auto-fixed a few formatting nits — the
+*second* `bun run lint` run, after `biome check --write .`, is the one that has to be clean),
+`bun run test:coverage` (796 tests, 100% funcs/lines on every touched `src/web/` file). `bun
+run e2e`: 20/24 — the 4 failures are this same sandbox's tooling gaps (no `tmux`, no Chromium
+binary, one bearer-token-matrix timeout), not a regression.
