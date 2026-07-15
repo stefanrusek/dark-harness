@@ -934,3 +934,48 @@ non-zero `costUsd` on a `token_usage` event, and an unconfigured one still produ
 `undefined` (no regression); (c) a configured `maxTurns` actually changes when the loop's
 safety-valve fires. Append a dated status entry here and update `docs/roster/grace.md` when
 done — note any of the three you have to defer, explicitly, rather than silently dropping.
+
+---
+
+## Round 7 — OPEN — sub-agents never reach "done" in interactive mode (found by E2E round 2)
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first, and Round 6's
+entry once it lands, since this round touches the same file).
+
+E2E's Round 2 (real-binary sub-agent spawning coverage) found a real bug while building that
+coverage, confirmed by hand, not fixed (out of E2E's ownership): `AgentRuntime.spawnAgent()`
+(`src/agent/runtime.ts` ~line 205) passes `interactive: this.interactive` — the
+runtime-instance-level flag — into **every** sub-agent's loop params, not just the root's.
+Since `src/cli.ts`'s `AgentRuntimeLoopAdapter` (used by every server/TUI/Web session) always
+constructs its `AgentRuntime` with `interactive: true`, **every sub-agent spawned in an
+interactive session inherits `interactive: true` too.**
+
+Round 5's whole point for the *root* was correct: a non-tool-use turn should pause
+("waiting") rather than end, so an operator can keep talking to it. But a sub-agent spawned
+via the `Agent` tool has no operator sitting there to send it more messages — once it's
+delivered its output, it should reach `"done"` like the old (pre-Round-5) semantics, not
+hang in `"waiting"` forever. This silently breaks the `Agent` tool's blocking mode
+(`run_in_background: false`, `ctx.tasks.awaitDone` in `src/agent/tools/agent.ts`) in any
+server/interactive context — the calling agent's foreground wait never resolves, because the
+sub-agent it's waiting on never reaches a terminal state.
+
+**Fix:** sub-agents should not inherit the root's `interactive` flag automatically — they
+need their own termination semantics (reach `"done"`/`"failed"` on the first non-tool-use
+turn, same as standalone/non-interactive mode), regardless of whether the root session
+itself is interactive. The one exception: a sub-agent should still be *steerable* mid-flight
+via `SendMessage` while it's actively running (that capability isn't in question, only what
+happens when the model itself decides it's done). Look closely at how `spawnAgent()` decides
+what to pass — this is likely a case where `interactive` needs to become root-only, with
+sub-agents always getting the non-interactive (terminates-on-end-turn) semantics, but confirm
+this doesn't regress `SendMessage`-driven mid-conversation steering for a still-running
+sub-agent (that path doesn't depend on the loop refusing to terminate — check the actual
+mechanism before assuming).
+
+**Gates:** the standard four. Add a regression test proving: (a) a sub-agent that completes
+without a tool call reaches `"done"` even when spawned from an interactive root; (b) the
+`Agent` tool's blocking (`run_in_background: false`) mode actually resolves in that case
+(this is exactly the hang E2E found — a test should prove it no longer hangs, not just check
+a status field); (c) `SendMessage` can still steer a running sub-agent mid-conversation (no
+regression to Round 5's root use case, applied correctly to sub-agents too if that's still
+desired for a still-running one). Append a dated status entry here and update
+`docs/roster/grace.md` when done.
