@@ -66,6 +66,12 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0005](../DH-0005-npm-token-secret.md) | `NPM_TOKEN` repository secret not yet set | feature | stefan |
+
+### implementing
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0001](../DH-0001-task-failed-marker-reliability.md) | `TASK_FAILED` marker is not reliably emitted despite being taught 🔒 | bug | stefan |
 | [DH-0009](../DH-0009-provider-retry-backoff-and-error-taxonomy.md) | No provider-level retry/backoff, and no error taxonomy, for transient failures | bug | stefan |
 | [DH-0011](../DH-0011-no-signal-handling-or-process-group-reaping.md) | No SIGTERM/SIGINT handling anywhere, and Bash tool doesn't reap grandchild processes | bug | stefan |
 | [DH-0013](../DH-0013-no-cost-turn-time-or-fanout-budgets.md) | No wall-clock, cost/token, or sub-agent fan-out budget — only a turn-count cap exists | feature | stefan |
@@ -89,12 +95,6 @@ source: tracking/
 | [DH-0041](../DH-0041-missing-user-facing-docs-bundle.md) | A cluster of user-facing documentation is entirely missing | feature | stefan |
 | [DH-0042](../DH-0042-readme-config-reference-gaps.md) | README's config reference omits `options.maxTurns` and per-model pricing fields, with no automated check against `src/contracts/config.ts` | bug | stefan |
 | [DH-0054](../DH-0054-no-first-class-grep-glob-tools.md) | No first-class Grep/Glob tools — all search is delegated informally to Bash | feature | stefan |
-
-### implementing
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0001](../DH-0001-task-failed-marker-reliability.md) | `TASK_FAILED` marker is not reliably emitted despite being taught 🔒 | bug | stefan |
 
 ## Recently Closed
 
