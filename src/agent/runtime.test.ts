@@ -8,6 +8,7 @@
 // loop -> tool dispatch without ever touching the network.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { realpathSync } from "node:fs";
 import {
   type AgentTreeNode,
   type DhConfig,
@@ -336,7 +337,9 @@ describe("AgentRuntime", () => {
     expect(result.success).toBe(true);
     const toolResult = logLines.find((l) => l.type === "tool_result");
     const output = toolResult && toolResult.type === "tool_result" ? toolResult.output : "";
-    expect(typeof output === "string" ? output.trim() : "").toBe("/tmp");
+    // Compare via realpath: on macOS, /tmp is a symlink to /private/tmp, and a shell's
+    // `pwd` (no -L) resolves to the physical path, so the literal "/tmp" would not match.
+    expect(typeof output === "string" ? output.trim() : "").toBe(realpathSync("/tmp"));
   });
 
   test("an explicit tools option restricts the tool map away from ALL_TOOLS", async () => {
