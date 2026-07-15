@@ -2,9 +2,11 @@
 
 **Addressed to:** the E2E domain lead.
 **Owner directory:** `e2e/` (per `CLAUDE.md` §3).
-**Status:** BLOCKED — sequenced after Core, Server, TUI, Web land a working first round.
-Do not start until the coordinator moves this to OPEN; it depends on real (not stubbed)
-entry points from those domains.
+**Status:** OPEN — unblocked 2026-07-15. Core's round 2 (`docs/handoffs/core.md`) landed
+real Server/TUI/Web wiring in `src/cli.ts` — verified directly by the coordinator: compiled
+`dist/dh --server`, curled a live `GET /api/events` (200) and `POST /api/commands`
+(`request_agent_tree` returned a real root-agent node). All four run modes are real, not
+stubs. Build against `origin/claude/coordinator-onboarding-kab9ls` HEAD.
 
 ---
 

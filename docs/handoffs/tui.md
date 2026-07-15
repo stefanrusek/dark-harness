@@ -78,6 +78,32 @@ bun run test:coverage   # 100% on new/changed code in src/tui/ — see the rende
 
 _(Append dated entries here. Status supersedes.)_
 
+---
+
+## Round 2 — OPEN — bearer-token passthrough
+
+**Addressed to:** TUI (Mary, resumed — read `docs/roster/mary.md` first).
+
+Grace (Core), wiring `src/cli.ts`'s real run modes, flagged that `startTui(baseUrl, io?)`
+has no way to pass a configured `security.token` (ADR 0004) down to the requests it makes —
+`security.token`-protected sessions currently don't work with the console client at all
+(the Web client already handles this correctly, via the fetch()-based SSE reader from the
+ADR 0004 amendment).
+
+Looking at the code myself: the low-level pieces already support it —
+`sendCommand(baseUrl, command, { headers })` in `http-client.ts` and (check) `sse-client.ts`
+already accept a headers passthrough. The gap is just that `startTui`'s own signature has
+nowhere for a caller (`src/cli.ts`) to supply a token. Add an optional parameter (your call
+on exact shape — `startTui(baseUrl, token?, io?)` or a `{ token }` field on the existing
+`io`/options object, whichever fits the existing structure better) and thread it into the
+`Authorization: Bearer <token>` header on every request the TUI makes, the same way Web
+does it. No token in a URL, ever (same constraint as Web's ADR 0004 amendment).
+
+**Gates:** same four commands. **Definition of done:** a configured token flows from
+`startTui`'s caller into every HTTP/SSE request the console client makes; a regression test
+proves it (e.g. asserting the `Authorization` header on an injected fetch double). Append a
+dated status entry here when done, and update `docs/roster/mary.md`.
+
 ### 2026-07-15 — Mary (TUI domain lead)
 
 Picked up mid-task from a prior instance of this role that was stopped before it could
