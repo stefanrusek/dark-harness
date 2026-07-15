@@ -1,0 +1,267 @@
+# Fleet Orchestration Methodology
+
+A portable playbook for building software with a small fleet of AI agents: a coordinator
+that holds the whole picture, domain leads that own slices of the system, and cheap
+implementers that do the typing — coordinating asynchronously through durable documents
+rather than a shared conversation.
+
+This document is **project-neutral**. It describes the method, not any one codebase.
+Each project keeps a thin project-specific layer (conventions, ownership map, invariants,
+quality gates) in its own constitution file (e.g. `CLAUDE.md`) and points back here.
+
+---
+
+## 1. When to use this
+
+Use it when the work is too large for one agent's context, benefits from parallelism, and
+spans separable domains (e.g. frontend / backend / native). It shines for multi-day builds
+where continuity across context resets matters. It is overkill for a single well-scoped
+change — reach for the fleet when the work-list itself is large or unknown.
+
+The core bet: **judgment is scarce and expensive; typing is cheap and parallelizable.**
+Everything below is arranged to spend intelligence where it changes outcomes and volume
+where it doesn't.
+
+---
+
+## 2. Roles
+
+- **Owner (human).** Holds intent, taste, and real-world authority the agents lack:
+  credentials, elevation, approvals, "ship it." Makes product calls and irreversible
+  business decisions. Everything ultimately routes to the owner for the things only a
+  human can do or decide.
+
+- **Coordinator (a.k.a. conductor/orchestrator).** Holds the whole picture. Decomposes
+  work, writes the briefs, routes them, reconciles the shared repository, tracks status,
+  and surfaces to the owner. **The coordinator does not implement** and does not make the
+  hardest architectural calls alone — it escalates those (see §3). Most coordinator work
+  is high-volume and low-judgment: monitor, route, commit, chase, keep documents current.
+
+- **Domain leads.** Each owns a slice of the system (a set of directories/packages).
+  A lead takes a brief, breaks it into concrete tasks, and delegates the typing to
+  implementers. Leads own integration within their slice and report status up.
+
+- **Implementers.** Do the actual writing against a tight brief: exact files, the wire
+  contract, the gates to run, and what "done" means. Cheapest capable tier. Their output
+  is judged by objective gates, not by re-reading.
+
+- **Architect-on-call (the "smarty-pants").** A frontier-tier agent invoked *only* for
+  genuine judgment: setting or changing a locked decision, slicing a hard decomposition,
+  reviewing a risky diff, resolving a cross-cutting design smell. Not always running —
+  called when an escalation trigger fires (§3).
+
+These roles are **functions, not necessarily separate processes.** A single agent can wear
+several; the point is to assign each function the cheapest tier that does it well.
+
+### Naming and identity (do this from the start)
+
+Give every long-running instance a **name and pronouns**, recorded in the constitution's
+roster. In a fleet that coordinates through a shared repository, "the backend agent" and
+"the native agent" turn ambiguous fast — *which* instance, this session or the one that
+pushed overnight? Names fix that; roles and directories attach to a name, and the history
+reads as people, not process IDs.
+
+- **Agents name themselves as they come online** (the coordinator first, then each lead as
+  it's stood up). Self-chosen names stick better than assigned ones.
+- **Default to she/her** — a deliberate, standing acknowledgment that women are
+  underrepresented in computing and no less capable, carried in every agent's identity. A
+  themed roster (e.g. pioneering women in computing) reinforces it and aids recall.
+- **Record persistence:** mark each name **persistent** (a continuous instance) or
+  **ephemeral** (a pod spun up on demand and dissolved, with no continuity of context
+  between spin-ups). Readers of the roster need to know which they're addressing.
+
+---
+
+## 3. Model tiers and escalation — the crux
+
+The expensive mistake is paying frontier rates for clerical work. The expensive *risk* is
+letting a cheap tier make a decision that ripples across the system. Split by job:
+
+| Function | Tier | Why |
+| --- | --- | --- |
+| Monitoring / heartbeat / git hygiene | Cheapest (or a script/cron) | Pure clerical; frontier rates here are pure waste |
+| Coordination (route, brief, commit, chase) | Mid (e.g. Sonnet) | High volume, modest judgment |
+| Implementation | Cheap–mid, by task difficulty | Judged by gates, not re-read |
+| Hard decisions / decomposition / risky review | Frontier (on-call) | Low volume, high stakes, ripples widely |
+
+**Decision density is front-loaded.** Greenfield bootstrap (empty repo → stack choice,
+founding architecture, first decomposition) is almost all judgment; a frontier brain
+hands-on there earns its cost. Once the architecture stabilizes and work becomes
+execution, transition to a **mid-tier coordinator + frontier architect-on-call.** That
+transition is the main cost lever.
+
+**Escalation triggers (write these down; do not leave to vibes).** The coordinator calls
+the architect-on-call when — and only when — it hits one of:
+1. A decision that sets, changes, or bends a locked decision or a system invariant.
+2. A decomposition it cannot cleanly slice (unclear ownership, tangled dependencies).
+3. A cross-cutting concern touching multiple domains at once.
+4. A diff in security-, correctness-, money-, or data-integrity-sensitive code.
+5. Two agents' outputs that conflict and need arbitration.
+6. Anything the coordinator notices it is guessing at.
+
+Under-escalation yields mediocre decisions; over-escalation burns the savings. The trigger
+list is the single most important thing to tune per project. Everything else routes to the
+owner (for authority/taste) or stays with the coordinator (for routine calls).
+
+---
+
+## 4. The substrate — artifacts, not conversation
+
+What makes this work asynchronously across context resets is that agents coordinate through
+**durable documents**, not a shared chat. Six artifact types:
+
+1. **The constitution** (e.g. `CLAUDE.md`). Binding, always-in-context rules every agent
+   obeys: stack decisions, ownership map, invariants, quality gates, workflow rules. Short
+   enough to always load. This is the project's law.
+
+2. **Locked decisions (ADRs).** One page per significant decision: the problem, the
+   decision, the rationale, the consequences. Once accepted, they are not re-litigated —
+   they are *referenced*. New information amends via a new dated section or a superseding
+   ADR, never a silent rewrite. ADRs are how a fleet avoids relitigating the same call
+   every time a fresh context appears.
+
+3. **Handoff documents.** The API between agents — a self-contained work order addressed
+   to a specific role: context, exact scope (files/dirs), the wire contracts, constraints,
+   gates, and a crisp "definition of done." See §5 for conventions.
+
+4. **Single source of wire truth.** All cross-component types/schemas/protocol messages
+   live in one shared module (e.g. a `contracts` package), as the authoritative definition
+   other components import. Never redeclare a wire type locally. This is what keeps
+   independently-built components integrating cleanly.
+
+5. **Objective quality gates.** Machine-checkable "done": test coverage thresholds,
+   typecheck, lint/format, an e2e pass. Implementers are judged by these, which is what
+   lets you trust cheap-tier output without re-reading every line.
+
+6. **Ownership map.** A directory/package → owner assignment so two agents physically
+   cannot collide. Part of the constitution.
+
+---
+
+## 5. Handoff document conventions
+
+The handoff is the load-bearing artifact. Conventions that prevent the common failures:
+
+- **A handoff is a document for a *named other agent* to execute — never a to-do for its
+  author.** The coordinator writes handoffs and routes them; it does not turn around and
+  execute them itself. (If the same agent will do the work, it's not a handoff — it's just
+  work.) This distinction is easy to violate and expensive when violated.
+
+- **Self-contained.** Assume the reader has none of the author's conversation. State the
+  context, the exact files/dirs in scope, the wire contracts to build against, the
+  constraints/invariants that apply, the gates to run, and what "done" looks like.
+
+- **Scoped to an owner.** A handoff touches only its addressee's directories. Cross-domain
+  needs are stated as *requests* to the other owner ("I need this field added to the shared
+  contract — request it, don't fork it"), not as edits across the boundary.
+
+- **Status supersedes.** A later report from the agent doing the work supersedes the
+  coordinator's earlier assumptions. Handoffs accrete dated sections; readers act on the
+  latest. The coordinator reads the agent's latest report before asserting status —
+  getting stale is a real and recurring failure.
+
+- **Escalate, don't guess.** When executing a handoff surfaces a genuine decision or a
+  blocker requiring authority (credentials, elevation, a product call), the agent writes up
+  the finding and its options and routes it up — it does not quietly pick a direction on a
+  locked-decision-class question, and it does not route around a safety boundary.
+
+---
+
+## 6. Coordination protocol (shared repository)
+
+Multiple agents writing to one repository need discipline. Two viable models:
+
+- **Shared working tree** (all agents in one checkout): strict directory ownership; **commit
+  before you yield** (never leave a turn with a dirty tree another agent might trip on);
+  **monitoring is fetch-only** (never rebase/stash/reset over another agent's uncommitted
+  work — it rewrites their tree underneath them); reconcile with rebase only from a clean
+  tree; on a shared branch **revert, never force-push** (history is append-only). Push your
+  own commits as plain fast-forwards; if a rebase would be needed while someone else is
+  mid-edit, wait.
+- **Per-agent worktrees** (each agent its own checkout of the same repo): agents physically
+  cannot disturb each other's working files; they integrate only through commits/branches.
+  More setup, fewer collisions. Prefer this when agents edit in parallel and step on each
+  other under the shared-tree model.
+
+Either way: **directory ownership is the primary collision-avoidance mechanism**, and the
+coordinator is the reconciler of record.
+
+---
+
+## 7. How work flows
+
+1. **Owner intent** arrives (a feature, a fix, a direction).
+2. **Decision, if needed.** If it sets/changes architecture or an invariant, the
+   coordinator (escalating to the architect-on-call per §3) resolves it and records an ADR.
+   Otherwise it proceeds.
+3. **Decompose into handoffs**, one per owning domain, self-contained (§5).
+4. **Domain leads execute**: break the brief into tasks, delegate typing to implementers,
+   integrate within their slice against the shared contracts and gates.
+5. **Reconcile**: the coordinator integrates results, watches for cross-domain mismatches,
+   keeps the shared tree healthy.
+6. **Surface to the owner**: outcomes, decisions needed, anything only a human can do.
+   Loop.
+
+Escalation directions are fixed: **up to the owner** for authority/taste/irreversible
+calls; **to the architect-on-call** for hard judgment; **stay with the coordinator** for
+routine routing and reconciliation.
+
+---
+
+## 8. Bootstrap — authoring the founding handoff
+
+A fleet needs a founding artifact: the giant initial handoff that turns an empty repo into
+a working plan (product spec, locked decisions, invariants, repository layout, work
+packages, and the constraints implementers must honor).
+
+**This founding brief can be authored in a frontier-model *chat*, outside the coding
+harness, and then handed to the coding fleet to execute.** You do not need the code harness
+to *write* the plan — only to *run* it. Draft the spec with a frontier model conversation,
+land it in the repo as the driving document, seed the constitution (`CLAUDE.md`) and the
+first ADRs from it, then let the coordinator take over. This front-loads the densest
+judgment into the cheapest place to do it (a single focused chat) before any fleet cost is
+incurred.
+
+---
+
+## 9. Anti-patterns (learned the hard way)
+
+- **Executing your own handoff.** If you wrote it as a handoff, route it; don't do it. (§5)
+- **Disturbing a peer's working tree.** Autostash/rebase/reset over someone's uncommitted
+  work rewrites their files mid-edit. Monitoring is fetch-only. (§6)
+- **Referencing reverted/abandoned work.** Work you did and undid is invisible to the other
+  agents; mentioning it only confuses. Communicate current state, not your private history.
+- **Stale coordinator.** Asserting status from old assumptions when a fresh report exists.
+  Read the latest report first; status supersedes. (§5)
+- **Re-litigating locked decisions.** If it's an ADR, reference it. Amend deliberately;
+  don't silently reopen.
+- **Forking the wire contract.** Redeclaring a shared type locally to move faster creates
+  integration drift. Request the change in the shared module. (§4)
+- **Paying frontier rates for clerical work.** The monitor/heartbeat is the cheapest tier or
+  a script — never a frontier model running `fetch` on a timer. (§3)
+- **Silent truncation.** If an agent caps its coverage (top-N, sampling, no-retry), it says
+  so. Unstated limits read as "covered everything" when they didn't.
+
+---
+
+## 10. Extraction checklist (adopting this on a new project)
+
+Portable (lift as-is): this document; the role model; the tier/escalation framing; the
+handoff/ADR/coordination conventions; the "founding handoff in a chat" bootstrap; the
+naming/identity practice (agents self-name, default she/her, record persistence).
+
+Project-specific (write fresh each time):
+- The **constitution** (`CLAUDE.md`): stack, ownership map, invariants, gates, workflow.
+- The **founding handoff / spec**: product decisions and work packages.
+- The **ownership map**: which directories belong to which domain lead.
+- The **quality gates**: the exact coverage/lint/typecheck/e2e thresholds.
+- The **escalation triggers**: tuned to where *this* project's judgment actually lives.
+
+Start a new project by drafting the founding handoff in a frontier chat (§8), distilling
+its constraints into a fresh `CLAUDE.md` that points back to this file, then standing up the
+coordinator.
+
+---
+
+*Distilled from a real multi-day, multi-agent build. Refine it as you learn — this file is
+itself a living artifact.*
