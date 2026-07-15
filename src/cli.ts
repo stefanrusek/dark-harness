@@ -50,9 +50,10 @@ export interface CliOptions {
   instructions: string | null;
   job: boolean;
   config: string;
+  env: string | null;
 }
 
-const FLAGS_WITH_VALUES = new Set(["--connect", "--port", "--instructions", "--config"]);
+const FLAGS_WITH_VALUES = new Set(["--connect", "--port", "--instructions", "--config", "--env"]);
 
 /** Printed by `--help`/`-h`, handled before flag parsing/config loading so it never depends
  * on a working `dh.json` — mirrors the mode matrix and flag list in README.md / HANDOFF.md §2. */
@@ -73,6 +74,8 @@ Flags:
   --instructions <file>    Path to an instructions file; starts the root agent on it immediately.
   --job                    Exit when the root agent finishes: 0 success, 1 self-reported failure, 2+ harness error.
   --config <path>          Path to dh.json (default: ./dh.json).
+  --env <file>             Load dotenv-style environment variables from <file> before dh.json
+                           is loaded, so its $(VAR) interpolation can see them.
   --help, -h               Show this help and exit.
 
 Config: dh.json in the working directory (or --config <path>). See README.md for the schema.
@@ -89,6 +92,7 @@ export function parseArgs(argv: string[]): CliOptions {
     instructions: null,
     job: false,
     config: DEFAULT_CONFIG_PATH,
+    env: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -114,6 +118,7 @@ export function parseArgs(argv: string[]): CliOptions {
       if (arg === "--connect") options.connect = value;
       else if (arg === "--instructions") options.instructions = value;
       else if (arg === "--config") options.config = value;
+      else if (arg === "--env") options.env = value;
       else {
         const parsed = Number(value);
         if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -156,6 +161,43 @@ async function readInstructionsFile(path: string): Promise<string> {
     throw new ConfigError(`instructions file not found: ${path}`);
   }
   return file.text();
+}
+
+async function readEnvFile(path: string): Promise<string> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) {
+    throw new ConfigError(`env file not found: ${path}`);
+  }
+  return file.text();
+}
+
+/**
+ * Parses a dotenv-style file: `KEY=VALUE` lines, blank lines and `#`-prefixed comment lines
+ * skipped, optional surrounding double-quotes on the value stripped as-is (no escape-sequence
+ * processing). Pure function — throws a clear error naming the offending line for anything
+ * without an `=`.
+ */
+export function parseEnvFile(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) {
+      continue;
+    }
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) {
+      throw new Error(`malformed env file line ${i + 1}: expected KEY=VALUE, got "${line}"`);
+    }
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1);
+    }
+    result[key] = value;
+  }
+  return result;
 }
 
 async function loadSystemPrompt(config: DhConfig): Promise<string> {
@@ -282,6 +324,8 @@ export interface CliIo {
 export interface CliDeps {
   loadConfig: (path: string) => Promise<DhConfig>;
   readInstructions: (path: string) => Promise<string>;
+  readEnvFile: (path: string) => Promise<string>;
+  applyEnv: (vars: Record<string, string>) => void;
   loadSystemPrompt: (config: DhConfig) => Promise<string>;
   /** Used only by the standalone `--instructions` path (see the module doc comment above
    * for why that path never goes through createAgentLoop/createServer). */
@@ -302,6 +346,8 @@ function defaultDeps(): CliDeps {
   return {
     loadConfig,
     readInstructions: readInstructionsFile,
+    readEnvFile,
+    applyEnv: (vars) => Object.assign(process.env, vars),
     loadSystemPrompt,
     createRuntime: (config, systemPrompt) => new AgentRuntime({ config, systemPrompt }),
     createAgentLoop: (config, systemPrompt) =>
@@ -429,6 +475,16 @@ export async function main(
   }
 
   const mode = composeMode(options);
+
+  if (options.env !== null) {
+    try {
+      const content = await deps.readEnvFile(options.env);
+      const vars = parseEnvFile(content);
+      deps.applyEnv(vars);
+    } catch (err) {
+      return fail(io, (err as Error).message);
+    }
+  }
 
   let config: DhConfig;
   try {

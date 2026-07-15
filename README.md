@@ -74,6 +74,7 @@ Other flags:
 | `--instructions <file>` | Path to an instructions file. The root agent starts on it immediately, autonomously. |
 | `--job` | Exit when the root agent finishes; see the exit-code table above. Without it, the process stays alive for inspection. |
 | `--config <path>` | Config file location. Default: `dh.json` in the working directory. |
+| `--env <file>` | Load a dotenv-style file into the environment before `dh.json` is loaded/interpolated (see below). |
 | `--port <n>` | Listen port (`--server`) or target port (`--connect`). Default `4000`. |
 
 Client and server talk over **HTTP + SSE on a single port** — not WebSocket — so the
@@ -140,6 +141,32 @@ Full schema rationale: [`docs/adr/0007-dhjson-schema.md`](docs/adr/0007-dhjson-s
   (the default).
 
 Rationale and scope: [`docs/adr/0004-security-posture.md`](docs/adr/0004-security-posture.md).
+
+### Keeping secrets out of `dh.json`: `--env <file>`
+
+`--env <file>` loads a dotenv-style file (`KEY=VALUE` per line, `#` comments, blank lines
+skipped, optional surrounding double-quotes on the value) into the process environment
+*before* `dh.json` is loaded — so its `$(VAR)` interpolation can resolve against it.
+
+The intended workflow: keep a gitignored `secrets.env` (populated however you like — by hand,
+or via tooling like Doppler) holding real API keys, and commit a fully-functional `dh.json`
+that references them only as `$(ANTHROPIC_API_KEY)` etc. No secrets ever land in the repo,
+but the committed config is a real, runnable example:
+
+```
+# secrets.env (gitignored — see .gitignore)
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```json
+{ "provider": [{ "name": "anthropic", "type": "anthropic", "apiKey": "$(ANTHROPIC_API_KEY)" }] }
+```
+
+```
+dh --env secrets.env
+```
+
+`.gitignore` excludes `secrets.env` specifically, plus `*.env` generally.
 
 ## Tools, skills, and sub-agents
 

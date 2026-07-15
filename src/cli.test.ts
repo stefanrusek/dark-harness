@@ -15,6 +15,7 @@ import {
   composeMode,
   main,
   parseArgs,
+  parseEnvFile,
 } from "./cli.ts";
 import type { DhConfig, ServerSentEvent } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
@@ -94,6 +95,7 @@ describe("parseArgs", () => {
       instructions: null,
       job: false,
       config: "dh.json",
+      env: null,
     });
   });
 
@@ -110,6 +112,8 @@ describe("parseArgs", () => {
       "plan.md",
       "--config",
       "custom.json",
+      "--env",
+      "secrets.env",
     ]);
     expect(options).toEqual({
       web: true,
@@ -119,6 +123,7 @@ describe("parseArgs", () => {
       instructions: "plan.md",
       job: true,
       config: "custom.json",
+      env: "secrets.env",
     });
   });
 
@@ -137,6 +142,10 @@ describe("parseArgs", () => {
 
   test("--config without a value throws CliUsageError", () => {
     expect(() => parseArgs(["--config"])).toThrow(CliUsageError);
+  });
+
+  test("--env without a value throws CliUsageError", () => {
+    expect(() => parseArgs(["--env"])).toThrow(CliUsageError);
   });
 
   test("--port with a non-integer value throws CliUsageError", () => {
@@ -567,6 +576,103 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       },
     });
     expect(received).toEqual({ config: TEST_CONFIG, systemPrompt: "resolved prompt" });
+  });
+});
+
+describe("parseEnvFile", () => {
+  test("parses simple KEY=VALUE lines", () => {
+    expect(parseEnvFile("FOO=bar\nBAZ=qux")).toEqual({ FOO: "bar", BAZ: "qux" });
+  });
+
+  test("skips blank lines and comments", () => {
+    expect(parseEnvFile("# a comment\n\nFOO=bar\n  # another\nBAZ=qux\n")).toEqual({
+      FOO: "bar",
+      BAZ: "qux",
+    });
+  });
+
+  test("strips optional surrounding double-quotes from the value", () => {
+    expect(parseEnvFile('FOO="bar baz"')).toEqual({ FOO: "bar baz" });
+  });
+
+  test("leaves unquoted or partially-quoted values untouched", () => {
+    expect(parseEnvFile('FOO=bar"baz')).toEqual({ FOO: 'bar"baz' });
+  });
+
+  test("throws a clear error naming the malformed line", () => {
+    expect(() => parseEnvFile("FOO=bar\nnotanassignment\n")).toThrow(/line 2/);
+    expect(() => parseEnvFile("notanassignment")).toThrow(/notanassignment/);
+  });
+});
+
+describe("main — --env flag", () => {
+  test("loads env vars before dh.json is loaded, so $(VAR) interpolation can see them", async () => {
+    const io = fakeIo();
+    const calls: string[] = [];
+    let appliedVars: Record<string, string> | undefined;
+    const code = await main(["--env", "secrets.env", "--server", "--job"], {
+      ...interactiveOverrides(io),
+      readEnvFile: async (path) => {
+        calls.push(`readEnvFile:${path}`);
+        expect(path).toBe("secrets.env");
+        return "ANTHROPIC_API_KEY=sk-test-123";
+      },
+      applyEnv: (vars) => {
+        calls.push("applyEnv");
+        appliedVars = vars;
+      },
+      loadConfig: async () => {
+        calls.push("loadConfig");
+        expect(appliedVars).toEqual({ ANTHROPIC_API_KEY: "sk-test-123" });
+        return TEST_CONFIG;
+      },
+    });
+    expect(calls).toEqual(["readEnvFile:secrets.env", "applyEnv", "loadConfig"]);
+    void code;
+  });
+
+  test("a missing env file returns HarnessError via the standard fail() path", async () => {
+    const io = fakeIo();
+    const code = await main(["--env", "missing.env"], {
+      ...baseOverrides(io),
+      readEnvFile: async () => {
+        throw new Error("env file not found: missing.env");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("env file not found: missing.env");
+  });
+
+  test("a malformed env file returns HarnessError with the parse error", async () => {
+    const io = fakeIo();
+    const code = await main(["--env", "bad.env"], {
+      ...baseOverrides(io),
+      readEnvFile: async () => "notanassignment",
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("malformed env file line 1");
+  });
+
+  test("the real readEnvFile/applyEnv deps work end to end against a real file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dh-cli-env-test-"));
+    try {
+      const envPath = join(dir, "secrets.env");
+      await Bun.write(envPath, "MY_TEST_VAR=hello-from-file\n");
+      const io = fakeIo();
+      process.env.MY_TEST_VAR = undefined;
+      let seenDuringLoadConfig: string | undefined;
+      await main(["--env", envPath, "--server", "--job"], {
+        ...interactiveOverrides(io),
+        loadConfig: async () => {
+          seenDuringLoadConfig = process.env.MY_TEST_VAR;
+          return TEST_CONFIG;
+        },
+      });
+      expect(seenDuringLoadConfig).toBe("hello-from-file");
+      process.env.MY_TEST_VAR = undefined;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
