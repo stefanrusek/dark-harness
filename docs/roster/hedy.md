@@ -99,3 +99,51 @@ slot naturally alongside the now-fixed full-turn test in `server-protocol.test.t
 untracked `dh.json` lint failure is unrelated, noted in the handoff), `bun test
 e2e/server-protocol.test.ts` — 5 pass, 0 fail. Did not run the full `bun run e2e` (no
 tmux/Chromium in this sandbox, unrelated to this change, per the task's own scoping).
+
+### 2026-07-15 — Round 2, gap 2a (fresh process again): built sub-agent e2e coverage, found a real Core bug
+
+Came online fresh again for the architect (Fable)'s two-gap review round. Same worktree
+provenance issue as Round 1 recurred (worktree branched from the pre-domain-landing ancestor
+commit `12679e4`, zero unique commits, fast-forwarded to real HEAD `0478707`) — now twice;
+worth someone looking at why worktree provisioning for this role keeps picking the wrong
+base.
+
+**What I built:** full detail in `docs/handoffs/e2e.md`'s dated Round 2 status-log entry.
+Short version: one new e2e scenario in `e2e/server-protocol.test.ts` driving a real
+`tool_use` -> `Agent` tool -> nested sub-agent spawn through the actual compiled binary,
+asserting real (not fixture) SSE events (`agent_spawned` for both root and child,
+`agent_output` carrying each one's own `agentId`, root's own turn resuming after the
+tool_result) and a real two-level `getAgentTree()` shape, plus confirming the sub-agent's own
+JSONL log is independently downloadable via `download_logs`.
+
+**Judgment calls:**
+
+- Two separate mock-provider instances (one per model — root's own, the sub-agent's own) —
+  not the one-shared-provider pattern every prior test used — because root's Agent-tool-call
+  HTTP request and the sub-agent's own loop's HTTP request are a genuine concurrent race
+  against a shared call-count queue once the tool actually executes; discovered this the hard
+  way (first draft hung/mis-ordered) before landing on giving them independent providers.
+- Found a real, previously-undetected bug exactly in the risk class this task called out:
+  `AgentRuntime.spawnAgent()` (`src/agent/runtime.ts`) threads the root's `interactive` flag
+  into every sub-agent too, so Round 5's "pause 'waiting' instead of ending" convention (meant
+  for a human steering the root session) also applies to sub-agents — meaning a spawned
+  sub-agent that already finished its one turn never reaches `"done"`, and the `Agent` tool's
+  `run_in_background: false` blocking path (`ctx.tasks.awaitDone`, `src/agent/tools/agent.ts`)
+  would hang forever in any interactive/server context. Did not fix it (Core's files) —
+  confirmed by hand, wrote the committed test to assert the *actual* current behavior (child
+  status `"waiting"`, not `"done"`) with a prominent inline comment explaining why, and wrote
+  it up in full in the handoff rather than either quietly working around it or committing a
+  test that would hang CI. Same posture Round 1 took for the TUI/Web deadlock and CORS
+  findings.
+- Did not attempt gap 2b (Bedrock provider e2e coverage) — prioritized 2a per the task's own
+  instruction to do so if time-constrained. Still fully open for whoever picks this up next;
+  said so explicitly in the handoff rather than silently dropping it.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean (145 files), `bun test
+e2e/server-protocol.test.ts` 6 pass/0 fail/32 `expect()` calls, `bun run test:coverage` 693
+pass/0 fail/100% coverage maintained. Ran the full `bun run e2e`: `exit-codes.test.ts` and
+`server-protocol.test.ts` pass; `tui.test.ts`/`web.test.ts` fail on missing `tmux`/Chromium in
+this sandbox (expected, same as every prior round); also noticed `security.test.ts`'s
+bearer-token SSE test timing out here — confirmed pre-existing and unrelated to this round's
+diff (touched file is only `server-protocol.test.ts`), not investigated further, flagged in
+the handoff for a future round.

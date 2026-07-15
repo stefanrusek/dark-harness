@@ -287,3 +287,89 @@ something to do yourself — say so explicitly rather than silently skipping it.
 **Gates:** the standard three (`typecheck`, `lint`, and whichever of `bun run e2e` your
 sandbox can actually run — note explicitly what you couldn't run, same as prior rounds).
 Append a dated status entry here and update `docs/roster/hedy.md` when done.
+
+---
+
+### 2026-07-15 — Round 2 (Hedy, fresh process): built 2a's sub-agent coverage, found a real bug; did not attempt 2b
+
+**Worktree note (same class of issue as Round 1):** the worktree I was launched into
+(`agent-a0afc5ca1e85a9cc1`) was branched from the same early ancestor commit (`12679e4`,
+before any domain landed), not from the real `claude/coordinator-onboarding-kab9ls` HEAD.
+Confirmed zero unique commits via `git merge-base --is-ancestor`, fast-forwarded to the real
+HEAD (`0478707`) before starting. Worth the coordinator looking at why worktree provisioning
+keeps doing this.
+
+**What I built:** one new scenario in `e2e/server-protocol.test.ts`, describe block
+`"sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)"` — scripts a real `tool_use` turn
+that calls the `Agent` tool against the real compiled binary, and asserts:
+- both `agent_spawned` events (root, then the sub-agent with `parentAgentId: "agent-root"`)
+- the sub-agent's own `agent_output` SSE event, carrying its own `agentId`
+- the root's own follow-up turn *after* the tool_result (proving the loop actually resumed
+  post-tool-call, not just that the tool fired)
+- `getAgentTree()` returning a real two-level nested tree (not a hand-built fixture) —
+  the first time tree nesting depth > 1 has been asserted at the wire level
+- the sub-agent's own JSONL log file is independently downloadable via `download_logs` with
+  its own header line (`agentId`/`parentAgentId`) — ADR 0004 per-agent logging actually fires
+  for a spawned child, not just the root
+
+**Design choice — two independent mock providers, not one shared queue:** my first draft
+used one `startMockAnthropicProvider` instance for both root and sub-agent (mirroring every
+existing test's pattern), scripting turns by call-arrival order. That doesn't work here:
+root's Agent tool call and the sub-agent's own loop both fire real HTTP requests
+concurrently once the tool executes, so which one's request lands first at the shared mock
+is a genuine race, not something `await`-chaining guarantees (I initially assumed the
+`run_in_background: false` blocking path would serialize it — see the bug below on why that
+path can't be used at all). Fixed by giving the sub-agent its own model (`"sub"`) pointed at
+its own mock provider instance in the test's `dh.json` — root's turns are strictly ordered by
+its own provider's call count, the sub-agent's one turn by its own, independently.
+
+**A real bug found via this real-binary test (not fixed — out of e2e's ownership per
+CLAUDE.md §3, flagged as a cross-domain finding for Core, same posture as Round 1's TUI/Web
+deadlock and CORS findings):**
+
+`AgentRuntime.spawnAgent()` (`src/agent/runtime.ts`) threads `interactive: this.interactive`
+into every sub-agent's own `runAgentLoop()` call, identically to the root's. Round 5's
+"interactive sessions pause `'waiting'` instead of ending after a non-tool-use turn"
+convention (`docs/handoffs/core.md`) was designed for the *root* — a human keeps typing
+follow-up messages into the same session, so "waiting for the next message" is the correct
+terminal state between exchanges. Applied to a sub-agent spawned via the `Agent` tool, the
+same convention means a sub-agent that has already delivered its one and only output over SSE
+(confirmed: `subProvider.callCount` stays at 1 forever, i.e. the sub-agent's own loop never
+asks the model anything else) never reaches `"done"` — it sits `"waiting"` indefinitely,
+because nothing will ever call `sendMessage()` on a sub-agent nobody is watching.
+
+This silently breaks the `Agent` tool's own `run_in_background: false` (blocking) mode in
+*any* interactive/server context: `ctx.tasks.awaitDone(taskId)`
+(`src/agent/tools/agent.ts`) never resolves, since a task's status transition to
+`"done"`/`"failed"` (what `TaskRegistry.awaitDone` actually waits on) never happens once the
+sub-agent's status is pinned to `"waiting"`. Confirmed directly by hand while building this
+test — scripting the identical scenario with `run_in_background: false` reproduces the hang
+(the root's own second turn never arrives, `rootProvider.callCount` stays stuck at 1). I did
+not commit that as a test, since a hanging `bun test` isn't useful CI signal on its own;
+flagging it here in prose, with the passing test's own inline comment pointing at the exact
+two files (`runtime.ts`'s `spawnAgent`, `tools/agent.ts`'s `awaitDone` call) is the more
+actionable trail for whoever picks this up. The committed test itself asserts the *actual*
+current behavior (child status `"waiting"`, not `"done"`) rather than working around it,
+exactly like Round 1's precedent for surfacing rather than quietly avoiding a broken path.
+
+**Not attempted this round: 2b (Bedrock provider e2e coverage).** Prioritized 2a per the
+task's own framing ("prioritize 2a if you don't have time for both") — ran out of scope after
+the sub-agent scenario plus tracking down and writing up the bug above. Bedrock remains
+covered only by `src/agent/providers/bedrock.test.ts` (unit-level), with no real-binary e2e
+scenario and no README guidance beyond the one-line sample config entry. Still open for
+whoever picks up Round 3 (or a fresh Round 2 continuation) — the task's own framing suggests
+either a mock/stub Bedrock-shaped HTTP endpoint (mirroring `mock-provider.ts`'s pattern) or,
+if lower lift, routing a README addition to Prompt instead; I did neither, so both options are
+still live.
+
+**Gates:** `bun run typecheck` clean (both TS programs). `bun run lint` clean (145 files, no
+fixes). `bun test e2e/server-protocol.test.ts` — 6 pass, 0 fail, 32 `expect()` calls (5
+pre-existing + this round's 1 new). `bun run test:coverage` — 693 pass, 0 fail, 100% coverage
+maintained across `src/`. Ran the full `bun run e2e`: this sandbox has neither `tmux` nor a
+Chromium binary (confirmed via `which`/the actual launch error, `/opt/pw-browsers/chromium`
+does not exist here), so `tui.test.ts` and `web.test.ts` fail exactly as in every prior round,
+unrelated to this change. Also observed `e2e/security.test.ts`'s bearer-token SSE happy-path
+test timing out at 5000ms in this sandbox — confirmed pre-existing and unrelated (file
+untouched by this round's diff, `git diff --stat` shows only `server-protocol.test.ts`
+changed); not investigated further since it's outside this round's scope, but worth a future
+round's attention if it's not just sandbox flakiness.
