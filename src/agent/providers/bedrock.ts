@@ -115,7 +115,15 @@ export class BedrockProvider implements ModelProvider {
   constructor(config: ProviderConfig, client?: BedrockClientLike) {
     this.client =
       client ??
-      new BedrockRuntimeClient(typeof config.region === "string" ? { region: config.region } : {});
+      new BedrockRuntimeClient({
+        ...(typeof config.region === "string" ? { region: config.region } : {}),
+        // DH-0009: the AWS SDK's own default retry behavior (maxAttempts: 3 total attempts)
+        // would otherwise compound with this adapter's own withRetry below, the same
+        // double-retry bug found (and fixed the same way) in anthropic.ts — see that
+        // adapter's constructor for the full explanation. maxAttempts: 1 means exactly one
+        // real attempt per call; this adapter owns all retry/backoff.
+        maxAttempts: 1,
+      });
     this.retryPolicy = config.retry;
   }
 
