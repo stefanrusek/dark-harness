@@ -1,0 +1,119 @@
+# Dark Harness — Constitution
+
+This is the project's law. It is short enough to always load, and binding on every agent
+that touches this repo. It is the project-specific layer described in `METHODOLOGY.md`
+(read that first — it defines the fleet roles, escalation model, and artifact types this
+file assumes). The founding product spec is `HANDOFF.md`.
+
+---
+
+## 1. What this is
+
+Dark Harness (`dh`): a single Bun application, compiled to a single binary, that runs an
+LLM agent (and sub-agents) with a minimal Claude-Code-mirrored tool set, skill/MCP support,
+and both console and web UIs. See `HANDOFF.md` for full product scope.
+
+## 2. Stack
+
+- **Runtime/toolchain:** Bun (>=1.3). TypeScript throughout, strict mode.
+- **Single package**, not a multi-package workspace — `dh` ships as one compiled binary, so
+  ownership is enforced by directory convention (below), not package boundaries.
+- **Testing:** `bun test` (built-in). Coverage via `bun test --coverage`.
+- **Compilation:** `bun build --compile` for release binaries (linux/macos x64+arm64,
+  windows-x64).
+
+## 3. Repository layout / ownership map
+
+Each directory has one owning domain. Handoffs are scoped to one owner; cross-boundary
+needs are requests to the other owner, never a direct edit (METHODOLOGY.md §5).
+
+| Path | Owning domain | Contents |
+| --- | --- | --- |
+| `src/contracts/` | **Contracts** (shared — changes need architect sign-off, see §6) | SSE event schema, POST command schema, log-line schema, `dh.json` schema, exit codes. The single source of wire truth. Every other domain imports from here; nothing redeclares a wire type locally. |
+| `src/agent/`, `src/config/`, `src/cli.ts` | **Core** | Agent loop, tool implementations (Bash, Read, Edit, Write, Agent, ToolSearch, Skill, TaskOutput, SendMessage, Monitor, TaskStop, McpAuth), provider adapters (anthropic-type, bedrock-type), `dh.json` loading/validation + `$(VAR)` interpolation, and the CLI entry point (flag parsing, mode composition: `--web`, `--server`, `--connect`, `--job`, `--instructions`, `--config`, `--port`). |
+| `src/server/` | **Server** | HTTP+SSE server, protocol handlers, JSONL-per-agent session logging, exit-code contract. |
+| `src/tui/` | **TUI** | Console client: alt-screen full-screen TUI, root view + agent tree, SSE client parsing. |
+| `src/web/` | **Web** | Web UI: served client-side only, agent tree, status colors, token/cost display, log download. |
+| `src/prompt/`, `README.md` | **Prompt** | Built-in system prompt, skill enumeration, bundled CLI-tools skill, and the project README (landing page). |
+| `e2e/` | **E2E** | Real-binary end-to-end tests: PTY harness for TUI, headless browser for web, HTTP/SSE across processes, mock provider endpoint. Sequenced after the other domains land. |
+| `docs/adr/` | Coordinator | Locked decisions. |
+| `docs/handoffs/` | Coordinator | Domain handoff documents. |
+| `.github/workflows/` | **CI/Release** | CI gate, tag-driven release/publish. |
+
+## 4. Invariants (locked decisions — reference the ADR, do not relitigate)
+
+1. One binary, two logical processes (server, client) composed by flags. Web UI is
+   **always client-served**, never by `--server`. See `docs/adr/0001-single-binary-modes.md`.
+2. Client↔server protocol is **HTTP + SSE**, not WebSocket. Versioned JSON events, resumable
+   via `Last-Event-ID`. See `docs/adr/0002-http-sse-protocol.md`.
+3. **Plaintext HTTP by default, no auth.** Optional `security.token` (bearer, constant-time
+   compare, never logged) and `security.tls` (cert/key) are opt-in via `dh.json`. Air-gapping
+   remains the primary posture. See `docs/adr/0003-security-posture.md`.
+4. **JSONL-per-agent logging**: one file per agent, first line is a metadata header (session
+   id, agent id, parent agent id, spawn timestamp, model, instructions summary/hash),
+   subsequent lines are timestamped events. Logs are automatic — agents never call a logging
+   tool. See `docs/adr/0004-jsonl-logging.md`.
+5. **Exit codes:** `0` success, `1` self-reported task failure, `2+` harness error. See
+   `docs/adr/0005-exit-code-contract.md`.
+6. **`dh.json` schema** (models/providers/options/skillPaths/mcpServers/systemPrompt/
+   security) is as specified in `HANDOFF.md` §5 and Addendum B — extend minimally, never
+   restructure without an ADR. See `docs/adr/0006-dhjson-schema.md`.
+7. **Permissions: everything is allowed, always.** No approval prompts, no permission modes.
+   Documentation must steer operators toward air-gapped deployment. See
+   `docs/adr/0003-security-posture.md`.
+8. **Sub-agents are ad-hoc only** — no named/predefined agent definition files; `Agent` takes
+   a model name + prompt; arbitrary nesting depth; `run_in_background` defaults to `true`
+   everywhere, overridable in config.
+
+## 5. Quality gates (hard rules — CI fails below these)
+
+Run before any commit is considered done; the exact commands are the contract implementers
+are judged against (METHODOLOGY.md §4.5):
+
+```
+bun run typecheck      # tsc --noEmit
+bun run lint            # biome check .
+bun run test:coverage   # bun test src --coverage; 100% coverage is a gate, not a target
+bun run e2e             # bun test e2e; real compiled binary, PTY + headless browser + mock provider
+```
+
+100% coverage applies to new/changed code in every PR. E2E spawns the **real compiled
+binary** in each run mode against a **mock Anthropic-compatible provider endpoint** — never
+the real API in the gate.
+
+## 6. Escalation triggers (tuned for this project)
+
+The coordinator calls the architect-on-call (Fable) when — and only when — a task hits:
+
+1. Anything that would set, change, or bend an invariant in §4 or a `docs/adr/` entry.
+2. A change to `src/contracts/` (the wire truth) — shared-schema edits are architect-reviewed
+   before other domains build against them.
+3. A decomposition that can't be cleanly sliced by the ownership map in §3.
+4. Anything touching the security posture (§4.3), the exit-code contract, or the logging
+   schema (diagnostics-critical, hard to patch after dark-factory runs depend on it).
+5. Two domains' outputs conflicting and needing arbitration.
+6. Anything the coordinator or a domain lead notices it is guessing at.
+
+Everything else is a routine coordinator call. Authority/taste/credentials questions (npm
+publish rights, GitHub repo settings, cutting the v0.1.0 release) route to the owner, not
+the architect.
+
+## 7. Roster
+
+| Name | Pronouns | Role | Persistence |
+| --- | --- | --- | --- |
+| Ada | she/her | Coordinator | Persistent for this build (this session) |
+
+Domain leads/implementers are spawned ad hoc per handoff and name themselves on arrival;
+this table grows as they come online. Architect-on-call is Fable, invoked per §6 — not a
+standing instance.
+
+## 8. Workflow rules
+
+- Directory ownership (§3) is the primary collision-avoidance mechanism.
+- Commit before you yield — never leave a dirty tree for another agent to trip on.
+- Status supersedes: a later report from the agent doing the work overrides earlier
+  assumptions, including the coordinator's.
+- No silent truncation: if an agent caps its coverage (top-N, sampling, deferred scope),
+  it says so explicitly in its report.
+- PRs: optional per task; the coordinator (Ada) is responsible for merging.

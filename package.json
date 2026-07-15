@@ -1,0 +1,27 @@
+{
+  "name": "dark-harness",
+  "version": "0.1.0",
+  "description": "Dark Harness (dh) — a single-binary LLM agent harness for autonomous dark-factory software work, with console and web UIs.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "dh": "./dist/dh"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "test": "bun test src",
+    "test:coverage": "bun test src --coverage",
+    "e2e": "bun test e2e",
+    "build": "bun build ./src/cli.ts --compile --outfile dist/dh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5.6.3"
+  }
+}
