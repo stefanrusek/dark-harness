@@ -9,7 +9,7 @@ blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow 
 created: 2026-07-15
 relations:
   depends_on: []
-  relates_to: []
+  relates_to: [DH-0023]
   supersedes: []
 implementation:
   - repo: dark-harness
@@ -57,3 +57,10 @@ both the Server domain sweep and the security audit as one of the highest-impact
 > finding in this sweep... should likely be escalated") and Security audit finding #4 (same root
 > cause, independently discovered). Both sweeps agree this warrants an architect decision, not a
 > routine fix.
+
+> [!NOTE]
+> Reconciled with DH-0023 (2026-07-15): that ticket's token-leak concern (`/api/config` handing
+> the bearer token to any caller of the web port) is the *same root cause* as this ticket, not
+> an independent issue — `src/web/server.ts`'s `Bun.serve()` has the identical missing-`hostname`
+> bug. Fixing this ticket's default bind (loopback) resolves that half of DH-0023 too; DH-0023
+> was trimmed to just its genuinely independent CORS/Host-header/CSP/clickjacking scope.

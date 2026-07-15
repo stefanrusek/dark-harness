@@ -5,60 +5,64 @@ type: bug
 status: draft
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: []
 created: 2026-07-15
 relations:
-  depends_on: []
+  depends_on: [DH-0022]
   relates_to: []
   supersedes: []
 implementation:
   - repo: dark-harness
 ---
 
-# DH-0023: The client-served web UI's own HTTP port leaks the bearer token with no auth, plus missing CORS/CSP/clickjacking hardening
+# DH-0023: Web UI CORS/Host-header/CSP/clickjacking hardening
 
 ## Summary
 
-`src/web/server.ts` exposes `GET /api/config` with no auth check at all, returning
-`{ baseUrl, token }` in plaintext JSON — the same bearer token ADR 0004 says must never be logged
-or leaked. Any process/user/webpage that can reach this port (which has no `security` config
-option of its own) obtains the full admission token to the real `dh --server`, completely
-defeating the token protection for anyone who can reach the *web* port even without direct access
-to the *server* port. Compounding this: the real `dh` server's CORS is `access-control-allow-origin:
-"*"`, which — in the default no-token posture — means any web page the operator's browser visits
-can issue cross-origin `fetch()` POSTs (`send_message`/`stop_agent`/`download_logs`) against
-`localhost:4000`, something same-origin policy would otherwise block; there's no `Host` header
-validation to guard against DNS rebinding; and the web client ships no CSP or `X-Frame-Options`,
-so (while there is currently no XSS sink — confirmed by both the TUI/Web sweep and the security
-audit, all rendering uses `textContent`/`createTextNode`) there's no defense-in-depth against a
-future regression, and the UI can currently be iframed/clickjacked by an attacker page.
+This ticket originally also covered `/api/config` handing the bearer token to any caller of
+the web port with no auth check. On review with the owner: `security.token` comes from the
+operator's own `dh.json`/env config — the operator already possesses it, so the web-serving
+process relaying it to its own browser client isn't a leak of a secret the operator lacks.
+The real severity question was *who else can reach that endpoint* — confirmed
+`src/web/server.ts`'s `Bun.serve()` has the exact same missing-`hostname`/binds-all-interfaces
+bug as `src/server/server.ts` (DH-0022), not an independent issue. Once DH-0022 fixes the
+default bind to loopback, `/api/config`'s exposure shrinks to "other processes on the same
+machine" and doesn't need a separate fix — **that part of this ticket is resolved by fixing
+DH-0022, not by anything here.**
+
+What remains, grouped together as one related "web-surface hardening" set (per Spile's
+own convention of one ticket per feature/related-story-group, not one ticket per story):
+CORS, Host-header validation, and CSP/clickjacking protections. These matter even on
+loopback-only binding, since they're about a malicious page in the *operator's own browser*
+reaching into `localhost`, not about network reachability — genuinely independent of
+DH-0022.
 
 ## User Stories
-
-### As an operator using a token-protected `dh --server`, I want the web UI to not leak that token to anyone who can merely load the web UI's own page
-
-- Given `security.token` is configured, when the web-serving process hands the token to its own
-  client, then that hand-off is not reachable by an arbitrary unauthenticated caller of the web
-  port.
 
 ### As an operator, I want the default (no-token) posture to not let any browser tab I have open drive my local `dh` session
 
 - Given the default no-auth posture, when a page on an unrelated origin issues a cross-origin
-  request to the local server, then it is not treated as same-privilege as a same-origin request
-  (CORS/Host-header hardening).
+  request to the local server, then it is not treated as same-privilege as a same-origin
+  request (CORS should not be `*` for a mutating API; add `Host` header validation to guard
+  against DNS rebinding).
 
 ### As an operator, I want the web UI to resist clickjacking even though no live XSS exists today
 
 - Given the web UI is served, when responses are returned, then `X-Frame-Options`/CSP
   `frame-ancestors` prevents it from being iframed by another origin.
 
+## Functional Requirements
+
+- Given the fix, when a test is added, then it pins the CORS header value and the presence of
+  CSP/`X-Frame-Options`, so a future regression is caught.
+
 ## Notes
 
 > [!NOTE]
-> Source: TUI/Web domain sweep finding #24 (token leak — the sweep author explicitly recommended
-> escalating this one to the architect, per CLAUDE.md §6.4) and the Security audit findings #1
-> (same token-leak finding, independently discovered), #2 (CORS drive-by risk), #3 (no DNS-rebinding
-> guard), #6 (no CSP), #7 (no clickjacking protection), #8 (token held safely in memory only —
-> confirmed clean, no action needed there). This is a cluster of related web-surface hardening gaps
-> that likely need one coordinated Server+Web fix and an architect decision on the token hand-off
-> design specifically.
+> Source: TUI/Web domain sweep finding #24 and Security audit findings #2 (CORS drive-by
+> risk), #3 (no DNS-rebinding guard), #6 (no CSP), #7 (no clickjacking protection), #8 (token
+> held safely in memory only — confirmed clean, no action needed there). The token-leak half
+> of the original finding (#1 in both sweeps) is resolved by DH-0022, not tracked here — see
+> that ticket's Notes for the reconciliation. No live XSS sink exists today (confirmed by both
+> sweeps — all rendering uses `textContent`/`createTextNode`), so this is defense-in-depth,
+> not an active exploit path.
