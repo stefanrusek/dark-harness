@@ -1553,3 +1553,53 @@ test:coverage` — 745 tests passing, 99.96%/100% funcs/lines aggregate (the sol
 not a regression this round introduced). `bun run e2e` not re-run this round (operational
 rules for this round said not to spawn sub-agents / kept to the standard four; no `e2e/` file
 touched — this is purely an `src/agent/` internal fix, no wire-protocol behavior changed).
+
+---
+
+## Round 12 — OPEN — push notification when a background task/sub-agent completes
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+This was the original example that motivated Fable's gap analysis several rounds ago, but it
+was used purely as a calibration example and never actually turned into an implementation
+round — a real miss, since it's arguably the most concrete, well-understood gap in the whole
+analysis. Fixing that oversight now.
+
+**The gap:** HANDOFF.md §4 requires tool "semantics [to] mirror Claude Code's tools of the
+same name." Real Claude Code — the environment every agent in this fleet runs inside —
+**pushes a notification to whoever's waiting when a background task completes**, rather
+than relying purely on the model proactively polling `Monitor`/`TaskOutput`. `dh` currently
+only has the poll half: Prompt round 3 taught the model it's *responsible* for checking, but
+nothing ever tells it *when* to check by pushing an event. Confirmed via extensive live
+testing this session: small/local models reliably fail to poll on their own, and even the
+prompt fix didn't close the gap for `Agent`-spawned sub-agents specifically (root spawns a
+sub-agent, sub-agent finishes and reports correctly internally, but the root never checks
+back and the operator never sees the answer — a real, reproduced failure mode).
+
+**Fix:** when a background task (`Bash` with `run_in_background: true`) or a sub-agent
+(`Agent` with `run_in_background: true`) completes, inject a message into the *spawning*
+agent's conversation announcing the completion and result — reusing the exact mechanism
+Round 5 already built for resuming a paused ("waiting") interactive conversation
+(`registerSendMessage`'s pending-message queue). Concretely: `TaskRegistry`
+(`src/agent/tasks.ts`) already knows when a task transitions to done/failed; when that
+happens, it should call back into whatever registered the task (the parent agent's own loop)
+with a synthetic message like `"Background task <id> completed: <output/status>"`, the same
+way an operator's `SendMessage` call would inject into a waiting conversation.
+
+**A real failure mode to design around, raised by the owner directly** (the same one
+Claude Code itself has): if a child spawns its own grandchild, and the child's own turn
+already ended (or the child itself isn't listening) before the grandchild finishes, the
+grandchild's completion message has nowhere to go — don't let it disappear silently into the
+void. At minimum, decide and document what happens in that case (e.g. the message is still
+recorded in the log even if no live listener is present, so it's not *lost*, even if nobody
+reacts to it in the moment) rather than leaving it an unconsidered edge case.
+
+**Gates:** the standard four. Add regression tests proving: a backgrounded `Bash` call's
+completion is proactively delivered to the spawning agent (not just retrievable via
+`TaskOutput` if asked); a spawned sub-agent's completion is proactively delivered to its
+parent; and the orphaned-grandchild case above is handled in a documented, deliberate way
+(even if the decision is "delivered best-effort, logged regardless"). Live-verify against a
+real running server, the way Round 5's fix was verified — this is exactly the kind of thing
+that looks fine in unit tests but needs a real multi-agent conversation to prove.
+
+Append a dated status entry here and update `docs/roster/grace.md` when done.
