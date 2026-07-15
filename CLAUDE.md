@@ -142,6 +142,7 @@ Roster file template:
 | Nightingale | she/her | CI/Release domain lead (`.github/workflows/`) | Persistent | `docs/roster/nightingale.md` |
 | Grace | she/her | Core domain lead (`src/agent/`, `src/config/`, `src/cli.ts`) | Persistent | `docs/roster/grace.md` |
 | Susan | she/her | Web domain lead (`src/web/`) | Persistent | `docs/roster/susan.md` |
+| Hedy | she/her | E2E domain lead (`e2e/`) | Persistent | `docs/roster/hedy.md` |
 
 Domain leads/implementers are spawned ad hoc per handoff and name themselves on arrival;
 this table grows as they come online. Architect-on-call is Fable, invoked per §6 — not a
