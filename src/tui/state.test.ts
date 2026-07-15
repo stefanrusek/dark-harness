@@ -4,6 +4,7 @@ import type {
   AgentSpawnedEvent,
   AgentStatusEvent,
   AgentTreeNode,
+  ResyncEvent,
   SessionEndedEvent,
   TokenUsageEvent,
 } from "../contracts/index.ts";
@@ -71,6 +72,16 @@ function sessionEnded(overrides: Partial<SessionEndedEvent> = {}): SessionEndedE
     timestamp: "2026-07-15T00:00:00.000Z",
     type: "session_ended",
     exitCode: 0,
+    ...overrides,
+  };
+}
+
+function resync(overrides: Partial<ResyncEvent> = {}): ResyncEvent {
+  return {
+    version: 1,
+    id: "e6",
+    timestamp: "2026-07-15T00:00:00.000Z",
+    type: "resync",
     ...overrides,
   };
 }
@@ -416,6 +427,15 @@ describe("reducer: command_error / resize / connection", () => {
 
   test("reconnected sets a visible notice that history may be incomplete (DH-0024)", () => {
     const { state, effects } = reducer(initialState(size()), { type: "reconnected" });
+    expect(state.reconnectNotice).toBe("Reconnected — history may be incomplete.");
+    expect(effects).toEqual([]);
+  });
+
+  test("a server-detected resync event sets the same reconnect notice (DH-0019)", () => {
+    const { state, effects } = reducer(initialState(size()), {
+      type: "sse_event",
+      event: resync(),
+    });
     expect(state.reconnectNotice).toBe("Reconnected — history may be incomplete.");
     expect(effects).toEqual([]);
   });

@@ -4,6 +4,7 @@ import type {
   AgentSpawnedEvent,
   AgentStatusEvent,
   AgentTreeNode,
+  ResyncEvent,
   SessionEndedEvent,
   TokenUsageEvent,
 } from "../../contracts/index.ts";
@@ -86,6 +87,15 @@ function sessionEnded(exitCode: number): SessionEndedEvent {
     timestamp: new Date().toISOString(),
     type: "session_ended",
     exitCode,
+  };
+}
+
+function resync(): ResyncEvent {
+  return {
+    version: 1,
+    id: "evt-resync",
+    timestamp: new Date().toISOString(),
+    type: "resync",
   };
 }
 
@@ -188,6 +198,13 @@ describe("state reducer", () => {
     state = applyEvent(state, sessionEnded(0));
     expect(state.sessionEnded).toBe(true);
     expect(state.exitCode).toBe(0);
+  });
+
+  test("a server-detected resync event sets possibleGap, same as a client-detected gap (DH-0019)", () => {
+    let state = createInitialState();
+    expect(state.possibleGap).toBe(false);
+    state = applyEvent(state, resync());
+    expect(state.possibleGap).toBe(true);
   });
 
   test("applyEvent does not mutate the previous state object", () => {

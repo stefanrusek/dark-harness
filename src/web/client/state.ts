@@ -217,6 +217,9 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       next.exitCode = event.exitCode;
       return next;
     }
+    case "resync":
+      next.possibleGap = true;
+      return next;
     default:
       // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added to
       // src/contracts/ without a case here (assertNever's parameter type is `never`, which

@@ -195,6 +195,11 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
       );
     case "session_ended":
       return noEffects({ ...state, sessionEnded: { exitCode: event.exitCode } });
+    case "resync":
+      return noEffects({
+        ...state,
+        reconnectNotice: "Reconnected — history may be incomplete.",
+      });
   }
 }
 
