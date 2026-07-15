@@ -455,3 +455,40 @@ wording with Mary's parallel TUI round — "time in current status" is this roun
 worth a later glance at `src/tui/`'s equivalent copy for consistency, not required.
 
 **Roster:** updated `docs/roster/susan.md` with this round's memory entry.
+
+---
+
+## Round 4 — OPEN — conversation view has no turn structure, never shows the user's own messages
+
+**Addressed to:** Web (Susan, resumed — read `docs/roster/susan.md` first).
+
+Confirmed by the owner via real screenshots comparing `dh`'s TUI against real Claude Code's
+CLI (same underlying issue affects the Web client's identical design — `src/web/client/
+state.ts`'s `AgentInfo.output` is also a flat `string`, `case "agent_output"` also just
+appends with no structure): the conversation view has no turn separation and never shows the
+operator's own sent messages, only the model's concatenated output. This is the second of
+two "calibration example" gaps from Fable's original architect review (the first — proactive
+completion push-notifications — was fixed in Core's Round 12); this one was discussed early
+on but never actually turned into a dispatched round until now.
+
+**Fix:** replace the flat `output: string` with a structured transcript — an ordered list of
+turns (role `"user" | "assistant"` + text, plus whatever else helps rendering — timestamp,
+etc.). Two things need to populate it:
+1. `agent_output` events append an **assistant** turn (as today, just structured now).
+2. Sending a message must add a **user** turn to the transcript *immediately*, client-side,
+   at the point the send action is handled — this never comes from the server, it's the
+   operator's own local echo of what they just typed, same as any real chat UI.
+
+Update the render path to show clear visual separation between turns (distinct styling per
+role — this is a real UI/UX opportunity, not just a functional fix; make it look like a real
+conversation, consistent with "make it a joy to use" from HANDOFF.md §9).
+
+**Gates:** the standard three. Add tests proving: a sent message appears in the transcript
+immediately (before any server response arrives); an `agent_output` event renders as a
+distinct, visually-separated assistant turn; multiple back-to-back assistant turns (e.g. from
+Round 12's push-notification wake-ups) still read as separate turns, not run together.
+Append a dated status entry here and update `docs/roster/susan.md` when done.
+
+Note: TUI (Mary) is getting the identical request for `src/tui/` in parallel — same root
+cause, no shared files between your two changes, but keep the same turn-model concept in
+sync where practical.

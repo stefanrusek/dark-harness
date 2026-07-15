@@ -496,3 +496,49 @@ files touched this round.
 
 No cross-domain requests. Consistent wording with Web (Susan) not verified — out of scope to
 check her round in this session — worth a quick glance if a future round touches both.
+
+---
+
+## Round 6 — OPEN — conversation view has no turn structure, never shows the user's own messages
+
+**Addressed to:** TUI (Mary, resumed — read `docs/roster/mary.md` first).
+
+Confirmed by the owner via real screenshots comparing `dh`'s TUI against real Claude Code's
+CLI: `dh`'s root/agent view renders as an unbroken wall of text with no visual separation
+between turns, and **the user's own typed messages never appear anywhere in the transcript**
+— only the model's responses, concatenated directly together. This is the second of two
+"calibration example" gaps from Fable's original architect review (the first — proactive
+completion push-notifications — was fixed in Core's Round 12); this one was likewise
+discussed early on but never actually turned into a dispatched round until now.
+
+**Root cause, confirmed in code:** `AgentInfo.output` (`src/tui/types.ts`) is a single flat
+`string`, appended to directly by `agent_output` events (`src/tui/state.ts`'s `appendOutput`)
+with no separator and no role marker. Sending a message (`state.input` → a `send_message`
+command) never adds anything to `output` at all — the SSE stream only ever carries the
+model's own output, so the user's side of the conversation is structurally absent from what
+gets rendered.
+
+**Fix:** replace the flat `output: string` with a structured transcript — an ordered list of
+turns, each with at least a role (`"user" | "assistant"`) and text, plus enough to render
+clear visual separation between them (a blank line, a role-prefixed label like real Claude
+Code's UI, whatever reads clearly in a terminal). Two things need to populate it:
+1. `agent_output` events append an **assistant** turn (as today, just structured now).
+2. Sending a message (when the operator hits Enter in the root view) must add a **user**
+   turn to the transcript *immediately*, client-side — this doesn't come from the server at
+   all, it's the operator's own local echo of what they just typed, same as any real chat
+   client. Add this at the point `state.ts` handles the send-message action, not somewhere
+   downstream.
+
+Update `renderRoot`/`renderAgent` (`render.ts`) to render the transcript with real turn
+separation instead of `wrapText(agent.output, cols)` on a raw string.
+
+**Gates:** the standard three. Add tests proving: a sent message appears in the transcript
+immediately (before any server response arrives); an `agent_output` event's text is rendered
+as a distinct assistant turn, visually separated from the user turn before it; multiple
+back-to-back assistant turns (e.g. from Round 12's push-notification wake-ups) still read as
+separate turns, not run together. Append a dated status entry here and update
+`docs/roster/mary.md` when done.
+
+Note: Web (Susan) is getting the identical request for `src/web/` in parallel — same root
+cause (`output: string` in `src/web/client/state.ts` too), no shared files between your two
+changes, but keep the same turn-model concept in sync where practical.
