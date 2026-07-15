@@ -403,3 +403,26 @@ obvious in a real terminal, not just "technically present."
 Add a render-level unit test asserting the cursor marker appears in the rendered frame when
 appropriate and doesn't appear in read-only views. Append a dated status entry here and
 update `docs/roster/mary.md` when done.
+
+---
+
+**Status — 2026-07-15, done.** Added `CURSOR_MARKER` (`\x1b[7m \x1b[0m`, an inverse-video
+space) to `src/tui/render.ts`, appended after `state.input` only in `renderRoot`'s
+`inputLine`. Tree and agent views are untouched (read-only, no cursor). Exported the
+constant so tests can assert against it directly instead of hardcoding the escape sequence.
+
+Added three tests to `src/tui/render.test.ts`:
+- root view's input line ends with the marker when input is non-empty,
+- the marker is still shown appended to `"> "` when input is empty (so the cursor is visible
+  even before typing starts, not just once there's text to attach it to),
+- tree and agent view frames never contain the marker.
+
+**Gates — all green:**
+```
+bun run typecheck      # clean
+bun run lint            # biome check . — clean
+bun run test:coverage   # 691 pass / 0 fail; src/tui/render.ts 100.00%/100.00%
+```
+
+No cross-domain requests — this was fully containable inside `src/tui/render.ts` and its
+test file, per the handoff's own framing.

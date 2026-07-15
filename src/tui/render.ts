@@ -9,6 +9,14 @@ import type { AgentInfo, TuiState } from "./types.ts";
 const HEADER_ROWS = 2;
 
 const RESET = "\x1b[0m";
+const INVERSE = "\x1b[7m";
+/** Synthetic cursor marker: an inverse-video space appended after the input text. The alt-
+ * screen shell hides the real terminal cursor for the whole session (see app.ts), and this
+ * module never touches the terminal directly, so the input box needs its own visible marker
+ * rendered as part of the frame text — consistent with the existing pure
+ * `TuiState -> string[]` rendering architecture, no real cursor-position math needed. Only
+ * the root view's input line is editable, so only `renderRoot` uses this. */
+export const CURSOR_MARKER = `${INVERSE} ${RESET}`;
 const STATUS_COLOR: Record<AgentStatus, string> = {
   running: "\x1b[33m",
   waiting: "\x1b[36m",
@@ -83,7 +91,7 @@ function renderRoot(
     ? tailLines(wrapText(agent.output, cols), contentRows)
     : tailLines(["Waiting for root agent to start…"], contentRows);
   const hint = state.statusMessage ?? "[Enter] send   [←] agent tree   [Ctrl+C] quit";
-  const inputLine = `> ${state.input}`;
+  const inputLine = `> ${state.input}${CURSOR_MARKER}`;
   return { content: padRows(content, contentRows), footer: [hint, inputLine] };
 }
 

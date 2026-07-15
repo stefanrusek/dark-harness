@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTreeNode } from "../contracts/index.ts";
-import { colorizeStatus, frameToAnsi, renderFrame, tailLines, wrapText } from "./render.ts";
+import {
+  CURSOR_MARKER,
+  colorizeStatus,
+  frameToAnsi,
+  renderFrame,
+  tailLines,
+  wrapText,
+} from "./render.ts";
 import { initialState } from "./state.ts";
 import type { TuiState } from "./types.ts";
 
@@ -98,6 +105,25 @@ describe("renderFrame", () => {
     const rows = renderFrame(state);
     expect(rows.join("\n")).toContain("hello world");
     expect(rows.some((row) => row.includes("> typing"))).toBe(true);
+  });
+
+  test("root view's input line ends with a visible cursor marker", () => {
+    const state = baseState({ input: "typing" });
+    const rows = renderFrame(state);
+    expect(rows.some((row) => row.endsWith(`> typing${CURSOR_MARKER}`))).toBe(true);
+  });
+
+  test("root view shows the cursor marker even with empty input", () => {
+    const state = baseState({ input: "" });
+    const rows = renderFrame(state);
+    expect(rows.some((row) => row.endsWith(`> ${CURSOR_MARKER}`))).toBe(true);
+  });
+
+  test("tree and agent views do not render the cursor marker (read-only)", () => {
+    const treeState = baseState({ view: { kind: "tree", selectedIndex: 0 }, tree: [] });
+    const agentState = baseState({ view: { kind: "agent", agentId: "missing" } });
+    expect(renderFrame(treeState).some((row) => row.includes(CURSOR_MARKER))).toBe(false);
+    expect(renderFrame(agentState).some((row) => row.includes(CURSOR_MARKER))).toBe(false);
   });
 
   test("root view shows a status message instead of the default hint when set", () => {
