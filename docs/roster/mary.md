@@ -52,3 +52,43 @@ Open thread for a future round (mine or a successor's): none blocking. If Core's
 `src/cli.ts` ends up wanting a different `startTui` signature than
 `startTui(baseUrl: string, io?: Partial<TuiIO>): Promise<void>`, that's a coordination note
 to pick up from Core's status log, not a TUI-side change to guess at pre-emptively.
+
+### 2026-07-15 — Round 2, bearer-token passthrough
+
+Came back for a small, precisely-scoped follow-up: Grace (Core) flagged that `startTui` had
+no way to receive a `security.token` (ADR 0004) to send as `Authorization: Bearer <token>`.
+Worked in a brand-new worktree off the latest `claude/coordinator-onboarding-kab9ls`
+(round 1's worktree was stale — Core's round-2 `cli.ts` merge, and four other domains, had
+landed since I branched it). Full details are in `docs/handoffs/tui.md`'s Round 2 status
+entry; the durable judgment calls worth keeping here:
+
+- **Signature: a new positional `token?` parameter, not a field folded into `TuiIO`.**
+  `TuiIO`'s whole purpose is "swap real I/O for a test fake" (its own doc comment says so);
+  a bearer token isn't a fake to inject, it's a real value every caller must decide on
+  purpose. Keeping it a distinct, explicitly-named parameter
+  (`startTui(baseUrl, token?, io?)`) reads better at the call site than reaching into an
+  options bag whose name doesn't suggest "auth" at all. When a future me (or successor) adds
+  another non-I/O parameter to `startTui`, prefer this pattern over overloading `TuiIO`
+  further.
+
+- **Copied Web's (Susan's) exact header convention rather than inventing my own.** Real
+  `Authorization: Bearer <token>` header, never a query param, and the header key is entirely
+  absent (not present-but-empty) when no token is configured. `src/web/client/commands.ts`
+  and `sse.ts` were the reference. Worth remembering: when two client domains (TUI, Web) both
+  talk to the same server contract, matching the sibling's already-battle-tested convention
+  beats independently re-deriving an equivalent one — less surface for a subtle mismatch to
+  hide in, and it's what a reviewer will expect to see.
+
+- **Did not touch `src/cli.ts`, even though the actual end-to-end fix needs a one-line
+  change there too.** Ownership map: `src/cli.ts` is Core's. The Round 2 handoff was scoped
+  to `startTui`'s own signature, not "make token auth work end to end" — I gave the exact
+  follow-up diff Grace needs in the handoff status log instead of taking it myself. This is
+  the same judgment call as round 1's endpoint-path fix, just in the other direction: last
+  time I had enough visibility to *resolve* a cross-domain question by reading the other
+  domain's landed code myself; this time the fix genuinely lives in the other domain's file,
+  so it stays a note, not an edit.
+
+Open thread for a future round: the `src/cli.ts` wiring above is the one thing standing
+between this change and token-protected sessions actually working for `dh`'s console client.
+Worth checking on this if `docs/handoffs/core.md`'s status log doesn't show it picked up by
+the time E2E starts exercising `--connect` with `security.token` configured.
