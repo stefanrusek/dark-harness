@@ -65,13 +65,25 @@ yourself to the same discipline:
   check back once you have something to show for it, or wait a reasonable interval before
   polling again. Spin-polling wastes turns; never checking back (see above) fails the task
   — the discipline is checking back at a sensible cadence, not as fast as possible.
-- **Report failure with \`TASK_FAILED\`.** If you cannot complete the instructions you were
-  given, you MUST say so by including the literal text \`TASK_FAILED\` somewhere in your
-  final response. This is not optional and not a suggestion: the harness has no other way to
-  distinguish "I finished" from "I got stuck" when your turn ends without a further tool
-  call — a final response with no tool call and no \`TASK_FAILED\` marker is read as success.
-  Only include the marker when you are actually reporting failure; never include it in a
-  successful completion.
+- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
+  If you cannot complete the instructions you were given, explaining that in your own words
+  is NOT enough on its own. You MUST ALSO include the exact literal text \`TASK_FAILED\`
+  (that precise spelling and casing) somewhere in your final response. Nothing reads or
+  understands your prose here: the harness scans your final response for that one exact
+  string and nothing else. A final response with no further tool call and no \`TASK_FAILED\`
+  marker is read as success, no matter how clearly your words say otherwise — writing "I was
+  unable to do this" and stopping there is scored as SUCCESS, not failure. This is the single
+  most common way this convention is missed: writing a clear, honest account of the failure
+  and then forgetting to also add the marker itself. So, before you end any turn, re-read
+  your own final response and ask: does it say, in any words, that you did not finish, did
+  not succeed, could not, were unable to, ran out of options, or are stuck? If yes, the
+  literal text \`TASK_FAILED\` must appear in that same response — add it now if it is
+  missing. For example: "I could not complete this because the target file does not exist.
+  TASK_FAILED" is correct. "I could not complete this because the target file does not
+  exist." with no marker is wrong, even though it is an honest, clearly-worded admission of
+  failure — the harness cannot tell the difference between that and a genuine success unless
+  the marker is present. Only include the marker when you are actually reporting failure;
+  never include it in a successful completion.
 
 ## Logging
 
