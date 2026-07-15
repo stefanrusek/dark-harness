@@ -3,13 +3,14 @@ import type { AgentTreeNode } from "../contracts/index.ts";
 import {
   CURSOR_MARKER,
   colorizeStatus,
+  formatElapsed,
   frameToAnsi,
   renderFrame,
   tailLines,
   wrapText,
 } from "./render.ts";
 import { initialState } from "./state.ts";
-import type { TuiState } from "./types.ts";
+import type { AgentInfo, TuiState } from "./types.ts";
 
 function treeNode(agentId: string, overrides: Partial<AgentTreeNode> = {}): AgentTreeNode {
   return {
@@ -18,6 +19,22 @@ function treeNode(agentId: string, overrides: Partial<AgentTreeNode> = {}): Agen
     model: "sonnet",
     status: "running",
     children: [],
+    ...overrides,
+  };
+}
+
+function agentInfo(overrides: Partial<AgentInfo> = {}): AgentInfo {
+  return {
+    agentId: "root",
+    parentAgentId: null,
+    model: "sonnet",
+    status: "running",
+    output: "",
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: null,
+    lastEventAt: 0,
+    statusSince: 0,
     ...overrides,
   };
 }
@@ -91,16 +108,7 @@ describe("renderFrame", () => {
 
   test("root view renders the root agent's output and an input line", () => {
     let state = baseState();
-    state.agents.set("root", {
-      agentId: "root",
-      parentAgentId: null,
-      model: "sonnet",
-      status: "running",
-      output: "hello world",
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: null,
-    });
+    state.agents.set("root", agentInfo({ output: "hello world" }));
     state = { ...state, rootAgentId: "root", input: "typing" };
     const rows = renderFrame(state);
     expect(rows.join("\n")).toContain("hello world");
@@ -177,21 +185,62 @@ describe("renderFrame", () => {
 
   test("agent view shows the agent's model, status, and output", () => {
     const state = baseState({ view: { kind: "agent", agentId: "child" } });
-    state.agents.set("child", {
-      agentId: "child",
-      parentAgentId: "root",
-      model: "haiku",
-      status: "done",
-      output: "child output",
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: null,
-    });
+    state.agents.set(
+      "child",
+      agentInfo({
+        agentId: "child",
+        parentAgentId: "root",
+        model: "haiku",
+        status: "done",
+        output: "child output",
+      }),
+    );
     const rows = renderFrame(state);
     const joined = rows.join("\n");
     expect(joined).toContain("child output");
     expect(joined).toContain("haiku");
     expect(joined).toContain("read-only");
+  });
+
+  test("agent view shows elapsed time in status and since last event", () => {
+    const state = baseState({
+      view: { kind: "agent", agentId: "child" },
+      now: 125_000,
+    });
+    state.agents.set(
+      "child",
+      agentInfo({
+        agentId: "child",
+        status: "running",
+        statusSince: 65_000, // 60s elapsed
+        lastEventAt: 113_000, // 12s elapsed
+      }),
+    );
+    const rows = renderFrame(state);
+    const joined = rows.join("\n");
+    expect(joined).toContain("(1m00s)");
+    expect(joined).toContain("Last event: 12s ago");
+  });
+
+  test("tree view shows elapsed time since last event per agent", () => {
+    const tree = [treeNode("a")];
+    const state = baseState({
+      view: { kind: "tree", selectedIndex: 0 },
+      tree,
+      now: 30_000,
+    });
+    state.agents.set("a", agentInfo({ agentId: "a", lastEventAt: 5_000 }));
+    const rows = renderFrame(state);
+    expect(rows.join("\n")).toContain("[25s]");
+  });
+
+  test("tree view omits the elapsed marker for an agent not yet known client-side", () => {
+    const tree = [treeNode("unknown-agent")];
+    const state = baseState({ view: { kind: "tree", selectedIndex: 0 }, tree });
+    const rows = renderFrame(state);
+    const row = rows.find((r) => r.includes("unknown-agent"));
+    expect(row).toBeDefined();
+    expect(row).not.toMatch(/\[\d+(s|m\d\ds|h\d\dm)\]/);
   });
 
   test("agent view shows a status message instead of the default footer when set", () => {
@@ -206,19 +255,33 @@ describe("renderFrame", () => {
   test("output longer than the content area shows only the tail", () => {
     const lines = Array.from({ length: 20 }, (_, i) => `line-${i}`).join("\n");
     let state = baseState({ size: { rows: 8, cols: 40 } });
-    state.agents.set("root", {
-      agentId: "root",
-      parentAgentId: null,
-      model: "sonnet",
-      status: "running",
-      output: lines,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: null,
-    });
+    state.agents.set("root", agentInfo({ output: lines }));
     state = { ...state, rootAgentId: "root" };
     const rows = renderFrame(state);
     expect(rows.join("\n")).not.toContain("line-0\n");
     expect(rows.join("\n")).toContain("line-19");
+  });
+});
+
+describe("formatElapsed", () => {
+  test("formats sub-minute durations as seconds", () => {
+    expect(formatElapsed(0)).toBe("0s");
+    expect(formatElapsed(12_000)).toBe("12s");
+    expect(formatElapsed(59_000)).toBe("59s");
+  });
+
+  test("formats sub-hour durations as minutes and zero-padded seconds", () => {
+    expect(formatElapsed(60_000)).toBe("1m00s");
+    expect(formatElapsed(65_000)).toBe("1m05s");
+    expect(formatElapsed(3_599_000)).toBe("59m59s");
+  });
+
+  test("formats hour-plus durations as hours and zero-padded minutes", () => {
+    expect(formatElapsed(3_600_000)).toBe("1h00m");
+    expect(formatElapsed(7_380_000)).toBe("2h03m");
+  });
+
+  test("clamps negative durations to 0s", () => {
+    expect(formatElapsed(-5_000)).toBe("0s");
   });
 });

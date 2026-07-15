@@ -23,10 +23,19 @@ export function initialState(size: { rows: number; cols: number }): TuiState {
     sessionEnded: null,
     size,
     statusMessage: null,
+    now: Date.now(),
   };
 }
 
-function defaultAgent(agentId: string): AgentInfo {
+/** Parse an SSE event's ISO `timestamp` into epoch ms, falling back to "now" if the string
+ * is ever malformed — a bad timestamp should degrade the liveness indicator, not crash the
+ * reducer. */
+function parseEventTime(timestamp: string): number {
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+function defaultAgent(agentId: string, at: number): AgentInfo {
   return {
     agentId,
     parentAgentId: null,
@@ -36,27 +45,43 @@ function defaultAgent(agentId: string): AgentInfo {
     inputTokens: 0,
     outputTokens: 0,
     costUsd: null,
+    lastEventAt: at,
+    statusSince: at,
   };
 }
 
-function withAgent(state: TuiState, agentId: string, patch: Partial<AgentInfo>): TuiState {
+/** Every event touching an agent bumps `lastEventAt`; only an explicit `status` change also
+ * bumps `statusSince`. */
+function withAgent(
+  state: TuiState,
+  agentId: string,
+  at: number,
+  patch: Partial<AgentInfo>,
+): TuiState {
   const agents = new Map(state.agents);
   const existing = agents.get(agentId);
   const agentOrder = existing ? state.agentOrder : [...state.agentOrder, agentId];
-  const next: AgentInfo = { ...(existing ?? defaultAgent(agentId)), ...patch };
+  const base = existing ?? defaultAgent(agentId, at);
+  const statusChanged = patch.status !== undefined && patch.status !== base.status;
+  const next: AgentInfo = {
+    ...base,
+    ...patch,
+    lastEventAt: at,
+    statusSince: statusChanged ? at : base.statusSince,
+  };
   agents.set(agentId, next);
   return { ...state, agents, agentOrder };
 }
 
-function appendOutput(state: TuiState, agentId: string, chunk: string): TuiState {
+function appendOutput(state: TuiState, agentId: string, at: number, chunk: string): TuiState {
   const agents = new Map(state.agents);
-  const existing = agents.get(agentId) ?? defaultAgent(agentId);
+  const existing = agents.get(agentId) ?? defaultAgent(agentId, at);
   const agentOrder = agents.has(agentId) ? state.agentOrder : [...state.agentOrder, agentId];
   let output = existing.output + chunk;
   if (output.length > MAX_OUTPUT_CHARS) {
     output = output.slice(output.length - MAX_OUTPUT_CHARS);
   }
-  agents.set(agentId, { ...existing, output });
+  agents.set(agentId, { ...existing, output, lastEventAt: at });
   return { ...state, agents, agentOrder };
 }
 
@@ -78,13 +103,16 @@ export function reducer(state: TuiState, action: Action): ReducerResult {
       return noEffects({ ...state, connection: action.status });
     case "key":
       return handleKey(state, action.key);
+    case "tick":
+      return noEffects({ ...state, now: action.now });
   }
 }
 
 function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult {
+  const at = parseEventTime(event.timestamp);
   switch (event.type) {
     case "agent_spawned": {
-      let next = withAgent(state, event.agentId, {
+      let next = withAgent(state, event.agentId, at, {
         parentAgentId: event.parentAgentId,
         model: event.model,
       });
@@ -94,12 +122,12 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
       return noEffects(next);
     }
     case "agent_output":
-      return noEffects(appendOutput(state, event.agentId, event.chunk));
+      return noEffects(appendOutput(state, event.agentId, at, event.chunk));
     case "agent_status":
-      return noEffects(withAgent(state, event.agentId, { status: event.status }));
+      return noEffects(withAgent(state, event.agentId, at, { status: event.status }));
     case "token_usage":
       return noEffects(
-        withAgent(state, event.agentId, {
+        withAgent(state, event.agentId, at, {
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           costUsd: event.costUsd ?? null,

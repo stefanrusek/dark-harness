@@ -28,6 +28,22 @@ export function colorizeStatus(status: AgentStatus, text: string): string {
   return `${STATUS_COLOR[status]}${text}${RESET}`;
 }
 
+/** Format a non-negative millisecond duration as a short human-readable elapsed string
+ * (`"0s"`, `"12s"`, `"1m05s"`, `"2h03m"`) — the liveness indicator shown per agent in the
+ * tree/agent views (Round 5, docs/handoffs/tui.md). Negative input (a clock that hasn't
+ * caught up to an event's timestamp yet) clamps to `"0s"` rather than showing a confusing
+ * negative duration. */
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return `${totalMinutes}m${String(seconds).padStart(2, "0")}s`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h${String(minutes).padStart(2, "0")}m`;
+}
+
 /** Greedily wrap text to `cols`-wide lines, honoring existing newlines. */
 export function wrapText(text: string, cols: number): string[] {
   const width = Math.max(1, cols);
@@ -110,7 +126,10 @@ function renderTree(
           const indent = "  ".repeat(entry.depth);
           const glyph = colorizeStatus(entry.node.status, "●");
           const label = `${entry.node.agentId} (${entry.node.model})`;
-          return `${marker}${indent}${glyph} ${label}`;
+          const lastEventAt = state.agents.get(entry.node.agentId)?.lastEventAt;
+          const elapsed =
+            lastEventAt === undefined ? "" : `  [${formatElapsed(state.now - lastEventAt)}]`;
+          return `${marker}${indent}${glyph} ${label}${elapsed}`;
         });
   const content = tailLines(wrapText(lines.join("\n"), cols), contentRows);
   const hint = state.statusMessage ?? "[↑/↓] navigate   [Enter] open   [Esc] back";
@@ -128,7 +147,9 @@ function renderAgent(
     ? tailLines(wrapText(agent.output, cols), contentRows)
     : tailLines(["(no output yet)"], contentRows);
   const meta = agent
-    ? `Model: ${agent.model}   Status: ${colorizeStatus(agent.status, agent.status)}`
+    ? `Model: ${agent.model}   Status: ${colorizeStatus(agent.status, agent.status)}` +
+      ` (${formatElapsed(state.now - agent.statusSince)})` +
+      `   Last event: ${formatElapsed(state.now - agent.lastEventAt)} ago`
     : "Model: (unknown)";
   const hint = state.statusMessage ?? `${meta}   —   [Esc] back to root (read-only)`;
   return { content: padRows(content, contentRows), footer: [hint] };
