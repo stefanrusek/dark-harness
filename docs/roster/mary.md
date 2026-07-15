@@ -145,3 +145,32 @@ Durable notes:
 Open thread for a future round: none from this side. The one live item is the cross-domain
 request to Hedy above (tighten `e2e/tui.test.ts` to assert the real send path); not blocking,
 just coverage catching up to the fix.
+
+### 2026-07-15 — Round 4, visible cursor in the input box
+
+Small, self-contained fix from real interactive testing: the input box had no visible
+cursor (real terminal cursor hidden for the whole alt-screen session; `render.ts` never drew
+one of its own). Worked directly in `src/tui/render.ts`, no other file needed a change.
+
+Durable notes:
+
+- **Rendered as frame text, not real terminal cursor positioning.** `render.ts` is
+  deliberately pure (`TuiState -> string[]`, no process/stdout access) — computing a real
+  cursor's row/column against variable-height, tail-clipped content above it would have
+  broken that purity for no real benefit. An inverse-video space (`\x1b[7m \x1b[0m`,
+  exported as `CURSOR_MARKER`) appended to the input line achieves the same visible effect
+  entirely within the existing rendering model.
+
+- **Exported the marker constant rather than letting tests hardcode the escape sequence.**
+  Same reasoning as `colorizeStatus`'s existing pattern in this file (RESET/STATUS_COLOR
+  aren't exported, but the function that uses them is) — here the marker itself is the
+  thing worth asserting against precisely, so it's the public surface, not an internal
+  string tests would have to duplicate and risk drifting from.
+
+- **Scoped strictly to `renderRoot`.** The tree and agent views are read-only by design
+  (per this handoff and prior rounds' Definition-of-done notes); no cursor marker belongs
+  there, and I added an explicit test asserting its absence rather than relying on it being
+  incidentally true.
+
+Open thread for a future round: none. This round didn't touch any other domain's surface
+and needed no cross-domain request.
