@@ -101,3 +101,35 @@ are usually account-side, not a `dh` config bug. Full text and placement rationa
 `docs/handoffs/prompt-docs.md` Round 4 status entry.
 
 Docs-only, no code gates apply this round.
+
+### 2026-07-15 — Round 5: TASK_FAILED reliability (DH-0001)
+
+Worked the ticket a coordinator/architect review raised: live testing against gemma-4-31b
+showed the model writing a plain-English admission of failure but never emitting the
+`TASK_FAILED` marker Round 3 taught, so `dh` reported exit code 0 for a self-acknowledged
+failure. Strengthened the `TASK_FAILED` bullet in `BASE_PROMPT`
+(`src/prompt/system-prompt.ts`): restated as "every time, no exceptions," named the exact
+observed failure mode (write the honest paragraph, forget the token), added a worked
+correct/incorrect example, and added a re-read-before-ending-your-turn self-check. Updated
+`src/prompt/system-prompt.test.ts` assertions to match.
+
+**Judgment call:** did not touch `src/agent/loop.ts`'s detection logic or propose a code
+change to the self-report mechanism myself — the ticket's Open Question (whether ADR 0006's
+exit-code contract needs a less string-dependent mechanism) is a real design question that
+crosses into Core's territory and the exit-code contract, both named in CLAUDE.md §6 as
+architect-review triggers. Escalated a concrete structural alternative (a mandatory
+structured "report terminal outcome" tool call instead of free-text scanning) as a finding
+in the ticket and in `docs/handoffs/prompt-docs.md`, rather than picking a direction
+unilaterally from the Prompt domain.
+
+**Honesty note carried forward, sharpened this round:** I have no way to re-run this against
+a live small/local model from this environment, so I closed the loop on "make the prompt
+stronger" but explicitly did NOT close the ticket — a stronger prompt is not proof the actual
+reliability gap is gone, and the ticket's own Risk section already predicted this exact
+limitation. Left `tracking/DH-0001-...md` at `status: implementing` with a status-log entry
+explaining why, rather than marking it resolved on the strength of a text change I can't
+behaviorally verify.
+
+Gates: `typecheck`, `lint`, `test:coverage` all pass (806/806 tests, 100% coverage retained
+on `src/prompt/system-prompt.ts`). `e2e` has pre-existing sandbox environment failures
+(missing `tmux`, missing chromium binary) unrelated to this change.

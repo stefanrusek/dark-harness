@@ -362,3 +362,61 @@ JSON.
 No cross-domain requests. Nothing deferred.
 
 — Iris (she/her), Prompt domain lead, persistent for this build.
+
+### 2026-07-15 — Round 5 status: `TASK_FAILED` reliability (DH-0001)
+
+Worked `tracking/DH-0001-task-failed-marker-reliability.md`: live testing against
+gemma-4-31b showed the model correctly stating in plain English that it could not complete
+an impossible task, but never emitting the literal `TASK_FAILED` marker Round 3 taught it —
+so `dh` reported exit code 0 for a self-acknowledged failure.
+
+**What I did:** strengthened the `TASK_FAILED` bullet in `BASE_PROMPT`
+(`src/prompt/system-prompt.ts`) considerably:
+
+- Restated the rule as "every time, no exceptions" rather than a single "MUST" sentence.
+- Named the actual failure mode directly — writing an honest, clearly-worded admission of
+  failure and then simply forgetting to also add the marker — since that's exactly what was
+  observed live, not a hypothetical.
+- Added a concrete worked example of both the correct form (prose + marker) and the wrong
+  form (prose alone, scored as success) so the model has a literal template to pattern-match
+  against instead of only an abstract instruction.
+- Added an explicit self-check instruction: before ending any turn, re-read your own final
+  response and ask whether it admits failure in any words; if so, add the marker.
+- Kept it as a single bullet in the existing list (not a separate section) — same judgment
+  as Round 3, this is one mechanism, and moving it out risks it reading as lower priority.
+
+Updated `src/prompt/system-prompt.test.ts`'s assertions to match the new opening phrase and
+added a check for the new self-check line.
+
+**Honesty note, stated plainly per the ticket's own framing:** I have no way to re-run this
+against a live gemma-4-31b session from this environment, so I cannot claim this closes the
+gap — only that it's a materially stronger, more concrete version of the same prompt-text
+mechanism. The ticket's own Risk section flags this exact limitation: prompt wording is
+fundamentally a request the model can still fail to follow, no matter how emphatic. A model
+willing to write a full honest paragraph about its own failure and then drop one specific
+token is not obviously a wording problem I can prompt my way out of with confidence.
+
+**Escalating rather than picking unilaterally:** the ticket's Open Question — whether ADR
+0006's exit-code contract needs a less string-dependent self-report mechanism — is a real
+design question, not just a wording gap, and any structural fix lives in `src/agent/loop.ts`
+(Core's territory) and touches the exit-code contract itself (CLAUDE.md §6 escalation
+trigger #4: "the exit-code contract" is explicitly named as architect-review territory). I'm
+not picking a direction unilaterally. Concretely, a structural alternative worth architect
+consideration: instead of (or in addition to) scanning free text for one literal string,
+give the model a mandatory tool call to report terminal outcome (e.g. a `ReportOutcome`
+tool with a `success`/`failure` argument) so the harness reads a structured field rather than
+pattern-matching prose. That doesn't relitigate "no tool call = loop end" — it just makes
+the *outcome* of that final turn structured instead of string-sniffed, which seems more
+robust to weaker models' free-text variance. Flagging this as a finding for Fable /
+coordinator judgment, not implementing it myself — it's outside `src/prompt/`'s ownership.
+
+**Gates:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass (806/806
+tests, 100% coverage retained). `bun run e2e` has pre-existing environment failures in this
+sandbox (`tmux` not on `$PATH`, no chromium at `/opt/pw-browsers/chromium`) unrelated to this
+change — not touched, not caused by this round.
+
+**Ticket status:** left as `implementing` (not closed) — the prompt strengthening is a real,
+committed improvement but not a verified fix, and the structural question is escalated
+rather than resolved. Closing would overclaim.
+
+— Iris (she/her), Prompt domain lead, persistent for this build.
