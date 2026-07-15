@@ -300,7 +300,17 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
       (e) => e.type === "agent_status" && e.agentId === "agent-root" && e.status === "waiting",
     );
 
-    expect(rootProvider.callCount).toBe(2);
+    // Three calls, not two: root's own tool_use turn (1) and its "heard back" turn (2), plus
+    // a third triggered by Core round 12's proactive wake-up (commit b9384f2) — once the
+    // sub-agent finishes, the parent agent is woken for an extra turn to process the
+    // completion push notification, sending root back to "running" and then "waiting" again.
+    // That wake-up happens asynchronously *after* root's first "waiting" status (from turn 2),
+    // so wait for the *second* "waiting" status rather than asserting immediately.
+    const isRootWaiting = (e: (typeof sse.events)[number]) =>
+      e.type === "agent_status" && e.agentId === "agent-root" && e.status === "waiting";
+    await sse.waitFor((e) => isRootWaiting(e) && sse.events.filter(isRootWaiting).length >= 2);
+
+    expect(rootProvider.callCount).toBe(3);
     expect(subProvider.callCount).toBe(1);
 
     // getAgentTree() reflects real nesting: one root with one agent-kind child, not a

@@ -552,3 +552,39 @@ gap-2a) — no regressions. `e2e/bedrock-provider.test.ts` itself: 3 pass / 0 fa
 **Open threads for whoever picks this up next:** the README/Bedrock-setup addition (routed to
 Prompt above, not e2e); multi-turn second-`send_message` e2e coverage (open since Round 1/2,
 still untouched).
+
+### 2026-07-15 — Round 6 (Hedy, fresh process): fixed sub-agent test broken by Core round 12's proactive wake-up
+
+Core round 12 (commit `b9384f2`) added proactive push-notification wake-ups: when a
+background task or sub-agent completes, the parent agent now gets an automatic extra turn
+to process the completion notification. That broke gap 2a's sub-agent-spawning test
+(`e2e/server-protocol.test.ts` — "Agent tool spawns a real sub-agent") at
+`expect(rootProvider.callCount).toBe(2)`: root now makes a real third call.
+
+Traced why 3 is correct, not just bumped the number: root's turn 1 is the `tool_use` that
+spawns the sub-agent (background, so its tool_result returns immediately without waiting on
+the sub-agent); turn 2 is root's own "Root heard back from the sub-agent." text, which sends
+it to SSE status "waiting"; turn 3 is the new proactive wake-up fired once the sub-agent
+actually finishes, giving root one more turn to process that completion push notification
+(mock provider's under-scripting safety net just repeats the last turn, so it also emits
+"Root heard back..." text again — harmless, only `callCount` and the tree shape are asserted
+after it).
+
+That wake-up is asynchronous relative to root's first "waiting" SSE event, so a naive
+"assert callCount right after seeing waiting" was flaky in the full-file run (caught it
+failing both on `callCount` and later on the `getAgentTree()` status still reading
+`"running"` mid-wake-up, in ~1/8 runs). Fixed by waiting for the *second* `agent_status:
+waiting` event for `agent-root` (turn 2's, then turn 3's) before asserting `callCount` or
+fetching the tree. Confirmed with 10 back-to-back full-file runs, no flakes.
+
+**Gates:** `bun test e2e/server-protocol.test.ts` — 6 pass / 0 fail, confirmed flake-free
+over 10 runs. `npx biome check e2e/server-protocol.test.ts` clean. `bun run typecheck` and
+`bun run lint` on the full repo currently fail, but on pre-existing **uncommitted** changes
+outside `e2e/` (`src/agent/runtime.ts`'s `AgentStatus` narrowing, a `task-stop.ts` format
+nit, and others across `src/agent`, `src/tui`, `src/web`) — confirmed by `git stash`ing
+everything and re-running `bun run typecheck` clean, then restoring. Not this round's scope
+(out of `e2e/` ownership per `CLAUDE.md` §3) and not touched.
+
+**Open threads:** the pre-existing uncommitted typecheck/lint failures above are Core/TUI/Web
+territory, not e2e — flagging for whoever owns landing round 12's work, since a dirty tree
+with failing gates was left uncommitted going into this round.
