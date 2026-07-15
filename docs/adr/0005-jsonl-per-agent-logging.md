@@ -30,3 +30,26 @@ and potentially while other agents are still running concurrently.
 - Log writing must be robust to a session ending mid-write (crash, kill) — readers should
   tolerate a truncated final line.
 - Token redaction (ADR 0004) applies at the log-writing layer, not as a separate scrub pass.
+
+## Amendment (2026-07-15): `client` and `build` on the header
+
+Prompted by a real diagnostic gap: a hung session with no way to tell which client (TUI vs.
+Web) or which build produced it. Approved design (Fable, architect-on-call), implemented in
+Core round 8:
+
+- `LogHeader` gains **`client: "tui" | "web" | "server" | "none"`** — a one-shot fact
+  captured at session start describing how *the log-writing process* was invoked (per ADR
+  0001's mode composition), not an attempt to track every remote client that connects to a
+  `--server` process over its lifetime (that has no single authoritative answer and isn't
+  attempted — `"server"`'s doc comment says so explicitly).
+- `LogHeader` gains **`build: { version, gitSha, dirty, releaseTag }`** — build identity
+  stamped into the compiled binary at build time via `bun build --compile --define`
+  substitution (a new `scripts/build.ts` wrapper all three build call sites — `package.json`,
+  `release.yml`, `e2e/support/build.ts` — now invoke instead of calling `bun build` raw).
+  `gitSha`/`releaseTag` are `null` for an unstamped build (running from source, or a raw
+  `bun build --compile` that bypassed the script) — `version` (from `package.json`) is always
+  present.
+- Both fields are **required** on every newly-written header. Readers of older log files
+  (written before this amendment) must tolerate their absence — this is an additive,
+  backward-compatible-to-read schema change, not a version bump of the header format itself.
+- `scripts/` is Core-owned (added to `CLAUDE.md` §3's ownership map).

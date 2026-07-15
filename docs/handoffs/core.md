@@ -1129,3 +1129,78 @@ prior round has hit) — but per the round's own instructions I ran the non-PTY/
 `e2e/server-protocol.test.ts` directly, which is what surfaced the cross-domain finding above
 (5 of 6 tests pass; the 1 failure is the known, now-flagged pre-existing assertion, not a new
 regression from this round's change).
+
+---
+
+## Round 8 — OPEN — client kind + build identity in the log header
+
+**Addressed to:** Core (Grace, resumed — read `docs/roster/grace.md` first).
+
+Fable (architect-on-call) designed this per CLAUDE.md §6 (touches the locked ADR 0005
+logging schema and `src/contracts/log.ts`) — full spec approved and appended as an amendment
+to `docs/adr/0005-jsonl-per-agent-logging.md`; read that amendment first, it's the sign-off
+for the contracts change below. `scripts/` is now a Core-owned path (added to `CLAUDE.md`
+§3). This round is the bulk of the implementation — Server, CI/Release, and E2E each have
+small follow-on rounds that depend on what you build here, so they're sequenced after, not
+parallel.
+
+### What to build
+
+1. **`src/contracts/log.ts`**: add `SessionClientKind = "tui" | "web" | "server" | "none"`
+   and `BuildInfo { version: string; gitSha: string | null; dirty: boolean; releaseTag:
+   string | null }`; add required `client: SessionClientKind` and `build: BuildInfo` to
+   `LogHeader`. This is the contracts diff the ADR amendment already sign-offs — no further
+   architect round-trip needed.
+
+2. **`src/config/build-info.ts`** (new): a pure `computeBuildInfo(raw: { gitSha, dirty,
+   releaseTag: string | undefined })` mapping raw stamp strings to `BuildInfo` (empty/absent
+   → `null`), fully unit-testable by injection; and an exported `BUILD_INFO` constant built
+   from `process.env.DH_BUILD_GIT_SHA`/`DH_BUILD_DIRTY`/`DH_BUILD_RELEASE_TAG` — these three
+   member expressions get substituted at compile time by `scripts/build.ts`'s `--define`
+   flags (verified mechanism: sealed against runtime env override once stamped; falls
+   through to real env, normally unset, when unstamped). `version` comes from a compile-time
+   `import pkg from "../../package.json" with { type: "json" }` — no stamping needed for that
+   field, it's always correct.
+
+3. **`scripts/build.ts`** (new): wraps `bun build ./src/cli.ts --compile` — accepts optional
+   `--target=<t>`, `--outfile <path>` (default `dist/dh`), `--release-tag <tag>` (must match
+   `/^v/` or exit 2). Computes git SHA via `Bun.spawnSync(["git", "rev-parse", "HEAD"])`
+   (empty on any failure — no git, not a repo — not an error) and dirty via `git status
+   --porcelain` (non-empty → dirty, only meaningful when a SHA was obtained). Invokes the
+   real `bun build` via `Bun.spawnSync` with an argv array (no shell quoting), always passing
+   all three `--define`s (empty string when a value is unavailable — a script-built binary is
+   always fully sealed). Exits with the underlying build's exit code; prints the stamp it
+   embedded for build-log auditability.
+
+4. **`package.json`**: `"build": "bun scripts/build.ts"`.
+
+5. **Plumbing** (`src/agent/runtime.ts`, `src/agent/loop.ts`, `src/cli.ts`): `AgentRuntimeOptions`
+   and `AgentLoopParams` both gain required `client: SessionClientKind`, threaded through
+   both existing `runAgentLoop()` call sites (root and sub-agent spawn) so every agent's
+   header inherits it; the header-construction literal in `loop.ts` adds `client:
+   params.client, build: BUILD_INFO` (direct import — build identity is a process-wide
+   constant, no need to thread it separately). `src/cli.ts` maps mode → kind: standalone
+   (`createStandaloneRuntime`) → `"none"`; local interactive → `mode.web ? "web" : "tui"`;
+   `--server` → `"server"`; `--connect` constructs no runtime, nothing to do there. Widen
+   `CliDeps.createAgentLoop`/`createRuntime` and `AgentRuntimeLoopAdapter`'s constructor
+   options to carry the value. Make it required everywhere (not defaulted) so no call site
+   can silently record a wrong value — update existing test fixtures mechanically.
+
+6. **Recommended, low-cost rider**: a `--version` flag (parallel to the existing `--help`)
+   printing `dh <version> (<gitSha|unstamped>[ dirty][, <releaseTag>])` — same motivation as
+   this whole round (a bug report needs "which build" without digging through logs).
+
+### Gates
+
+The standard four. Add: `computeBuildInfo` unit tests covering all branches (stamped clean,
+stamped dirty, unstamped, release-tagged); a test proving each CLI mode writes the correct
+`client` value into a real header (via the existing `CliDeps` injection seams, same pattern
+as Round 6's logging test); confirm `bun run build` still produces a working binary and
+prints its stamp. `scripts/build.ts` itself is tooling, not `src/` — use your judgment on
+whether/how to test it directly (a smoke-test invocation is probably enough; it doesn't need
+100% coverage the way `src/` does, but say explicitly what you did and didn't verify).
+
+Append a dated status entry here and update `docs/roster/grace.md` when done. Note anything
+you defer explicitly (per usual) — Server/CI-Release/E2E's follow-on rounds depend on
+`scripts/build.ts` and the new `LogHeader` shape both existing, so flag clearly if either is
+incomplete.
