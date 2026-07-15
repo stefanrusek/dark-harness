@@ -92,4 +92,56 @@ describe("TaskRegistry", () => {
     const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
     expect(id).toBe("bash-1");
   });
+
+  // Round 12 (docs/handoffs/core.md): the onSettled hook AgentRuntime uses to push a
+  // completion notification into a task's parent conversation.
+  test("onSettled fires with the final snapshot once a background task settles successfully", async () => {
+    const settled: unknown[] = [];
+    const registry = new TaskRegistry((snapshot) => settled.push(snapshot));
+    const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+    await registry.awaitDone(id);
+    expect(settled).toEqual([registry.snapshot(id)]);
+    expect(registry.snapshot(id).status).toBe("done");
+  });
+
+  test("onSettled fires with a 'failed' snapshot (including the error) when a background task's run rejects", async () => {
+    const settled: { status: string; error?: string }[] = [];
+    const registry = new TaskRegistry((snapshot) => settled.push(snapshot));
+    const id = registry.start({
+      kind: "agent",
+      parentAgentId: "root",
+      run: async () => {
+        throw new Error("boom");
+      },
+    });
+    await registry.awaitDone(id);
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.status).toBe("failed");
+    expect(settled[0]?.error).toBe("boom");
+  });
+
+  test("onSettled does NOT fire for a foreground (background: false) task", async () => {
+    const settled: unknown[] = [];
+    const registry = new TaskRegistry((snapshot) => settled.push(snapshot));
+    const id = registry.start({
+      kind: "bash",
+      parentAgentId: "root",
+      background: false,
+      run: async () => {},
+    });
+    await registry.awaitDone(id);
+    expect(settled).toEqual([]);
+  });
+
+  test("trySnapshot returns undefined for an unknown id instead of throwing", () => {
+    const registry = new TaskRegistry();
+    expect(registry.trySnapshot("bash-999")).toBeUndefined();
+  });
+
+  test("trySnapshot returns the same snapshot snapshot() would, for a known id", async () => {
+    const registry = new TaskRegistry();
+    const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+    await registry.awaitDone(id);
+    expect(registry.trySnapshot(id)).toEqual(registry.snapshot(id));
+  });
 });

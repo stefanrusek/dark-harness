@@ -1604,6 +1604,112 @@ that looks fine in unit tests but needs a real multi-agent conversation to prove
 
 Append a dated status entry here and update `docs/roster/grace.md` when done.
 
+### 2026-07-15 — Round 12 status log (Grace, resumed)
+
+**Design implemented — a registry-level settle hook, delivered through the same channel
+Round 5 already built for SendMessage.**
+
+- `TaskRegistry` (`src/agent/tasks.ts`) now takes an optional `onSettled?: (snapshot:
+  TaskSnapshot) => void` constructor callback, fired once per task after its `run` promise
+  settles (success or failure) — but **only for background tasks** (`StartTaskParams.background`,
+  new field, default `true`). A foreground call (`run_in_background: false`, or the Bash/Agent
+  tool's own blocking `awaitDone()` path) already gets its result synchronously as the tool's
+  own return value; a second push-notification into that same turn would just be noise, so
+  foreground tasks never fire the hook. `bash.ts`/`agent.ts` now pass their already-computed
+  `runInBackground` value straight through (`ToolContext.spawnAgent`'s params gained an
+  optional `background` field to carry it to `AgentRuntime.spawnAgent`).
+- Added `TaskRegistry.trySnapshot(id)` — a non-throwing sibling of `snapshot()` returning
+  `undefined` for an unknown id, used by the delivery logic below to check a parent's liveness
+  without a try/catch at the call site.
+- `AgentRuntime` (`src/agent/runtime.ts`) constructs its `TaskRegistry` wired to
+  `handleTaskSettled()`, which builds a human-readable notification (`"[Sub-agent <id>
+  completed]\n<output>"` or `"[Background Bash task <id> failed: <error>]\n<output>"`) and
+  calls the new `tryDeliverToAgent(parentAgentId, message)`:
+  - `parentAgentId === ROOT_AGENT_ID`: delivers via `this.rootSendMessage` — but only if
+    `rootStarted` is true AND `rootStatus` is `"running"`/`"waiting"`. This guard matters: both
+    `rootSendMessage` (once set) and a task's own `sendMessage` closure are never cleared after
+    their loop returns, so "a sink is registered" alone doesn't mean "someone is listening" —
+    checking status distinguishes a live loop from a stale, already-finished one. Also guards
+    against the pre-`runRoot()` state, where `rootStatus` defaults to `"waiting"` even though
+    nothing has started yet (Round 2's existing convention) — `rootStarted` is what
+    disambiguates that from a real live "waiting" pause.
+  - Otherwise: looks up the parent via `tasks.trySnapshot`, checks the same
+    running/waiting liveness gate, and calls `tasks.sendMessage(parentAgentId, message)` if
+    live.
+  - Reuses Round 5's existing pending-message queue exactly — `registerSendMessage`'s sink is
+    installed for a loop's entire active lifetime (root or sub-agent alike), not just during
+    a "waiting" pause, so a message arriving mid-turn is queued and drained at the top of the
+    next turn regardless of whether the parent happened to be "running" or "waiting" at the
+    instant of delivery.
+
+**Orphaned-grandchild case — designed for, not left unconsidered, per the owner's explicit
+ask.** `tryDeliverToAgent` returns whether it actually reached a live listener. Regardless of
+that result, `handleTaskSettled` *always* emits one more log line — a `role: "system"` message
+(the existing `LogMessageEvent.role` union already includes `"system"`, so no `src/contracts/`
+change was needed) — tagged to the **settled task's own agentId**, not the parent's. The
+child's own log stream is guaranteed to still be open at this point (it just finished emitting
+its own `completed`/`failed` line moments earlier), which is what makes this durable even when
+the parent has already finished or never started: `"Completion notification delivered live to
+parent agent <id>."` when live, or `"...could NOT be delivered live (parent agent <id> is not
+currently running/waiting — orphaned or already finished) — recorded here only, not lost:
+<message>"` when not. Chosen behavior, stated explicitly: **best-effort live delivery, always
+logged, never blocks or retries.** A message an orphaned parent only ever sees by reading its
+own transcript after the fact is still strictly better than one that vanishes with no trace —
+but this round does not attempt anything fancier (queuing for later delivery if the parent
+somehow resumes, re-parenting to a grandparent, etc.); that's flagged here as a deliberately
+out-of-scope deeper design a future round could revisit if it turns out operators actually need
+it.
+
+**Regression tests** (`src/agent/tasks.test.ts`, `src/agent/runtime.test.ts`): `onSettled`
+fires-on-success/fires-with-error/doesn't-fire-for-foreground at the registry level;
+`trySnapshot` unknown-id and known-id behavior. At the runtime level: two real end-to-end tests
+through the actual mock-provider-backed loop (an interactive root that spawns a real
+`run_in_background: true` Bash task and a real backgrounded `Agent` sub-agent, both proving the
+injected notification reaches a real second/third provider turn, not just the task registry);
+a still-running non-root parent receiving live delivery; the orphaned-grandchild case (parent
+already `"done"` when its child settles) proving no live delivery *and* the system log line;
+the pre-`rootStarted` false-positive guard; the foreground no-notification case; and the
+failure-reason-in-message case.
+
+**Live verification (the standard this identity holds itself to every round):** compiled the
+real binary, ran a real mock Anthropic-compatible HTTP server plus a real `dh --server`
+process, and drove it with a single `curl` `send_message` telling the root to spawn a
+`sleep 2 && echo done-from-bg` background Bash task, then walked away — no second curl call.
+The real SSE stream shows the root going `waiting` → (2.0s later, unprompted) `running` →
+producing new output → `waiting` again, entirely on its own. `download_logs`'s real JSONL
+confirms the mechanism precisely: a `role: "system"` line reading `"Completion notification
+delivered live to parent agent agent-root."` on the bash task's own log, immediately followed
+by a `role: "user"` line on the root's log reading `"[Background Bash task bash-1
+completed]\ndone-from-bg\n"` — then a fresh `tool_call`/`tool_result` pair as the root's next
+real turn. (The mock script I used happens to re-trigger the same background command every
+time it sees a fresh user turn, so the log actually shows this cycle repeating eight times
+before I stopped the processes — an accidental but convincing demonstration that the wake-up
+is real and repeatable, not a one-off race.)
+
+**A real e2e regression this round's behavior change directly causes — flagged as a request to
+Hedy (E2E), not fixed here, per this identity's standing ownership-boundary convention (Rounds
+3/5/7):** `e2e/server-protocol.test.ts`'s `"Agent tool spawns a real sub-agent"` test (Round 2,
+gap 2a) leaves the `Agent` tool call at its default `run_in_background: true` and asserts
+`rootProvider.callCount === 2` right after the root's first `"waiting"` status event. That
+assertion is now racy: once the background sub-agent's own (separately fast) run settles, this
+round's new delivery fires and wakes the root for a **third** real turn — confirmed by running
+the test both before (`git stash`, 6/6 pass) and after (5/6 pass, this exact assertion, `1/6`
+fails intermittently with `callCount` observed as `3`) my change. This is a real, expected
+consequence of the round's own design, not a bug in the implementation — the fix on E2E's side
+is precise: wait for the *second* `"waiting"` transition (not the first) before asserting
+`callCount`, or explicitly assert the eventual value is `3` once the injected notification's
+own log line has appeared, mirroring how this round's own runtime-level tests wait for the
+notification's log line before asserting. I did not touch `e2e/` myself, consistent with how
+I've treated it every round this bug class has come up.
+
+**Gates:** `bun run typecheck` and `bun run lint` both green. `bun run test:coverage`: 757
+pass, 100%/100% funcs/lines for every file this round touched (`runtime.ts`, `tasks.ts`,
+`bash.ts`, `agent.ts`, `types.ts`); aggregate 99.96%/100%, the sole shortfall being `src/cli.ts`'s
+pre-existing, unrelated `import.meta.main` process-entry gap from round 1. `bun run e2e`: 19/24
+pass — 4 failures are the same tmux/Chromium sandbox-availability gap every prior round has hit
+(confirmed identical failure signatures to Round 8-11's own notes), the 5th is the real,
+expected, precisely-diagnosed regression above, routed to Hedy rather than fixed in place.
+
 ---
 
 ## Round 13 — OPEN — tool-fidelity fixes from the Claude Code conformance audit

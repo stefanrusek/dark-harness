@@ -40,6 +40,12 @@ export interface StartTaskParams {
    * lets Server's AgentLoopHandle.sendMessage/stopAgent/getAgentTree operate on one
    * consistent "agentId" instead of needing a translation table). */
   id?: string;
+  /** Round 12 (docs/handoffs/core.md): whether this task was started as `run_in_background:
+   * true`. Defaults to `true` when omitted. Only background tasks fire the registry's
+   * `onSettled` completion-notification callback on the constructor — a foreground call
+   * already blocks on `awaitDone()` and gets its result synchronously as the tool's own
+   * return value, so a second push-notification into the same turn would be redundant. */
+  background?: boolean;
   run: (handle: TaskRunHandle) => Promise<void>;
 }
 
@@ -63,6 +69,7 @@ interface InternalTask {
   controller: AbortController;
   sendMessage?: (message: string) => void;
   done: Promise<void>;
+  background: boolean;
 }
 
 export class TaskNotFoundError extends Error {
@@ -76,12 +83,11 @@ export class TaskRegistry {
   private tasks = new Map<string, InternalTask>();
   private counter = 0;
 
-  // An explicit (even empty) constructor is required for Bun's coverage instrumentation to
-  // count the class's synthetic constructor slot as "hit" — see docs/handoffs/server.md
-  // status log for detail (Radia independently found and fixed the same instrumentation
-  // artifact in src/server/fake-agent-loop.ts).
-  // biome-ignore lint/complexity/noUselessConstructor: see comment above
-  constructor() {}
+  /** Round 12 (docs/handoffs/core.md): fired once, after a *background* task's `run` has
+   * settled (success or failure), with its final snapshot — the hook AgentRuntime uses to
+   * push a completion notification into the parent agent's conversation. Foreground tasks
+   * (background: false) never fire this — see StartTaskParams.background's doc comment. */
+  constructor(private readonly onSettled?: (snapshot: TaskSnapshot) => void) {}
 
   private nextId(kind: TaskKind): string {
     this.counter += 1;
@@ -104,6 +110,7 @@ export class TaskRegistry {
       createdAt: new Date().toISOString(),
       controller,
       done: Promise.resolve(),
+      background: params.background ?? true,
       ...(params.model !== undefined ? { model: params.model } : {}),
     };
     this.tasks.set(id, task);
@@ -130,6 +137,14 @@ export class TaskRegistry {
         task.status = "failed";
         task.error = err instanceof Error ? err.message : String(err);
         task.finishedAt = new Date().toISOString();
+      })
+      .then(() => {
+        // Round 12: fires after the branches above have settled task.status/error/finishedAt,
+        // regardless of which branch ran (the .catch above never rethrows) — so this always
+        // observes the final snapshot, not a mid-settle one.
+        if (task.background) {
+          this.onSettled?.(this.snapshot(id));
+        }
       });
 
     return id;
@@ -162,6 +177,14 @@ export class TaskRegistry {
       ...(task.error !== undefined ? { error: task.error } : {}),
     };
     return snapshot;
+  }
+
+  /** Non-throwing snapshot lookup — Round 12's completion-notification delivery uses this to
+   * check whether a parent agentId corresponds to a currently-tracked task without needing a
+   * try/catch at every call site (unlike `snapshot()`, returns undefined instead of throwing
+   * `TaskNotFoundError` for an unknown id — e.g. the root, which isn't a task at all). */
+  trySnapshot(id: string): TaskSnapshot | undefined {
+    return this.tasks.has(id) ? this.snapshot(id) : undefined;
   }
 
   monitor(ids: string[]): TaskSnapshot[] {

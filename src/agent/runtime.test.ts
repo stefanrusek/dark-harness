@@ -116,6 +116,34 @@ function startMockAnthropicServer(onRequest?: (body: { model: string }) => void)
             "tool_use",
           );
         }
+        // Round 12 test support: a real run_in_background Bash/Agent call whose completion
+        // should be proactively delivered into the (interactive) root's conversation.
+        if (text.includes("use-background-bash-tool")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_bgbash",
+                name: "Bash",
+                input: { command: "sleep 0.05 && echo hi", run_in_background: true },
+              },
+            ],
+            "tool_use",
+          );
+        }
+        if (text.includes("use-background-agent-tool")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_bgagent",
+                name: "Agent",
+                input: { prompt: "child instruction", run_in_background: true },
+              },
+            ],
+            "tool_use",
+          );
+        }
         if (text.includes("use-bash-pwd")) {
           return message(
             [
@@ -1021,5 +1049,218 @@ describe("AgentRuntime — Round 6b/6c: config-driven cost pricing and maxTurns"
     const usageEvent = events.find((e) => e.type === "token_usage");
     expect(usageEvent?.type).toBe("token_usage");
     expect(usageEvent && "costUsd" in usageEvent ? usageEvent.costUsd : undefined).toBeUndefined();
+  });
+});
+
+describe("AgentRuntime — Round 12: proactive push notification on background task/sub-agent completion", () => {
+  test("a real background Bash task's completion is proactively delivered into a waiting interactive root's conversation, not just retrievable via TaskOutput", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      interactive: true,
+      onLogLine,
+    });
+
+    const runPromise = runtime.runRoot("use-background-bash-tool");
+    const deadline = Date.now() + 5000;
+    while (
+      Date.now() < deadline &&
+      !logLines.some(
+        (l) =>
+          l.type === "message" && l.role === "user" && l.content.includes("Background Bash task"),
+      )
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    runtime.stopRoot();
+    await runPromise;
+
+    const injected = logLines.find(
+      (l) =>
+        l.type === "message" && l.role === "user" && l.content.includes("Background Bash task"),
+    );
+    expect(injected).toBeDefined();
+    if (injected?.type === "message") {
+      expect(injected.content).toContain("completed");
+      expect(injected.content).toContain("hi"); // the command's own stdout, echoed back
+    }
+    // Confirms this actually reached the root's own conversation loop (a real second
+    // provider turn), not merely that TaskRegistry recorded it — this is exactly the
+    // "root never checked back on its own" failure mode the round's handoff describes.
+    expect(
+      logLines.filter((l) => l.type === "message" && l.role === "assistant").length,
+    ).toBeGreaterThan(1);
+  });
+
+  test("a real background sub-agent (Agent tool)'s completion is proactively delivered into a waiting interactive root's conversation", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      interactive: true,
+      onLogLine,
+    });
+
+    const runPromise = runtime.runRoot("use-background-agent-tool");
+    const deadline = Date.now() + 5000;
+    while (
+      Date.now() < deadline &&
+      !logLines.some(
+        (l) => l.type === "message" && l.role === "user" && l.content.includes("Sub-agent"),
+      )
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    runtime.stopRoot();
+    await runPromise;
+
+    const injected = logLines.find(
+      (l) => l.type === "message" && l.role === "user" && l.content.includes("Sub-agent"),
+    );
+    expect(injected).toBeDefined();
+    if (injected?.type === "message") {
+      expect(injected.content).toContain("completed");
+      expect(injected.content).toContain("child done");
+    }
+  });
+
+  test("a background task's completion is proactively delivered to a still-running/waiting parent sub-agent, not only the root", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+    const delivered: string[] = [];
+
+    const parentId = runtime.tasks.start({
+      kind: "agent",
+      parentAgentId: ROOT_AGENT_ID,
+      background: true,
+      run: async (handle) => {
+        handle.registerSendMessage((message) => delivered.push(message));
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      },
+    });
+    // The parent's own settle-callback would otherwise race the assertions below (it starts
+    // "running" only once start() returns) — mirrors how spawnAgent() keeps the task
+    // registry's status in sync with the loop's own transitions (see runtime.ts's onEvent
+    // handler in spawnAgent()).
+    runtime.tasks.setStatus(parentId, "running");
+
+    const childId = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: parentId,
+      background: true,
+      run: async () => {},
+    });
+    await runtime.tasks.awaitDone(childId);
+
+    expect(
+      delivered.some((m) => m.includes("Background Bash task") && m.includes("completed")),
+    ).toBe(true);
+    expect(
+      logLines.some(
+        (l) =>
+          l.type === "message" &&
+          l.role === "system" &&
+          l.content.includes("delivered live to parent agent"),
+      ),
+    ).toBe(true);
+  });
+
+  test("orphaned grandchild: if the parent has already finished, the notification is not lost — it's recorded as a system log line instead", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+    const delivered: string[] = [];
+
+    const parentId = runtime.tasks.start({
+      kind: "agent",
+      parentAgentId: ROOT_AGENT_ID,
+      background: true,
+      run: async (handle) => {
+        handle.registerSendMessage((message) => delivered.push(message));
+      },
+    });
+    // The parent's own turn (and its whole loop) ends before its grandchild does — the
+    // exact edge case the handoff raised directly.
+    await runtime.tasks.awaitDone(parentId);
+    expect(runtime.tasks.snapshot(parentId).status).toBe("done");
+
+    const childId = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: parentId,
+      background: true,
+      run: async () => {},
+    });
+    await runtime.tasks.awaitDone(childId);
+
+    expect(delivered).toEqual([]); // never delivered live — parent wasn't listening anymore
+    const notice = logLines.find(
+      (l) =>
+        l.type === "message" &&
+        l.role === "system" &&
+        l.content.includes("Background Bash task") &&
+        l.content.includes("NOT be delivered live"),
+    );
+    expect(notice).toBeDefined();
+    if (notice?.type === "message") {
+      expect(notice.content).toContain("orphaned or already finished");
+    }
+  });
+
+  test("a background task's completion is not falsely delivered to a root that hasn't started yet, even though rootStatus defaults to 'waiting'", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+
+    const childId = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: ROOT_AGENT_ID,
+      background: true,
+      run: async () => {},
+    });
+    await runtime.tasks.awaitDone(childId);
+
+    const notice = logLines.find(
+      (l) =>
+        l.type === "message" && l.role === "system" && l.content.includes("Background Bash task"),
+    );
+    expect(notice).toBeDefined();
+    if (notice?.type === "message") {
+      expect(notice.content).toContain("NOT be delivered live");
+    }
+  });
+
+  test("a foreground (background: false) task's completion never fires a completion notification", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+
+    const childId = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: ROOT_AGENT_ID,
+      background: false,
+      run: async () => {},
+    });
+    await runtime.tasks.awaitDone(childId);
+
+    expect(logLines.some((l) => l.type === "message" && l.role === "system")).toBe(false);
+  });
+
+  test("a failed background task's notification reports the failure reason", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+
+    const childId = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: ROOT_AGENT_ID,
+      background: true,
+      run: async () => {
+        throw new Error("boom");
+      },
+    });
+    await runtime.tasks.awaitDone(childId);
+
+    const notice = logLines.find((l) => l.type === "message" && l.role === "system");
+    expect(notice).toBeDefined();
+    if (notice?.type === "message") {
+      expect(notice.content).toContain("failed: boom");
+    }
   });
 });

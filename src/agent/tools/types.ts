@@ -33,8 +33,12 @@ export interface ToolContext {
   agentId: string;
   config: DhConfig;
   tasks: TaskRegistry;
-  /** Starts a sub-agent as a task; resolves to the task id immediately (task runs concurrently). */
-  spawnAgent(params: { model: string; prompt: string }): string;
+  /** Starts a sub-agent as a task; resolves to the task id immediately (task runs concurrently).
+   * `background` (Round 12, default true) should mirror the tool call's own
+   * `run_in_background` resolution — only a background spawn gets a completion
+   * push-notification into the parent's conversation when it finishes; see
+   * docs/handoffs/core.md's Round 12 entry and TaskRegistry's `onSettled` doc comment. */
+  spawnAgent(params: { model: string; prompt: string; background?: boolean }): string;
   /** Skill lookup: scans config.skillPaths for `<name>/SKILL.md`. */
   loadSkill(name: string): Promise<{ name: string; path: string; content: string } | null>;
   /** Deferred-tool discovery over configured mcpServers (see docs/handoffs/core.md status log). */

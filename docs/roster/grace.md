@@ -585,3 +585,59 @@ against real AWS Bedrock — a fake/mock that never inspects the field it's supp
 against is indistinguishable from no test at all for that specific claim. Confirming this
 directly at the real-HTTP-request layer (not just `provider.calls[]` in a unit test) is what
 would have caught this bug before it shipped, and is what closes it out now.
+
+### 2026-07-15 — Round 12 (push notification on background task/sub-agent completion)
+
+Full technical writeup in `docs/handoffs/core.md`'s dated Round 12 status log entry. Judgment/
+process notes for a future me.
+
+**The key design decision: liveness is a status check, not "is a sink registered."** Both
+`rootSendMessage` and a task's own `sendMessage` closure (set via `registerSendMessage`) are
+never cleared once the owning loop returns — they just become stale closures over a dead
+`pendingMessages` array nobody will ever drain again. I could have used "is a sink present" as
+the delivery gate and it would have compiled and mostly worked, but it would silently
+misreport orphaned deliveries as "delivered" (the call doesn't throw, it just goes nowhere).
+Gating on `AgentStatus` (`"running"`/`"waiting"` = live; `"done"`/`"failed"` = stale) instead,
+and specifically also checking `rootStarted` (since `rootStatus` defaults to `"waiting"` even
+before `runRoot()` has ever been called — Round 2's own convention), is what makes the
+"orphaned grandchild" case actually detectable rather than silently misreported.
+
+**The orphaned-grandchild edge case — my answer, stated for the record since the owner asked
+for one explicitly rather than leaving it implicit:** best-effort live delivery; always logged
+regardless, as a `role: "system"` line on the *settled task's own* log (guaranteed still open,
+unlike the parent's, which may already be closed/gone) rather than the parent's. I considered
+and rejected two fancier alternatives: (a) queuing the notification for later delivery if the
+parent somehow resumes — rejected because nothing in this codebase's model ever un-finishes an
+agent, so "later" never actually arrives; (b) re-parenting an orphaned notification up to the
+grandparent — rejected as solving a problem nobody asked for and adding a second delivery path
+with its own liveness question. "Never lost, never blocks, never retries" is the right minimum
+scope for this round; flagged explicitly in the handoff as a future round's call if operators
+ever need more.
+
+**Found a real, expected e2e regression caused by this round's own behavior change, and held
+the ownership boundary on it — the fourth time this exact pattern has come up (rounds 3, 5, 7,
+now 12).** `e2e/server-protocol.test.ts`'s Round 2 sub-agent-spawning test asserts
+`rootProvider.callCount === 2` right after the root's first `"waiting"` — but with this round's
+fix live, the sub-agent's own background completion now wakes the root for a real third turn,
+racily bumping that count to 3. Confirmed by running the test both before and after my change
+(`git stash`/`git stash pop`) rather than assuming causation from the failure alone. Diagnosed
+precisely (which assertion, why, and the exact fix E2E needs — wait for the *second* `waiting`
+transition, or assert the eventual value once the notification's own log line appears) and
+routed it to Hedy in the handoff rather than editing `e2e/` myself, exactly the same boundary
+I've held every time this class of "my deliberate change breaks another domain's hardcoded
+expectation" has come up before.
+
+**Verification discipline, continued — again the closing proof, not a supplement to it.** Real
+compiled binary, real mock HTTP provider, real `dh --server`, one `curl send_message` and then
+nothing else — the SSE stream and the downloaded JSONL log both show the root autonomously
+waking up ~2 seconds later (matching the background command's own `sleep 2`) with no further
+operator input, the exact failure mode (root never checks back on a finished background task)
+the round's handoff described as reproduced live. The mock script I improvised happened to
+retrigger the same background command on every fresh turn, so I got an accidental but
+convincing repeated demonstration (8 full wake cycles) rather than a single one-off.
+
+**Gates:** typecheck/lint/test:coverage all green (757 tests, 100%/100% on every file this
+round touched, aggregate 99.96%/100% with the sole shortfall being `src/cli.ts`'s pre-existing
+`import.meta.main` gap from round 1). `bun run e2e`: 19/24 — 4 are the standing tmux/Chromium
+sandbox gap every round hits, 1 is the real, precisely-diagnosed, routed-to-Hedy regression
+above.

@@ -63,7 +63,7 @@ export const agentTool: Tool = {
         ? input.run_in_background
         : ctx.runInBackgroundDefault;
 
-    const taskId = ctx.spawnAgent({ model, prompt });
+    const taskId = ctx.spawnAgent({ model, prompt, background: runInBackground });
 
     if (runInBackground) {
       return {

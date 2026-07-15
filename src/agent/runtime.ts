@@ -20,7 +20,7 @@ import { searchConfiguredMcpTools } from "./mcp.ts";
 import { createProvider } from "./providers/index.ts";
 import type { ModelProvider } from "./providers/types.ts";
 import { loadSkillFromPaths } from "./skills.ts";
-import { TaskRegistry } from "./tasks.ts";
+import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { ALL_TOOLS, buildToolMap } from "./tools/index.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
@@ -122,7 +122,10 @@ export class RootNotListeningError extends Error {
  * lets Agent/Monitor/TaskOutput/SendMessage/TaskStop cooperate in-process. */
 export class AgentRuntime {
   readonly sessionId: string;
-  readonly tasks = new TaskRegistry();
+  // Round 12 (docs/handoffs/core.md): wired to handleTaskSettled() so every *background*
+  // Bash/Agent task's completion pushes a notification into its parent's conversation — see
+  // that method's doc comment for the full design, including the orphaned-grandchild case.
+  readonly tasks = new TaskRegistry((snapshot) => this.handleTaskSettled(snapshot));
   private readonly config: DhConfig;
   private readonly systemPrompt: string;
   private readonly cwd: string;
@@ -218,7 +221,10 @@ export class AgentRuntime {
    * the cli.ts adapter to maintain a bidirectional translation table between them (task id
    * <-> loop id), which is exactly the kind of extra state/bug surface worth designing
    * away instead of working around. */
-  spawnAgent(parentAgentId: string, params: { model: string; prompt: string }): string {
+  spawnAgent(
+    parentAgentId: string,
+    params: { model: string; prompt: string; background?: boolean },
+  ): string {
     const model = this.resolveModel(params.model);
     const provider = this.providerFor(model);
     const agentId = `agent-${randomUUID()}`;
@@ -228,6 +234,7 @@ export class AgentRuntime {
       parentAgentId,
       model: model.name,
       id: agentId,
+      background: params.background ?? true,
       run: async (handle) => {
         const result = await runAgentLoop({
           sessionId: this.sessionId,
@@ -477,5 +484,80 @@ export class AgentRuntime {
         children: rootChildren,
       },
     ];
+  }
+
+  /** Round 12 (docs/handoffs/core.md): reacts to a *background* task's completion by pushing
+   * a notification into the parent agent's conversation, the same way real Claude Code
+   * proactively tells whoever's waiting rather than relying on the model to poll
+   * Monitor/TaskOutput on its own (confirmed live this round: small/local models reliably
+   * don't poll, and even after Prompt round 3's discipline fix, a root never checked back on
+   * a finished sub-agent unprompted). Reuses Round 5's existing pending-message queue —
+   * `tryDeliverToAgent` below calls exactly the same `sendMessage` sink SendMessage itself
+   * uses, so from the receiving loop's point of view this is indistinguishable from an
+   * operator/parent message arriving.
+   *
+   * Orphaned-grandchild case, designed for deliberately (not left unconsidered — raised by
+   * the owner directly): a child can spawn its own grandchild and then have its own turn (or
+   * its whole loop) end before the grandchild finishes. When that happens there is no live
+   * listener to deliver into — `tryDeliverToAgent` returns false, and rather than silently
+   * dropping the notification, it is *always* recorded as a system-role log line on the
+   * child's (the grandchild's parent's — i.e. this task's own) log stream, tagged with
+   * whether live delivery actually happened. The task's own log is guaranteed to still be
+   * open at this point (it just finished emitting its own completed/failed log line moments
+   * earlier), so this is a durable record even when nobody was there to react to it live. The
+   * chosen behavior is explicitly "best-effort live delivery, always logged" — never silently
+   * lost, but also never blocks or retries: a message an orphaned parent will only ever see by
+   * reading its own transcript after the fact is still strictly better than one that vanishes
+   * with no trace at all. */
+  private handleTaskSettled(snapshot: TaskSnapshot): void {
+    const kindLabel = snapshot.kind === "bash" ? "Background Bash task" : "Sub-agent";
+    const outcome =
+      snapshot.status === "failed" ? `failed: ${snapshot.error ?? "unknown error"}` : "completed";
+    const output = snapshot.output.length > 0 ? snapshot.output : "(no output)";
+    const message = `[${kindLabel} ${snapshot.id} ${outcome}]\n${output}`;
+
+    const delivered = this.tryDeliverToAgent(snapshot.parentAgentId, message);
+
+    this.onLogLine?.(snapshot.id, {
+      version: 1,
+      timestamp: new Date().toISOString(),
+      type: "message",
+      role: "system",
+      content: delivered
+        ? `Completion notification delivered live to parent agent ${snapshot.parentAgentId}.`
+        : `Completion notification could NOT be delivered live (parent agent ${snapshot.parentAgentId} is not currently running/waiting — orphaned or already finished) — recorded here only, not lost: ${message}`,
+    });
+  }
+
+  /** Attempts live delivery of a completion notification into `agentId`'s currently-running
+   * conversation. Returns whether it actually reached a live listener (a genuinely
+   * running/waiting loop), as opposed to a stale or never-registered `sendMessage` sink —
+   * both the root's and a sub-agent task's own `sendMessage` closures remain set after their
+   * loop has already returned (nothing clears them), so a status check is required in
+   * addition to "is a sink registered at all" to tell a live delivery from a message pushed
+   * into a dead, already-abandoned queue nobody will ever drain. */
+  private tryDeliverToAgent(agentId: string, message: string): boolean {
+    if (agentId === ROOT_AGENT_ID) {
+      if (this.rootStarted && this.rootSendMessage && this.isLiveStatus(this.rootStatus)) {
+        this.rootSendMessage(message);
+        return true;
+      }
+      return false;
+    }
+
+    const parentSnapshot = this.tasks.trySnapshot(agentId);
+    if (!parentSnapshot || !this.isLiveStatus(parentSnapshot.status)) {
+      return false;
+    }
+    try {
+      this.tasks.sendMessage(agentId, message);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private isLiveStatus(status: AgentStatus): boolean {
+    return status === "running" || status === "waiting";
   }
 }

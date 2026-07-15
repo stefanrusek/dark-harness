@@ -107,6 +107,7 @@ export const bashTool: Tool = {
     const taskId = ctx.tasks.start({
       kind: "bash",
       parentAgentId: ctx.agentId,
+      background: runInBackground,
       run: async (handle) => {
         const { exitCode, timedOut } = await runCommand(
           command,
