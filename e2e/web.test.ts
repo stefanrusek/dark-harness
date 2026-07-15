@@ -5,16 +5,20 @@
 // revision 1194, so this launches with an explicit `executablePath` per this session's
 // operating instructions rather than the version-matched default path).
 //
-// IMPORTANT — same cross-domain defect documented in e2e/tui.test.ts's header comment: the
-// web client's composer never renders for the root agent before it has spawned at least
-// once (`AppView` never calls `request_agent_tree` on boot; `selectedAgentId` is only set by
-// an `agent_spawned` SSE event — see `src/web/client/state.ts`'s `applyEvent` and
-// `src/web/client/app.ts`). This test kicks off the root agent's first turn with a direct
-// `fetch` POST to `/api/commands` (learning the target server's URL the same way the real
-// page does — via its own `/dh-config.json` — so this isn't privileged information a real
-// user couldn't get), then verifies every part of the UI that *is* reachable once the root
-// agent exists: live SSE-driven rendering, status colors, token/cost display, and log
-// download, all through real Playwright interactions against the real page.
+// FIXED DEFECT (originally found by this real-browser test — see docs/handoffs/web.md's
+// Round 2 status log and docs/handoffs/e2e.md): the web client's composer never rendered
+// for the root agent before it had spawned at least once, because `AppView` never called
+// `request_agent_tree` on boot — `selectedAgentId` was only ever set by an `agent_spawned`
+// SSE event, which itself never fires until someone sends a first message, which nothing
+// could do without a composer. A fresh `dh --web` session deadlocked; nothing was
+// reachable via the real UI. Fixed in `src/web/client/app.ts` (`bootstrapAgentTree`, called
+// from `start()`) + `src/web/client/state.ts` (`seedFromTree`): Server already synthesizes
+// a pre-start root node (`status: "waiting"`, `parentAgentId: null`) precisely so
+// `request_agent_tree` can answer this before any message is ever sent. This test now
+// drives the *real* composer (type + click, the actual interactive path) to send the root
+// agent's first turn — no direct API workaround — then verifies every other part of the UI
+// once the root agent exists: live SSE-driven rendering, status colors, token/cost display,
+// and log download, all through real Playwright interactions against the real page.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -47,14 +51,6 @@ describe("web UI (dh --web) in a real headless browser", () => {
     const webUrl = /web UI ready at (\S+)\./.exec(stdout)?.[1];
     if (!webUrl) throw new Error(`could not parse web UI URL from stdout: ${stdout}`);
 
-    // Learn the target dh-server's own URL the same way the real page does on boot
-    // (src/web/client/main.ts fetches this same-origin endpoint) — used below to kick off
-    // the root agent's first turn, working around the composer-bootstrap defect documented
-    // above.
-    const dhConfig = (await fetch(new URL("/dh-config.json", webUrl)).then((r) => r.json())) as {
-      baseUrl: string;
-    };
-
     const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
     cleanups.push(() => browser.close());
     const context = await browser.newContext({ acceptDownloads: true });
@@ -68,18 +64,20 @@ describe("web UI (dh --web) in a real headless browser", () => {
     await page.waitForFunction(
       "document.querySelector('.connection-pill')?.textContent === 'Live'",
     );
-    expect(await page.locator(".empty-state").textContent()).toBe("Waiting for an agent to spawn…");
 
-    const postRes = await fetch(new URL("/api/commands", dhConfig.baseUrl), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        type: "send_message",
-        agentId: "agent-root",
-        message: "hi from playwright",
-      }),
-    });
-    expect(postRes.status).toBe(200);
+    // The fix under test: the composer is already usable on a brand-new session, before any
+    // message has ever been sent and before any agent_spawned SSE event has ever fired —
+    // seeded purely by the request_agent_tree bootstrap (src/web/client/app.ts).
+    const rootHeader = page.locator(".agent-header-name");
+    await rootHeader.waitFor({ state: "visible" });
+    expect(await rootHeader.textContent()).toBe("Root agent");
+    const composerInput = page.locator(".composer-input");
+    await composerInput.waitFor({ state: "visible" });
+
+    // Send the root agent's first turn through the real interactive UI (type + click) — no
+    // direct API workaround.
+    await composerInput.fill("hi from playwright");
+    await page.getByRole("button", { name: "Send" }).click();
 
     // Sidebar: one root row, status eventually "done" (status colors, HANDOFF.md §9).
     const rootRow = page.locator(".agent-row.root");
@@ -111,11 +109,6 @@ describe("web UI (dh --web) in a real headless browser", () => {
     );
     const bannerClass = await page.locator(".session-banner").getAttribute("class");
     expect(bannerClass).toMatch(/session-banner-ok/);
-
-    // Composer: now that the root agent exists and is selected, it does render (proving the
-    // *rest* of the interactive flow works — see this file's header comment for what's out
-    // of scope here).
-    expect(await page.locator(".composer-input").isVisible()).toBe(true);
 
     // Log download: per-agent JSONL.
     //

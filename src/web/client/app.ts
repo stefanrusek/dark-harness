@@ -5,7 +5,13 @@
 
 import type { ServerSentEvent } from "../../contracts/index.ts";
 import type { ServerTarget } from "../protocol.ts";
-import { CommandError, type FetchLike, sendMessage, stopAgent } from "./commands.ts";
+import {
+  CommandError,
+  type FetchLike,
+  requestAgentTree,
+  sendMessage,
+  stopAgent,
+} from "./commands.ts";
 import { type DownloadEnv, downloadLogs } from "./download.ts";
 import {
   type AppCallbacks,
@@ -27,6 +33,7 @@ import {
   type WebState,
   applyEvent,
   createInitialState,
+  seedFromTree,
   selectAgent,
   selectedAgent,
   setConnectionStatus,
@@ -108,6 +115,27 @@ export class AppView {
         clearTimeoutImpl: this.deps.clearTimeoutImpl,
       },
     );
+    this.bootstrapAgentTree();
+  }
+
+  /**
+   * Learns the root agent's id via `request_agent_tree` (Server synthesizes a pre-start
+   * root node — `status: "waiting"`, `parentAgentId: null` — before any message is ever
+   * sent). This is the *only* bootstrap path for a fresh session: `agent_spawned` (the SSE
+   * event that would otherwise seed `rootAgentId`) never fires until the agent loop starts,
+   * which never happens until someone sends the first message through the composer — which
+   * the composer can't render without already knowing the root's id. Without this call, a
+   * fresh `dh --web` session deadlocks: nothing to select, no composer, no way in.
+   * Runs independently of (and races harmlessly with) the SSE connection above — whichever
+   * resolves first wins; `seedFromTree`/`applyEvent` are both idempotent about it.
+   */
+  private bootstrapAgentTree(): void {
+    requestAgentTree(this.deps.target, this.deps.fetchImpl)
+      .then((res) => {
+        this.state = seedFromTree(this.state, res.tree);
+        this.renderAll();
+      })
+      .catch((err) => this.reportError(err));
   }
 
   stop(): void {
