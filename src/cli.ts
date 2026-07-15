@@ -223,12 +223,12 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
 
   stopAgent(agentId: string): void {
     if (agentId === ROOT_AGENT_ID) {
-      // Known limitation, not new this round (docs/handoffs/core.md Round 2 status log):
-      // loop.ts has no cooperative cancellation at all yet — TaskStop's abort signal only
-      // ever interrupted a run_in_background Bash call, never a loop mid-turn, for
-      // sub-agents either. A safe no-op here is honest about what's actually supported
-      // rather than throwing and failing the command handler for an operation the loop
-      // can't actually perform yet.
+      // Round 3 fix (docs/handoffs/core.md status log): this used to be a documented no-op
+      // — loop.ts had no cooperative cancellation at all. AgentRuntime.stopRoot() now
+      // triggers the root's own AbortController; see loop.ts's AgentLoopParams.signal doc
+      // comment for exactly what "stop" does and doesn't interrupt (between-turns and the
+      // in-flight provider call, not a tool call already in progress).
+      this.runtime.stopRoot();
       return;
     }
     this.runtime.tasks.stop(agentId);

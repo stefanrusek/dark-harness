@@ -22,7 +22,10 @@ import { ProviderError } from "./types.ts";
 /** Minimal slice of the Bedrock runtime client this adapter depends on — lets tests inject a
  * fake without touching AWS. */
 export interface BedrockClientLike {
-  send(command: ConverseCommand): Promise<{
+  send(
+    command: ConverseCommand,
+    options?: { abortSignal?: AbortSignal },
+  ): Promise<{
     output?: { message?: BedrockMessage };
     stopReason?: BedrockStopReason;
     usage?: {
@@ -81,7 +84,10 @@ export class BedrockProvider implements ModelProvider {
       new BedrockRuntimeClient(typeof config.region === "string" ? { region: config.region } : {});
   }
 
-  async complete(request: ProviderCompletionRequest): Promise<ProviderCompletionResult> {
+  async complete(
+    request: ProviderCompletionRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderCompletionResult> {
     const tools: BedrockTool[] = request.tools.map(
       (t) =>
         ({
@@ -105,6 +111,7 @@ export class BedrockProvider implements ModelProvider {
           })),
           ...(tools.length > 0 ? { toolConfig: { tools } } : {}),
         }),
+        signal ? { abortSignal: signal } : undefined,
       );
     } catch (err) {
       throw new ProviderError(`bedrock provider request failed: ${(err as Error).message}`, {

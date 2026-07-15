@@ -506,3 +506,93 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
     }
   });
 });
+
+describe("AgentRuntime.stopRoot / spawnAgent signal threading (Round 3: real cancellation)", () => {
+  /** A mock provider endpoint that never resolves its response on its own — the only way
+   * runRoot()/spawnAgent() below can finish is if the AbortSignal genuinely propagates all
+   * the way down to the outbound fetch call. If it didn't, these tests would hang until
+   * bun's default per-test timeout and fail — that failure mode *is* the test. */
+  function startNeverRespondingServer() {
+    return Bun.serve({
+      port: 0,
+      fetch() {
+        return new Promise<Response>(() => {
+          // Deliberately never resolves.
+        });
+      },
+    });
+  }
+
+  test("stopRoot() aborts a running root loop's in-flight provider call", async () => {
+    const slowServer = startNeverRespondingServer();
+    try {
+      const config: DhConfig = {
+        options: { defaultModel: "test-model" },
+        models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+        provider: [
+          {
+            name: "mock",
+            type: "anthropic",
+            baseURL: slowServer.url.toString(),
+            apiKey: "sk-test",
+          },
+        ],
+      };
+      const { events, onEvent } = collectors();
+      const runtime = new AgentRuntime({ config, systemPrompt: "sp", onEvent });
+      const rootPromise = runtime.runRoot("go");
+      // Give the fetch a moment to actually be in flight before stopping it.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      runtime.stopRoot();
+      const result = await rootPromise;
+      expect(result.success).toBe(false);
+      const statusEvent = events.find((e) => e.type === "agent_status");
+      expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe(
+        "failed",
+      );
+    } finally {
+      slowServer.stop(true);
+    }
+  });
+
+  test("stopRoot() before runRoot() has ever been called is a safe no-op", () => {
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    expect(() => runtime.stopRoot()).not.toThrow();
+  });
+
+  test("stopRoot() after the root has already finished is a safe no-op", async () => {
+    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    await runtime.runRoot("please just answer");
+    expect(() => runtime.stopRoot()).not.toThrow();
+  });
+
+  test("tasks.stop(subAgentId) aborts a sub-agent's in-flight provider call, not just its bookkeeping", async () => {
+    const slowServer = startNeverRespondingServer();
+    try {
+      const config: DhConfig = {
+        options: { defaultModel: "test-model" },
+        models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+        provider: [
+          {
+            name: "mock",
+            type: "anthropic",
+            baseURL: slowServer.url.toString(),
+            apiKey: "sk-test",
+          },
+        ],
+      };
+      const runtime = new AgentRuntime({ config, systemPrompt: "sp" });
+      const taskId = runtime.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "go" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      runtime.tasks.stop(taskId);
+      await runtime.tasks.awaitDone(taskId);
+      // Before Round 3, tasks.stop() only ever updated registry bookkeeping — the loop
+      // itself kept running (and the fetch kept hanging) regardless. awaitDone() resolving
+      // at all here (rather than this test timing out) is the actual proof of the fix; the
+      // status assertion below is a secondary sanity check.
+      expect(runtime.tasks.snapshot(taskId).status).toBe("failed");
+    } finally {
+      slowServer.stop(true);
+    }
+  });
+});

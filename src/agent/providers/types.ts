@@ -47,7 +47,14 @@ export interface ProviderCompletionResult {
 }
 
 export interface ModelProvider {
-  complete(request: ProviderCompletionRequest): Promise<ProviderCompletionResult>;
+  /** `signal` (Round 3: docs/handoffs/core.md status log) is optional and best-effort — both
+   * built-in adapters forward it straight to their SDK's own abort support so an in-flight
+   * request can actually be cancelled, not just prevented from starting. A provider that
+   * ignores it degrades gracefully to loop.ts's between-turn check only. */
+  complete(
+    request: ProviderCompletionRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderCompletionResult>;
 }
 
 export class ProviderError extends Error {

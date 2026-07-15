@@ -477,3 +477,96 @@ clean, `bun run test:coverage` — 633 tests passing across the full merged tree
 100% funcs/lines aggregate (the one explained gap above). `bun run e2e` still has nothing to
 run — `e2e/` hasn't landed in this tree yet, consistent with round 1's "out of scope, E2E
 domain, sequenced after."
+
+### 2026-07-15 — Grace, Round 3 (real cancellation: stopAgent actually stops something)
+
+Worked in a fresh worktree (`grace-round3`, branched from
+`origin/claude/coordinator-onboarding-kab9ls` at `f6ad86f`) per the coordinator's
+instruction. Scope: `stopAgent` was a real no-op for the root and only task-registry
+bookkeeping for sub-agents — the coordinator traced the exact gap (no `signal` field on
+`AgentLoopParams`, `spawnAgent()` never passing `handle.signal` through, `runRoot()` having
+no `AbortController` at all) before opening this round, so implementation started from a
+precise, already-diagnosed starting point rather than needing rediscovery.
+
+**What "stop" now does, exactly (the minimum-viable scope, chosen deliberately — full detail
+and the effort trade-off in `docs/roster/grace.md`):**
+1. **Between turns** — `AgentLoopParams.signal` (new) is checked at the top of every turn,
+   before starting a new one. An already-aborted signal stops before the *first* turn too
+   (the provider is never called).
+2. **During the provider call itself** — both built-in providers now forward the signal to
+   their SDK's own native abort support (`anthropic.ts`: `messages.create(params, {signal})`;
+   `bedrock.ts`: `client.send(command, {abortSignal})` — confirmed both actually accept this
+   from the installed SDKs' own `.d.ts` files before writing any code, not assumed). An
+   in-flight model request genuinely gets interrupted, not just the next one prevented — this
+   was flagged in the handoff as "nice to have, not required" but turned out to be
+   straightforward given both SDKs already support it, so it's in.
+3. **NOT covered**: a tool call already in progress (e.g. a blocking `Bash` call without
+   `run_in_background`) runs to completion once started — `ToolContext` has no `signal` field
+   this round. Documented explicitly in `loop.ts`'s `AgentLoopParams.signal` doc comment and
+   here, not silently left out.
+
+**Wiring:**
+- `spawnAgent()`: passes `handle.signal` (the `TaskRunHandle`'s `AbortSignal`, already
+  sitting in scope — `TaskRegistry.stop(id)` already called this same controller, it just
+  never reached the loop before) straight into `runAgentLoop({..., signal: handle.signal})`.
+- `runRoot()`: creates a fresh `AbortController` per call (`this.rootController`, a new
+  instance field — root isn't a `TaskRegistry` entry, so it needed its own), passes its
+  `.signal` into the loop, and a new `stopRoot(): void` method triggers it. Idempotent/safe
+  to call before the root has started or after it's finished (both are no-ops).
+- `src/cli.ts`'s `AgentRuntimeLoopAdapter.stopAgent(ROOT_AGENT_ID)` now calls
+  `runtime.stopRoot()` instead of the round-2 no-op.
+
+**What an aborted turn reports:** exactly the same shape a self-reported failure already
+uses — `AgentLoopResult.success: false`, an `agent_status: "failed"` event, a logged
+`failed` event with a reason distinguishing which of the two check points fired
+(`STOPPED_BETWEEN_TURNS_REASON` / `STOPPED_DURING_PROVIDER_CALL_REASON`, both exported from
+`loop.ts`). Judgment call: did **not** introduce a new `AgentStatus` value for "stopped" —
+`TaskStop`'s existing sub-agent bookkeeping already collapses "stopped" into "failed"
+(`task.error = "stopped by TaskStop"`), so keeping the loop's own report in that same shape
+keeps the two mechanisms consistent instead of adding a status value only one of them uses.
+A genuine (non-abort-caused) provider error still propagates normally — the new try/catch
+around the provider call only treats it as "stopped" when `params.signal?.aborted` is
+actually true, so this isn't a blanket swallow of provider exceptions.
+
+**Verification (both automated and live, not just automated):**
+- `loop.test.ts`: already-aborted-before-first-turn, aborted-between-turns (with a partial
+  `finalOutput` preserved from the turn that did complete), aborted-during-the-provider-call
+  (a provider that only rejects once its signal fires — proves the interruption, not just a
+  timeout), a genuine unrelated provider error still propagating, and the signal-omitted path
+  unchanged from before.
+- `anthropic.test.ts`/`bedrock.test.ts`: unit-level proof the exact `AbortSignal` object
+  reaches the SDK call's options, and that omitting a signal doesn't send `{signal:
+  undefined}` (own real value, not just a coverage-driven line).
+- `runtime.test.ts`: two tests spin up a mock provider endpoint that **never responds** on
+  its own — `stopRoot()`/`tasks.stop(subAgentId)` finishing the run at all (rather than the
+  test timing out) is the actual proof; if the abort didn't genuinely propagate to the
+  outbound fetch, these would hang until bun's default per-test timeout and fail. That
+  failure mode is a deliberate part of the test design, not a flake risk — a broken build
+  fails loudly and fast rather than passing by accident.
+- `cli.test.ts`: same never-responding-server pattern, but through the real
+  `AgentRuntimeLoopAdapter` + real `send_message`-then-`stopAgent` sequence.
+- **Live subprocess smoke test** (real compiled/dev binary, real HTTP, a real never-
+  responding mock provider — not just unit tests): started `dh --server`, POSTed
+  `send_message` to `agent-root` (provider hangs forever), confirmed via
+  `request_agent_tree` the root was stuck `"running"`, POSTed `stop_agent`, and confirmed the
+  tree reported `"failed"` promptly afterward — the actual owner-facing flow this round
+  exists for, exercised end-to-end.
+
+**Cross-domain request, not acted on unilaterally:** `e2e/` (Hedy's domain) doesn't have a
+stop-a-running-agent scenario yet, and now it'd have real behavior worth verifying at the
+real-binary/real-process level (not just my own unit/integration tests). Concrete spec for
+whoever picks this up: extend `e2e/support/mock-provider.ts` (or add a one-off inline mock
+server the way `server-protocol.test.ts`'s sibling tests already do for other cases) with a
+turn that delays or never resolves, `send_message` to start the root, confirm via SSE it's
+`agent_spawned` but stuck before `agent_status`, POST `stop_agent`, and assert the SSE stream
+reports `agent_status: failed` promptly rather than waiting for the provider to naturally
+resolve — mirrors `server-protocol.test.ts`'s existing `send_message to agent-root runs a
+full turn, observable live over SSE` test almost exactly, just with a stop in the middle.
+Did not add this myself — `e2e/` is Hedy's owned directory, and CLAUDE.md's ownership model
+treats this as a request, not something for me to implement directly, even though the
+round-3 handoff explicitly left the call to me.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean, `bun run test:coverage` — 668
+tests passing, 99.95%/100% funcs/lines aggregate (same single explained gap as round 2:
+`cli.ts`'s real `startTui` default needs an actual PTY). `bun run e2e` — 18 tests passing,
+unchanged by this round's work (no e2e file touched, per the cross-domain request above).

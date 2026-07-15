@@ -157,3 +157,58 @@ cross-domain requests in this round's status log (TUI token auth passthrough; lo
 real cooperative cancellation) are real, not decorative — worth checking whether Mary's
 picked up the first one before E2E writes a security-matrix test that assumes the console
 TUI can authenticate.
+
+### 2026-07-15 — Round 3 (real cancellation: stopAgent actually stops something)
+
+Worked from a fresh worktree (`grace-round3`, branched from
+`origin/claude/coordinator-onboarding-kab9ls` at `f6ad86f`) — the coordinator had already
+traced the exact gap (no `signal` on `AgentLoopParams`, `spawnAgent()` not forwarding
+`handle.signal`, `runRoot()` with no `AbortController`) before opening the round, which made
+this a much faster round than 1 or 2: no discovery phase, straight to implementation.
+
+Full technical writeup in `docs/handoffs/core.md`'s dated Round 3 entry. This section is
+judgment/process notes for a future me.
+
+**Scope decision I'm glad I made:** the handoff explicitly allowed stopping at "cooperative,
+checked between turns" and called deeper work (interrupting an in-flight provider call) a
+nice-to-have. Before deciding how deep to go, I checked the actual installed SDKs'
+`.d.ts` files (`@anthropic-ai/sdk`'s `RequestOptions.signal`, `@smithy/core`'s
+`HandlerOptions` with `abortSignal`) rather than assuming support existed or guessing at API
+shape. Since both genuinely supported it with a one-line change per adapter, I went ahead —
+but the check-first approach is the actual lesson: "is this actually easy" is answerable in
+under a minute by reading the dependency's own types, and it's a much better basis for a
+scope decision than a vibe about how hard something "probably" is. I did NOT extend this
+same effort to threading a signal through individual tool executions (`ToolContext`) — that
+would touch all 12 tools' call sites and every tool test's helper, a much bigger and more
+invasive change for a comparatively narrow benefit (a long blocking tool call is the
+exception, not the common case, for what "stop" needs to feel responsive for) — scoped that
+out explicitly rather than either silently skipping it or over-building.
+
+**Test design choice worth remembering for future cancellation/timing-sensitive work:** the
+`runtime.test.ts`/`cli.test.ts` regression tests use mock HTTP servers that **never respond**
+on their own. This means: if the abort signal genuinely doesn't propagate all the way to the
+outbound fetch, the test hangs and fails via bun's default per-test timeout, rather than
+passing by accident (which a "responds after a short delay, then check a flag" test design
+would risk under CI timing variance). A test that can only pass by actually interrupting a
+truly-pending operation is a stronger proof than one that races a timer. I'll default to this
+pattern for any future "does cancellation really work" test rather than sleep-and-check.
+
+**Ownership boundary held even when explicitly invited to cross it:** the round-3 handoff
+said "your call, and this may mean a request to Hedy/E2E rather than you touching e2e/" —
+i.e. it explicitly offered me the option to just add the file myself. I still routed it as a
+request (with a concrete, actionable spec — not just "someone should add a test") rather than
+writing into `e2e/` directly, consistent with how I've treated `src/tui/`, `src/server/`,
+`src/web/` in rounds 1-2. The bar I'm using: an explicit invitation from a handoff doesn't
+override the ownership map in CLAUDE.md §3 by itself — I'd want that to come from the
+coordinator specifically reassigning the file, or from Hedy herself, not infer it from being
+given latitude on a judgment call. Flagging this here in case a future me (or the
+coordinator) disagrees with where I drew that line — it was closer than the round-1/2 calls.
+
+**Verification discipline that paid off again:** did a real live subprocess test (not just
+unit tests) — real `dh --server`, a real never-responding mock provider process, `curl`
+driving the actual HTTP command API — timing the root's status transition from stuck
+`"running"` to `"failed"` after `stop_agent`. This is the third round in a row where a live
+process-level check surfaced or confirmed something the unit tests alone wouldn't have
+(round 2's send_message-to-unstarted-root bug was found exactly this way). Worth keeping as
+a standing habit for this identity: before calling a round done, drive the actual owner-
+facing flow through a real process at least once, not just through fakes.

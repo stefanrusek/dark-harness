@@ -847,16 +847,44 @@ describe("AgentRuntimeLoopAdapter", () => {
     }
   });
 
-  test("stopAgent(ROOT_AGENT_ID) is a documented no-op (loop.ts has no cooperative cancellation yet)", () => {
-    const server = startMockAnthropicServer();
+  test("stopAgent(ROOT_AGENT_ID) really stops the root agent (Round 3 — used to be a no-op)", async () => {
+    // A dedicated never-responding mock server, not the shared fast-answering one above —
+    // this proves stopAgent actually reaches AgentRuntime.stopRoot()'s AbortController
+    // (interrupting a genuinely in-flight provider call), not just that it doesn't throw.
+    // If the wiring regressed to a no-op, this test would hang until bun's default per-test
+    // timeout and fail — that failure mode *is* the test.
+    const neverRespondingServer = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Promise<Response>(() => {});
+      },
+    });
     try {
       const adapter = new AgentRuntimeLoopAdapter({
-        config: adapterConfig(server),
+        config: adapterConfig(neverRespondingServer),
         systemPrompt: "sp",
       });
-      expect(() => adapter.stopAgent(ROOT_AGENT_ID)).not.toThrow();
+      const events: ServerSentEvent[] = [];
+      adapter.onEvent((e) => events.push(e));
+      adapter.sendMessage(ROOT_AGENT_ID, "hello"); // lazily starts the root
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      adapter.stopAgent(ROOT_AGENT_ID);
+      await new Promise<void>((resolve) => {
+        const check = setInterval(() => {
+          if (events.some((e) => e.type === "session_ended")) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 5);
+      });
+      const statusEvent = events.find((e) => e.type === "agent_status");
+      expect(statusEvent).toMatchObject({
+        type: "agent_status",
+        agentId: ROOT_AGENT_ID,
+        status: "failed",
+      });
     } finally {
-      server.stop(true);
+      neverRespondingServer.stop(true);
     }
   });
 
