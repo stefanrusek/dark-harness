@@ -4,11 +4,13 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { ProviderConfig } from "../../contracts/index.ts";
+import { withRetry } from "./retry.ts";
 import type {
   ModelProvider,
   ProviderCompletionRequest,
   ProviderCompletionResult,
   ProviderContentBlock,
+  ProviderErrorKind,
   ProviderStopReason,
 } from "./types.ts";
 import { ProviderError } from "./types.ts";
@@ -59,8 +61,24 @@ function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopRe
   return "other";
 }
 
+/** DH-0009: classifies a raw thrown value from the Anthropic SDK. The SDK's own `APIError`
+ * (and subclasses like `AuthenticationError`/`RateLimitError`/`InternalServerError`) carry a
+ * `status` HTTP code; anything without one (a plain `TypeError`/`fetch` failure, DNS, TLS)
+ * never reached the provider at all. */
+function classifyAnthropicError(err: unknown): { kind: ProviderErrorKind; retryable: boolean } {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (typeof status === "number") {
+    if (status === 401 || status === 403) return { kind: "auth", retryable: false };
+    if (status === 429) return { kind: "rate_limit", retryable: true };
+    if (status >= 500) return { kind: "overloaded", retryable: true };
+    return { kind: "other", retryable: false };
+  }
+  return { kind: "network", retryable: true };
+}
+
 export class AnthropicProvider implements ModelProvider {
   private client: AnthropicClientLike;
+  private retryPolicy: ProviderConfig["retry"];
 
   constructor(config: ProviderConfig, client?: AnthropicClientLike) {
     this.client =
@@ -69,6 +87,7 @@ export class AnthropicProvider implements ModelProvider {
         apiKey: typeof config.apiKey === "string" ? config.apiKey : undefined,
         baseURL: config.baseURL,
       });
+    this.retryPolicy = config.retry;
   }
 
   async complete(
@@ -77,26 +96,35 @@ export class AnthropicProvider implements ModelProvider {
   ): Promise<ProviderCompletionResult> {
     let response: Anthropic.Message;
     try {
-      response = await this.client.messages.create(
-        {
-          model: request.model,
-          system: request.system,
-          max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-          messages: request.messages.map((m) => ({
-            role: m.role,
-            content: m.content.map(toAnthropicContent),
-          })),
-          tools: request.tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
-          })),
-        },
-        signal ? { signal } : undefined,
+      response = await withRetry(
+        () =>
+          this.client.messages.create(
+            {
+              model: request.model,
+              system: request.system,
+              max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+              messages: request.messages.map((m) => ({
+                role: m.role,
+                content: m.content.map(toAnthropicContent),
+              })),
+              tools: request.tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
+              })),
+            },
+            signal ? { signal } : undefined,
+          ),
+        (err) => classifyAnthropicError(err).retryable,
+        this.retryPolicy,
+        signal,
       );
     } catch (err) {
+      const { kind, retryable } = classifyAnthropicError(err);
       throw new ProviderError(`anthropic provider request failed: ${(err as Error).message}`, {
         cause: err,
+        kind,
+        retryable,
       });
     }
 

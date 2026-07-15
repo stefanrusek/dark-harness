@@ -314,6 +314,53 @@ describe("validateConfig — rejections", () => {
     expect(config.provider[0]?.region).toBe("us-west-2");
   });
 
+  test("DH-0009: accepts a well-formed provider retry config", () => {
+    const config = validateConfig(
+      baseConfig({
+        provider: [
+          {
+            name: "anthropic",
+            type: "anthropic",
+            retry: { maxAttempts: 5, baseDelayMs: 100, maxDelayMs: 5000 },
+          },
+        ],
+      }),
+    );
+    expect(config.provider[0]?.retry).toEqual({
+      maxAttempts: 5,
+      baseDelayMs: 100,
+      maxDelayMs: 5000,
+    });
+  });
+
+  test("DH-0009: rejects a non-object provider retry config", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ provider: [{ name: "anthropic", type: "anthropic", retry: "fast" }] }),
+      ),
+    ).toThrow(/provider\[0\].retry must be an object/);
+  });
+
+  test("DH-0009: rejects a typo'd key inside a provider retry config", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          provider: [{ name: "anthropic", type: "anthropic", retry: { maxAttepts: 5 } }],
+        }),
+      ),
+    ).toThrow(/provider\[0\].retry has unknown key "maxAttepts"/);
+  });
+
+  test("DH-0009: rejects a non-positive provider retry field", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          provider: [{ name: "anthropic", type: "anthropic", retry: { maxAttempts: 0 } }],
+        }),
+      ),
+    ).toThrow(/provider\[0\].retry.maxAttempts must be a positive number/);
+  });
+
   test("DH-0015: rejects a typo'd key inside an mcpServers entry", () => {
     expect(() =>
       validateConfig(baseConfig({ mcpServers: { foo: { command: "x", enviroment: {} } } })),

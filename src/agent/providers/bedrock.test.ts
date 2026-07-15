@@ -165,9 +165,122 @@ describe("BedrockProvider", () => {
         throw new Error("throttled");
       },
     };
-    const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+    // maxAttempts: 1 keeps this test instant — a plain Error (no recognizable AWS exception
+    // name) classifies as "network"/retryable (see the dedicated DH-0009 retry tests below).
+    const provider = new BedrockProvider(
+      { name: "bedrock", type: "bedrock", retry: { maxAttempts: 1 } },
+      client,
+    );
     await expect(provider.complete(BASE_REQUEST)).rejects.toThrow(ProviderError);
     await expect(provider.complete(BASE_REQUEST)).rejects.toThrow(/throttled/);
+  });
+
+  describe("DH-0009: error classification and retry/backoff", () => {
+    function errorWithName(name: string, message = "failed"): Error {
+      const err = new Error(message);
+      err.name = name;
+      return err;
+    }
+
+    test("classifies AccessDeniedException as auth and never retries", async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          throw errorWithName("AccessDeniedException", "nope");
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).kind).toBe("auth");
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(calls).toBe(1);
+    });
+
+    test("classifies ThrottlingException as rate_limit and retries up to maxAttempts", async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          throw errorWithName("ThrottlingException", "slow down");
+        },
+      };
+      const provider = new BedrockProvider(
+        {
+          name: "bedrock",
+          type: "bedrock",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("rate_limit");
+      expect((err as ProviderError).retryable).toBe(true);
+      expect(calls).toBe(3);
+    });
+
+    test("classifies ServiceUnavailableException as overloaded and retries", async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          throw errorWithName("ServiceUnavailableException", "down");
+        },
+      };
+      const provider = new BedrockProvider(
+        {
+          name: "bedrock",
+          type: "bedrock",
+          retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("overloaded");
+      expect(calls).toBe(2);
+    });
+
+    test("a retry that eventually succeeds returns the successful result", async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          if (calls < 2) throw errorWithName("ThrottlingException", "slow down");
+          return {
+            output: { message: { role: "assistant", content: [{ text: "worked eventually" }] } },
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1 },
+          };
+        },
+      };
+      const provider = new BedrockProvider(
+        {
+          name: "bedrock",
+          type: "bedrock",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([{ type: "text", text: "worked eventually" }]);
+      expect(calls).toBe(2);
+    });
+
+    test("an unrecognized AWS exception name classifies as other and is not retried", async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          throw errorWithName("ValidationException", "bad request");
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("other");
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(calls).toBe(1);
+    });
   });
 
   test("constructs a real Bedrock SDK client when none is injected", () => {

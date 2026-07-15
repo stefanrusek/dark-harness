@@ -23,6 +23,22 @@ export interface ModelConfig {
 
 export type ProviderType = "anthropic" | "bedrock";
 
+/**
+ * DH-0009 (tracking/DH-0009-provider-retry-backoff-and-error-taxonomy.md): per-provider
+ * retry/backoff tuning. Every field is optional with a sane built-in default (see
+ * src/agent/providers/retry.ts) — this exists so an operator can widen/narrow retry behavior
+ * per provider (e.g. a flaky local endpoint vs. a production Anthropic/Bedrock account)
+ * without needing a code change.
+ */
+export interface ProviderRetryConfig {
+  /** Total attempts, including the first (non-retry) one. Default 3. */
+  maxAttempts?: number;
+  /** Base delay before the first retry, doubled each subsequent attempt. Default 500ms. */
+  baseDelayMs?: number;
+  /** Upper bound on the (pre-jitter) computed delay. Default 8000ms. */
+  maxDelayMs?: number;
+}
+
 export interface ProviderConfig {
   name: string;
   type: ProviderType;
@@ -30,6 +46,8 @@ export interface ProviderConfig {
   baseURL?: string;
   apiKey?: string;
   region?: string;
+  /** DH-0009: retry/backoff tuning for transient failures against this provider. */
+  retry?: ProviderRetryConfig;
   [key: string]: unknown;
 }
 

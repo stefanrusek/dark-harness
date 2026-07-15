@@ -71,8 +71,36 @@ function validateProvider(raw: unknown, index: number): ProviderConfig {
       );
     }
   }
+  if (raw.retry !== undefined) {
+    validateProviderRetry(raw.retry, `provider[${index}].retry`);
+  }
   const config: ProviderConfig = { ...raw, name, type: providerType };
   return config;
+}
+
+/** DH-0009: validates the optional per-provider retry/backoff tuning object — every field is
+ * optional, but a present field must be a positive number, not some other typo'd shape. */
+function validateProviderRetry(raw: unknown, path: string): void {
+  if (!isRecord(raw)) {
+    throw new ConfigError(`${path} must be an object`);
+  }
+  const known = new Set(["maxAttempts", "baseDelayMs", "maxDelayMs"]);
+  for (const key of Object.keys(raw)) {
+    if (!known.has(key)) {
+      throw new ConfigError(
+        `${path} has unknown key "${key}"; known keys: ${[...known].join(", ")}`,
+      );
+    }
+  }
+  for (const key of known) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (
+      value !== undefined &&
+      (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    ) {
+      throw new ConfigError(`${path}.${key} must be a positive number when present`);
+    }
+  }
 }
 
 function validateModel(raw: unknown, index: number, providerNames: Set<string>): ModelConfig {

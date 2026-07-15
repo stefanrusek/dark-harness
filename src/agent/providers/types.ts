@@ -57,9 +57,34 @@ export interface ModelProvider {
   ): Promise<ProviderCompletionResult>;
 }
 
+/**
+ * DH-0009 (tracking/DH-0009-provider-retry-backoff-and-error-taxonomy.md): classifies a
+ * provider failure so downstream logic (retry, display) can react appropriately instead of
+ * treating every SDK failure as one opaque, unclassified error.
+ *
+ * - `auth` — bad/missing credentials, forbidden. Never retryable — retrying sends the exact
+ *   same doomed request again.
+ * - `rate_limit` — 429/throttling. Retryable.
+ * - `overloaded` — 5xx/server-side transient failure. Retryable.
+ * - `network` — the request never reached the provider at all (DNS, connection refused, TLS).
+ *   Retryable.
+ * - `other` — anything not confidently classified as one of the above (e.g. a malformed
+ *   request, a 4xx that isn't auth). Not retryable by default — an unrecognized error
+ *   shouldn't be assumed safe to blindly retry.
+ */
+export type ProviderErrorKind = "auth" | "rate_limit" | "overloaded" | "network" | "other";
+
 export class ProviderError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
+  readonly kind: ProviderErrorKind;
+  readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    options?: { cause?: unknown; kind?: ProviderErrorKind; retryable?: boolean },
+  ) {
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "ProviderError";
+    this.kind = options?.kind ?? "other";
+    this.retryable = options?.retryable ?? false;
   }
 }

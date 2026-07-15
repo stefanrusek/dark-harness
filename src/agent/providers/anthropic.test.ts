@@ -154,9 +154,138 @@ describe("AnthropicProvider", () => {
         },
       },
     };
-    const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+    // maxAttempts: 1 keeps this test instant — a plain Error (no `.status`) classifies as
+    // "network"/retryable (see the dedicated DH-0009 retry tests below), which would
+    // otherwise make this test wait through real backoff delays for no reason.
+    const provider = new AnthropicProvider(
+      { name: "anthropic", type: "anthropic", retry: { maxAttempts: 1 } },
+      client,
+    );
     await expect(provider.complete(BASE_REQUEST)).rejects.toThrow(ProviderError);
     await expect(provider.complete(BASE_REQUEST)).rejects.toThrow(/network down/);
+  });
+
+  describe("DH-0009: error classification and retry/backoff", () => {
+    function errorWithStatus(status: number, message = "failed"): Error {
+      const err = new Error(message);
+      (err as unknown as { status: number }).status = status;
+      return err;
+    }
+
+    test("classifies a 401/403 as auth and never retries", async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            throw errorWithStatus(401, "bad key");
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).kind).toBe("auth");
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(calls).toBe(1);
+    });
+
+    test("classifies a 429 as rate_limit and retries up to maxAttempts", async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            throw errorWithStatus(429, "slow down");
+          },
+        },
+      };
+      const provider = new AnthropicProvider(
+        {
+          name: "anthropic",
+          type: "anthropic",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("rate_limit");
+      expect((err as ProviderError).retryable).toBe(true);
+      expect(calls).toBe(3);
+    });
+
+    test("classifies a 5xx as overloaded and retries", async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            throw errorWithStatus(503, "overloaded");
+          },
+        },
+      };
+      const provider = new AnthropicProvider(
+        {
+          name: "anthropic",
+          type: "anthropic",
+          retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("overloaded");
+      expect(calls).toBe(2);
+    });
+
+    test("a retry that eventually succeeds returns the successful result, not an error", async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            if (calls < 2) throw errorWithStatus(429, "slow down");
+            return {
+              id: "msg_retry",
+              type: "message",
+              role: "assistant",
+              model: "sonnet-5",
+              content: [{ type: "text", text: "worked eventually" }],
+              stop_reason: "end_turn",
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
+            } as unknown as Anthropic.Message;
+          },
+        },
+      };
+      const provider = new AnthropicProvider(
+        {
+          name: "anthropic",
+          type: "anthropic",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([{ type: "text", text: "worked eventually" }]);
+      expect(calls).toBe(2);
+    });
+
+    test("a 4xx other than 401/403/429 classifies as other and is not retried", async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            throw errorWithStatus(400, "bad request");
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("other");
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(calls).toBe(1);
+    });
   });
 
   test("constructs a real Anthropic SDK client when none is injected (baseURL/apiKey wiring)", () => {
