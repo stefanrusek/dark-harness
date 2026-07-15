@@ -4,17 +4,39 @@ name: Gate
 # Called by ci.yml (on PRs/main) and release.yml (before cutting a release) so both
 # paths run the exact same checks and can never drift apart.
 #
-# `test:coverage` (`bun test src --coverage`) reports coverage but does not itself
-# fail the process below 100% — bun's own hard-threshold mechanism is a `bunfig.toml`
-# `coverageThreshold` entry, which is a repo-root file outside this domain's ownership
-# (.github/workflows/, per CLAUDE.md §3). Rather than add that file unilaterally, this
-# workflow parses `bun test --coverage`'s text summary ("All files" row) itself and
-# fails the step if either the function or line percentage is below 100.00. This was
-# verified locally against bun 1.3.11: `bun test src --coverage --coverage-reporter=text`
-# prints a summary line of the form:
-#   All files                    |  100.00 |  100.00 |
-# See docs/handoffs/ci-release.md status log for the alternative (bunfig.toml) and why
-# it was left as a request rather than a silent edit.
+# DH-0030: the coverage/completeness/e2e steps below used to parse `bun test
+# --coverage`'s printed ANSI text table (grep + awk over an "All files" row and a
+# column layout) and used a fail-open conditional for e2e ("run it if files happen
+# to exist, else just print a notice"). Both were fragile: a bun version bump that
+# reflows the printed table (spacing, column order, locale decimal separator) could
+# silently break the coverage checks, and an accidentally-emptied `e2e/` directory
+# would silently downgrade the e2e gate to a no-op instead of failing. Replaced with:
+#   - coverage + completeness: `--coverage-reporter=lcov`, a structured, documented
+#     format (`SF:`/`FNF:`/`FNH:`/`LF:`/`LH:` records) that bun itself produces and
+#     that isn't subject to text-table reflow. Verified locally against bun 1.3.14:
+#     `bun test src --coverage --coverage-reporter=lcov` writes `coverage/lcov.info`;
+#     totals are summed with awk directly from those records, and the completeness
+#     check diffs the `SF:` file list (not a printed table's path column) against
+#     `git ls-files`.
+#   - e2e: fails closed. Once `e2e/` contains at least one test file (true today —
+#     see `e2e/*.test.ts`), an empty/missing `e2e/` is treated as a hard failure, not
+#     a notice. This is a one-way ratchet, matching HANDOFF.md/docs/handoffs/ci-release.md's
+#     framing that e2e is "sequenced after the other domains land" — now that it has
+#     landed, its absence is a regression, not an expected bootstrap state.
+#
+# `test:coverage` still doesn't fail below 100% on its own — bun's own hard-threshold
+# mechanism is a `bunfig.toml` `coverageThreshold` entry, a repo-root file outside this
+# domain's ownership (.github/workflows/, per CLAUDE.md §3), so this workflow continues
+# to enforce the threshold itself rather than adding that file unilaterally. See
+# docs/handoffs/ci-release.md status log for that alternative and why it was left as a
+# request rather than a silent edit.
+#
+# Separately flagged (not fixed here, outside this domain): CLAUDE.md §5 describes the
+# coverage gate as applying to "new/changed code," but this step (inherited from round 1,
+# unchanged in that respect) enforces 100% for the whole tree, always — CLAUDE.md is
+# coordinator-owned law, not `.github/workflows/`, so reconciling the wording is a
+# coordinator call, not something this domain edits unilaterally. Recorded in
+# docs/handoffs/ci-release.md.
 on:
   workflow_call:
 
@@ -48,22 +70,39 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          bun test src --coverage --coverage-reporter=text 2>&1 | tee coverage-report.txt
+          bun test src --coverage --coverage-reporter=lcov --coverage-reporter=text 2>&1 | tee coverage-report.txt
           TEST_EXIT="${PIPESTATUS[0]}"
           if [ "$TEST_EXIT" -ne 0 ]; then
             echo "::error::bun test failed (exit $TEST_EXIT) — see log above."
             exit "$TEST_EXIT"
           fi
 
-          SUMMARY_LINE="$(grep '^All files' coverage-report.txt || true)"
-          if [ -z "$SUMMARY_LINE" ]; then
-            echo "::error::Could not find a coverage summary ('All files' row) in bun's output — treating as a gate failure rather than a silent pass."
+          if [ ! -f coverage/lcov.info ]; then
+            echo "::error::coverage/lcov.info was not produced — treating as a gate failure rather than a silent pass."
             exit 1
           fi
 
-          FUNCS_PCT="$(echo "$SUMMARY_LINE" | awk -F'|' '{gsub(/ /,"",$2); print $2}')"
-          LINES_PCT="$(echo "$SUMMARY_LINE" | awk -F'|' '{gsub(/ /,"",$3); print $3}')"
-          echo "Coverage: functions=${FUNCS_PCT}% lines=${LINES_PCT}%"
+          # Sum FNH/FNF (functions hit/found) and LH/LF (lines hit/found) across every
+          # SF: record in the lcov file, then compute percentages ourselves — a
+          # structured sum, not a string comparison against a formatted percentage.
+          read -r FNH FNF LH LF <<EOF
+          $(awk -F: '
+            /^FNH:/ { fnh += $2 }
+            /^FNF:/ { fnf += $2 }
+            /^LH:/  { lh  += $2 }
+            /^LF:/  { lf  += $2 }
+            END { print fnh, fnf, lh, lf }
+          ' coverage/lcov.info)
+          EOF
+
+          if [ "$FNF" -eq 0 ] || [ "$LF" -eq 0 ]; then
+            echo "::error::lcov report has zero total functions/lines (FNF=$FNF LF=$LF) — coverage/lcov.info looks empty or malformed."
+            exit 1
+          fi
+
+          FUNCS_PCT="$(awk -v h="$FNH" -v f="$FNF" 'BEGIN { printf "%.2f", (h/f)*100 }')"
+          LINES_PCT="$(awk -v h="$LH" -v f="$LF" 'BEGIN { printf "%.2f", (h/f)*100 }')"
+          echo "Coverage: functions=${FUNCS_PCT}% (${FNH}/${FNF}) lines=${LINES_PCT}% (${LH}/${LF})"
 
           if [ "$FUNCS_PCT" != "100.00" ] || [ "$LINES_PCT" != "100.00" ]; then
             echo "::error::Coverage gate failed — CLAUDE.md §5 requires 100% (functions and lines). Got functions=${FUNCS_PCT}%25, lines=${LINES_PCT}%25."
@@ -77,22 +116,14 @@ jobs:
           # loaded" — a src file that no test imports (directly or transitively)
           # is silently OMITTED from the report rather than shown at 0%, so the
           # 100%-threshold step above would report "100.00%" even with completely
-          # untested files sitting in src/. Verified locally against this repo:
-          # src/contracts/{commands,config,events,index,log}.ts currently have zero
-          # test coverage and do not appear in bun's coverage table at all, yet the
-          # threshold check reports 100%. This step closes that gap by diffing the
-          # set of files bun's coverage table actually lists against every real
-          # source file, and hard-failing on anything missing — so "100% coverage
-          # is a gate, not a target" (CLAUDE.md §5) holds for the whole tree, not
-          # just the subset some test happens to import.
+          # untested files sitting in src/. This step closes that gap by diffing the
+          # set of files lcov's `SF:` records actually list (structured, not a
+          # printed-table path column) against every real source file, and
+          # hard-failing on anything missing — so "100% coverage is a gate, not a
+          # target" (CLAUDE.md §5) holds for the whole tree, not just the subset some
+          # test happens to import.
           set -euo pipefail
-          REPORTED_FILES="$(awk -F'|' '
-            /^-+\|/ { c++; next }
-            c==2 {
-              path=$1; gsub(/^ +| +$/,"",path);
-              if (path != "All files" && path != "") print path;
-            }
-          ' coverage-report.txt | sort -u)"
+          REPORTED_FILES="$(grep '^SF:' coverage/lcov.info | sed 's/^SF://' | sort -u)"
 
           ALL_SRC="$(git ls-files 'src/*.ts' 'src/**/*.ts' 'src/*.tsx' 'src/**/*.tsx' 2>/dev/null \
             | grep -vE '\.(test|spec)\.(ts|tsx)$' \
@@ -109,17 +140,20 @@ jobs:
 
           echo "All src files are exercised by at least one test."
 
-      - name: E2E (real compiled binary, once e2e/ lands tests)
+      - name: E2E (real compiled binary — fails closed if e2e/ has no tests)
         shell: bash
         run: |
-          # HANDOFF.md §10 / docs/handoffs/ci-release.md: e2e/ is sequenced after the
-          # other domains land, so it may not exist (or may be empty) yet. Rather than
-          # a permanent `continue-on-error` that would need a follow-up PR to remove,
-          # this step auto-detects real test files and only then runs (and hard-fails
-          # on) `bun run e2e`. Once the E2E domain adds test files this becomes a real
-          # gate with no further workflow change required.
-          if find e2e -type f \( -name "*.test.ts" -o -name "*.spec.ts" -o -name "*_test_*.ts" -o -name "*_spec_*.ts" \) 2>/dev/null | grep -q .; then
-            bun run e2e
-          else
-            echo "::notice::No e2e test files found under e2e/ yet — skipping (not yet a hard gate). This step self-activates once the E2E domain lands *.test.ts/*.spec.ts files."
+          # DH-0030: this used to auto-detect e2e test files and downgrade to a
+          # `::notice` (not a failure) if none were found — reasonable while e2e/ was
+          # still being built out (HANDOFF.md §10: sequenced after other domains
+          # land), but fails *open*: if a future change accidentally emptied e2e/ of
+          # test files, this step would silently stop being a gate instead of
+          # failing. Now that e2e/ is populated (see e2e/*.test.ts), this step fails
+          # closed instead: zero e2e test files is a hard failure, not a notice.
+          E2E_TEST_COUNT="$(find e2e -type f \( -name "*.test.ts" -o -name "*.spec.ts" -o -name "*_test_*.ts" -o -name "*_spec_*.ts" \) 2>/dev/null | wc -l | tr -d ' ')"
+          echo "Found $E2E_TEST_COUNT e2e test file(s) under e2e/."
+          if [ "$E2E_TEST_COUNT" -eq 0 ]; then
+            echo "::error::No e2e test files found under e2e/ — this is a hard gate failure, not a bootstrap notice, now that the E2E domain has landed test files. If e2e/ was intentionally emptied, that decision needs sign-off (CLAUDE.md §6), not a silent gate downgrade."
+            exit 1
           fi
+          bun run e2e

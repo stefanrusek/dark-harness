@@ -369,3 +369,184 @@ absent; npm package still linux-x64-only. See `docs/roster/nightingale.md` round
 detail on each.
 
 — Nightingale (she/her), CI/Release domain lead
+
+## Round 3 (2026-07-15) — DH-0030, DH-0032, DH-0036: structured gates, real-runner smoke tests, container reference
+
+Fresh instance, resuming this name. Worked three tickets already in `implementing`, all
+verified against the actual repo/live tools rather than trusting the ticket prose, and all
+closed at the end. Full detail below; identity-level residue lives in
+`docs/roster/nightingale.md`.
+
+**Branch currency:** worktree HEAD was exactly `git merge-base HEAD
+claude/coordinator-onboarding-kab9ls` (zero unique local commits — the same "safe
+fast-forward" situation round 2 first distinguished from round 1's real-merge case), so
+`git merge --ff-only` onto the coordinator tip was clean and unambiguous. That pulled in a
+large amount of other-domain work (Contracts tests, tracking/ tickets, etc.) that had
+landed since this worktree's creation, none of it conflicting with `.github/workflows/`.
+
+### DH-0030 — coverage/completeness/e2e gates: structured checks, not text-parsing / fail-open
+
+`gate.yml`'s coverage and completeness steps used to `grep`/`awk` bun's printed ANSI
+summary table (`All files | 100.00 | 100.00 |`) and its per-file path column — a format
+bun could reflow on any version bump without warning. The e2e step auto-detected test
+files and downgraded to `::notice` (not a failure) if none were found — reasonable while
+`e2e/` was still empty, but fails *open* if it were ever emptied again by accident.
+
+**What changed:**
+- Coverage step now runs `bun test src --coverage --coverage-reporter=lcov
+  --coverage-reporter=text` (keeping `text` too, for a human-readable log) and sums
+  `FNH`/`FNF`/`LH`/`LF` across every `SF:` record in `coverage/lcov.info` with `awk`,
+  computing the percentage itself rather than string-comparing a formatted percentage in
+  the printed table.
+- Completeness step now diffs the `SF:` file list from the same `coverage/lcov.info`
+  against `git ls-files 'src/**/*.ts'` (minus test/`.d.ts` files) — same structured source,
+  no printed-table parsing.
+- E2E step now fails closed: it counts `e2e/*.test.ts`/`*.spec.ts` files first and hard
+  errors (`exit 1`) if the count is zero, *then* runs `bun run e2e` — no more silent
+  `::notice` downgrade path.
+- Flagged, not fixed (both real, both outside `.github/workflows/`): CLAUDE.md §5 states
+  the gate is "new/changed code" scoped but the step (inherited, unchanged in this
+  respect) has always enforced 100% repo-wide — CLAUDE.md is coordinator-owned law, not
+  something this domain edits unilaterally to match its own gate's actual behavior.
+
+**Verification actually performed, not assumed:**
+- Ran `bun test src --coverage --coverage-reporter=lcov --coverage-reporter=text` for real
+  in this worktree (bun 1.3.14) and hand-executed the exact awk/comm pipeline from the new
+  workflow steps against the real `coverage/lcov.info`, not just read the YAML.
+- **Found the gate is currently red against real repo state, structurally** — not a
+  regression from this change, and not mine to fix (both are other domains' files):
+  - Coverage: `src/cli.ts` reports `FNH:38 FNF:39` in lcov (one uncovered function) — total
+    function coverage is 459/460 = 99.78% (the old text-summary line agreed: `All files |
+    99.96 | 100.00 |`, since 99.96% ≠ 100.00% too — so this isn't a new failure my rewrite
+    introduces, both old and new correctly redden the gate here; Core-owned file, flagged
+    not fixed).
+  - Completeness: `src/prompt/index.ts`, `src/server/agent-loop.ts`, `src/tui/types.ts`,
+    `src/web/client/main.ts` never appear in any `SF:` record — no test imports them
+    (directly or transitively). Prompt/Server/TUI/Web-owned respectively; flagged not
+    fixed.
+  - (Round 1's originally-flagged `src/contracts/*.ts` gap has since been closed by
+    whichever round added `src/contracts/index.test.ts` — confirmed those files now do
+    appear with real `FNF`/`LF` counts, or `0/0` for the two files that are pure
+    interface/type declarations with no runtime lines to cover.)
+  - **This means `gate.yml` will currently fail a real CI run** until Core/Prompt/Server/
+    TUI/Web add the missing test coverage — not something I can fix from
+    `.github/workflows/`, but worth surfacing loudly rather than only in a workflow
+    comment, since it blocks any real PR/release right now.
+- `python3 -c "import yaml; yaml.safe_load(...)"` on `gate.yml`/`release.yml`/`ci.yml`: all
+  three parse clean. `actionlint` unavailable in this session (no cached Go module build);
+  same caveat round 2 flagged — recommend a pass by whoever next has it available.
+- `bun run typecheck` / `bun run lint`: both clean.
+
+### DH-0032 — real-runner smoke tests before release, on the actual shipped artifact
+
+All 5 release targets were cross-compiled from a single `ubuntu-latest` runner with zero
+execution anywhere in CI; the windows-x64/darwin-x64/darwin-arm64 binaries specifically
+were never run on a matching real OS before shipping.
+
+**What changed:** added a `smoke-test` job to `release.yml`, between `build` and `release`
+(so `release` now `needs: smoke-test` instead of `needs: build` directly — a broken
+cross-compiled binary now blocks the GitHub Release from being cut at all). One matrix
+entry per released target, each on a GitHub-hosted runner matching that target's actual
+OS/arch: `dh-linux-x64`→`ubuntu-latest`, `dh-linux-arm64`→`ubuntu-24.04-arm`,
+`dh-darwin-x64`→`macos-13` (Intel), `dh-darwin-arm64`→`macos-latest` (Apple Silicon),
+`dh-windows-x64.exe`→`windows-latest`. Each step downloads that target's actual `build`-job
+artifact (`actions/download-artifact`, same artifact the `release` job later attaches to
+the GitHub Release) and runs `dh --version`, asserting non-empty output and exit 0 — so
+this satisfies the ticket's explicit functional requirement ("exercises the actual artifact
+intended for release, not a separately-built native-host binary"), not just "some binary
+built the same way."
+
+**Verification actually performed:**
+- Could not spin up a live `windows-latest`/`macos-13` GitHub Actions runner from this
+  session — no `gh`/Actions API access here either, same constraint round 1 hit. What I
+  *could* and did verify live, in this worktree (linux/arm64 host):
+  - Built a real stamped binary via the exact command the `build` job runs
+    (`bun scripts/build.ts --outfile /tmp/dh-smoke-check --release-tag
+    v0.0.0-smoketest`), then ran the *exact* Unix smoke-test step's logic against it by
+    hand: `chmod +x`, capture `dh --version` output, assert non-empty — got `dh 0.1.0
+    (033dc7517bfc8... dirty, v0.0.0-smoketest)`, exit 0. This is the same shape of command
+    the `smoke-test` job's Unix branch runs, just not on the specific hosted-runner labels.
+  - `python3 -c "import yaml; yaml.safe_load(...)"` on the edited `release.yml`: parses
+    clean, including the matrix `include:` block and the `pwsh`-conditional Windows step.
+  - Read `runner.os` conditional semantics against GitHub's documented context
+    (`runner.os == 'Windows'`) rather than assuming syntax — this session couldn't execute
+    a `pwsh` step live, so the Windows branch is verified by careful reading + YAML
+    parsing, not by execution. **Flagging for whoever next has live Actions access:** spot
+    check the Windows smoke-test branch specifically on a real run before depending on it.
+  - `ubuntu-24.04-arm` and `macos-13` are GitHub-hosted runner labels current as of this
+    session's training/knowledge, not independently re-verified against GitHub's live
+    runner-images list (no network access to GitHub's docs from this sandbox). If either
+    label has since been deprecated/renamed, the job will fail loudly with an "unknown
+    runner" error rather than silently skip — acceptable degradation, but worth a
+    live-environment spot check before the next real tagged release.
+
+### DH-0036 — reference Dockerfile and container/deployment doc
+
+No shipped Dockerfile, base-image guidance, or deployment doc existed despite HANDOFF.md
+naming a container as the canonical dark-factory deployment.
+
+**What changed:** added `Dockerfile` (repo root, multi-stage: `oven/bun:1.3.14` build
+stage → `debian:bookworm-slim` runtime stage carrying only `bash`+`git`+`ca-certificates`,
+deliberately no `tmux` since that's only an e2e test-harness dependency), `.dockerignore`,
+and `docs/deployment.md` (run-mode examples for the unattended `--instructions --job` case
+and the headless `--server` case, `.dh-logs` volume-mount guidance, secret-injection
+patterns for both the Anthropic and Bedrock provider shapes, and a forward-reference to
+DH-0011 for the still-open signal-handling gap).
+
+**Verification actually performed — built and ran the real container, not just read the
+Dockerfile:**
+- `docker build -t dh-smoke:test .` — real Docker daemon was available in this session
+  (unlike some prior CI/Release rounds' sandboxes). First attempt failed for a genuine
+  reason I hadn't anticipated: `scripts/build.ts`'s `gitSha()` calls `Bun.spawnSync(["git",
+  ...])`, which **throws** (uncaught `ENOENT`), not just returns a non-zero exit, when
+  `git` isn't on PATH at all — the base `oven/bun` image doesn't ship `git`, so the build
+  stage crashed outright rather than gracefully stamping "unstamped." Fixed by installing
+  `git`+`ca-certificates` in the build stage too, before `bun install`.
+- Rebuilt after the fix: succeeded, logged `scripts/build.ts: stamped build /out/dh
+  (unstamped)` — "unstamped" because `.dockerignore` excludes `.git` from the build
+  context (intentional: no reason to ship the maintainer's git history into a Docker
+  build), so `gitSha()`/`isDirty()` both fail closed to their documented "not a git repo"
+  fallback rather than crashing a second time. This is expected/acceptable for a
+  generically-reusable reference Dockerfile, not a live CI/release build (that path is
+  `release.yml`'s own cross-compile, unrelated to this Dockerfile).
+- `docker run --rm dh-smoke:test --version` → `dh 0.1.0 (unstamped)`, exit 0.
+- `docker run --rm dh-smoke:test` (default `CMD ["--help"]`, no args) → printed the real
+  `--help` text, confirming the image is self-documenting rather than hanging or erroring
+  when run bare.
+- `docker run --rm --entrypoint bash dh-smoke:test -c "git --version && which bash"` →
+  confirmed both `git` and `bash` are genuinely present and on PATH in the runtime image,
+  not just referenced in a comment.
+- Cleaned up the test image (`docker rmi dh-smoke:test`) after verification — not left in
+  this session's Docker cache.
+- Did not edit `README.md` to link `docs/deployment.md` — `README.md` is Prompt-domain
+  owned (CLAUDE.md §3: `src/prompt/`, `README.md` → Prompt). Flagging this as a request:
+  Prompt (Iris) or the coordinator should add a link from README's security-posture /
+  air-gapping section to `docs/deployment.md` so it's discoverable from the doc most
+  operators will actually read first.
+
+**Gate status this round:** `bun run typecheck`/`bun run lint` clean. `coverage-report.txt`
+(a scratch file the manual coverage-gate verification produced locally) was deleted before
+committing — not meant to be tracked.
+
+**Open threads for the next instance (superseding/adding to round 1-2's list):**
+1. `gate.yml` will fail on a real CI run right now: `src/cli.ts` has one uncovered
+   function (Core-owned) and four files (`src/prompt/index.ts`,
+   `src/server/agent-loop.ts`, `src/tui/types.ts`, `src/web/client/main.ts` — Prompt/
+   Server/TUI/Web-owned respectively) are never loaded by any test. Not new, not
+   introduced by this round — the old text-parsing gate would have caught the coverage
+   number too (99.96% ≠ 100%), just less legibly; this round's structured check makes the
+   completeness gap explicit by file name. Needs each owning domain to add coverage, not
+   something CI/Release can fix.
+2. DH-0032's Windows/macOS smoke-test branches are verified by reading + YAML-parsing +
+   an equivalent-logic dry run on Linux, not by an actual `windows-latest`/`macos-13`
+   Actions run (no live Actions access in this session). Spot-check on the next real tag
+   push or whenever `gh`/Actions access is available.
+3. `ubuntu-24.04-arm`/`macos-13` runner labels not independently re-verified against
+   GitHub's current live runner-image list.
+4. README.md doesn't yet link `docs/deployment.md` — Prompt-domain request, not applied
+   here.
+5. Carried forward unchanged from round 1/2 (all still true, not re-verified this round):
+   action version pins unverified live, `NPM_TOKEN` secret absent, npm package
+   linux-x64-only.
+
+— Nightingale (she/her), CI/Release domain lead

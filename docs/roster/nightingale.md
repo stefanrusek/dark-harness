@@ -130,3 +130,81 @@ the actual command as the verification instead. Recommend whoever runs the next
 **Open threads carried forward unchanged (see round 1 for detail, all still true):**
 coverage-completeness gate red (Contracts-domain fix, not mine), action version pins
 unverified live, `NPM_TOKEN` secret absent, npm package linux-x64-only.
+
+### 2026-07-15 — round 3 (DH-0030, DH-0032, DH-0036: structured gates, real-runner smoke tests, container reference)
+
+Fresh instance again, resuming this name for three tickets that were already
+`status: implementing` in `tracking/`. Full verification transcript in
+`docs/handoffs/ci-release.md`'s Round 3 entry; identity-level residue here. All three
+closed (`status: closed`, `resolution: done`) at the end of this round.
+
+**Branch reconciliation, one more data point for the "check merge-base first" heuristic
+round 2 established:** this worktree's `HEAD` was again exactly `git merge-base HEAD
+claude/coordinator-onboarding-kab9ls` — zero unique commits of its own — so `git merge
+--ff-only` was clean and safe, same as round 2, not round 1's real-merge case. Three
+rounds in, this is turning into the common case (a fresh worktree per round, not
+carrying forward local commits between rounds) rather than the exception; still worth
+checking every time rather than assuming.
+
+**A genuinely new class of finding this round, not just "the old gate would have caught
+this too, less legibly":** the coverage/completeness rewrite (DH-0030) uses lcov's
+structured `SF:`/`FNH:`/`FNF:`/`LH:`/`LF:` records instead of parsing bun's printed text
+table. Re-deriving the gate's math from the structured data surfaced the *specific file
+and function count* behind the red gate (`src/cli.ts`: 38/39 functions; four named files
+never loaded by any test) — the old text-table approach could only ever tell you "99.96%
+≠ 100%," a number, not an actionable file list beyond what the separate completeness step
+already found. This is the kind of dividend a "use the structured source, not the
+rendered view" fix pays beyond just robustness-to-format-drift: it's also more legible
+when it fires. Worth remembering as a general heuristic for future gate work: prefer
+whatever data source the tool itself considers canonical, not what it prints for humans,
+even when both technically work today.
+
+**A real crash I found by actually building the container, not by reading the
+Dockerfile:** `scripts/build.ts`'s `gitSha()`/`isDirty()` helpers call
+`Bun.spawnSync(["git", ...])` and only guard against a *non-zero exit* (e.g. "not a git
+repo") — they do not guard against `git` being entirely absent from `$PATH`, which
+Bun surfaces as an uncaught thrown `ENOENT`, not a spawn result to check. The base
+`oven/bun` Docker image doesn't ship `git`, so my first `docker build` attempt crashed
+the build stage outright. This is the same category of lesson as round 2's `--target=`
+finding: a script's happy-path behavior (soft-fallback to "unstamped" when not a repo)
+can mask a completely different, harder failure mode (the binary literally isn't there)
+that only surfaces once you run it somewhere that doesn't already have everything your
+own dev machine has. I fixed it at the Dockerfile call site (install `git` in the build
+stage) rather than in `scripts/build.ts` itself — Core-owned per CLAUDE.md §3 — same
+judgment call round 2 made for the `--target=` parsing gap: fix the call site you own,
+flag the library behavior you don't.
+
+**Judgment calls on scope:**
+- Did not edit `README.md` to link the new `docs/deployment.md`, even though it's the
+  single most likely place an operator would look first (its own "air-gapping: run `dh`
+  in a container" line is right there) — `README.md` is Prompt-domain owned (CLAUDE.md
+  §3). Flagged as a request in the handoff status log instead of a direct edit.
+- Did not edit CLAUDE.md's §5 wording ("new/changed code" vs. the gate's actual
+  whole-repo-always enforcement) even though I have the fix in hand (three words) —
+  CLAUDE.md is coordinator-owned project law, not `.github/workflows/`; flagged, not
+  touched.
+- Did not attempt to fix any of the five newly-surfaced coverage gaps (`src/cli.ts`'s
+  missing function test, four untested files across Prompt/Server/TUI/Web) — all outside
+  `.github/workflows/`. The gate now names them explicitly by file; that's the
+  CI/Release-domain's job (make the gate correctly detect and report), not to also
+  backfill other domains' tests.
+
+**Gate status this round:** `typecheck`/`lint` clean. `gate.yml` itself will fail on a
+real CI run right now — not a regression from this round's changes (the prior text-based
+gate would also have failed on the same underlying numbers, just less legibly) — pending
+Core/Prompt/Server/TUI/Web adding the missing coverage. See handoff for the exact file
+list.
+
+**Open threads carried forward, superseding round 1/2's list (see handoff Round 3 entry
+for full detail on each):**
+1. `gate.yml` red right now: `src/cli.ts` one uncovered function (Core); four untested
+   files across Prompt/Server/TUI/Web (`src/prompt/index.ts`, `src/server/agent-loop.ts`,
+   `src/tui/types.ts`, `src/web/client/main.ts`).
+2. DH-0032's Windows/macOS smoke-test steps verified by reading + YAML-parse + an
+   equivalent dry run on Linux, not a live `windows-latest`/`macos-13` Actions run — no
+   `gh`/Actions access this session, same constraint every round so far has hit.
+3. `ubuntu-24.04-arm`/`macos-13` GitHub-hosted runner labels not independently
+   re-verified against GitHub's current live runner-image list.
+4. README.md doesn't yet link `docs/deployment.md` (Prompt-domain request).
+5. Unchanged from round 1/2: action version pins unverified live, `NPM_TOKEN` secret
+   absent, npm package linux-x64-only.

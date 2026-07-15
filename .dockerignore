@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+coverage-report.txt
+.dh-logs
+.git
+.github
+.claude
