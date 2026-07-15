@@ -98,15 +98,51 @@ Everything else is a routine coordinator call. Authority/taste/credentials quest
 publish rights, GitHub repo settings, cutting the v0.1.0 release) route to the owner, not
 the architect.
 
-## 7. Roster
+## 7. Roster and agent memory
 
-| Name | Pronouns | Role | Persistence |
-| --- | --- | --- | --- |
-| Ada | she/her | Coordinator | Persistent for this build (this session) |
+Every `Agent` spawn is a **fresh process with no memory of prior runs** — a "persistent"
+named role only survives across invocations if the repo carries it forward. Two artifacts
+do that job together:
+
+- **This table** — the lightweight index: who exists, pronouns, role, persistence.
+- **`docs/roster/<name>.md`** — one memory file per persistent agent. Not a duplicate of a
+  handoff's dated status log (which records *what got built, task by task*) — this is the
+  durable, identity-level record: judgment calls and why, conventions adopted, open threads,
+  anything a fresh instance resuming "itself" would otherwise have to re-derive from scratch.
+
+**Convention for resuming a named role:** read `docs/roster/<name>.md` first (if it exists),
+then the relevant handoff(s) and their latest status-log entries, then do the work. Before
+ending your turn, append a dated entry to your own roster file's Memory section, and update
+your row below if anything changed. First time coming online under a chosen name: create
+`docs/roster/<name>.md` using the template below and add yourself to the table.
+
+Roster file template:
+
+```markdown
+# Roster: <Name> — <role>
+
+**Pronouns:** ...
+**Role:** ...
+**Persistence:** persistent | ephemeral
+**Owns:** <directories>
+**Handoffs:** <links to docs/handoffs/*.md this role works from>
+
+## Memory
+
+### <date> — <round/topic>
+<durable notes: judgment calls and why, conventions adopted, open threads>
+```
+
+| Name | Pronouns | Role | Persistence | Memory |
+| --- | --- | --- | --- | --- |
+| Ada | she/her | Coordinator | Persistent for this build (this session) | (this session; no separate file yet) |
+| Iris | she/her | Prompt domain lead (`src/prompt/`, `README.md`) | Persistent | `docs/roster/iris.md` |
+| Radia | she/her | Server domain lead (`src/server/`) | Persistent | `docs/roster/radia.md` |
+| Grace | she/her | Core domain lead (`src/agent/`, `src/config/`, `src/cli.ts`) | Persistent | `docs/roster/grace.md` |
 
 Domain leads/implementers are spawned ad hoc per handoff and name themselves on arrival;
 this table grows as they come online. Architect-on-call is Fable, invoked per §6 — not a
-standing instance.
+standing instance, no roster file needed.
 
 ## 8. Workflow rules
 
