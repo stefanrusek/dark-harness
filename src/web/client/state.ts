@@ -27,6 +27,19 @@ export interface AgentNode {
   outputTokens: number;
   costUsd: number;
   spawnOrder: number;
+  /**
+   * ISO timestamp of the most recent status transition (or, for a freshly-observed node,
+   * the moment it was first seen). Every `ServerSentEvent` already carries a `timestamp`
+   * (src/contracts/events.ts), so this is derived client-side with no wire-protocol change.
+   *
+   * Purpose (docs/handoffs/web.md Round 3): `running` is otherwise a single undifferentiated
+   * status with no elapsed-time signal, and since the Anthropic provider adapter calls
+   * `messages.create` non-streaming, a slow turn and a hung turn look byte-for-byte
+   * identical without this. The render layer turns this into a live "Xs/Xm ago" indicator
+   * so an operator watching a long-running agent can tell "still thinking" from "silently
+   * stalled."
+   */
+  statusSince: string;
 }
 
 export type ConnectionStatus = "connecting" | "open" | "reconnecting" | "closed";
@@ -58,7 +71,7 @@ export function createInitialState(): WebState {
   };
 }
 
-function ensureAgent(state: WebState, agentId: string): AgentNode {
+function ensureAgent(state: WebState, agentId: string, timestamp: string): AgentNode {
   const existing = state.agents.get(agentId);
   if (existing) return existing;
   const node: AgentNode = {
@@ -71,6 +84,7 @@ function ensureAgent(state: WebState, agentId: string): AgentNode {
     outputTokens: 0,
     costUsd: 0,
     spawnOrder: spawnCounter++,
+    statusSince: timestamp,
   };
   state.agents.set(agentId, node);
   return node;
@@ -86,7 +100,7 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
 
   switch (event.type) {
     case "agent_spawned": {
-      const node = { ...ensureAgent(next, event.agentId) };
+      const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
       node.parentAgentId = event.parentAgentId;
       node.model = event.model;
       next.agents.set(event.agentId, node);
@@ -99,19 +113,22 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       return next;
     }
     case "agent_output": {
-      const node = { ...ensureAgent(next, event.agentId) };
+      const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
       node.output += event.chunk;
       next.agents.set(event.agentId, node);
       return next;
     }
     case "agent_status": {
-      const node = { ...ensureAgent(next, event.agentId) };
+      const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
+      if (node.status !== event.status) {
+        node.statusSince = event.timestamp;
+      }
       node.status = event.status;
       next.agents.set(event.agentId, node);
       return next;
     }
     case "token_usage": {
-      const node = { ...ensureAgent(next, event.agentId) };
+      const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
       node.inputTokens += event.inputTokens;
       node.outputTokens += event.outputTokens;
       node.costUsd += event.costUsd ?? 0;
@@ -161,8 +178,17 @@ function flattenTree(tree: AgentTreeNode[], out: AgentTreeNode[] = []): AgentTre
  * overwrites an already-known agent's fields (an `agent_spawned`/`agent_status` that beat
  * this response to the client is strictly more current than a boot-time snapshot), and
  * never moves `rootAgentId`/`selectedAgentId` once already set.
+ *
+ * `nowIso` seeds `statusSince` for nodes learned this way (the tree response itself carries
+ * no per-node timestamp) — pass the wall-clock time the response was handled at. Defaults to
+ * `new Date().toISOString()` so existing callers/tests don't need to change; injectable for
+ * deterministic tests.
  */
-export function seedFromTree(state: WebState, tree: AgentTreeNode[]): WebState {
+export function seedFromTree(
+  state: WebState,
+  tree: AgentTreeNode[],
+  nowIso: string = new Date().toISOString(),
+): WebState {
   const nodes = flattenTree(tree);
   if (nodes.length === 0) return state;
 
@@ -179,6 +205,7 @@ export function seedFromTree(state: WebState, tree: AgentTreeNode[]): WebState {
       outputTokens: 0,
       costUsd: 0,
       spawnOrder: spawnCounter++,
+      statusSince: nowIso,
     });
   }
 

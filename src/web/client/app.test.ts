@@ -63,6 +63,7 @@ function harness(
   overrides: {
     commandResponse?: (body: unknown) => Response;
     treeResponse?: (body: unknown) => Response;
+    now?: number;
   } = {},
 ) {
   const { document, root, dispatch, dispatchKey } = createTestDom();
@@ -104,6 +105,21 @@ function harness(
   }) as typeof setTimeout;
   const clearTimeoutImpl = (() => {}) as typeof clearTimeout;
 
+  // Fake clock + interval for the liveness indicator (docs/handoffs/web.md Round 3):
+  // `intervalCalls` captures the tick callback so a test can invoke it directly instead of
+  // sleeping in real time, and `clock` lets a test move `nowFn()`'s reported time forward.
+  const clock = { now: overrides.now ?? Date.parse("2026-01-01T00:00:00Z") };
+  const nowFn = () => clock.now;
+  const intervalCalls: Array<() => void> = [];
+  let intervalCleared = false;
+  const setIntervalImpl = ((fn: () => void) => {
+    intervalCalls.push(fn);
+    return intervalCalls.length as unknown as ReturnType<typeof setInterval>;
+  }) as typeof setInterval;
+  const clearIntervalImpl = (() => {
+    intervalCleared = true;
+  }) as typeof clearInterval;
+
   const app = new AppView(root, {
     doc: document,
     target,
@@ -111,6 +127,9 @@ function harness(
     fetchImpl,
     setTimeoutImpl,
     clearTimeoutImpl,
+    nowFn,
+    setIntervalImpl,
+    clearIntervalImpl,
   });
 
   return {
@@ -125,6 +144,9 @@ function harness(
     downloadCalls,
     timeoutCalls,
     target,
+    clock,
+    intervalCalls,
+    isIntervalCleared: () => intervalCleared,
   };
 }
 
@@ -251,6 +273,32 @@ describe("AppView construction and rendering", () => {
     await flush();
     app.stop();
     expect(() => app.stop()).not.toThrow();
+  });
+
+  test("the liveness indicator advances on its own tick, with no new SSE event, via the injected clock/interval", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+    await flush();
+
+    const elapsedBefore = h.root.querySelector(".status-elapsed")?.textContent;
+    expect(elapsedBefore).toContain("just now");
+    expect(h.intervalCalls).toHaveLength(1);
+
+    h.clock.now += 65_000; // 1m 05s later, no new event.
+    h.intervalCalls[0]?.(); // Fire the injected tick directly instead of sleeping for real.
+
+    const elapsedAfter = h.root.querySelector(".status-elapsed")?.textContent;
+    expect(elapsedAfter).toBe("for 1m 05s");
+  });
+
+  test("stop() clears the liveness ticker so it doesn't keep firing after teardown", async () => {
+    const h = harness();
+    h.app.start();
+    await flush();
+    expect(h.isIntervalCleared()).toBe(false);
+    h.app.stop();
+    expect(h.isIntervalCleared()).toBe(true);
   });
 
   test("incoming events update state and re-render the sidebar/header", async () => {

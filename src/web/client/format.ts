@@ -53,6 +53,26 @@ export function formatExitCode(exitCode: number): string {
   return `harness error (exit ${exitCode})`;
 }
 
+/**
+ * Formats an elapsed duration (ms, clamped to >= 0) as a compact "time in current status"
+ * / "last event at" label — e.g. "just now", "42s", "3m 12s", "1h 05m". Deliberately coarse
+ * (drops sub-second precision) since its job is letting an operator eyeball "still a normal
+ * turn" vs. "this has been running a suspiciously long time," not precise timing.
+ */
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  if (totalSeconds < 1) return "just now";
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return `${totalMinutes}m ${String(seconds).padStart(2, "0")}s`;
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${totalHours}h ${String(minutes).padStart(2, "0")}m`;
+}
+
 /** Short id for display: keeps a stable prefix so identical ids remain visually distinct. */
 export function shortAgentId(agentId: string): string {
   return agentId.length <= 10 ? agentId : `${agentId.slice(0, 8)}…`;
