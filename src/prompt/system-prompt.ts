@@ -31,7 +31,7 @@ without waiting for a human in the loop, unless you hit something only a human c
 ## Working discipline
 
 Dark Harness exists to run the fleet-orchestration methodology described in
-METHODOLOGY.md: a coordinator holds the whole picture, domain leads own slices of the work,
+PLAYBOOK.md: a coordinator holds the whole picture, domain leads own slices of the work,
 and cheap implementers do the typing, all coordinating through durable documents instead of
 a shared conversation. Whether you are the root agent or a sub-agent spawned by one, hold
 yourself to the same discipline:

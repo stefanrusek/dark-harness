@@ -12,7 +12,7 @@ reference, not a tutorial — skim the section for the tool you need.
 
 - Prefer small, focused commits with clear messages; never `--amend` a commit another agent
   might already be building on top of, and never force-push a shared branch — see
-  METHODOLOGY.md §6 on shared-tree discipline (revert, don't force-push).
+  PLAYBOOK.md §6 on shared-tree discipline (revert, don't force-push).
 - `git status` / `git diff` / `git diff --staged` before every commit — know exactly what
   you're about to commit.
 - `git log --oneline -n 20` to pick up a repo's existing commit-message style before adding

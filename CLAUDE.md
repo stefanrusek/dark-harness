@@ -1,7 +1,7 @@
 # Dark Harness — Constitution
 
 This is the project's law. It is short enough to always load, and binding on every agent
-that touches this repo. It is the project-specific layer described in `METHODOLOGY.md`
+that touches this repo. It is the project-specific layer described in `PLAYBOOK.md`
 (read that first — it defines the fleet roles, escalation model, and artifact types this
 file assumes). The founding product spec is `HANDOFF.md`.
 
@@ -25,7 +25,7 @@ and both console and web UIs. See `HANDOFF.md` for full product scope.
 ## 3. Repository layout / ownership map
 
 Each directory has one owning domain. Handoffs are scoped to one owner; cross-boundary
-needs are requests to the other owner, never a direct edit (METHODOLOGY.md §5).
+needs are requests to the other owner, never a direct edit (PLAYBOOK.md §5).
 
 | Path | Owning domain | Contents |
 | --- | --- | --- |
@@ -68,7 +68,7 @@ needs are requests to the other owner, never a direct edit (METHODOLOGY.md §5).
 ## 5. Quality gates (hard rules — CI fails below these)
 
 Run before any commit is considered done; the exact commands are the contract implementers
-are judged against (METHODOLOGY.md §4.5):
+are judged against (PLAYBOOK.md §4.5):
 
 ```
 bun run typecheck      # tsc --noEmit

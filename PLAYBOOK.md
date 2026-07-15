@@ -1,4 +1,4 @@
-# Fleet Orchestration Methodology
+# Fleet Orchestration Playbook
 
 A portable playbook for building software with a small fleet of AI agents: a coordinator
 that holds the whole picture, domain leads that own slices of the system, and cheap
@@ -7,7 +7,12 @@ rather than a shared conversation.
 
 This document is **project-neutral**. It describes the method, not any one codebase.
 Each project keeps a thin project-specific layer (conventions, ownership map, invariants,
-quality gates) in its own constitution file (e.g. `CLAUDE.md`) and points back here.
+quality gates) in its own **constitution** file (e.g. `CLAUDE.md`) and points back here.
+The naming is deliberate: this playbook is the reusable framework you drop into a new
+project; the constitution is that project's binding law, written *against* this framework.
+Don't conflate the two — amend this file when the *method* needs to evolve (as it did after
+this playbook's first true from-scratch run surfaced real gaps — see §11), amend a project's
+constitution when *that project's* conventions need to change.
 
 ---
 
@@ -36,6 +41,18 @@ where it doesn't.
   and surfaces to the owner. **The coordinator does not implement** and does not make the
   hardest architectural calls alone — it escalates those (see §3). Most coordinator work
   is high-volume and low-judgment: monitor, route, commit, chase, keep documents current.
+
+  **The role is defined as much by what it delegates as by what it does.** It's easy for a
+  coordinator to quietly accrete hands-on work over a long session — hand-testing a feature,
+  tracing a bug through the source, running the verification commands itself — because each
+  instance feels small and each instance is, individually, faster to just do than to write up
+  and route. Don't. **Delegate execution — testing, debugging/root-cause investigation,
+  gate-running/verification — to a dispatched agent, even a one-off, throwaway one; retain
+  judgment: what to prioritize, what a finding means, whether to merge, when to escalate.**
+  "The coordinator is responsible for merging" means owning the *decision* and the
+  consequences, not personally typing the verification commands — dispatch the check, act on
+  its report. If you notice yourself running a test, reading a stack trace, or diagnosing a
+  regression rather than assigning someone (or something) to do it, that's the tell.
 
 - **Domain leads.** Each owns a slice of the system (a set of directories/packages).
   A lead takes a brief, breaks it into concrete tasks, and delegates the typing to
@@ -69,6 +86,18 @@ reads as people, not process IDs.
 - **Record persistence:** mark each name **persistent** (a continuous instance) or
   **ephemeral** (a pod spun up on demand and dissolved, with no continuity of context
   between spin-ups). Readers of the roster need to know which they're addressing.
+
+- **When to promote a role to a persistent name (with a roster file) versus dispatch it
+  anonymously:** a persistent name carries a durable, auditable identity across time — its
+  roster file accretes a real history even though each invocation is a fresh process with no
+  memory of the last. An anonymous one-off dispatch has no equivalent trail; its existence is
+  visible only in whatever conversation or handoff spawned it. **Promote to a persistent
+  named role when a category of work recurs and its history needs to be inspectable later**
+  (a domain lead who'll take handoff after handoff over the project's life). **Keep it
+  anonymous for a genuine one-shot task** (a single investigation, a single verification
+  pass) — but even then, the coordinator is responsible for making sure anything the dispatch
+  *finds* lands in a durable document. The dispatch itself doesn't need permanence; its
+  findings always do (see §4's new backlog artifact, and §11).
 
 ---
 
@@ -135,6 +164,18 @@ What makes this work asynchronously across context resets is that agents coordin
 
 6. **Ownership map.** A directory/package → owner assignment so two agents physically
    cannot collide. Part of the constitution.
+
+7. **Backlog / issue log.** Every issue, gap, or observation — raised by the owner, found
+   during testing, surfaced in passing conversation, or noted as a calibration example while
+   scoping other work — is written to disk **at the moment it's raised**, not deferred to
+   memory. Size the artifact to the issue: a one-line entry in a tracked list for something
+   small; a real spec (user stories, acceptance criteria) for something substantial — a
+   bullet point under-describes a feature's worth of work and the detail gets lost by the
+   time anyone acts on it. This is not a write-only log: **the coordinator periodically
+   re-reads it** and either acts on each entry directly or brings it back to the owner for a
+   decision. Anything not committed to a durable document this way survives only as long as
+   it stays in someone's attention — which, across context resets and parallel agents, is not
+   long. See §11 for the failure mode this closes.
 
 ---
 
@@ -241,6 +282,17 @@ incurred.
   a script — never a frontier model running `fetch` on a timer. (§3)
 - **Silent truncation.** If an agent caps its coverage (top-N, sampling, no-retry), it says
   so. Unstated limits read as "covered everything" when they didn't.
+- **Using a finding only as a calibration example.** Mentioning an issue to prime another
+  agent's analysis (e.g. "here are two examples of the kind of gap I mean") is not the same
+  as tracking it. The example is itself a candidate finding and needs its own entry in the
+  backlog (§4.7) — it does not get to ride along implicitly on the analysis it seeded. This
+  bit twice in the same project before being named as a pattern.
+- **Asking a research/analysis dispatch for a prioritized list instead of a comprehensive
+  one.** Finding everything and deciding what matters are two different jobs. Bake them into
+  one instruction and the agent's own judgment about what's "worth mentioning" silently
+  gates what ever reaches paper — low-priority-but-real findings can vanish before the
+  coordinator ever sees them. Always ask for the full inventory first, no self-filtering;
+  make prioritization an explicit, visible second pass, not an implicit filter on the first.
 
 ---
 
@@ -260,6 +312,31 @@ Project-specific (write fresh each time):
 Start a new project by drafting the founding handoff in a frontier chat (§8), distilling
 its constraints into a fresh `CLAUDE.md` that points back to this file, then standing up the
 coordinator.
+
+---
+
+## 11. Case study: what this playbook's first from-scratch run surfaced
+
+This playbook was originally distilled *after the fact* from a project that developed the
+method ad hoc. The build this file now lives in was its first true maiden voyage — adopted
+from day one rather than reconstructed afterward — and, as a founding document finally
+getting exercised for real, it had gaps. Three showed up clearly enough to amend the method
+itself rather than just patch the one project:
+
+1. **Coordinator scope crept** over a long session: hands-on testing, live debugging, and
+   gate-running all quietly became things the coordinator just did, rather than dispatched.
+   Amended in §2 (Roles).
+2. **A recurring theme — an owner's live testing turned up a real UX gap that was mentioned
+   in conversation but never written down**, and separately, **two concrete examples given
+   to a research agent purely to calibrate its thinking were never independently tracked** —
+   both instances of the same failure: something raised, never committed to disk, quietly
+   lost. Amended in §4 (new backlog artifact) and §9 (two new anti-patterns).
+3. **A gap-analysis dispatch was asked for a "prioritized list"** and delivered exactly
+   that — a curated list, not a comprehensive one — meaning anything the research agent
+   judged low-priority may never have surfaced at all. Amended in §9.
+
+None of these are project-specific to Dark Harness; all three are gaps in the *method*,
+which is why they landed here rather than in that project's own constitution.
 
 ---
 

@@ -215,7 +215,7 @@ event bodies. Agents never call a logging tool — their output *is* the log.
 
 This project was built by a small fleet of AI agents coordinating through durable documents
 rather than a shared conversation — the practice is documented in
-[`METHODOLOGY.md`](METHODOLOGY.md), and the project-specific rules (stack, ownership map,
+[`PLAYBOOK.md`](PLAYBOOK.md), and the project-specific rules (stack, ownership map,
 invariants, quality gates) are in [`CLAUDE.md`](CLAUDE.md). Contributors extending `dh`
 should read both before their first change.
 
