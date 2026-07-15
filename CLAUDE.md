@@ -138,6 +138,7 @@ Roster file template:
 | Ada | she/her | Coordinator | Persistent for this build (this session) | (this session; no separate file yet) |
 | Iris | she/her | Prompt domain lead (`src/prompt/`, `README.md`) | Persistent | `docs/roster/iris.md` |
 | Radia | she/her | Server domain lead (`src/server/`) | Persistent | `docs/roster/radia.md` |
+| Mary | she/her | TUI domain lead (`src/tui/`) | Persistent | `docs/roster/mary.md` |
 
 Domain leads/implementers are spawned ad hoc per handoff and name themselves on arrival;
 this table grows as they come online. Architect-on-call is Fable, invoked per §6 — not a
