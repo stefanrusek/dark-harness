@@ -464,3 +464,91 @@ e2e/exit-codes.test.ts e2e/server-protocol.test.ts`).
 
 No open threads added this round beyond what was already tracked (multi-turn second-exchange
 coverage, gap 2b Bedrock e2e coverage — both still open from prior rounds).
+
+---
+
+### 2026-07-15 — Round 5 (Hedy, fresh process): closed gap 2b, Bedrock e2e coverage
+
+Came online fresh for this file's 2b task order. Read this file's 2b entry and
+`docs/roster/hedy.md` first per `CLAUDE.md` §7's resuming convention.
+
+**Key research finding before writing any code:** `BedrockProvider` (`src/agent/providers/
+bedrock.ts`) never reads a `baseURL`/`endpoint`-shaped field from `ProviderConfig` — only
+`config.region` — so a config-only e2e scenario looked impossible at first (that would have
+been a cross-domain request to Grace/Core, per the task's own framing). But the underlying
+AWS SDK v3 client (`BedrockRuntimeClient`) resolves its endpoint through the standard
+"endpoints 2.0" environment-variable convention independent of application code: confirmed by
+reading `node_modules/@smithy/core/dist-cjs/submodules/endpoints/index.js` (`ENV_ENDPOINT_URL
+= "AWS_ENDPOINT_URL"`, joined with the service id) and `node_modules/@aws-sdk/
+client-bedrock-runtime/dist-cjs/index.js` (`serviceId: config?.serviceId ?? "Bedrock
+Runtime"`) — so setting `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` in the spawned process's
+environment redirects the real, unmodified `BedrockProvider`/`BedrockRuntimeClient` to a local
+mock with **zero source changes and no client injection** — the real e2e path this domain is
+supposed to build, not a cross-domain ask.
+
+**Second finding, only surfaced by actually running it:** `BedrockRuntimeClient` always
+constructs a `NodeHttp2Handler` (`requestHandler: NodeHttp2Handler.create(...)` in the SDK's
+`runtimeConfig`), even for the non-streaming `Converse` operation — there's no config path to
+make it fall back to HTTP/1.1. `Bun.serve` (used for the existing Anthropic mock) only speaks
+cleartext HTTP/1.1, which the SDK's http2 session rejected outright (`TypeError: The
+"authority" argument must be of type string, Object, or URL` deep inside `node:http2`, then
+`dh: root agent crashed: bedrock provider request failed: ... http2 request did not get a
+response`). Fix: built the mock on Node's `node:http2` module (`http2.createServer(...)`,
+cleartext h2c — Bun's Node-compat layer supports it) instead of `Bun.serve`.
+
+**What I built:**
+- `e2e/support/mock-bedrock-provider.ts` — h2c mock server implementing the one wire call the
+  adapter makes, `POST /model/{modelId}/converse` (path confirmed from the SDK's own operation
+  table). Records every request body and every `modelId` path segment (decoded) in call
+  order; exposes `startMockBedrockProvider(turns)` (async — `listen(0)` resolves after an
+  actual OS port is bound, unlike `Bun.serve`'s synchronous return), `successTurn`,
+  `taskFailedTurn`, and `mockBedrockEnv(baseURL, region?)` (bundles
+  `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` + dummy static `AWS_ACCESS_KEY_ID`/
+  `AWS_SECRET_ACCESS_KEY`/`AWS_REGION` — enough for the SDK to sign requests locally with zero
+  real AWS network egress; the mock never verifies SigV4).
+- `e2e/bedrock-provider.test.ts` — three scenarios, all against the real compiled binary via
+  `spawnDh`'s `extraEnv`:
+  1. Success path -> exit 0, asserting `provider.modelIds` equals the real `ModelConfig.model`
+     value and explicitly `.not.toBe("bedrock-mock")` (the friendly `name`).
+  2. Self-reported `TASK_FAILED` -> exit 1, same convention as the Anthropic exit-code tests.
+  3. A real `tool_use` turn (Bash) followed by a second turn — asserts `callCount === 2`, both
+     calls carry the real model id, and the *second* request's message history actually
+     contains a `toolResult` block, proving the loop resumed post-tool-call over Bedrock, not
+     just that the first call fired.
+  All three deliberately use a `dh.json` fixture where `ModelConfig.name` ("bedrock-mock") and
+  `ModelConfig.model` (a fake Bedrock model id, `anthropic.claude-3-5-sonnet-20241022-v2:0`)
+  differ, per this round's explicit instruction — exactly the two fields Core's round 11 found
+  conflated in every real provider call. Had this suite existed before round 11, test 1 alone
+  would have failed the moment `provider.modelIds` diverged from the expected value.
+
+**Judgment calls:**
+- Did not attempt the optional README addition on Bedrock setup (region, credential-chain
+  expectations) this round — prioritized building and hardening the actual e2e scenario given
+  the h2c discovery ate the bulk of the time budget. Per this round's own framing, that
+  addition is a request to **Prompt** (owns `README.md`), not something for e2e to write
+  directly — flagging it explicitly here rather than silently doing or dropping it. Content
+  Prompt would need: `provider.region` config field, standard AWS credential-chain resolution
+  (env vars / shared config / instance role — nothing custom, per `bedrock.ts`'s own doc
+  comment "no custom credential handling"), and a note that Bedrock Converse errors surface
+  through the same `ProviderError` wrapping as Anthropic.
+- Kept `mockBedrockEnv`'s credentials as obviously-fake string literals (not empty strings) —
+  empty values risk the SDK falling through to a *real* credential-chain lookup (shared config
+  file, IMDS, etc.) in some environments instead of using the static values, which would be a
+  slow/networked failure mode in CI rather than a fast deterministic one.
+- Did not attempt a streaming (`ConverseStream`) scenario — `bedrock.ts` only ever calls
+  `ConverseCommand`, never `ConverseStreamCommand`, so there is nothing in the real adapter for
+  it to exercise; noting this so a future round doesn't assume it's an oversight.
+
+**Gates:** `bun run typecheck` clean. `bun run lint` clean (152 files; biome auto-fixed one
+import-order/wrap nit in the new test file via `biome check --fix`). `bun run test:coverage`:
+745 pass / 0 fail / 100% coverage maintained (`src/` unit tests only — this round's new files
+live under `e2e/`, outside that gate's scope, same as every prior e2e round). Ran `bun run e2e`
+in full: 20 pass / 4 fail — the same four pre-existing environment gaps as every prior round
+(missing `tmux` for `tui.test.ts`, missing Chromium at `/opt/pw-browsers/chromium` for
+`web.test.ts`, and `security.test.ts`'s bearer-token SSE timeout, all flagged back in Round 2
+gap-2a) — no regressions. `e2e/bedrock-provider.test.ts` itself: 3 pass / 0 fail / 13
+`expect()` calls, run both in isolation and as part of the full suite.
+
+**Open threads for whoever picks this up next:** the README/Bedrock-setup addition (routed to
+Prompt above, not e2e); multi-turn second-`send_message` e2e coverage (open since Round 1/2,
+still untouched).

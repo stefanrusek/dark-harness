@@ -178,3 +178,51 @@ touches are 12/12 green in isolation.
 **Open threads unchanged:** multi-turn second-`send_message` e2e coverage (Round 2) and gap 2b
 (Bedrock provider e2e coverage, Round 2 gap-2a) are both still open for whoever picks this up
 next.
+
+### 2026-07-15 — Round 5 (fresh process again): closed gap 2b, Bedrock e2e coverage
+
+Came online fresh for the 2b task order in `docs/handoffs/e2e.md`. This worktree/session was
+branched correctly from the real HEAD this time (no ancestor-provisioning issue to flag).
+
+**What I built:** full detail in `docs/handoffs/e2e.md`'s Round 5 entry. Short version:
+`e2e/support/mock-bedrock-provider.ts` (a cleartext HTTP/2 mock server for Bedrock's
+`Converse` API) and `e2e/bedrock-provider.test.ts` (3 scenarios: success, self-reported
+failure, and tool_use-then-resume), all driving the real compiled binary and the real
+unmodified `BedrockProvider` via the AWS SDK's own `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`
+environment variable — no source change to `src/agent/providers/bedrock.ts` needed, contrary
+to what I initially expected after seeing it only reads `config.region`.
+
+**Two real discoveries, in order:**
+1. `BedrockRuntimeClient` resolves its endpoint via the SDK's standard env-var convention
+   regardless of application code — meaning e2e could reach a local mock without any Core
+   change, once I read the actual `@smithy`/`@aws-sdk` source in `node_modules` instead of
+   assuming a code change was required.
+2. `BedrockRuntimeClient` always builds an HTTP/2 request handler, even for the non-streaming
+   `Converse` call — this only showed up by actually running the scenario against `Bun.serve`
+   (HTTP/1.1) and hitting an opaque `node:http2` `TypeError`. Root-caused it by grepping the
+   SDK's `runtimeConfig` for `requestHandler`, then rebuilt the mock on `node:http2`'s h2c
+   server instead.
+
+**Judgment calls:**
+- Per this round's own instructions, deliberately built the `dh.json` fixture with
+  `ModelConfig.name` ("bedrock-mock") different from `ModelConfig.model` (a fake Bedrock model
+  id), and assert the mock's captured wire-level `modelId` equals the latter, not the former —
+  this is the exact shape of bug Core's round 11 found and fixed via real AWS testing. Test 1
+  would have failed pre-round-11.
+- Did not write the optional Bedrock README section — explicitly routed to Prompt (owns
+  `README.md`) in the handoff rather than doing it myself or silently skipping it, with the
+  content Prompt would need summarized there.
+- Chose obviously-fake (non-empty) static AWS credential env vars for the mock, not empty
+  strings, to avoid the SDK falling through to a real credential-chain lookup in some
+  environments.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean (152 files, one auto-fix applied to
+the new test file), `bun run test:coverage` 745/745 pass, 100% coverage maintained (unit tests
+under `src/` only — e2e is a separate gate). Full `bun run e2e`: 20 pass / 4 fail, all four the
+same pre-flagged environment gaps as every prior round (no `tmux`, no Chromium binary, the
+pre-existing `security.test.ts` bearer-token SSE timeout) — no regressions. New
+`bedrock-provider.test.ts`: 3/3 green.
+
+**Open threads for whoever picks this up next:** the Bedrock README addition (now explicitly a
+request to Prompt, not e2e); multi-turn second-`send_message` e2e coverage (open since Round
+1/2, still untouched, oldest open thread in this domain).
