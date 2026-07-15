@@ -212,3 +212,46 @@ process-level check surfaced or confirmed something the unit tests alone wouldn'
 (round 2's send_message-to-unstarted-root bug was found exactly this way). Worth keeping as
 a standing habit for this identity: before calling a round done, drive the actual owner-
 facing flow through a real process at least once, not just through fakes.
+
+### 2026-07-15 — Round 4 (fix: rootStatus stuck 'running' forever on a runRoot() crash)
+
+Worked from a fresh worktree (`grace-round4`, branched from
+`origin/claude/coordinator-onboarding-kab9ls` at `abe2a78`) — a bug the coordinator found by
+hand while independently verifying my round-3 cancellation fix (not a fix I asked for or
+anticipated; the coordinator was doing exactly the kind of live-process verification I've
+been advocating for in my own notes, and it paid off — a real bug I hadn't hit in any of my
+own test scenarios because none of them happened to use a config that crashes the provider
+call specifically).
+
+Full technical writeup in `docs/handoffs/core.md`'s dated Round 4 entry. This section is
+process notes.
+
+**What made this round fast:** the coordinator's own diagnosis was exact — file, line,
+mechanism, and a concretely correct suggested fix, all before I even started. There was
+essentially no discovery phase; the work was implement-the-suggested-fix, verify it actually
+closes the gap (not just "doesn't crash"), and check whether the fix's scope was exactly
+right or needed adjusting (it was exactly right — see the handoff entry's "scope check" on
+why I didn't also wrap `resolveModel`/`providerFor`). This is a good illustration of why the
+fleet's escalation/handoff model works: a precise bug report with a proposed fix turns a
+round that could have needed real investigation into a mostly-mechanical implementation
+task, freeing the actual judgment for the one real open question (does the fix's scope need
+to be wider than suggested, and it didn't).
+
+**Verification habit paying off across rounds, now including catching me being wrong:**
+rounds 2 and 3 both had a "live process check surfaced something the unit tests alone
+wouldn't have" moment, and this round is a data point in the *other* direction — the
+coordinator's own live check caught something *my* unit tests missed, in code I'd already
+"verified" thoroughly in round 3. Worth internalizing: live verification isn't just a
+belt-and-suspenders habit for my own work, it's also *why* the coordinator caught this in
+the first place, and it's exactly the same discipline in both directions. I re-ran the
+coordinator's exact repro (real `dh --server`, real 401-returning mock server, `send_message`
+then four `request_agent_tree` polls over ~20 seconds via curl) as my own closing check
+before calling this done, rather than trusting the regression tests alone to prove the fix
+holds at the same real timescale the bug was found at.
+
+**Open thread, not urgent:** the `resolveModel()`/`providerFor()` narrower case (see the
+handoff entry's "scope check") is unreachable from any current caller, but only because
+`src/cli.ts` happens to never call `runRoot()` with an explicit `modelName`. If a future
+round adds a code path that does (e.g. a per-message model override from the TUI/Web input),
+this narrower gap becomes reachable and worth revisiting — flagging so it doesn't get
+silently forgotten.

@@ -223,7 +223,24 @@ export class AgentRuntime {
    * Round 3: creates a fresh AbortController for this run and passes its signal into the
    * loop — stopRoot() (below) is what triggers it, giving src/cli.ts's AgentLoopHandle
    * adapter something real to call for `stopAgent(ROOT_AGENT_ID)` instead of the previous
-   * no-op. */
+   * no-op.
+   *
+   * Round 4 fix (docs/handoffs/core.md status log): `runAgentLoop` itself can *throw*
+   * rather than resolve — a harness-level failure (bad `apiKey`, unreachable `baseURL`, any
+   * error the provider adapter's own try/catch doesn't itself convert into a normal
+   * `AgentLoopResult`) before the loop ever produces a self-report. The `runAgentLoop` call
+   * is wrapped in try/catch specifically so `this.rootStatus` and the `session_ended` event
+   * both still update on *that* path too, not only the normal resolve path — otherwise
+   * `getAgentTree()` (which reads `this.rootStatus`) reports a permanently `"running"`
+   * zombie root agent to any client that asks *after* the crash (a transient
+   * `agent_status`-shaped event at the moment of the crash, which `src/cli.ts`'s adapter
+   * does emit via its own `.catch()`, doesn't help a client that connects or polls later —
+   * confirmed live: the coordinator found this by hand, root stayed `"running"` in
+   * `request_agent_tree` for 20+ seconds after a real crash). Rethrows afterward so every
+   * existing caller's own error handling (`src/cli.ts`'s standalone `--instructions` path's
+   * try/catch, the adapter's `.catch()` for the interactive path) is unaffected — this is
+   * purely making `AgentRuntime`'s own state consistent before the error leaves this
+   * method, not a behavior change for callers. */
   async runRoot(
     instruction: string,
     modelName?: string,
@@ -236,25 +253,38 @@ export class AgentRuntime {
     this.rootStatus = "running";
     this.rootController = new AbortController();
 
-    const result = await runAgentLoop({
-      sessionId: this.sessionId,
-      agentId: ROOT_AGENT_ID,
-      parentAgentId: null,
-      model: model.name,
-      systemPrompt: this.systemPrompt,
-      instruction,
-      provider,
-      tools: this.toolMap,
-      toolContext: this.buildToolContext(ROOT_AGENT_ID),
-      registerSendMessage: (fn) => {
-        this.rootSendMessage = fn;
-      },
-      signal: this.rootController.signal,
-      ...(this.onEvent ? { onEvent: this.onEvent } : {}),
-      ...(this.onLogLine
-        ? { onLogLine: (line: LogLine) => this.onLogLine?.(ROOT_AGENT_ID, line) }
-        : {}),
-    });
+    let result: { success: boolean; finalOutput: string };
+    try {
+      result = await runAgentLoop({
+        sessionId: this.sessionId,
+        agentId: ROOT_AGENT_ID,
+        parentAgentId: null,
+        model: model.name,
+        systemPrompt: this.systemPrompt,
+        instruction,
+        provider,
+        tools: this.toolMap,
+        toolContext: this.buildToolContext(ROOT_AGENT_ID),
+        registerSendMessage: (fn) => {
+          this.rootSendMessage = fn;
+        },
+        signal: this.rootController.signal,
+        ...(this.onEvent ? { onEvent: this.onEvent } : {}),
+        ...(this.onLogLine
+          ? { onLogLine: (line: LogLine) => this.onLogLine?.(ROOT_AGENT_ID, line) }
+          : {}),
+      });
+    } catch (err) {
+      this.rootStatus = "failed";
+      this.onEvent?.({
+        version: 1,
+        id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: "session_ended",
+        exitCode: ExitCode.HarnessError,
+      });
+      throw err;
+    }
 
     this.rootStatus = result.success ? "done" : "failed";
     this.onEvent?.({

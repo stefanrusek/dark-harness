@@ -596,3 +596,81 @@ describe("AgentRuntime.stopRoot / spawnAgent signal threading (Round 3: real can
     }
   });
 });
+
+describe("AgentRuntime.runRoot — Round 4: rootStatus/getAgentTree must not get stuck 'running' on a crash", () => {
+  /** Mimics the real bug the coordinator found by hand: a bad apiKey/unreachable endpoint
+   * makes the real provider adapter's SDK call throw before runAgentLoop ever produces a
+   * self-report — a genuine rejection, not the Round 3 abort-triggered one loop.ts treats as
+   * a clean stop. A 401 response is what a real Anthropic-shaped endpoint returns for a bad
+   * apiKey; the SDK throws on it, AnthropicProvider wraps it in ProviderError, and nothing
+   * before Round 4 ever updated `this.rootStatus` on that path. */
+  function startUnauthorizedServer() {
+    return Bun.serve({
+      port: 0,
+      fetch() {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      },
+    });
+  }
+
+  function crashingConfig(server: ReturnType<typeof startUnauthorizedServer>): DhConfig {
+    return {
+      options: { defaultModel: "test-model" },
+      models: [{ name: "test-model", provider: "mock", model: "mock-1" }],
+      provider: [
+        { name: "mock", type: "anthropic", baseURL: server.url.toString(), apiKey: "sk-bad" },
+      ],
+    };
+  }
+
+  test("runRoot() rejects, but rootStatus/getAgentTree() report 'failed' immediately afterward — not stuck 'running'", async () => {
+    const server = startUnauthorizedServer();
+    try {
+      const runtime = new AgentRuntime({ config: crashingConfig(server), systemPrompt: "sp" });
+      await expect(runtime.runRoot("go")).rejects.toThrow();
+      // The actual regression check: polled *after* the throw has already been handled by
+      // the caller (this test), exactly like a fresh request_agent_tree from a client that
+      // connects after the crash — not observed via any transient event.
+      const tree = runtime.getAgentTree();
+      expect(tree[0]?.status).toBe("failed");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("runRoot()'s crash path fires a session_ended event, matching the normal-completion path's contract", async () => {
+    const server = startUnauthorizedServer();
+    try {
+      const events: ServerSentEvent[] = [];
+      const runtime = new AgentRuntime({
+        config: crashingConfig(server),
+        systemPrompt: "sp",
+        onEvent: (e) => events.push(e),
+      });
+      await expect(runtime.runRoot("go")).rejects.toThrow();
+      const sessionEnded = events.find((e) => e.type === "session_ended");
+      expect(sessionEnded).toMatchObject({
+        type: "session_ended",
+        exitCode: ExitCode.HarnessError,
+      });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("polling getAgentTree() repeatedly after a crash never reports 'running' again (no delayed/stale update)", async () => {
+    const server = startUnauthorizedServer();
+    try {
+      const runtime = new AgentRuntime({ config: crashingConfig(server), systemPrompt: "sp" });
+      await expect(runtime.runRoot("go")).rejects.toThrow();
+      // Mirrors the coordinator's manual repro: poll several times with real delays between
+      // calls, the way an operator's client actually would, rather than checking once.
+      for (let i = 0; i < 3; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(runtime.getAgentTree()[0]?.status).toBe("failed");
+      }
+    } finally {
+      server.stop(true);
+    }
+  });
+});
