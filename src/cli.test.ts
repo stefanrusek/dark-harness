@@ -44,10 +44,21 @@ function fakeIo(): CliIo & { stdoutLines: string[]; stderrLines: string[]; exitC
   };
 }
 
+/** DH-0011: never install real `process.on("SIGTERM"/"SIGINT")` listeners from a test —
+ * they'd leak across the whole suite (hundreds of never-removed listeners) and, worse, a
+ * real Ctrl-C during a test run would call the *real* `process.exit` a defaultDeps()
+ * installSignalHandlers wires up, killing the test runner outright. Tests that want to
+ * exercise the shutdown behavior itself call `main()` with an explicit override capturing
+ * the handler instead (see the dedicated describe block below). */
+function fakeInstallSignalHandlers(): CliDeps["installSignalHandlers"] {
+  return () => () => {};
+}
+
 function baseOverrides(io: CliIo): Partial<CliDeps> {
   return {
     loadConfig: async () => TEST_CONFIG,
     io,
+    installSignalHandlers: fakeInstallSignalHandlers(),
   };
 }
 
@@ -83,6 +94,7 @@ function interactiveOverrides(io: CliIo): Partial<CliDeps> {
     startTui: async () => {},
     serveWebUi: () => fakeWebUi(),
     io,
+    installSignalHandlers: fakeInstallSignalHandlers(),
   };
 }
 
@@ -420,6 +432,42 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(io.stdoutLines[0]).toContain(String(DEFAULT_PORT));
   });
 
+  // DH-0011: a `--server` process is the canonical long-lived container deployment
+  // (HANDOFF.md §1/§11) that receives SIGTERM on scale-down/redeploy — proves the handler
+  // installed for it actually stops the agent loop and the server, then exits cleanly,
+  // instead of the process just dying with no chance to do either.
+  test("DH-0011: SIGTERM on a --server process stops the agent loop and the server", async () => {
+    const io = fakeIo();
+    let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
+    let stopAgentCalled = false;
+    let serverStopCalled = false;
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      installSignalHandlers: (onSignal) => {
+        capturedOnSignal = onSignal;
+        return () => {};
+      },
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          stopAgent: () => {
+            stopAgentCalled = true;
+          },
+        }),
+      createServer: () =>
+        fakeServer({
+          stop: () => {
+            serverStopCalled = true;
+          },
+        }),
+    });
+    expect(capturedOnSignal).toBeDefined();
+    capturedOnSignal?.("SIGTERM");
+    expect(stopAgentCalled).toBe(true);
+    expect(serverStopCalled).toBe(true);
+    expect(io.stderrLines.some((l) => l.includes("SIGTERM"))).toBe(true);
+    expect(io.exitCodes).toContain(ExitCode.Success);
+  });
+
   test("--connect starts console client mode with no local server, targeting the given host/port", async () => {
     const io = fakeIo();
     let createServerCalled = false;
@@ -621,6 +669,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
         runRoot: async () => {
           throw new Error("boom");
         },
+        stopRoot: () => {},
       }),
     });
     expect(code).toBe(ExitCode.HarnessError);
@@ -633,7 +682,10 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     const code = await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
-      createRuntime: () => ({ runRoot: async () => ({ success: true, finalOutput: "yay" }) }),
+      createRuntime: () => ({
+        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        stopRoot: () => {},
+      }),
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.exitCodes).toEqual([ExitCode.Success]);
@@ -645,7 +697,10 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     const code = await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
-      createRuntime: () => ({ runRoot: async () => ({ success: false, finalOutput: "nope" }) }),
+      createRuntime: () => ({
+        runRoot: async () => ({ success: false, finalOutput: "nope" }),
+        stopRoot: () => {},
+      }),
     });
     expect(code).toBe(ExitCode.TaskFailure);
     expect(io.exitCodes).toEqual([ExitCode.TaskFailure]);
@@ -656,7 +711,10 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     const code = await main(["--instructions", "plan.md"], {
       ...interactiveOverrides(io),
       readInstructions: async () => "do the thing",
-      createRuntime: () => ({ runRoot: async () => ({ success: true, finalOutput: "yay" }) }),
+      createRuntime: () => ({
+        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        stopRoot: () => {},
+      }),
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.exitCodes).toEqual([]);
@@ -672,7 +730,10 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       loadSystemPrompt: async () => "resolved prompt",
       createRuntime: (config, systemPrompt) => {
         received = { config, systemPrompt };
-        return { runRoot: async () => ({ success: true, finalOutput: "ok" }) };
+        return {
+          runRoot: async () => ({ success: true, finalOutput: "ok" }),
+          stopRoot: () => {},
+        };
       },
     });
     expect(received).toEqual({ config: TEST_CONFIG, systemPrompt: "resolved prompt" });
@@ -687,10 +748,46 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       readInstructions: async () => "do the thing",
       createRuntime: (_config, _systemPrompt, client) => {
         receivedClient = client;
-        return { runRoot: async () => ({ success: true, finalOutput: "ok" }) };
+        return {
+          runRoot: async () => ({ success: true, finalOutput: "ok" }),
+          stopRoot: () => {},
+        };
       },
     });
     expect(receivedClient).toBe("none");
+  });
+
+  // DH-0011 (tracking/DH-0011-no-signal-handling-or-process-group-reaping.md): a SIGTERM
+  // during the standalone --instructions/--job run — exactly the "container receives
+  // SIGTERM on scale-down" scenario HANDOFF's canonical deployment describes — must call
+  // stopRoot() (the same cooperative-cancellation mechanism TaskStop already uses), log
+  // that it happened, and report a harness-error exit code, not just die silently.
+  test("DH-0011: SIGTERM stops the root agent via stopRoot() and exits HarnessError", async () => {
+    const io = fakeIo();
+    let stopRootCalled = false;
+    let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
+    const code = await main(["--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "do the thing",
+      installSignalHandlers: (onSignal) => {
+        capturedOnSignal = onSignal;
+        return () => {};
+      },
+      createRuntime: () => ({
+        runRoot: async () => {
+          // Simulate the signal firing while the root agent is mid-run.
+          capturedOnSignal?.("SIGTERM");
+          return { success: false, finalOutput: "partial work" };
+        },
+        stopRoot: () => {
+          stopRootCalled = true;
+        },
+      }),
+    });
+    expect(stopRootCalled).toBe(true);
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines.some((l) => l.includes("SIGTERM"))).toBe(true);
+    expect(io.stdoutLines).toContain("partial work");
   });
 });
 
@@ -831,8 +928,10 @@ describe("main — real filesystem-backed default deps", () => {
           received = { instruction, systemPrompt };
           return { success: true, finalOutput: "ok" };
         },
+        stopRoot: () => {},
       }),
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(received).toEqual({ instruction: "the real instruction text", systemPrompt: "sp" });
   });
@@ -842,6 +941,7 @@ describe("main — real filesystem-backed default deps", () => {
     const code = await main(["--instructions", join(dir, "missing.md")], {
       loadConfig: async () => TEST_CONFIG,
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines[0]).toContain("instructions file not found");
@@ -856,9 +956,10 @@ describe("main — real filesystem-backed default deps", () => {
       loadConfig: async () => TEST_CONFIG,
       createRuntime: (_config, systemPrompt) => {
         received = systemPrompt;
-        return { runRoot: async () => ({ success: true, finalOutput: "ok" }) };
+        return { runRoot: async () => ({ success: true, finalOutput: "ok" }), stopRoot: () => {} };
       },
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(received).toBe(DEFAULT_SYSTEM_PROMPT);
   });
@@ -874,9 +975,10 @@ describe("main — real filesystem-backed default deps", () => {
       loadConfig: async () => ({ ...TEST_CONFIG, systemPrompt: systemPromptPath }),
       createRuntime: (_config, systemPrompt) => {
         received = systemPrompt;
-        return { runRoot: async () => ({ success: true, finalOutput: "ok" }) };
+        return { runRoot: async () => ({ success: true, finalOutput: "ok" }), stopRoot: () => {} };
       },
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(received).toBe("custom system prompt");
   });
@@ -886,6 +988,7 @@ describe("main — real filesystem-backed default deps", () => {
     const code = await main([], {
       loadConfig: async () => ({ ...TEST_CONFIG, systemPrompt: join(dir, "nope.md") }),
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines[0]).toContain("systemPrompt file not found");
@@ -903,6 +1006,7 @@ describe("main — real filesystem-backed default deps", () => {
       }),
       loadSystemPrompt: async () => "sp",
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines[0]).toContain("root agent crashed");
@@ -952,6 +1056,7 @@ describe("main — real filesystem-backed default deps", () => {
         }),
         loadSystemPrompt: async () => "sp",
         io,
+        installSignalHandlers: fakeInstallSignalHandlers(),
       });
       expect(code).toBe(ExitCode.Success);
 
@@ -978,6 +1083,7 @@ describe("main — real filesystem-backed default deps", () => {
       loadConfig: async () => TEST_CONFIG,
       startTui: async () => {},
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(code).toBe(ExitCode.Success);
   });
@@ -989,6 +1095,7 @@ describe("main — real filesystem-backed default deps", () => {
       createAgentLoop: () => fakeAgentLoop(),
       createServer: () => fakeServer(),
       io,
+      installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines[0]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
@@ -1006,6 +1113,7 @@ describe("main — default io wired to console/process.exit", () => {
         loadConfig: async () => TEST_CONFIG,
         createAgentLoop: () => fakeAgentLoop(),
         createServer: () => fakeServer(),
+        installSignalHandlers: fakeInstallSignalHandlers(),
       });
       expect(code).toBe(ExitCode.Success);
       expect(logSpy).toHaveBeenCalled();

@@ -396,12 +396,13 @@ export interface CliDeps {
   applyEnv: (vars: Record<string, string>) => void;
   loadSystemPrompt: (config: DhConfig) => Promise<string>;
   /** Used only by the standalone `--instructions` path (see the module doc comment above
-   * for why that path never goes through createAgentLoop/createServer). */
+   * for why that path never goes through createAgentLoop/createServer). Exposes `stopRoot`
+   * too (DH-0011) so this path's SIGTERM/SIGINT handler has something real to call. */
   createRuntime: (
     config: DhConfig,
     systemPrompt: string,
     client: SessionClientKind,
-  ) => Pick<AgentRuntime, "runRoot">;
+  ) => Pick<AgentRuntime, "runRoot" | "stopRoot">;
   /** Used by every interactive mode (server/local/connect). */
   createAgentLoop: (
     config: DhConfig,
@@ -416,6 +417,19 @@ export interface CliDeps {
     token?: string;
   }) => WebUiHandleLike;
   io: CliIo;
+  /**
+   * DH-0011 fix (tracking/DH-0011-no-signal-handling-or-process-group-reaping.md): grepping
+   * the whole codebase for SIGTERM/SIGINT/process.on used to return nothing — the canonical
+   * dark-factory deployment (a container, per HANDOFF.md §1/§11) receives SIGTERM on
+   * scale-down/redeploy, and with no handler Bun's default behavior kills the process
+   * abruptly with no chance to flush a final log line or stop in-flight work. Installs a
+   * handler for both signals; `onSignal` is called (at most once — a second signal during an
+   * already-in-progress shutdown is a no-op here, letting the OS's own default disposition
+   * take over if the operator insists) with which signal fired. Returns an uninstall
+   * function. Injectable so tests never register a real `process.on` listener (which would
+   * leak across test files and could fire during unrelated test-runner signal handling).
+   */
+  installSignalHandlers: (onSignal: (signal: "SIGTERM" | "SIGINT") => void) => () => void;
 }
 
 /**
@@ -464,6 +478,22 @@ function defaultDeps(): CliDeps {
       stdout: (message) => console.log(message),
       stderr: (message) => console.error(message),
       exit: (code) => process.exit(code),
+    },
+    installSignalHandlers: (onSignal) => {
+      let firedOnce = false;
+      const handler = (signal: "SIGTERM" | "SIGINT") => () => {
+        if (firedOnce) return; // let a second signal fall through to the OS default.
+        firedOnce = true;
+        onSignal(signal);
+      };
+      const sigterm = handler("SIGTERM");
+      const sigint = handler("SIGINT");
+      process.on("SIGTERM", sigterm);
+      process.on("SIGINT", sigint);
+      return () => {
+        process.off("SIGTERM", sigterm);
+        process.off("SIGINT", sigint);
+      };
     },
   };
 }
@@ -538,6 +568,37 @@ async function runInteractiveMode(
     });
     const boundPort = server.start();
 
+    // DH-0011: this process owns real resources from here on (the DhServer's listening
+    // socket, the AgentRuntime driving it) — exactly the "container receives SIGTERM on
+    // scale-down" scenario HANDOFF.md's canonical deployment describes. `webHandle` is
+    // populated by the `mode.web` branch below (if taken) — declared here, ahead of it, so
+    // the shutdown closure captures whichever resources actually ended up live by the time a
+    // signal fires, without duplicating this logic per branch.
+    let webHandle: WebUiHandleLike | undefined;
+    let shuttingDown = false;
+    const uninstallSignals = deps.installSignalHandlers((signal) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      io.stderr(`dh: received ${signal}; shutting down session ${sessionId}...`);
+      try {
+        agentLoop.stopAgent(ROOT_AGENT_ID);
+      } catch {
+        // best-effort — nothing running yet, or already stopped.
+      }
+      try {
+        webHandle?.stop();
+      } catch {
+        // best-effort.
+      }
+      try {
+        server.stop();
+      } catch {
+        // best-effort.
+      }
+      uninstallSignals();
+      io.exit(ExitCode.Success);
+    });
+
     if (mode.kind === "server") {
       io.stdout(`dh: headless server listening on port ${boundPort} (session ${sessionId}).`);
       return ExitCode.Success;
@@ -545,16 +606,17 @@ async function runInteractiveMode(
 
     const baseUrl = `http://localhost:${boundPort}`;
     if (mode.web) {
-      const handle = deps.serveWebUi({
+      webHandle = deps.serveWebUi({
         port: 0,
         targetBaseUrl: baseUrl,
         ...(config.security?.token ? { token: config.security.token } : {}),
       });
-      io.stdout(`dh: web UI ready at ${handle.url}.`);
+      io.stdout(`dh: web UI ready at ${webHandle.url}.`);
       return ExitCode.Success;
     }
 
     await deps.startTui(baseUrl, config.security?.token);
+    uninstallSignals();
     server.stop();
     return ExitCode.Success;
   } catch (err) {
@@ -643,11 +705,30 @@ export async function main(
 
   const runtime = deps.createRuntime(config, systemPrompt, "none");
 
+  // DH-0011: the standalone `--instructions`/`--job` path is exactly the unattended
+  // dark-factory scenario a container's SIGTERM/SIGINT can interrupt mid-run — best-effort
+  // cooperative stop via the same AbortSignal-driven mechanism TaskStop/stopRoot() already
+  // use (loop.ts's AgentLoopParams.signal), rather than the process just dying with no
+  // chance to log anything.
+  let interrupted = false;
+  const uninstallSignals = deps.installSignalHandlers((signal) => {
+    interrupted = true;
+    io.stderr(`dh: received ${signal}; stopping the root agent...`);
+    runtime.stopRoot();
+  });
+
   let result: { success: boolean; finalOutput: string };
   try {
     result = await runtime.runRoot(instructionText);
   } catch (err) {
+    uninstallSignals();
     return fail(io, `root agent crashed: ${(err as Error).message}`);
+  }
+  uninstallSignals();
+  if (interrupted) {
+    io.stdout(result.finalOutput);
+    io.exit(ExitCode.HarnessError);
+    return ExitCode.HarnessError;
   }
 
   io.stdout(result.finalOutput);

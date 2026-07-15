@@ -107,6 +107,30 @@ describe("Bash tool", () => {
     expect(result.output).toContain("timed out");
   }, 2000);
 
+  test("DH-0011: a timed-out command's backgrounded grandchild is reaped too, not left orphaned", async () => {
+    const ctx = makeToolContext({ cwd: dir });
+    const markerFile = join(dir, "grandchild-alive");
+    // The outer command backgrounds a long sleep (a grandchild from the tool's perspective)
+    // and returns immediately; before DH-0011, killing only the immediate `bash -c` process
+    // left that backgrounded sleep running as an orphan.
+    await bashTool.execute(
+      {
+        command: `(touch ${markerFile}; sleep 30; rm -f ${markerFile}) & disown; sleep 5`,
+        timeout: 100,
+        run_in_background: false,
+      },
+      ctx,
+    );
+    // Give the backgrounded process a moment to have started (touch the marker) before we
+    // check whether the process-group kill reaped it.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const stillRunning = await new Promise<boolean>((resolve) => {
+      const check = Bun.spawn(["pgrep", "-f", `touch ${markerFile}`], { stdout: "ignore" });
+      check.exited.then((code) => resolve(code === 0));
+    });
+    expect(stillRunning).toBe(false);
+  }, 3000);
+
   test("clamps timeout_ms to the maximum allowed", async () => {
     const ctx = makeToolContext({ cwd: dir });
     const result = await bashTool.execute(

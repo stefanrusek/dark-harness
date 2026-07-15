@@ -8,6 +8,16 @@
 // does NOT persist to the next call, unlike a real interactive shell. This matches how real
 // Claude Code's own *subagent* Bash threads behave, not a novel choice; see the tool
 // description below, which states this explicitly for the model.
+//
+// DH-0011 fix (tracking/DH-0011-no-signal-handling-or-process-group-reaping.md): the
+// timeout/abort path used to only call `proc.kill()` on the immediate `bash -c` process —
+// anything that command backgrounded itself (`sleep 300 &`, a daemon it started) kept running
+// as an orphan/zombie after the tool call "ended". Fixed by spawning with `detached: true`
+// (POSIX: `setsid()`, making the `bash -c` process the leader of a brand-new process group)
+// and killing the *group* (`process.kill(-pid, signal)`, the POSIX convention for "negative
+// pid targets the process group") on both the timeout path and the AbortSignal path, before
+// falling back to killing just the immediate process if the group kill fails for any reason
+// (e.g. the process already exited, or already reaped its own children).
 
 import { capOutput } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
@@ -32,6 +42,19 @@ async function pipeToBuffer(
   append(decoder.decode());
 }
 
+/** Kills `proc`'s entire process group (DH-0011) — falls back to killing just the immediate
+ * process if the group kill fails (e.g. it already exited, or `pid` isn't a valid group
+ * leader for any reason). `detached: true` at spawn time (below) is what makes `proc.pid` the
+ * leader of its own process group in the first place, so `-pid` addresses that whole group,
+ * POSIX's convention for "negative pid" in `kill(2)`. */
+function killProcessGroup(proc: { pid: number; kill: () => void }): void {
+  try {
+    process.kill(-proc.pid, "SIGTERM");
+  } catch {
+    proc.kill();
+  }
+}
+
 async function runCommand(
   command: string,
   cwd: string,
@@ -43,14 +66,21 @@ async function runCommand(
     cwd,
     stdout: "pipe",
     stderr: "pipe",
-    signal,
+    // DH-0011: NOT passing `signal` directly here — Bun's own signal-triggered kill only ever
+    // kills this immediate process, not its process group. The abort listener below does a
+    // full group kill instead, exactly like the timeout path.
+    detached: true,
   });
 
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    proc.kill();
+    killProcessGroup(proc);
   }, timeoutMs);
+
+  const onAbort = () => killProcessGroup(proc);
+  signal.addEventListener("abort", onAbort);
+  if (signal.aborted) onAbort();
 
   try {
     await Promise.all([
@@ -61,6 +91,7 @@ async function runCommand(
     return { exitCode, timedOut };
   } finally {
     clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
   }
 }
 
