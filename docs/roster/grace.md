@@ -415,3 +415,70 @@ config-to-loop threading itself is covered, not just `loop.ts`'s pre-existing in
 logic. `bun run e2e` was not run this round (sandbox still lacks `tmux`/Chromium, the same
 gap every prior round has hit) — noted explicitly in the handoff rather than silently
 skipped.
+
+### 2026-07-15 — Round 8 (client + build identity in the log header; `scripts/build.ts`)
+
+A contracts round with real architect sign-off already in hand (Fable's ADR 0005 amendment),
+so there was no design ambiguity to resolve — the work was faithful implementation across
+five touched surfaces (contracts, a new build-info module, a new build script, plumbing
+through loop.ts/runtime.ts/cli.ts, a `--version` rider) plus the mechanical fallout of making
+two previously-optional-in-practice fields required everywhere. Full technical writeup in
+`docs/handoffs/core.md`'s dated Round 8 status log entry. Process notes for a future me:
+
+**The "required, not defaulted" instruction was worth taking literally, and it had a real
+cost worth planning for up front.** The handoff explicitly said `client` should be required on
+`AgentLoopParams`/`AgentRuntimeOptions` "so no call site can silently record a wrong value" —
+I could have taken a shortcut (default to `"none"` in the constructor, keep the type
+optional) and every existing test would have kept compiling untouched. I didn't, because the
+whole point of the amendment is that a silently-wrong `client` value defeats the diagnostic
+it exists to enable — a defaulted field is exactly the kind of thing that quietly drifts. The
+real cost was ~50 existing test call sites across `runtime.test.ts`/`cli.test.ts` needing a
+mechanical update; I handled `runtime.test.ts`'s ~40 sites with one small wrapper function
+(`newAgentRuntime()`, defaults `client: "none"`) plus a scripted find-replace rather than
+hand-editing each one, which kept the diff's actual content small and reviewable despite the
+line count. Worth defaulting to "add one small test-local wrapper + scripted replace" over
+either "hand-edit every site" or "make the field secretly optional to avoid touching tests"
+next time a required-field change has a wide test-fixture blast radius.
+
+**Found a real cross-file compile break outside my own three planned files, and fixed it
+rather than treating it as someone else's problem to notice later.** `src/server/logger.test.ts`
+and `src/server/server.test.ts` (Server-owned) had inline `LogHeader` object literals that
+stopped type-checking the moment `client`/`build` became required — not something the round-8
+handoff called out, since it was written before realizing every existing literal construction
+of the type (not just constructor calls) would need updating. Since `bun run typecheck` is a
+whole-repo gate, not a per-domain one, leaving those broken would have made the round
+incomplete by its own definition of done even though the fix is one line per literal and
+doesn't touch Server's actual logic/assertions. Fixed both directly (mechanical `client`/
+`build` additions only) and flagged it explicitly in the status log as a cross-boundary touch,
+rather than either silently leaving typecheck red for another domain to discover, or quietly
+not mentioning that I'd touched files outside my three planned ones.
+
+**Left one honest loose end rather than over-fixing it under time pressure to call the round
+"clean":** `createStandaloneRuntime()` hardcodes `client: "none"` internally instead of
+reading the `client` argument that `CliDeps.createRuntime` now formally accepts and that
+`main()` now passes through. It's correct today (the only caller ever passes `"none"`), and
+wiring it through fully would have meant either changing `createStandaloneRuntime`'s own
+signature (a bigger, not-asked-for change to a function whose contract Round 6a specifically
+designed) or introducing an unused-parameter warning at the type level to route around it.
+I judged flagging this precisely in the status log was the more honest choice than quietly
+"fixing" it with a change nobody asked to review, or not mentioning the parameter is currently
+decorative for that one call site.
+
+**Verification discipline, continued:** live-verified `scripts/build.ts` itself (not just its
+unit-testable pieces) against four real scenarios — a clean stamped build, a `--release-tag
+v0.1.0` build, a rejected non-`v`-prefixed tag (exit 2, no binary produced), and a raw `bun
+build --compile` bypassing the script entirely (confirms "unstamped" is what a caller sees,
+not a crash) — each checked by actually running the resulting binary's `--version`, not by
+reading the script and assuming it's right. This is the same standing habit this identity's
+prior rounds established (a live process check before calling something done), applied here
+to a build-tooling script rather than a running agent process.
+
+**Gates:** all green — `bun run typecheck`, `bun run lint`, `bun run test:coverage` (741
+tests, 99.96%/100% funcs/lines aggregate; the sole func-coverage shortfall is `src/cli.ts`'s
+pre-existing `if (import.meta.main)` process-entry gap from round 1, not a regression this
+round introduced). `bun run e2e`: sandbox still lacks `tmux`/Chromium (same gap every prior
+round has hit) — 15/19 pass, the 4 failures confirmed to be exactly the missing-binary ones,
+not new assertion failures. Full detail in `docs/handoffs/core.md`'s dated Round 8 status log
+entry, including the explicit confirmation that both `scripts/build.ts` and the new
+`LogHeader` shape are fully complete (not stubs) for Server/CI-Release/E2E's follow-on
+rounds to build against.

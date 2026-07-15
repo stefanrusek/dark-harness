@@ -14,6 +14,7 @@ import {
   type DhServerLike,
   type WebUiHandleLike,
   composeMode,
+  formatVersionString,
   main,
   parseArgs,
   parseEnvFile,
@@ -235,6 +236,63 @@ describe("main — --help", () => {
       },
     });
     expect(code).toBe(ExitCode.Success);
+  });
+});
+
+describe("main — --version", () => {
+  test("--version prints build identity and exits Success without touching config", async () => {
+    const io = fakeIo();
+    const code = await main(["--version"], {
+      io,
+      loadConfig: async () => {
+        throw new Error("--version must not load config");
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.exitCodes).toEqual([ExitCode.Success]);
+    expect(io.stdoutLines[0]).toMatch(/^dh \d+\.\d+\.\d+ \(/);
+  });
+});
+
+describe("formatVersionString", () => {
+  test("unstamped build", () => {
+    expect(
+      formatVersionString({ version: "0.1.0", gitSha: null, dirty: false, releaseTag: null }),
+    ).toBe("dh 0.1.0 (unstamped)");
+  });
+
+  test("stamped clean build", () => {
+    expect(
+      formatVersionString({ version: "0.1.0", gitSha: "abc123", dirty: false, releaseTag: null }),
+    ).toBe("dh 0.1.0 (abc123)");
+  });
+
+  test("stamped dirty build", () => {
+    expect(
+      formatVersionString({ version: "0.1.0", gitSha: "abc123", dirty: true, releaseTag: null }),
+    ).toBe("dh 0.1.0 (abc123 dirty)");
+  });
+
+  test("stamped release build", () => {
+    expect(
+      formatVersionString({
+        version: "0.1.0",
+        gitSha: "abc123",
+        dirty: false,
+        releaseTag: "v0.1.0",
+      }),
+    ).toBe("dh 0.1.0 (abc123, v0.1.0)");
+  });
+
+  test("stamped dirty release build", () => {
+    expect(
+      formatVersionString({
+        version: "0.1.0",
+        gitSha: "abc123",
+        dirty: true,
+        releaseTag: "v0.1.0",
+      }),
+    ).toBe("dh 0.1.0 (abc123 dirty, v0.1.0)");
   });
 });
 
@@ -491,6 +549,47 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(io.stderrLines[0]).toContain("failed to start connect mode");
     expect(io.stderrLines[0]).toContain("terminal not available");
   });
+
+  // Round 8: each interactive run mode must map to the right SessionClientKind so every
+  // agent's log header (ADR 0005 amendment) can tell which client kind produced it.
+  test('no --instructions (local console) passes client: "tui" to createAgentLoop', async () => {
+    const io = fakeIo();
+    let receivedClient: string | undefined;
+    await main([], {
+      ...interactiveOverrides(io),
+      createAgentLoop: (_config, _systemPrompt, client) => {
+        receivedClient = client;
+        return fakeAgentLoop();
+      },
+    });
+    expect(receivedClient).toBe("tui");
+  });
+
+  test('--web (local web mode) passes client: "web" to createAgentLoop', async () => {
+    const io = fakeIo();
+    let receivedClient: string | undefined;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      createAgentLoop: (_config, _systemPrompt, client) => {
+        receivedClient = client;
+        return fakeAgentLoop();
+      },
+    });
+    expect(receivedClient).toBe("web");
+  });
+
+  test('--server passes client: "server" to createAgentLoop', async () => {
+    const io = fakeIo();
+    let receivedClient: string | undefined;
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      createAgentLoop: (_config, _systemPrompt, client) => {
+        receivedClient = client;
+        return fakeAgentLoop();
+      },
+    });
+    expect(receivedClient).toBe("server");
+  });
 });
 
 describe("main — standalone --instructions path (bypasses Server/TUI/Web entirely)", () => {
@@ -577,6 +676,21 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       },
     });
     expect(received).toEqual({ config: TEST_CONFIG, systemPrompt: "resolved prompt" });
+  });
+
+  // Round 8: the standalone path has no interactive TUI/Web/server client attached.
+  test('createRuntime is invoked with client: "none"', async () => {
+    const io = fakeIo();
+    let receivedClient: string | undefined;
+    await main(["--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "do the thing",
+      createRuntime: (_config, _systemPrompt, client) => {
+        receivedClient = client;
+        return { runRoot: async () => ({ success: true, finalOutput: "ok" }) };
+      },
+    });
+    expect(receivedClient).toBe("none");
   });
 });
 
@@ -947,6 +1061,7 @@ describe("AgentRuntimeLoopAdapter", () => {
       const adapter = new AgentRuntimeLoopAdapter({
         config: adapterConfig(server),
         systemPrompt: "sp",
+        client: "tui",
       });
       // Round 2 fix: a "waiting" root node (not an empty tree) is what makes
       // sendMessage(ROOT_AGENT_ID, ...) reachable at all through the real command handler
@@ -972,6 +1087,7 @@ describe("AgentRuntimeLoopAdapter", () => {
     const adapter = new AgentRuntimeLoopAdapter({
       config: adapterConfig(server),
       systemPrompt: "sp",
+      client: "tui",
     });
     try {
       const events: ServerSentEvent[] = [];
@@ -1022,6 +1138,7 @@ describe("AgentRuntimeLoopAdapter", () => {
         provider: [],
       },
       systemPrompt: "sp",
+      client: "tui",
     });
     const events: ServerSentEvent[] = [];
     adapter.onEvent((e) => events.push(e));
@@ -1058,6 +1175,7 @@ describe("AgentRuntimeLoopAdapter", () => {
       const adapter = new AgentRuntimeLoopAdapter({
         config: adapterConfig(unauthorizedServer),
         systemPrompt: "sp",
+        client: "tui",
       });
       adapter.sendMessage(ROOT_AGENT_ID, "hello"); // lazily starts the root; the crash is async
       for (let i = 0; i < 3; i += 1) {
@@ -1075,6 +1193,7 @@ describe("AgentRuntimeLoopAdapter", () => {
       const adapter = new AgentRuntimeLoopAdapter({
         config: adapterConfig(server),
         systemPrompt: "sp",
+        client: "tui",
       });
       expect(() => adapter.sendMessage("agent-unknown", "hi")).toThrow(/unknown task id/);
     } finally {
@@ -1098,6 +1217,7 @@ describe("AgentRuntimeLoopAdapter", () => {
       const adapter = new AgentRuntimeLoopAdapter({
         config: adapterConfig(neverRespondingServer),
         systemPrompt: "sp",
+        client: "tui",
       });
       const events: ServerSentEvent[] = [];
       adapter.onEvent((e) => events.push(e));
@@ -1129,6 +1249,7 @@ describe("AgentRuntimeLoopAdapter", () => {
       const adapter = new AgentRuntimeLoopAdapter({
         config: adapterConfig(server),
         systemPrompt: "sp",
+        client: "tui",
       });
       expect(() => adapter.stopAgent("agent-unknown")).toThrow(/unknown task id/);
     } finally {
@@ -1142,6 +1263,7 @@ describe("AgentRuntimeLoopAdapter", () => {
       const adapter = new AgentRuntimeLoopAdapter({
         config: adapterConfig(server),
         systemPrompt: "sp",
+        client: "tui",
       });
       const seenByA: string[] = [];
       const seenByB: string[] = [];
@@ -1214,7 +1336,7 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
         },
       ],
     };
-    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp" });
+    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp", client: "tui" });
     const dhServer = new DhServer({
       agentLoop: adapter,
       sessionId: "s1",
@@ -1302,7 +1424,7 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
         },
       ],
     };
-    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp" });
+    const adapter = new AgentRuntimeLoopAdapter({ config, systemPrompt: "sp", client: "tui" });
     const dhServer = new DhServer({
       agentLoop: adapter,
       sessionId: "s3",

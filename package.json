@@ -17,7 +17,7 @@
     "test": "bun test src",
     "test:coverage": "bun test src --coverage",
     "e2e": "bun test e2e",
-    "build": "bun build ./src/cli.ts --compile --outfile dist/dh"
+    "build": "bun scripts/build.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

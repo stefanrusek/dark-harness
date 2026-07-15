@@ -13,6 +13,7 @@ import {
   type LogLine,
   type ModelConfig,
   type ServerSentEvent,
+  type SessionClientKind,
 } from "../contracts/index.ts";
 import { runAgentLoop } from "./loop.ts";
 import { searchConfiguredMcpTools } from "./mcp.ts";
@@ -35,6 +36,11 @@ export interface AgentRuntimeOptions {
   cwd?: string;
   sessionId?: string;
   tools?: Tool[];
+  /** Round 8 (ADR 0005 amendment): how the process constructing this runtime was invoked —
+   * required (not defaulted) so no call site can silently record a wrong value in every
+   * agent's log header. Threaded unchanged into every runAgentLoop() call this runtime makes
+   * (root and sub-agents alike — a session's client kind is fixed for its whole lifetime). */
+  client: SessionClientKind;
   onEvent?: (event: ServerSentEvent) => void;
   /** Cross-domain note (docs/handoffs/core.md Round 2 status log): takes `agentId` as a
    * separate first argument — unlike `LogLine` itself, most `LogEvent` variants don't
@@ -125,6 +131,7 @@ export class AgentRuntime {
   private readonly onEvent: ((event: ServerSentEvent) => void) | undefined;
   private readonly onLogLine: ((agentId: string, line: LogLine) => void) | undefined;
   private readonly interactive: boolean;
+  private readonly client: SessionClientKind;
 
   // Root-agent bookkeeping: runRoot() isn't tracked in `tasks` (it IS the session, per its
   // own doc comment below), so getAgentTree()/sendMessageToRoot() need their own small
@@ -157,6 +164,7 @@ export class AgentRuntime {
     this.onEvent = options.onEvent;
     this.onLogLine = options.onLogLine;
     this.interactive = options.interactive ?? false;
+    this.client = options.client;
   }
 
   private resolveModel(name: string): ModelConfig {
@@ -252,6 +260,7 @@ export class AgentRuntime {
           // be steered mid-conversation while it's actively looping; `interactive` only
           // controls what happens when the model itself produces a non-tool-use turn.
           interactive: false,
+          client: this.client,
           ...(this.config.options.maxTurns !== undefined
             ? { maxTurns: this.config.options.maxTurns }
             : {}),
@@ -345,6 +354,7 @@ export class AgentRuntime {
         },
         signal: this.rootController.signal,
         interactive: this.interactive,
+        client: this.client,
         ...(this.config.options.maxTurns !== undefined
           ? { maxTurns: this.config.options.maxTurns }
           : {}),

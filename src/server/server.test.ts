@@ -174,6 +174,8 @@ describe("DhServer", () => {
         spawnedAt: "2026-07-15T00:00:00.000Z",
         model: "sonnet",
         instructionsSummary: "do it",
+        client: "none",
+        build: { version: "0.0.0", gitSha: null, dirty: false, releaseTag: null },
       });
 
       const res = await fetch(`http://localhost:${port}/api/commands`, {
@@ -453,6 +455,8 @@ describe("DhServer", () => {
         spawnedAt: "2026-07-15T00:00:00.000Z",
         model: "sonnet",
         instructionsSummary: "do it",
+        client: "none",
+        build: { version: "0.0.0", gitSha: null, dirty: false, releaseTag: null },
       });
       loop.emitLog("agent-a", { version: 1, timestamp: "t", type: "completed", success: true });
 

@@ -1204,3 +1204,102 @@ Append a dated status entry here and update `docs/roster/grace.md` when done. No
 you defer explicitly (per usual) — Server/CI-Release/E2E's follow-on rounds depend on
 `scripts/build.ts` and the new `LogHeader` shape both existing, so flag clearly if either is
 incomplete.
+
+### 2026-07-15 — Round 8 status log (Grace)
+
+**Both dependencies Server/CI-Release/E2E need are fully complete: `scripts/build.ts` exists
+and works, and `LogHeader` carries `client`/`build` on every newly-written line.** Details
+below; nothing in this round is a stub.
+
+**Contracts (`src/contracts/log.ts`):** added `SessionClientKind` (`"tui" | "web" | "server" |
+"none"`) and `BuildInfo { version, gitSha, dirty, releaseTag }`, both required on `LogHeader`
+exactly as the ADR 0005 amendment specifies — no deviation from the sign-off.
+
+**`src/config/build-info.ts` (new):** `computeBuildInfo(raw)` is a pure function; `BUILD_INFO`
+is the process-wide constant built from `process.env.DH_BUILD_GIT_SHA`/`DH_BUILD_DIRTY`/
+`DH_BUILD_RELEASE_TAG`, sealed at compile time by `scripts/build.ts`'s `--define` flags. One
+judgment call not spelled out in the handoff: `dirty` is forced `false` whenever `gitSha` is
+`null` (empty-string stamp) — a dirty flag with no commit to anchor it to isn't meaningful,
+and `computeBuildInfo`'s own doc comment says so. `version` comes from `import pkg from
+"../../package.json" with { type: "json" }` (resolveJsonModule was already on in
+`tsconfig.json`, no config change needed).
+
+**`scripts/build.ts` (new):** wraps `bun build ./src/cli.ts --compile`, computing git sha/
+dirty via `Bun.spawnSync(["git", ...])` (empty/false on any failure, not an error) and always
+passing all three `--define`s (empty string when unavailable). `--release-tag` validates
+`/^v/` and exits 2 otherwise (verified live: `--release-tag 0.1.0` → exit 2 with a clear
+stderr message; `--release-tag v0.1.0` → succeeds). Prints a one-line stamp summary for
+build-log auditability. `package.json`'s `"build"` script now calls it.
+
+**Plumbing:** `AgentLoopParams.client` (loop.ts) and `AgentRuntimeOptions.client`
+(runtime.ts) are both required, threaded through both `runAgentLoop()` call sites
+(`spawnAgent()` and `runRoot()`) unchanged from the runtime's own `this.client`. `loop.ts`'s
+header-construction literal adds `client: params.client, build: BUILD_INFO` (direct import,
+not threaded as a param, per the handoff's own note that build identity is a process-wide
+constant). `src/cli.ts` maps mode → kind exactly as specified: standalone
+(`createStandaloneRuntime`) → `"none"` (hardcoded at its one call site, not routed through
+the `CliDeps.createRuntime`'s injected `client` param — see below); interactive local →
+`mode.web ? "web" : "tui"`; `--server` → `"server"`; `--connect` constructs no runtime, no
+client value needed there. `CliDeps.createAgentLoop`/`createRuntime` both gained a required
+third `client: SessionClientKind` parameter; `AgentRuntimeLoopAdapter`'s constructor options
+gained `client` too.
+
+**One implementation note worth flagging explicitly:** `createStandaloneRuntime()` (the
+function `deps.createRuntime` wraps) constructs its own `AgentRuntime` with `client: "none"`
+hardcoded directly inside itself, not by reading the `client` argument `main()` now passes to
+`deps.createRuntime(config, systemPrompt, "none")`. This is harmless today — the standalone
+path is the only caller and always passes `"none"` anyway — but it means the third parameter
+is currently decorative for this one call site (kept because the handoff explicitly asked
+for `CliDeps.createRuntime` to carry the value, and default test overrides of
+`createRuntime` do receive/can assert on it — see the new `client: "none"` test). If a future
+round ever wants `createRuntime` to honor a non-`"none"` client, `createStandaloneRuntime`
+itself needs to accept and use that parameter instead of hardcoding it — flagging so it isn't
+silently forgotten.
+
+**`--version` flag:** built as recommended. `formatVersionString(build)` produces `dh
+<version> (<sha|unstamped>[ dirty][, <releaseTag>])` — confirmed against all four
+combinations via unit tests, and live against the real compiled binary (see verification
+below).
+
+**Test-fixture mechanics (the "update existing test fixtures mechanically" the handoff
+anticipated):** `runtime.test.ts` had ~40 `new AgentRuntime({...})` call sites; rather than
+touching each one by hand I added a `newAgentRuntime()` wrapper that defaults `client: "none"`
+and mechanically replaced every call (scripted, verified the one remaining `new
+AgentRuntime(` afterward is the wrapper's own definition). `cli.test.ts` had ~10
+`new AgentRuntimeLoopAdapter({...})` sites missing the new required field; added `client:
+"tui"` to each (mechanical, scripted where the shape was uniform, three by hand where it
+wasn't). Also had to touch two Server-domain test files this round didn't otherwise plan to
+touch — `src/server/logger.test.ts` and `src/server/server.test.ts` — because their existing
+inline `LogHeader` object literals no longer type-check without the two new required fields;
+added `client: "none"` and a placeholder `build` object to each literal. This is a mechanical
+fixture fix only (their assertions/behavior are unchanged) — flagging it since it's a
+cross-boundary touch, even though it was strictly type-level and load-bearing for `bun run
+typecheck` to pass at all across the whole repo.
+
+**Explicitly out of scope / left for the sequenced follow-on rounds (not silently
+deferred):**
+- Did not touch `e2e/support/build.ts` or `.github/workflows/release.yml` — both currently
+  call `bun build --compile` directly rather than `scripts/build.ts`; per the handoff these
+  are Server/CI-Release/E2E's own follow-on rounds to wire up now that the script exists and
+  works. Confirmed via `grep` that both files reference `bun build ./src/cli.ts` directly.
+- `scripts/build.ts` itself: not unit-tested to 100% (it's tooling, not `src/`, per the
+  handoff's own allowance). What I did verify directly, live, with the real script (not
+  mocked): a clean build (`bun scripts/build.ts`) produces a working binary whose `--version`
+  prints a real 40-char git sha and `dirty` (since this worktree has uncommitted changes at
+  build time); a `--release-tag v0.1.0` build stamps the tag into the same binary's
+  `--version` output; a `--release-tag 0.1.0` (no leading "v") build exits 2 with a clear
+  error and does not produce a binary; a raw `bun build ./src/cli.ts --compile` (bypassing the
+  script entirely) produces a binary whose `--version` correctly prints `unstamped` rather
+  than crashing or lying about build identity.
+
+**Gates:** `bun run typecheck`/`bun run lint`/`bun run test:coverage` all green — 741 tests,
+99.96%/100% funcs/lines aggregate (the one func-coverage shortfall is `src/cli.ts`'s
+pre-existing, previously-documented `if (import.meta.main)` process-entry gap from round 1,
+unrelated to this round's changes — confirmed by checking the coverage tool's own
+per-file breakdown, `src/cli.ts` is the only file below 100% funcs and the percentage moved
+in the direction expected by adding one more never-executed-under-test line, not a regression
+introduced this round). `bun run e2e`: sandbox still lacks `tmux`/Chromium (same gap every
+prior round has hit) — 15/19 tests pass; the 4 failures are exactly the tmux-PTY and
+Chromium-launch tests failing for missing-binary reasons, not assertion failures — confirmed
+by reading each failure's own error message (`Executable not found in $PATH: "tmux"`,
+`Failed to launch chromium because executable doesn't exist`).

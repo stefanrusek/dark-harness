@@ -43,7 +43,8 @@
 // bounded amount of tool-calling work forever, which defeats the point of a safety cap.
 
 import { randomUUID } from "node:crypto";
-import type { LogLine, ServerSentEvent } from "../contracts/index.ts";
+import { BUILD_INFO } from "../config/build-info.ts";
+import type { LogLine, ServerSentEvent, SessionClientKind } from "../contracts/index.ts";
 import type {
   ModelProvider,
   ProviderCompletionResult,
@@ -110,6 +111,12 @@ export interface AgentLoopParams {
    * case).
    */
   pricing?: { inputPricePerMToken?: number; outputPricePerMToken?: number };
+  /** Round 8 (ADR 0005 amendment): how the process that owns this session was invoked — see
+   * SessionClientKind's own doc comment in src/contracts/log.ts. Required (not defaulted) so
+   * no call site can silently record a wrong value; threaded from AgentRuntimeOptions.client
+   * via runtime.ts into every runAgentLoop() call (root and every sub-agent alike — a
+   * session's client kind doesn't vary per agent within it). */
+  client: SessionClientKind;
 }
 
 /** Computes a `token_usage` event's `costUsd`, or undefined if pricing wasn't configured at
@@ -267,6 +274,8 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     spawnedAt: nowIso(),
     model: params.model,
     instructionsSummary: params.instruction.slice(0, 200),
+    client: params.client,
+    build: BUILD_INFO,
   });
   emitLog(params, {
     version: 1,

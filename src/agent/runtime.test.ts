@@ -16,8 +16,25 @@ import {
   type LogLine,
   type ServerSentEvent,
 } from "../contracts/index.ts";
-import { AgentRuntime, ConfigModelError, ROOT_AGENT_ID, RootNotListeningError } from "./runtime.ts";
+import {
+  AgentRuntime,
+  type AgentRuntimeOptions,
+  ConfigModelError,
+  ROOT_AGENT_ID,
+  RootNotListeningError,
+} from "./runtime.ts";
 import { bashTool } from "./tools/bash.ts";
+
+/** Round 8: `AgentRuntimeOptions.client` is required (no default) so no real call site can
+ * silently record a wrong value in a log header — but nearly every test in this suite
+ * predates that field and doesn't care which value it takes. This helper defaults it to
+ * `"none"` (the standalone/no-client value) so existing fixtures don't need to repeat it at
+ * every call site; tests that specifically care about `client` still override it. */
+function newAgentRuntime(
+  options: Omit<AgentRuntimeOptions, "client"> & Partial<Pick<AgentRuntimeOptions, "client">>,
+) {
+  return new AgentRuntime({ client: "none", ...options });
+}
 
 /** A minimal Anthropic Messages API-shaped mock server. Decides its response from the last
  * message's content, independent of call ordering, so it stays correct under the
@@ -170,7 +187,7 @@ function collectors() {
 describe("AgentRuntime", () => {
   test("runRoot runs the default model end-to-end against the mock provider", async () => {
     const { events, logLines, loggedAgentIds, onEvent, onLogLine } = collectors();
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "you are a test agent",
       onEvent,
@@ -181,6 +198,13 @@ describe("AgentRuntime", () => {
     expect(result.finalOutput).toBe("root done");
     expect(events.some((e) => e.type === "agent_spawned" && e.agentId === "agent-root")).toBe(true);
     expect(logLines[0]?.type).toBe("header");
+    // Round 8 (ADR 0005 amendment): the header carries client (threaded from
+    // AgentRuntimeOptions.client, defaulted to "none" by this suite's helper) and build
+    // (the process-wide BUILD_INFO constant — version is always present even unstamped).
+    if (logLines[0]?.type === "header") {
+      expect(logLines[0].client).toBe("none");
+      expect(logLines[0].build.version.length).toBeGreaterThan(0);
+    }
     // onLogLine's agentId param (a Round 2 addition) is threaded correctly for the root.
     expect(loggedAgentIds.every((id) => id === ROOT_AGENT_ID)).toBe(true);
     expect(loggedAgentIds.length).toBeGreaterThan(0);
@@ -192,7 +216,7 @@ describe("AgentRuntime", () => {
 
   test("runRoot emits session_ended with TaskFailure when the root agent self-reports failure", async () => {
     const { events, onEvent } = collectors();
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp", onEvent });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onEvent });
     const result = await runtime.runRoot("fail please");
     expect(result.success).toBe(false);
     const sessionEnded = events.find((e) => e.type === "session_ended");
@@ -200,7 +224,7 @@ describe("AgentRuntime", () => {
   });
 
   test("runRoot accepts an explicit model name overriding options.defaultModel", async () => {
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig({
         models: [
           { name: "test-model", provider: "mock", model: "mock-1" },
@@ -214,7 +238,7 @@ describe("AgentRuntime", () => {
   });
 
   test("runRoot works without onEvent/onLogLine callbacks", async () => {
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "you are a test agent",
     });
@@ -223,14 +247,14 @@ describe("AgentRuntime", () => {
   });
 
   test("sessionId defaults to a generated id when not provided", () => {
-    const a = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
-    const b = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const a = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const b = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     expect(a.sessionId).not.toBe(b.sessionId);
     expect(a.sessionId.length).toBeGreaterThan(0);
   });
 
   test("sessionId honors an explicit override", () => {
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "sp",
       sessionId: "session-fixed",
@@ -239,7 +263,7 @@ describe("AgentRuntime", () => {
   });
 
   test("spawnAgent starts a task that reaches 'done' and carries the sub-agent's output", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     const taskId = runtime.spawnAgent("agent-root", {
       model: "test-model",
       prompt: "child instruction",
@@ -252,7 +276,7 @@ describe("AgentRuntime", () => {
 
   test("spawnAgent surfaces a sub-agent's self-reported TASK_FAILED as a failed task", async () => {
     const { onEvent, onLogLine } = collectors();
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "sp",
       onEvent,
@@ -267,7 +291,7 @@ describe("AgentRuntime", () => {
 
   test("spawnAgent's returned task id IS the sub-agent's own SSE/log agentId (unified identifier space)", async () => {
     const { events, loggedAgentIds, onEvent, onLogLine } = collectors();
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "sp",
       onEvent,
@@ -287,14 +311,14 @@ describe("AgentRuntime", () => {
   });
 
   test("spawnAgent throws ConfigModelError for an unknown model name", () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     expect(() => runtime.spawnAgent("agent-root", { model: "nope", prompt: "x" })).toThrow(
       ConfigModelError,
     );
   });
 
   test("runRoot rejects when the resolved model references an unknown provider", async () => {
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig({
         provider: [{ name: "someone-else", type: "anthropic" }],
       }),
@@ -304,7 +328,7 @@ describe("AgentRuntime", () => {
   });
 
   test("providerFor caches and reuses the same provider instance across calls", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     const first = await runtime.runRoot("please just answer");
     const second = await runtime.runRoot("please just answer");
     expect(first.success).toBe(true);
@@ -312,13 +336,13 @@ describe("AgentRuntime", () => {
   });
 
   test("buildToolContext wires spawnAgent so the Agent tool can block on a sub-agent", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     const result = await runtime.runRoot("use-agent-tool");
     expect(result.success).toBe(true);
   });
 
   test("buildToolContext wires loadSkill so the Skill tool can look it up", async () => {
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig({ skillPaths: ["/nonexistent"] }),
       systemPrompt: "sp",
     });
@@ -329,7 +353,7 @@ describe("AgentRuntime", () => {
   });
 
   test("buildToolContext wires searchDeferredTools so the ToolSearch tool can query it", async () => {
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig({ mcpServers: { docs: { url: "https://example.com" } } }),
       systemPrompt: "sp",
     });
@@ -339,7 +363,7 @@ describe("AgentRuntime", () => {
 
   test("buildToolContext defaults cwd to process.cwd() when not overridden", async () => {
     const { logLines, onLogLine } = collectors();
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
     const result = await runtime.runRoot("use-bash-pwd");
     expect(result.success).toBe(true);
     const toolResult = logLines.find((l) => l.type === "tool_result");
@@ -349,7 +373,7 @@ describe("AgentRuntime", () => {
 
   test("buildToolContext honors an explicit cwd override", async () => {
     const { logLines, onLogLine } = collectors();
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "sp",
       cwd: "/tmp",
@@ -365,7 +389,7 @@ describe("AgentRuntime", () => {
   });
 
   test("an explicit tools option restricts the tool map away from ALL_TOOLS", async () => {
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "sp",
       tools: [bashTool],
@@ -377,7 +401,7 @@ describe("AgentRuntime", () => {
 
 describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 2)", () => {
   test("rootHasStarted is false before runRoot() and true after", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     expect(runtime.rootHasStarted).toBe(false);
     await runtime.runRoot("please just answer");
     expect(runtime.rootHasStarted).toBe(true);
@@ -388,7 +412,7 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
     // empty tree pre-start makes the root unreachable by Server's own send_message
     // validation (src/server/commands.ts's findAgent check runs before AgentLoopHandle.
     // sendMessage() is ever called) — see runtime.ts's rootStatus field doc comment.
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     expect(runtime.getAgentTree()).toEqual([
       {
         agentId: ROOT_AGENT_ID,
@@ -401,7 +425,7 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
   });
 
   test("getAgentTree() returns a lone root node once runRoot() completes, with no sub-agents", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     await runtime.runRoot("please just answer");
     const tree = runtime.getAgentTree();
     expect(tree).toEqual([
@@ -416,13 +440,13 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
   });
 
   test("getAgentTree() reflects 'failed' root status after a self-reported failure", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     await runtime.runRoot("fail please");
     expect(runtime.getAgentTree()[0]?.status).toBe("failed");
   });
 
   test("getAgentTree() nests agent-kind sub-agents under their parent, excluding bash-kind tasks", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     // A bash-kind task, spawned directly against the registry (as the Bash tool would for a
     // run_in_background call) — must NOT appear in the tree (Round 2 judgment call: the
     // tree is agent-kind only).
@@ -461,7 +485,7 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
   });
 
   test("sendMessageToRoot throws RootNotListeningError before the root agent has started", () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     expect(() => runtime.sendMessageToRoot("hi")).toThrow(RootNotListeningError);
   });
 
@@ -498,7 +522,7 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
     });
 
     try {
-      const runtime = new AgentRuntime({
+      const runtime = newAgentRuntime({
         config: baseConfig({
           provider: [
             {
@@ -564,7 +588,7 @@ describe("AgentRuntime.stopRoot / spawnAgent signal threading (Round 3: real can
         ],
       };
       const { events, onEvent } = collectors();
-      const runtime = new AgentRuntime({ config, systemPrompt: "sp", onEvent });
+      const runtime = newAgentRuntime({ config, systemPrompt: "sp", onEvent });
       const rootPromise = runtime.runRoot("go");
       // Give the fetch a moment to actually be in flight before stopping it.
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -581,12 +605,12 @@ describe("AgentRuntime.stopRoot / spawnAgent signal threading (Round 3: real can
   });
 
   test("stopRoot() before runRoot() has ever been called is a safe no-op", () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     expect(() => runtime.stopRoot()).not.toThrow();
   });
 
   test("stopRoot() after the root has already finished is a safe no-op", async () => {
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     await runtime.runRoot("please just answer");
     expect(() => runtime.stopRoot()).not.toThrow();
   });
@@ -606,7 +630,7 @@ describe("AgentRuntime.stopRoot / spawnAgent signal threading (Round 3: real can
           },
         ],
       };
-      const runtime = new AgentRuntime({ config, systemPrompt: "sp" });
+      const runtime = newAgentRuntime({ config, systemPrompt: "sp" });
       const taskId = runtime.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "go" });
       await new Promise((resolve) => setTimeout(resolve, 20));
       runtime.tasks.stop(taskId);
@@ -651,7 +675,7 @@ describe("AgentRuntime.runRoot — Round 4: rootStatus/getAgentTree must not get
   test("runRoot() rejects, but rootStatus/getAgentTree() report 'failed' immediately afterward — not stuck 'running'", async () => {
     const server = startUnauthorizedServer();
     try {
-      const runtime = new AgentRuntime({ config: crashingConfig(server), systemPrompt: "sp" });
+      const runtime = newAgentRuntime({ config: crashingConfig(server), systemPrompt: "sp" });
       await expect(runtime.runRoot("go")).rejects.toThrow();
       // The actual regression check: polled *after* the throw has already been handled by
       // the caller (this test), exactly like a fresh request_agent_tree from a client that
@@ -667,7 +691,7 @@ describe("AgentRuntime.runRoot — Round 4: rootStatus/getAgentTree must not get
     const server = startUnauthorizedServer();
     try {
       const events: ServerSentEvent[] = [];
-      const runtime = new AgentRuntime({
+      const runtime = newAgentRuntime({
         config: crashingConfig(server),
         systemPrompt: "sp",
         onEvent: (e) => events.push(e),
@@ -686,7 +710,7 @@ describe("AgentRuntime.runRoot — Round 4: rootStatus/getAgentTree must not get
   test("polling getAgentTree() repeatedly after a crash never reports 'running' again (no delayed/stale update)", async () => {
     const server = startUnauthorizedServer();
     try {
-      const runtime = new AgentRuntime({ config: crashingConfig(server), systemPrompt: "sp" });
+      const runtime = newAgentRuntime({ config: crashingConfig(server), systemPrompt: "sp" });
       await expect(runtime.runRoot("go")).rejects.toThrow();
       // Mirrors the coordinator's manual repro: poll several times with real delays between
       // calls, the way an operator's client actually would, rather than checking once.
@@ -757,7 +781,7 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
     const server = startAccumulatingEchoServer();
     try {
       const events: ServerSentEvent[] = [];
-      const runtime = new AgentRuntime({
+      const runtime = newAgentRuntime({
         config: interactiveConfig(server),
         systemPrompt: "sp",
         interactive: true,
@@ -828,7 +852,7 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
   test("a sub-agent spawned from an interactive root still reaches 'done' on its first non-tool-use turn (not stuck 'waiting' forever)", async () => {
     const server = startAccumulatingEchoServer();
     try {
-      const runtime = new AgentRuntime({
+      const runtime = newAgentRuntime({
         config: interactiveConfig(server),
         systemPrompt: "sp",
         interactive: true,
@@ -853,7 +877,7 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
 
   test("SendMessage can still steer a still-running (tool-using) sub-agent under an interactive root, even though it now terminates instead of waiting", async () => {
     const { onLogLine, logLines } = collectors();
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "sp",
       interactive: true,
@@ -893,7 +917,7 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
 
   test("the Agent tool's blocking mode (run_in_background: false) actually resolves for a sub-agent spawned from an interactive root", async () => {
     const events: ServerSentEvent[] = [];
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig(),
       systemPrompt: "sp",
       interactive: true,
@@ -928,7 +952,7 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
 describe("AgentRuntime — Round 6b/6c: config-driven cost pricing and maxTurns", () => {
   test("options.maxTurns from config actually changes when the loop's safety valve fires", async () => {
     const { onEvent, onLogLine, events, logLines } = collectors();
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig({ options: { defaultModel: "test-model", maxTurns: 2 } }),
       systemPrompt: "sp",
       onEvent,
@@ -946,7 +970,7 @@ describe("AgentRuntime — Round 6b/6c: config-driven cost pricing and maxTurns"
 
   test("a configured model price produces a real (non-zero) costUsd on token_usage events", async () => {
     const { onEvent, events } = collectors();
-    const runtime = new AgentRuntime({
+    const runtime = newAgentRuntime({
       config: baseConfig({
         models: [
           {
@@ -971,7 +995,7 @@ describe("AgentRuntime — Round 6b/6c: config-driven cost pricing and maxTurns"
 
   test("an unconfigured model's token_usage events still have costUsd undefined (no regression)", async () => {
     const { onEvent, events } = collectors();
-    const runtime = new AgentRuntime({ config: baseConfig(), systemPrompt: "sp", onEvent });
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onEvent });
     await runtime.runRoot("please just answer");
     const usageEvent = events.find((e) => e.type === "token_usage");
     expect(usageEvent?.type).toBe("token_usage");

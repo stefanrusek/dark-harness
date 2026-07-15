@@ -30,6 +30,8 @@ describe("SessionLogger", () => {
       spawnedAt: "2026-07-15T00:00:00.000Z",
       model: "sonnet",
       instructionsSummary: "do the thing",
+      client: "none",
+      build: { version: "0.0.0", gitSha: null, dirty: false, releaseTag: null },
     };
     logger.append("a1", header);
     expect(readFileSync(logger.filePathFor("a1"), "utf8")).toBe(`${JSON.stringify(header)}\n`);
@@ -46,6 +48,8 @@ describe("SessionLogger", () => {
       spawnedAt: "2026-07-15T00:00:00.000Z",
       model: "sonnet",
       instructionsSummary: "do the thing",
+      client: "none",
+      build: { version: "0.0.0", gitSha: null, dirty: false, releaseTag: null },
     };
     const message: LogMessageEvent = {
       version: 1,

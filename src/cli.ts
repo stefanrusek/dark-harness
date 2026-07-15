@@ -12,8 +12,15 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { AgentRuntime, ROOT_AGENT_ID } from "./agent/runtime.ts";
+import { BUILD_INFO } from "./config/build-info.ts";
 import { ConfigError, DEFAULT_CONFIG_PATH, loadConfig } from "./config/index.ts";
-import type { AgentTreeNode, DhConfig, ExitCode as ExitCodeType } from "./contracts/index.ts";
+import type {
+  AgentTreeNode,
+  BuildInfo,
+  DhConfig,
+  ExitCode as ExitCodeType,
+  SessionClientKind,
+} from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
 import {
   type AgentLoopEventListener,
@@ -78,9 +85,20 @@ Flags:
   --env <file>             Load dotenv-style environment variables from <file> before dh.json
                            is loaded, so its $(VAR) interpolation can see them.
   --help, -h               Show this help and exit.
+  --version                Show build identity (version, git sha, dirty flag) and exit.
 
 Config: dh.json in the working directory (or --config <path>). See README.md for the schema.
 `;
+
+/** Round 8: same motivation as the whole round — "which build produced this?" shouldn't
+ * require digging through a log directory. Format: `dh <version> (<sha|unstamped>[
+ * dirty][, <releaseTag>])`. */
+export function formatVersionString(build: BuildInfo): string {
+  let inner = build.gitSha ?? "unstamped";
+  if (build.dirty) inner += " dirty";
+  if (build.releaseTag) inner += `, ${build.releaseTag}`;
+  return `dh ${build.version} (${inner})`;
+}
 
 /** Parses argv (excluding the `bun`/script prefix — pass `process.argv.slice(2)`). Throws
  * CliUsageError on anything malformed; never exits or prints — that's main()'s job. */
@@ -238,10 +256,11 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
   private readonly eventListeners = new Set<AgentLoopEventListener>();
   private readonly logListeners = new Set<AgentLoopLogListener>();
 
-  constructor(options: { config: DhConfig; systemPrompt: string }) {
+  constructor(options: { config: DhConfig; systemPrompt: string; client: SessionClientKind }) {
     this.runtime = new AgentRuntime({
       config: options.config,
       systemPrompt: options.systemPrompt,
+      client: options.client,
       // Round 5 (docs/handoffs/core.md status log): every interactive session — server/TUI/
       // Web, root and sub-agents alike — pauses instead of ending on a non-tool-use turn.
       // The standalone `--instructions`/`--job` path (defaultDeps().createRuntime) never sets
@@ -335,9 +354,17 @@ export interface CliDeps {
   loadSystemPrompt: (config: DhConfig) => Promise<string>;
   /** Used only by the standalone `--instructions` path (see the module doc comment above
    * for why that path never goes through createAgentLoop/createServer). */
-  createRuntime: (config: DhConfig, systemPrompt: string) => Pick<AgentRuntime, "runRoot">;
+  createRuntime: (
+    config: DhConfig,
+    systemPrompt: string,
+    client: SessionClientKind,
+  ) => Pick<AgentRuntime, "runRoot">;
   /** Used by every interactive mode (server/local/connect). */
-  createAgentLoop: (config: DhConfig, systemPrompt: string) => AgentLoopHandle;
+  createAgentLoop: (
+    config: DhConfig,
+    systemPrompt: string,
+    client: SessionClientKind,
+  ) => AgentLoopHandle;
   createServer: (options: DhServerOptions) => DhServerLike;
   startTui: (baseUrl: string, token?: string) => Promise<void>;
   serveWebUi: (options: {
@@ -367,6 +394,9 @@ function createStandaloneRuntime(config: DhConfig, systemPrompt: string): AgentR
     config,
     systemPrompt,
     sessionId,
+    // The standalone `--instructions`/`--job` dark-factory path has no interactive
+    // TUI/Web/server client attached — "none" per SessionClientKind's own doc comment.
+    client: "none",
     onLogLine: (agentId, line) => logger.append(agentId, line),
   });
 }
@@ -378,9 +408,12 @@ function defaultDeps(): CliDeps {
     readEnvFile,
     applyEnv: (vars) => Object.assign(process.env, vars),
     loadSystemPrompt,
+    // The standalone path's own runtime is always constructed with client: "none" directly
+    // inside createStandaloneRuntime() (it's not one of the four interactive modes this
+    // `client` param maps from), so the value passed here is intentionally unused.
     createRuntime: (config, systemPrompt) => createStandaloneRuntime(config, systemPrompt),
-    createAgentLoop: (config, systemPrompt) =>
-      new AgentRuntimeLoopAdapter({ config, systemPrompt }),
+    createAgentLoop: (config, systemPrompt, client) =>
+      new AgentRuntimeLoopAdapter({ config, systemPrompt, client }),
     createServer: (options) => new DhServer(options),
     startTui: (baseUrl, token) => startTuiClient(baseUrl, token),
     serveWebUi: (options) => serveWebUiClient(options),
@@ -444,8 +477,13 @@ async function runInteractiveMode(
       return ExitCode.Success;
     }
 
-    // mode.kind is "local" or "server" — both start a real local DhServer.
-    const agentLoop = deps.createAgentLoop(config, systemPrompt);
+    // mode.kind is "local" or "server" — both start a real local DhServer. Round 8: maps
+    // the run mode to the SessionClientKind stamped into every agent's log header this
+    // process writes — `--server` is headless ("server"); local mode is "web" or "tui"
+    // depending on which client attaches to the DhServer this process also starts.
+    const clientKind: SessionClientKind =
+      mode.kind === "server" ? "server" : mode.web ? "web" : "tui";
+    const agentLoop = deps.createAgentLoop(config, systemPrompt, clientKind);
     const sessionId = randomUUID();
     const logDir = join(process.cwd(), ".dh-logs", sessionId);
     const server = deps.createServer({
@@ -492,6 +530,12 @@ export async function main(
 
   if (argv.includes("--help") || argv.includes("-h")) {
     io.stdout(HELP_TEXT);
+    io.exit(ExitCode.Success);
+    return ExitCode.Success;
+  }
+
+  if (argv.includes("--version")) {
+    io.stdout(formatVersionString(BUILD_INFO));
     io.exit(ExitCode.Success);
     return ExitCode.Success;
   }
@@ -554,7 +598,7 @@ export async function main(
     return fail(io, (err as Error).message);
   }
 
-  const runtime = deps.createRuntime(config, systemPrompt);
+  const runtime = deps.createRuntime(config, systemPrompt, "none");
 
   let result: { success: boolean; finalOutput: string };
   try {
