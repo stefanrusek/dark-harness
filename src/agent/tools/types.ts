@@ -46,6 +46,10 @@ export interface ToolContext {
      * tool's optional `description` param, threaded through to TaskSnapshot/Monitor/the
      * agent tree/the JSONL log header. */
     description?: string;
+    /** DH-0077: when "worktree", the spawned sub-agent's cwd is a freshly created git
+     * worktree (see runtime.ts's spawnAgent()/worktree.ts) instead of inheriting the
+     * spawning agent's own cwd. */
+    isolation?: "worktree";
   }): string;
   /** Skill lookup: scans config.skillPaths for `<name>/SKILL.md`. */
   loadSkill(name: string): Promise<{ name: string; path: string; content: string } | null>;

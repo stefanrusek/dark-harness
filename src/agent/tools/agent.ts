@@ -48,6 +48,18 @@ export const agentTool: Tool = {
           "— the harness never derives a name from the prompt itself, so this is required.",
       },
       run_in_background: { type: "boolean" },
+      isolation: {
+        type: "string",
+        enum: ["worktree"],
+        description:
+          "When set to 'worktree', the sub-agent runs in a freshly created git worktree " +
+          "(its own branch) instead of the parent's working tree/cwd — use for risky or " +
+          "experimental file edits that shouldn't collide with the parent's or siblings' " +
+          "in-progress changes. Requires the parent's cwd to be inside a git repository. " +
+          "The worktree is cleaned up automatically if it ends up with no changes; if it " +
+          "does have changes, the worktree path and branch are reported back in the " +
+          "sub-agent's result for the dispatching agent to review/merge.",
+      },
     },
     required: ["prompt", "description"],
     additionalProperties: false,
@@ -79,6 +91,18 @@ export const agentTool: Tool = {
     }
     const model = modelResult;
 
+    // DH-0077: optional worktree isolation, mirroring real Claude Code's Agent tool shape.
+    // Validated here (not just left to the schema's `enum`) because schema `enum` is only
+    // advisory to the model, same precedent as the `description` required-check above.
+    const isolationInput = input.isolation;
+    if (isolationInput !== undefined && isolationInput !== "worktree") {
+      return {
+        output: `Agent tool error: unsupported 'isolation' value "${String(isolationInput)}"; only "worktree" is supported.`,
+        isError: true,
+      };
+    }
+    const isolation = isolationInput === "worktree" ? ("worktree" as const) : undefined;
+
     const runInBackground =
       typeof input.run_in_background === "boolean"
         ? input.run_in_background
@@ -96,6 +120,7 @@ export const agentTool: Tool = {
         prompt,
         background: runInBackground,
         description,
+        ...(isolation !== undefined ? { isolation } : {}),
       });
     } catch (err) {
       return {

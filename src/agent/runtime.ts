@@ -25,12 +25,26 @@ import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { ALL_TOOLS, buildToolMap } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
+import {
+  type CreatedWorktree,
+  WorktreeError,
+  createWorktree,
+  hasChanges,
+  isGitRepo,
+  removeWorktree,
+} from "./worktree.ts";
 
 /** The root agent's fixed identifier — used both as the loop's own `agentId` (its SSE
  * events/log lines) and as the "agentId" `AgentLoopHandle`'s wire-facing operations
  * (sendMessage/stopAgent/the tree) address it by, exactly like every sub-agent's task id
  * (see spawnAgent()'s doc comment for why those two id spaces are now unified). */
 export const ROOT_AGENT_ID = "agent-root";
+
+/** DH-0077: default cap on concurrently-live isolation worktrees when `options.
+ * maxConcurrentAgents` is left unset — worktree creation has real disk/git overhead a plain
+ * in-process sub-agent spawn doesn't, so it's never left fully unbounded even when the
+ * general agent-fanout budget is. */
+const DEFAULT_MAX_CONCURRENT_WORKTREES = 4;
 
 export interface AgentRuntimeOptions {
   config: DhConfig;
@@ -203,6 +217,15 @@ export class AgentRuntime {
    * in the runtime. */
   private readonly agentCwd = new Map<string, string>();
   private liveAgentCount = 0;
+  /** DH-0077: agentId -> its isolation worktree, only populated for sub-agents spawned with
+   * `isolation: "worktree"`. Removed once the sub-agent's task settles and cleanup (or
+   * hand-off, if it has changes) has run — see spawnAgent()'s `run` finally block below. */
+  private readonly agentWorktree = new Map<string, CreatedWorktree>();
+  /** DH-0077: separate from `liveAgentCount` — worktree creation has real disk/git overhead
+   * a plain in-process sub-agent spawn doesn't, so it gets its own budget check, tied to the
+   * same `options.maxConcurrentAgents` config knob (falling back to a small built-in default
+   * when that's unset) rather than introducing a new dh.json field for it. */
+  private liveWorktreeCount = 0;
   private budgetTripped = false;
 
   constructor(options: AgentRuntimeOptions) {
@@ -435,7 +458,13 @@ export class AgentRuntime {
    * away instead of working around. */
   spawnAgent(
     parentAgentId: string,
-    params: { model: string; prompt: string; background?: boolean; description?: string },
+    params: {
+      model: string;
+      prompt: string;
+      background?: boolean;
+      description?: string;
+      isolation?: "worktree";
+    },
   ): string {
     // DH-0013: fan-out budget checks — depth first (cheaper, no model/provider resolution
     // needed to reject), then concurrency. Both throw synchronously; the Agent tool
@@ -461,12 +490,57 @@ export class AgentRuntime {
     const provider = this.providerFor(model);
     const agentId = `agent-${randomUUID()}`;
     this.agentDepth.set(agentId, depth);
-    // DH-0070: inherit the spawning agent's own cwd at spawn time — not the runtime's
-    // process-wide `this.cwd` — so a sub-agent spawned from a sub-agent (grandchild) would
-    // inherit its immediate parent's cwd, not the root's, if those ever diverged. Falls back
-    // to `this.cwd` only if the parent somehow has no recorded entry (defensive; every real
-    // parent — root or sub-agent — always has one by the time it can spawn anything).
-    this.agentCwd.set(agentId, this.agentCwd.get(parentAgentId) ?? this.cwd);
+
+    // DH-0077: worktree isolation requested — validated (and, if valid, actually created)
+    // synchronously here, so a bad request (not a git repo, budget exceeded, git failure)
+    // refuses synchronously exactly like the depth/concurrency checks above, rather than
+    // silently no-oping or only failing once the sub-agent's task starts running.
+    let worktree: CreatedWorktree | undefined;
+    if (params.isolation === "worktree") {
+      const parentCwd = this.agentCwd.get(parentAgentId) ?? this.cwd;
+      if (!isGitRepo(parentCwd)) {
+        this.agentDepth.delete(agentId);
+        throw new Error(
+          `spawn refused: isolation: "worktree" requires the parent agent's cwd (${parentCwd}) to be inside a git repository.`,
+        );
+      }
+      // DH-0077: worktree creation has real disk/git overhead a plain in-process sub-agent
+      // spawn doesn't — capped separately from (but tied to the same knob as)
+      // maxConcurrentAgents, falling back to a small built-in default when unset so this is
+      // never accidentally unbounded.
+      const worktreeCap = maxConcurrentAgents ?? DEFAULT_MAX_CONCURRENT_WORKTREES;
+      if (this.liveWorktreeCount >= worktreeCap) {
+        this.agentDepth.delete(agentId);
+        throw new Error(
+          `spawn refused: ${this.liveWorktreeCount} isolated worktree(s) already live, at ` +
+            `the ${maxConcurrentAgents !== undefined ? "configured options.maxConcurrentAgents" : "default worktree"} ` +
+            `(${worktreeCap}) limit.`,
+        );
+      }
+      try {
+        worktree = createWorktree(parentCwd, agentId);
+      } catch (err) {
+        this.agentDepth.delete(agentId);
+        throw new WorktreeError(
+          `spawn refused: failed to create isolation worktree: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    if (worktree) {
+      // DH-0077: this sub-agent runs against its isolated worktree, not the parent's cwd.
+      this.agentCwd.set(agentId, worktree.path);
+      this.agentWorktree.set(agentId, worktree);
+      this.liveWorktreeCount += 1;
+    } else {
+      // DH-0070: inherit the spawning agent's own cwd at spawn time — not the runtime's
+      // process-wide `this.cwd` — so a sub-agent spawned from a sub-agent (grandchild) would
+      // inherit its immediate parent's cwd, not the root's, if those ever diverged. Falls
+      // back to `this.cwd` only if the parent somehow has no recorded entry (defensive;
+      // every real parent — root or sub-agent — always has one by the time it can spawn
+      // anything).
+      this.agentCwd.set(agentId, this.agentCwd.get(parentAgentId) ?? this.cwd);
+    }
     this.liveAgentCount += 1;
 
     return this.tasks.start({
@@ -550,6 +624,31 @@ export class AgentRuntime {
           }
         } finally {
           this.liveAgentCount -= 1;
+          // DH-0077: settle this sub-agent's isolation worktree, if any — clean it up
+          // automatically when it ends up with no changes, or otherwise leave it in place
+          // and append a note to this sub-agent's own output (surfaced via TaskSnapshot.
+          // output — Monitor/TaskOutput/the Agent tool's blocking result all read it) so the
+          // dispatching agent can review/merge the changes itself. Runs regardless of
+          // whether the loop above succeeded or failed — a failed sub-agent may still have
+          // left useful partial work in its worktree worth surfacing.
+          const worktreeForAgent = this.agentWorktree.get(agentId);
+          if (worktreeForAgent) {
+            this.agentWorktree.delete(agentId);
+            this.liveWorktreeCount -= 1;
+            try {
+              if (hasChanges(worktreeForAgent)) {
+                handle.append(
+                  `\n[isolation worktree] changes retained at ${worktreeForAgent.path} on branch ${worktreeForAgent.branch} — review/merge manually, then remove the worktree/branch yourself when done.`,
+                );
+              } else {
+                removeWorktree(worktreeForAgent);
+              }
+            } catch (err) {
+              handle.append(
+                `\n[isolation worktree] warning: failed to inspect/clean up worktree at ${worktreeForAgent.path} (branch ${worktreeForAgent.branch}): ${(err as Error).message}`,
+              );
+            }
+          }
         }
       },
     });
