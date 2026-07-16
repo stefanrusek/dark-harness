@@ -1580,7 +1580,7 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
   // self-report handling is unaffected by this round — see loop.test.ts and
   // runtime.test.ts's non-interactive-by-default coverage, and cli.test.ts's `--job` tests
   // above using a real createRuntime dep.)
-  test("waitForExitCode resolves TaskFailure through a real DhServer when the operator stops an interactive root mid-conversation", async () => {
+  test("waitForExitCode resolves Success through a real DhServer when the operator stops an interactive root paused 'waiting' for its next message", async () => {
     const mockProvider = startMockAnthropicServer("all good");
     const config: DhConfig = {
       options: { defaultModel: "test-model" },
@@ -1625,7 +1625,9 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ type: "stop_agent", agentId: ROOT_AGENT_ID }),
       });
-      expect(await exitCodePromise).toBe(ExitCode.TaskFailure);
+      // DH-0059: stopping an agent paused "waiting" (idle between turns, not mid-work) is a
+      // graceful end of the conversation, not an interrupted task — exitCode 0, not 1.
+      expect(await exitCodePromise).toBe(ExitCode.Success);
     } finally {
       dhServer.stop();
       mockProvider.stop(true);

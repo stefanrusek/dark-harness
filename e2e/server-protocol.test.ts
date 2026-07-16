@@ -131,7 +131,9 @@ describe("real client <-> server over HTTP/SSE (separate processes)", () => {
     expect(stopRes.status).toBe(200);
 
     const ended = await sse.waitFor((e) => e.type === "session_ended");
-    expect(ended).toMatchObject({ type: "session_ended", exitCode: ExitCode.TaskFailure });
+    // DH-0059: stopping an agent paused "waiting" for its next message is a graceful end of
+    // the conversation, not an interrupted task — exitCode 0, not 1 (ADR 0006 amendment).
+    expect(ended).toMatchObject({ type: "session_ended", exitCode: ExitCode.Success });
   });
 
   test("SSE resume via Last-Event-ID replays buffered events", async () => {
