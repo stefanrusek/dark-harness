@@ -131,3 +131,50 @@ describe("McpManager: throttled lazy reconnect", () => {
     await manager.close();
   });
 });
+
+describe("McpManager: addServers (DH-0091)", () => {
+  test("connects newly-added servers and merges their tools in", async () => {
+    const manager = new McpManager({ good: GOOD_SERVER });
+    await manager.connectAll();
+    expect(manager.listAllTools().tools.filter((t) => t.serverName === "good")).toHaveLength(3);
+
+    await manager.addServers({ alsoGood: GOOD_SERVER });
+    const { tools, unreachable } = manager.listAllTools();
+    expect(unreachable).toEqual([]);
+    expect(tools.filter((t) => t.serverName === "good")).toHaveLength(3);
+    expect(tools.filter((t) => t.serverName === "alsoGood")).toHaveLength(3);
+    await manager.close();
+  });
+
+  test("skips a name that already exists — the existing (e.g. dh.json's own) config wins", async () => {
+    const manager = new McpManager({ shared: BROKEN_SERVER });
+    await manager.connectAll();
+    expect(manager.listAllTools().unreachable).toEqual([
+      { name: "shared", error: expect.any(String) },
+    ]);
+
+    // Adding a "shared" entry pointed at a working server must NOT replace the already-
+    // configured (here: broken) one — the pre-existing name always wins.
+    await manager.addServers({ shared: GOOD_SERVER });
+    expect(manager.listAllTools().unreachable).toEqual([
+      { name: "shared", error: expect.any(String) },
+    ]);
+    await manager.close();
+  });
+
+  test("never throws even when an added server is unreachable", async () => {
+    const manager = new McpManager(undefined);
+    await expect(manager.addServers({ broken: BROKEN_SERVER })).resolves.toBeUndefined();
+    expect(manager.listAllTools().unreachable).toEqual([
+      { name: "broken", error: expect.any(String) },
+    ]);
+    await manager.close();
+  });
+
+  test("addServers({}) is a no-op", async () => {
+    const manager = new McpManager(undefined);
+    await manager.addServers({});
+    expect(manager.listAllTools()).toEqual({ tools: [], unreachable: [] });
+    await manager.close();
+  });
+});

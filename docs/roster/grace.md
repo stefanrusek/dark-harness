@@ -1348,3 +1348,44 @@ to this change. Added the README's "Optional web access" section myself this rou
 enough to fold in rather than hand to Iris — flagged explicitly in the ticket's closing
 note in case she wants to restyle it to match the rest of the doc later). Closed DH-0074 via
 `spile-ops`/`transition.py` (`resolution: done`).
+
+### 2026-07-16 — DH-0091: project `.mcp.json` auto-load
+
+Implemented dh's equivalent of real Claude Code auto-picking up a project's `.mcp.json`.
+New `src/agent/mcp/project-config.ts`: `loadProjectMcpServers(cwd)` reads `<cwd>/.mcp.json`
+(working-directory-root only, no nested/parent search — same DH-0055 scoping precedent the
+ticket calls out), returns `undefined` on a missing file (silent no-op, unchanged behavior),
+and reuses `src/config/validate.ts`'s `validateMcpServers` (now exported) for the
+`mcpServers` key so a `.mcp.json` entry is held to the exact same shape/validation as
+`dh.json`'s own field — no second schema. Throws `ConfigError` on malformed JSON or a
+`mcpServers` shape that fails validation.
+
+Wiring lives in `AgentRuntime`'s constructor (`src/agent/runtime.ts`), alongside the
+existing eager `connectAll()` fire-and-forget call: added `McpManager.addServers()`
+(`src/agent/mcp/manager.ts`) which connects newly-added servers and **skips any name
+already present** — that skip is what gives `dh.json`'s own `mcpServers` entry precedence on
+a collision (dh.json is constructed into the manager first, synchronously, before the async
+`.mcp.json` read resolves). A malformed `.mcp.json` is caught and `console.error`'d, never
+thrown into the constructor — startup must never fail because of a bad project file, same
+"degrade gracefully" contract `connectAll()` already has per server.
+
+Considered a pure `mergeMcpServers()` helper (spread-order merge) for the precedence logic
+but dropped it — `McpManager` was already constructed synchronously from `dh.json`'s
+servers by the time the async `.mcp.json` read resolves, so re-merging into a fresh map
+would mean throwing away and reconstructing already-connecting connections. The "skip
+existing name" check inside `addServers()` is the one place precedence is actually enforced;
+keeping it single-sourced there seemed better than a second helper whose result would need
+to be reconciled with what's already live.
+
+**Gates:** typecheck/lint clean. `bun run test:coverage`: 1557 pass, 0 fail;
+`src/agent/mcp/project-config.ts` and `src/agent/runtime.ts` both 100% lines/funcs;
+`src/agent/mcp/manager.ts` 100% lines (95.83% funcs is pre-existing, unrelated to this
+change). `bun run e2e`: 30 pass, 2 fail — the same pre-existing headless-Chromium-
+unavailable-in-sandbox failures prior rounds have footnoted, unrelated to this change.
+
+Closed DH-0091 (`transition.py DH-0091 closed --resolution done`).
+
+**Worktree note (repeat, still true):** this round's assigned worktree was again branched
+from a stale/empty `origin/main` (no `src/` tree) — had to
+`git merge claude/coordinator-onboarding-kab9ls` (fast-forwarded cleanly) before any real
+source existed to edit. Same flag as prior rounds; worth fixing at the provisioning layer.
