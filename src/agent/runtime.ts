@@ -16,12 +16,14 @@ import {
   type SessionClientKind,
 } from "../contracts/index.ts";
 import { runAgentLoop } from "./loop.ts";
-import { searchConfiguredMcpTools } from "./mcp.ts";
+import { McpManager } from "./mcp/manager.ts";
+import { buildMcpTools } from "./mcp/tools.ts";
 import { createProvider } from "./providers/index.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
 import { loadSkillFromPaths } from "./skills.ts";
 import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { ALL_TOOLS, buildToolMap } from "./tools/index.ts";
+import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
 /** The root agent's fixed identifier — used both as the loop's own `agentId` (its SSE
@@ -140,6 +142,12 @@ export class AgentRuntime {
   private readonly systemPrompt: string;
   private readonly cwd: string;
   private readonly toolMap: Map<string, Tool>;
+  /** DH-0002: one shared McpManager per runtime (per process), constructed from
+   * `config.mcpServers` and connected eagerly, in parallel, at construction time — see the
+   * constructor body. Its discovered tools are merged into `toolMap` in place as each
+   * server's connect+discovery cycle resolves; `loop.ts`'s per-turn `toolDefs` read makes
+   * newly-added entries visible without any further plumbing. */
+  private readonly mcpManager: McpManager;
   private readonly providers = new Map<string, ModelProvider>();
   private readonly onEvent: ((event: ServerSentEvent) => void) | undefined;
   private readonly onLogLine: ((agentId: string, line: LogLine) => void) | undefined;
@@ -192,6 +200,13 @@ export class AgentRuntime {
     this.cwd = options.cwd ?? process.cwd();
     this.sessionId = options.sessionId ?? randomUUID();
     this.toolMap = buildToolMap(options.tools ?? ALL_TOOLS);
+    // DH-0002: constructed and connected here, not lazily on first ToolSearch call — eager
+    // connection keeps ToolSearch fast and surfaces misconfigured servers in the startup
+    // logs. connectAll() never throws/rejects (every per-server failure is caught inside
+    // McpConnection itself), so this fire-and-forget `.then()` is safe: it never produces an
+    // unhandled rejection, and startup never blocks on or fails because of it.
+    this.mcpManager = new McpManager(this.config.mcpServers);
+    void this.mcpManager.connectAll().then(() => this.mergeMcpTools());
     this.onEvent = options.onEvent;
     this.onLogLine = options.onLogLine;
     this.interactive = options.interactive ?? false;
@@ -307,6 +322,9 @@ export class AgentRuntime {
   }
 
   private buildToolContext(agentId: string): ToolContext {
+    // DH-0002: fresh per agent lifetime (declared here, closed over by both the returned
+    // object's own field and the searchDeferredTools closure below).
+    const activatedTools = new Set<string>();
     return {
       cwd: this.cwd,
       runInBackgroundDefault: this.config.options.runInBackgroundDefault ?? true,
@@ -315,12 +333,73 @@ export class AgentRuntime {
       tasks: this.tasks,
       spawnAgent: (params: { model: string; prompt: string }) => this.spawnAgent(agentId, params),
       loadSkill: (name: string) => loadSkillFromPaths(name, this.config.skillPaths ?? []),
-      searchDeferredTools: (query: string) =>
-        searchConfiguredMcpTools(this.config.mcpServers, query),
+      searchDeferredTools: async (query: string, searchOptions?: { maxResults?: number }) => {
+        // DH-0002 §6 lazy retry: any corpus-touching ToolSearch call gives every currently-
+        // failed MCP server one throttled (>=60s since its last attempt) reconnect attempt
+        // before the search runs, so a server that's recovered becomes visible again without
+        // waiting for the next runtime restart. Never throws (McpManager.
+        // reconnectFailedServers() swallows per-server errors internally).
+        await this.mcpManager.reconnectFailedServers();
+        this.mergeMcpTools();
+
+        const { tools: mcpTools, unreachable } = this.mcpManager.listAllTools();
+        const corpus = [
+          ...[...this.toolMap.values()]
+            .filter((t) => !t.deferred)
+            .map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+          ...mcpTools.map((t) => ({
+            name: `mcp__${t.serverName}__${t.name}`,
+            description: t.description,
+            inputSchema: {
+              type: "object" as const,
+              properties: (t.inputSchema.properties as Record<string, unknown>) ?? {},
+              ...(t.inputSchema.required ? { required: t.inputSchema.required } : {}),
+              ...(t.inputSchema.additionalProperties !== undefined
+                ? { additionalProperties: t.inputSchema.additionalProperties }
+                : {}),
+            },
+            deferred: true,
+            serverName: t.serverName,
+          })),
+        ];
+
+        const { results, notFound } = runToolSearch(corpus, query, searchOptions?.maxResults);
+        for (const result of results) {
+          if (result.deferred) activatedTools.add(result.name);
+        }
+
+        return {
+          results,
+          ...(notFound ? { notFound } : {}),
+          ...(unreachable.length > 0 ? { unreachableServers: unreachable } : {}),
+        };
+      },
       // Round 13 (docs/handoffs/core.md): fresh per agent lifetime, matching this
       // ToolContext's own lifetime — see readRegistry's doc comment in tools/types.ts.
       readRegistry: new Map(),
+      // DH-0002: fresh per agent lifetime, same scoping precedent as readRegistry above —
+      // captured by this closure so searchDeferredTools (above) can mutate it directly.
+      activatedTools,
     };
+  }
+
+  /** DH-0002: merges every currently-discovered MCP tool into the shared `toolMap`, in
+   * place, so `loop.ts`'s fresh-per-turn `toolDefs` read (params.tools) picks up tools that
+   * finish connecting after construction with no further plumbing. Idempotent — re-adding an
+   * already-present tool just overwrites it with (functionally identical) fresh state; safe
+   * to call after every reconnect attempt. */
+  private mergeMcpTools(): void {
+    for (const tool of buildMcpTools(this.mcpManager)) {
+      this.toolMap.set(tool.name, tool);
+    }
+  }
+
+  /** DH-0002: closes every MCP connection (terminating stdio children). Coordinates with
+   * cli.ts's existing SIGTERM/SIGINT handling (see `installSignalHandlers` there) rather
+   * than installing a second, independent shutdown mechanism — call this from whatever
+   * shutdown path already exists for the owning process (see cli.ts call sites). */
+  async close(): Promise<void> {
+    await this.mcpManager.close();
   }
 
   /** Spawns a sub-agent as a task; returns immediately with the task id.

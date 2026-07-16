@@ -9,6 +9,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   type AgentTreeNode,
   type DhConfig,
@@ -110,9 +111,39 @@ function startMockAnthropicServer(onRequest?: (body: { model: string }) => void)
             "tool_use",
           );
         }
-        if (text.includes("use-toolsearch")) {
+        if (text.includes("use-toolsearch-select-and-call")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_search_select",
+                name: "ToolSearch",
+                input: { query: "select:mcp__fixture__echo" },
+              },
+            ],
+            "tool_use",
+          );
+        }
+        if (
+          text.includes("use-toolsearch") &&
+          !text.includes("select-and-call") &&
+          !text.includes("unreachable")
+        ) {
           return message(
             [{ type: "tool_use", id: "tu_search", name: "ToolSearch", input: { query: "q" } }],
+            "tool_use",
+          );
+        }
+        if (text.includes("use-toolsearch-unreachable")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_search_unreachable",
+                name: "ToolSearch",
+                input: { query: "anything" },
+              },
+            ],
             "tool_use",
           );
         }
@@ -170,6 +201,26 @@ function startMockAnthropicServer(onRequest?: (body: { model: string }) => void)
           return message([{ type: "text", text: "could not do it TASK_FAILED" }], "end_turn");
         }
         return message([{ type: "text", text: "root done" }], "end_turn");
+      }
+
+      // After ToolSearch's `select:` activation, issue a real call to the now-activated MCP
+      // tool on the very next turn — proving activation + per-turn toolDefs + dispatch all
+      // work end to end, not just that ToolSearch's own output looks right.
+      const toolResultBlock = (
+        content as unknown as Array<{ type: string; tool_use_id?: string }>
+      ).find((c) => c.type === "tool_result");
+      if (toolResultBlock?.tool_use_id === "tu_search_select") {
+        return message(
+          [
+            {
+              type: "tool_use",
+              id: "tu_call_fixture_echo",
+              name: "mcp__fixture__echo",
+              input: { text: "round-trip" },
+            },
+          ],
+          "tool_use",
+        );
       }
 
       return message([{ type: "text", text: "finished after tool" }], "end_turn");
@@ -432,6 +483,71 @@ describe("AgentRuntime", () => {
     });
     const result = await runtime.runRoot("use-toolsearch");
     expect(result.success).toBe(true);
+  });
+
+  test("DH-0002: select: activates a real MCP tool discovered from a configured stdio " +
+    "server, and the very next turn can call it and get real output back", async () => {
+    const { logLines, onLogLine } = collectors();
+    const fixturePath = fileURLToPath(
+      new URL("./mcp/__fixtures__/fake-stdio-server.ts", import.meta.url),
+    );
+    const runtime = newAgentRuntime({
+      config: baseConfig({
+        mcpServers: { fixture: { command: process.execPath, args: ["run", fixturePath] } },
+      }),
+      systemPrompt: "sp",
+      onLogLine,
+    });
+    // Give the runtime's eager, fire-and-forget connectAll() a beat to finish so the first
+    // ToolSearch call's own corpus-touching reconnect isn't racing it (DH-0002 §3/§6) —
+    // exercised deliberately unawaited elsewhere; this test cares about the steady state.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const result = await runtime.runRoot("use-toolsearch-select-and-call");
+    expect(result.success).toBe(true);
+
+    const toolResults = logLines.filter((l) => l.type === "tool_result");
+    const searchResult = toolResults.find(
+      (l) => l.type === "tool_result" && l.toolUseId === "tu_search_select",
+    );
+    expect(
+      searchResult && searchResult.type === "tool_result" ? searchResult.output : "",
+    ).toContain("mcp__fixture__echo");
+    const echoResult = toolResults.find(
+      (l) => l.type === "tool_result" && l.toolUseId === "tu_call_fixture_echo",
+    );
+    expect(echoResult && echoResult.type === "tool_result" ? echoResult.output : "").toBe(
+      "echo: round-trip",
+    );
+    await runtime.close();
+  });
+
+  test("DH-0002: ToolSearch's footer lists a currently-unreachable configured MCP server", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig({
+        mcpServers: { broken: { command: "/definitely/does/not/exist/mcp-server" } },
+      }),
+      systemPrompt: "sp",
+      onLogLine,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const result = await runtime.runRoot("use-toolsearch-unreachable");
+    expect(result.success).toBe(true);
+    const searchResult = logLines.find(
+      (l) => l.type === "tool_result" && l.toolUseId === "tu_search_unreachable",
+    );
+    const output = searchResult && searchResult.type === "tool_result" ? searchResult.output : "";
+    expect(output).toContain("broken");
+    expect(output).toContain("Unreachable");
+    await runtime.close();
+  });
+
+  test("DH-0002: AgentRuntime.close() closes the shared McpManager (terminates stdio " +
+    "children) without throwing, even with no mcpServers configured", async () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    await expect(runtime.close()).resolves.toBeUndefined();
   });
 
   test("buildToolContext defaults cwd to process.cwd() when not overridden", async () => {
