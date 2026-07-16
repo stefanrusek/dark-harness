@@ -20,6 +20,7 @@ source: tracking/
 | [DH-0051](../DH-0051-no-git-native-artifacts-or-log-replay-tooling.md) | No git-native session artifacts, and no evaluation/replay tooling built on the JSONL logs | deferred (2026-07-15): sweep-sourced, no observed need |
 | [DH-0052](../DH-0052-windows-console-support-unverified.md) | Windows console/TUI support is unverified — no Windows-specific console-mode handling found, and no Windows execution anywhere in CI | deferred, revisit soon (2026-07-15) |
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | deferred (2026-07-15): no observed sustained-outage incident, same as DH-0049 |
+| [DH-0060](../DH-0060-tui-overnight-behavioral-test-agent-tmux-text-screenshot-verification-suite.md) | TUI overnight behavioral test agent: tmux text-screenshot verification suite | status: verifying |
 | [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | status: verifying |
 
 ## Board
@@ -70,12 +71,12 @@ source: tracking/
 | [DH-0035](../DH-0035-first-run-friction-no-init-doctor-dry-run.md) | No `dh init`/`dh doctor`/`--dry-run`, and cold error messages give a first-time operator no path forward | feature | stefan |
 | [DH-0037](../DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md) | No log rotation/disk-growth caps, no structured final run-summary artifact, and no log-analysis tooling | feature | stefan |
 | [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
-| [DH-0060](../DH-0060-tui-overnight-behavioral-test-agent-tmux-text-screenshot-verification-suite.md) | TUI overnight behavioral test agent: tmux text-screenshot verification suite | feature | stefan |
 
 ### verifying
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
+| [DH-0060](../DH-0060-tui-overnight-behavioral-test-agent-tmux-text-screenshot-verification-suite.md) | TUI overnight behavioral test agent: tmux text-screenshot verification suite | feature | stefan |
 | [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | feature | stefan |
 
 ## Recently Closed

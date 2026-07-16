@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0060
 type: feature
-status: implementing
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
