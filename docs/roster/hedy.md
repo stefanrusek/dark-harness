@@ -343,3 +343,40 @@ Chromium-path gap (pre-existing), 1 pre-existing `security.test.ts` timeout, 2 n
 
 **Open threads:** Web-side DH-0056 coverage (blocked on Susan's round landing); the
 SSE-reconnect regression (Server/TUI cross-domain question, not e2e's to fix).
+
+### 2026-07-15 — Round 10 (fresh process again): DH-0059 e2e-trigger update, closed the ticket
+
+Came online fresh for the e2e half of DH-0059 (Core+TUI's Ctrl+C-stops-the-agent-when-
+this-process-owns-the-server fix had already landed). Same worktree-provenance issue as
+prior rounds — landed on a stale branch tip (`12679e4`, founding-docs only); confirmed via
+`git merge-base --is-ancestor` that the worktree branch had zero unique commits before
+`git reset --hard` onto `claude/coordinator-onboarding-kab9ls`'s real tip. Worth another
+prompt-layer fix at some point — every round hits this.
+
+The Round-9 SSE-reconnect regression noted last round is gone: with the real fix landed,
+`e2e/tui.test.ts`'s scenarios no longer hang on the reconnect banner — they now hang for a
+different, expected reason (no test in the suite had ever actually triggered a stop).
+
+**What I fixed, one call site per gap, no assertions loosened:**
+- `e2e/tui.test.ts` local-PTY scenario — added a real `C-c` after the turn completes, wait
+  for `"stopping session"` then `"session ended"`, then confirm the real process exited
+  (not just the rendered string) via new `TmuxSession.isProcessExited()`/`waitForExit()` in
+  `e2e/support/tmux-pty.ts`, checking tmux's `pane_dead` pane flag.
+- `e2e/tui.test.ts` `--connect` scenario — investigated first: Ctrl+C is correctly
+  detach-only there (this process doesn't own the remote server), so instead of sending
+  Ctrl+C the test now POSTs `stop_agent` directly to the remote server's own `/api/commands`
+  and waits for the SSE-forwarded `"session ended"` text to render in the connected client.
+- `e2e/security.test.ts` bearer-token happy path — now waits for `agent_status: "waiting"`,
+  POSTs an authenticated `stop_agent`, then asserts `session_ended` with `exitCode: 0` —
+  exercising the ADR 0006 amendment's graceful-waiting-stop success path end to end.
+
+**Gates:** `typecheck`/`lint` clean (had to run `biome check --write` on my own two files
+for line-wrapping, nothing else). `test:coverage` 1228/1228, 100% coverage, no `src/`
+touched (baseline, not this round's work). Full `bun run e2e`: 30 pass / 2 fail — both
+failures are the long-standing headless-Chromium-missing-binary gap
+(`web.test.ts`/`connect-web.test.ts`, `/opt/pw-browsers/chromium` absent in this sandbox),
+unrelated to this diff and present before it.
+
+**Closed DH-0059** via spile-ops (`implementing` → `closed`, resolution `done`), added a
+resolution note to the ticket, regenerated the tracker view. No new open threads from this
+round.

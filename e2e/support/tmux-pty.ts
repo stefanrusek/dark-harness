@@ -33,6 +33,12 @@ export interface TmuxSession {
   sendText(text: string): void;
   /** Polls `capture()` until `predicate` matches or `timeoutMs` elapses. */
   waitFor(predicate: (screen: string) => boolean, timeoutMs?: number): Promise<string>;
+  /** True once the wrapped process has actually exited (tmux's pane is dead), as opposed to
+   * merely being off-screen or the tmux session still existing. Used to confirm a real
+   * process exit after a quit/stop sequence, not just a rendered "session ended" string. */
+  isProcessExited(): boolean;
+  /** Polls `isProcessExited()` until it's true or `timeoutMs` elapses. */
+  waitForExit(timeoutMs?: number): Promise<void>;
   kill(): void;
 }
 
@@ -109,6 +115,26 @@ export function startTmuxSession(command: string[], options: TmuxSessionOptions 
           throw new Error(
             `timed out after ${timeoutMs}ms waiting for tmux screen condition. Last screen:\n${screen}`,
           );
+        }
+        await Bun.sleep(150);
+      }
+    },
+    isProcessExited() {
+      // Once the wrapped process exits, tmux marks its pane dead (still capturable, but no
+      // longer running) rather than immediately tearing down the session — check that flag
+      // rather than whether the session itself still exists.
+      const result = run(["tmux", "list-panes", "-t", sessionName, "-F", "#{pane_dead}"]);
+      if (!result.ok) {
+        // The session itself is gone — the process is certainly no longer running.
+        return true;
+      }
+      return result.stdout.trim() === "1";
+    },
+    async waitForExit(timeoutMs = 10_000) {
+      const start = Date.now();
+      while (!this.isProcessExited()) {
+        if (Date.now() - start > timeoutMs) {
+          throw new Error(`timed out after ${timeoutMs}ms waiting for tmux pane process to exit`);
         }
         await Bun.sleep(150);
       }

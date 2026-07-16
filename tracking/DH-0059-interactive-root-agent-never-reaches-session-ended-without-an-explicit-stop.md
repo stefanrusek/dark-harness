@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0059
 type: bug
-status: implementing
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -231,3 +231,25 @@ Constants (TUI-owned, named here so tests can reference intent): `SESSION_ENDED_
 > `e2e/security.test.ts`'s authenticated happy-path test (all currently hang waiting on
 > `session_ended`, which never fires today in local/headless mode either, since quit paths
 > never call `stop_agent`).
+
+> [!NOTE]
+> Resolution (2026-07-15, Hedy/E2E): the e2e-trigger gap above is closed. Fixed all three
+> scenarios by adding the trigger each was missing rather than loosening assertions:
+> - `e2e/tui.test.ts` local-PTY scenario: sends a real `C-c` after the turn completes, waits
+>   for `"stopping session"` then `"session ended"`, then confirms the underlying process
+>   actually exited (added `TmuxSession.isProcessExited()`/`waitForExit()` to
+>   `e2e/support/tmux-pty.ts`, checking tmux's `pane_dead` flag rather than trusting rendered
+>   text alone).
+> - `e2e/tui.test.ts` `--connect` scenario: confirmed Ctrl+C is correctly detach-only here
+>   (not exercised — this process doesn't own the server) and instead ends the remote
+>   session directly via a `stop_agent` POST to the server's own API, then waits for the
+>   SSE-forwarded `"session ended"` text to render in the connected client.
+> - `e2e/security.test.ts` bearer-token happy-path: now waits for `agent_status: "waiting"`,
+>   then POSTs an authenticated `stop_agent`, then asserts `session_ended` with
+>   `exitCode: 0` — exercising the ADR 0006 amendment's graceful-waiting-stop success path.
+>
+> All three genuinely pass now (verified via real compiled binary + real tmux PTY / real
+> HTTP). Full gates: `typecheck`/`lint` clean, `test:coverage` 1228/1228 (no `src/` touched,
+> baseline coverage), full `bun run e2e` 30/32 pass — the only 2 failures are the
+> pre-existing headless-Chromium-missing-binary gap (`web.test.ts`,
+> `connect-web.test.ts`), unrelated to this ticket and unchanged by this fix.

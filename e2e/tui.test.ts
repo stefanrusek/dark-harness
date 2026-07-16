@@ -62,7 +62,15 @@ describe("local TUI (dh, no flags) under a real PTY", () => {
     // (no agent_spawned event has fired yet), so this actually sends and the real turn
     // completes end to end.
     await session.waitFor((screen) => screen.includes("Hello from the fixed TUI!"), 15_000);
+
+    // DH-0059: an interactive root agent parks in "waiting" and never reaches
+    // session_ended on its own — this process owns the server, so Ctrl+C here really does
+    // send stop_agent and wait for the graceful shutdown, not just detach.
+    session.sendKeys("C-c");
+    await session.waitFor((screen) => screen.includes("stopping session"), 5_000);
     await session.waitFor((screen) => screen.includes("session ended"), 15_000);
+    // Confirm the real process actually exited, not just that the TUI rendered the string.
+    await session.waitForExit(5_000);
   }, 30_000);
 });
 
@@ -106,6 +114,20 @@ describe("--connect: a real second dh process against a real dh --server", () =>
     expect(postRes.status).toBe(200);
 
     await session.waitFor((screen) => screen.includes("Hello from the remote server!"), 15_000);
+
+    // DH-0059: in --connect mode this process does NOT own the server, so Ctrl+C is
+    // detach-only — it must NOT send stop_agent to the remote agent. The remote root agent
+    // parks in "waiting" and never reaches session_ended on its own; since this test isn't
+    // the one asserting detach behavior, end the remote session directly via the server's
+    // own API (the same one any real operator could use) so the SSE-forwarded
+    // "session ended" text actually renders in this --connect client before the test ends.
+    const stopRes = await fetch(`http://localhost:${port}/api/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "stop_agent", agentId: "agent-root" }),
+    });
+    expect(stopRes.status).toBe(200);
+
     await session.waitFor((screen) => screen.includes("session ended"), 15_000);
   }, 30_000);
 });
