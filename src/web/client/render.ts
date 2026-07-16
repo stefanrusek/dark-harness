@@ -9,7 +9,9 @@ import {
   formatCostUsd,
   formatElapsed,
   formatExitCode,
+  formatStatusElapsed,
   formatTokenCount,
+  formatTokenLabel,
   shortAgentId,
 } from "./format.ts";
 import { renderMarkdownInto } from "./markdown-dom.ts";
@@ -17,11 +19,16 @@ import {
   type AgentNode,
   type Turn,
   type WebState,
+  agentDepth,
   isRoot,
   orderedAgents,
   selectedAgent,
   sessionTotals,
 } from "./state.ts";
+
+/** Indent step per tree depth (DH-0066: the sidebar was a flat list with no hierarchy at
+ *  all — a fixed per-level indent is the minimal change that makes parent/child legible). */
+const SIDEBAR_INDENT_PX = 16;
 
 export interface AppCallbacks {
   onSelectAgent(agentId: string): void;
@@ -236,6 +243,13 @@ export function renderSidebar(
     if (selected) item.classList.add("selected");
     if (isRoot(state, agent.agentId)) item.classList.add("root");
 
+    // DH-0066: indent by tree depth so the sidebar reads as a hierarchy, not a flat list —
+    // the product's signature "agent tree" (HANDOFF §9) wasn't actually a tree visually.
+    const depth = agentDepth(state, agent.agentId);
+    if (depth > 0) {
+      item.style.paddingLeft = `calc(var(--space-2) + ${depth * SIDEBAR_INDENT_PX}px)`;
+    }
+
     const dot = el(doc, "span", `status-dot status-${style.token}`);
     // DH-0029 (#40): the status dot's only description was a hover-only `title` tooltip —
     // invisible to keyboard/screen-reader users. `aria-label` (plus `aria-hidden` so the
@@ -261,7 +275,9 @@ export function renderSidebar(
     item.appendChild(elapsed);
 
     const tokens = el(doc, "span", "agent-tokens");
-    tokens.textContent = formatTokenCount(agent.inputTokens + agent.outputTokens);
+    // DH-0066: a bare integer next to an elapsed-time label read as a mystery number — the
+    // unit makes it self-explanatory without needing a hover.
+    tokens.textContent = formatTokenLabel(agent.inputTokens + agent.outputTokens);
     item.appendChild(tokens);
 
     item.setAttribute(
@@ -344,7 +360,9 @@ export function renderAgentHeader(
   badge.textContent = style.label;
   title.appendChild(badge);
   const elapsed = el(doc, "span", "status-elapsed");
-  elapsed.textContent = `for ${formatElapsed(now - Date.parse(agent.statusSince))}`;
+  // DH-0066: `formatStatusElapsed` avoids the broken-English "WAITING for just now" — the
+  // "for" prefix only makes sense once there's an actual duration to attach it to.
+  elapsed.textContent = formatStatusElapsed(now - Date.parse(agent.statusSince));
   elapsed.title = `Time since this agent last changed status — helps tell "still thinking" from "stalled" during a long turn`;
   title.appendChild(elapsed);
   container.appendChild(title);
@@ -442,13 +460,60 @@ export function renderTranscript(
 ): TranscriptRenderState {
   container.textContent = "";
   const transcript = agent?.transcript ?? [];
-  for (const turn of transcript) {
-    container.appendChild(buildTurnElement(doc, turn));
+  if (transcript.length === 0) {
+    // DH-0066: a genuinely empty transcript pane (no turns yet) previously rendered as
+    // blank space with no explanation — indistinguishable from "still loading" or a bug.
+    container.appendChild(buildEmptyTranscriptState(doc, agent));
+  } else {
+    for (const turn of transcript) {
+      container.appendChild(buildTurnElement(doc, turn));
+    }
   }
+  maybeAppendThinkingIndicator(doc, container, agent, transcript);
   return {
     turnCount: transcript.length,
     lastTurnTextLength: transcript.at(-1)?.text.length ?? 0,
   };
+}
+
+/** DH-0066: real empty state for an agent that hasn't produced any output yet, instead of
+ *  blank space in the transcript pane. */
+function buildEmptyTranscriptState(doc: Document, agent: AgentNode | null): HTMLElement {
+  const empty = el(doc, "div", "empty-state");
+  empty.textContent = agent
+    ? `No output yet — spawned just now, model ${agent.model || "unknown"}.`
+    : "Waiting for an agent to spawn…";
+  return empty;
+}
+
+/**
+ * DH-0066: a lightweight "thinking" placeholder (pulsing three dots) shown while an agent is
+ * `running` but hasn't opened an assistant turn for its *current* turn yet — the architect
+ * review's liveness spike found nothing at all in the transcript pane during a slow turn
+ * except the header's elapsed timer. `turnOpen` (see state.ts) is exactly "is there an
+ * assistant turn currently accumulating for this running turn," so its absence while
+ * `running` is precisely the gap this fills.
+ */
+function maybeAppendThinkingIndicator(
+  doc: Document,
+  container: HTMLElement,
+  agent: AgentNode | null,
+  transcript: Turn[],
+): void {
+  if (!agent || agent.status !== "running" || agent.turnOpen) return;
+  const lastTurn = transcript.at(-1);
+  if (lastTurn && lastTurn.role === "assistant") return;
+  const thinking = el(doc, "div", "turn turn-assistant turn-thinking");
+  const role = el(doc, "div", "turn-role");
+  role.textContent = turnRoleLabel("assistant");
+  thinking.appendChild(role);
+  const dots = el(doc, "div", "turn-text thinking-dots");
+  dots.setAttribute("aria-label", "Agent is thinking");
+  for (let i = 0; i < 3; i++) {
+    dots.appendChild(el(doc, "span", "thinking-dot"));
+  }
+  thinking.appendChild(dots);
+  container.appendChild(thinking);
 }
 
 /**
@@ -489,10 +554,18 @@ export function appendTranscript(
     }
   }
 
+  // The thinking placeholder's visibility depends on live agent state (status, turnOpen),
+  // not just transcript length — cheapest correct approach is to drop any stale one before
+  // appending new turns (so new turns land before it, not after a stale trailing node) and
+  // decide fresh on every call, mirroring what a full renderTranscript would render.
+  container.querySelector(".turn-thinking")?.remove();
+
   for (let i = rendered.turnCount; i < transcript.length; i++) {
     const turn = transcript[i];
     if (turn) container.appendChild(buildTurnElement(doc, turn));
   }
+
+  maybeAppendThinkingIndicator(doc, container, agent, transcript);
 
   return {
     turnCount: transcript.length,

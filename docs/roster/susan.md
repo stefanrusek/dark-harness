@@ -332,3 +332,51 @@ when absent (root always keeps "root"/"Root agent"). This required a `src/contra
 `src/web/client/state.ts` change too, since Web's tree is built from `AgentSpawnedEvent` SSE
 events, not the `AgentTreeNode` tree-poll path TUI uses — see Grace's roster note on the
 `AgentSpawnedEvent.description` addition. Added coverage in state.test.ts and render.test.ts.
+
+### 2026-07-16 — DH-0066: architect design-review polish pass
+
+First pass on Fable's design review (`tracking/DH-0066-*.md`) — full detail of what
+shipped vs. what's deliberately deferred is in that ticket's Notes section (status log
+entry) now, not just here. This file is the durable judgment-call summary.
+
+**The one bug worth remembering the shape of: consecutive-assistant-turn concatenation.**
+`appendAssistantChunk` used to merge a new `agent_output` chunk into the transcript's last
+turn whenever that turn's `role` was `"assistant"` — but "last turn is assistant" is not
+the same fact as "this turn is still the same, currently-streaming turn." Two genuinely
+separate turns (an agent finishing one turn, then starting a second one later with no user
+message in between) both being `role: "assistant"` meant they silently glued into one
+bubble with no boundary at all — exactly what the review's live capture caught. Fixed by
+adding `AgentNode.turnOpen`, a boolean that's the actual "is there an in-flight assistant
+turn" fact, set on every chunk and cleared the instant `agent_status` reports anything
+other than `"running"`. **Pattern worth reusing:** when a merge/dedup decision is being
+made on "does the last item have property X," ask whether X is really proof of "same
+logical unit" or just an accidental match on a field that recurs — here `role` recurred
+across genuinely distinct turns, so it needed a dedicated boolean for the fact it was being
+used as a stand-in for.
+
+**Judgment call on the prose-font Open Question:** the ticket explicitly framed
+`--font-ui`-for-prose/`--font-mono`-for-code as "the review's recommendation" and called
+the existing all-mono look "an accident of `.turn-text`'s single font-family rule, not a
+recorded design decision" in its own Assumptions section — so I took that as license to
+just implement the recommendation rather than leaving it as a genuinely open owner-taste
+question. If a future round disagrees, it's a small, contained CSS revert.
+
+**Didn't reproduce the "sidebar renders empty while viewing a sub-agent after
+`session_ended`" bug** (`spike-agent-tree.png`) — read `evictCompletedAgents`/
+`seedFromTree` carefully and found no code path that should drop agent rows on session
+end, but this sandbox has no Chromium binary to drive a real repro. Left as an open item on
+the ticket rather than shipping a speculative fix for a bug I couldn't observe — worth
+revisiting with a working browser before assuming it's fixed or assuming it's real.
+
+**Didn't close the ticket.** Genuine scope remains (tool-call chips and the sub-agent
+spawn-prompt-as-opening-turn both need an SSE wire-vocabulary change, which routes through
+architect review per CLAUDE.md §6 — not something a Web-only pass can resolve
+unilaterally; plus the unreproduced sidebar bug above, plus a couple of explicitly
+low-priority "delight" nits). Moved `draft` → `implementing` with a clear status-log split
+of done vs. not, rather than either closing prematurely or leaving it looking untouched.
+
+**Gates:** `bun run typecheck`, `bun run lint`, `bun run test:coverage` — 100% funcs/lines
+on every file touched this round, 1397 tests project-wide. `bun run e2e`: 30/32 (built
+`dist/dh` first, which fixed 1 of the previously-failing tests from a missing binary) — the
+remaining 2 failures are this sandbox's already-documented missing-Chromium-binary gap, not
+a regression; nothing this round touches routes, auth, or the wire protocol.

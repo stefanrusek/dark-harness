@@ -54,6 +54,16 @@ export interface AgentNode {
   costUsd: number;
   spawnOrder: number;
   /**
+   * DH-0066: whether the transcript's last turn is still an "open" assistant turn that a
+   * fresh `agent_output` chunk should extend. Without this, two genuinely separate
+   * assistant turns (e.g. a turn that finished, then a later turn after the agent went
+   * `running` again) both being `role: "assistant"` back-to-back meant a new chunk always
+   * got merged into the previous turn's text with no boundary at all — the architect
+   * review's "two turns concatenate into one bubble" finding. Cleared whenever the agent's
+   * status leaves `"running"` (the turn is over); set whenever a chunk is appended.
+   */
+  turnOpen: boolean;
+  /**
    * ISO timestamp of the most recent status transition (or, for a freshly-observed node,
    * the moment it was first seen). Every `ServerSentEvent` already carries a `timestamp`
    * (src/contracts/events.ts), so this is derived client-side with no wire-protocol change.
@@ -189,6 +199,7 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
     outputTokens: 0,
     costUsd: 0,
     spawnOrder: spawnCounter++,
+    turnOpen: false,
     statusSince: timestamp,
   };
   state.agents.set(agentId, node);
@@ -196,15 +207,22 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
 }
 
 /**
- * Appends a streamed chunk to a transcript: extends the last turn in place if it's already
- * an assistant turn (the common case — one model response streams in many small chunks), or
- * opens a new assistant turn otherwise (transcript empty, or the last turn was the
- * operator's own message). Returns a new array; never mutates `transcript`.
+ * Appends a streamed chunk to a transcript: extends the last turn in place only when it's
+ * both already an assistant turn *and* that turn is still open (`turnOpen` — see
+ * `AgentNode.turnOpen`'s doc comment for why "last turn is an assistant turn" alone isn't a
+ * safe merge condition), or opens a new assistant turn otherwise (transcript empty, the last
+ * turn was the operator's own message, or the previous assistant turn already closed).
+ * Returns a new array; never mutates `transcript`.
  */
-function appendAssistantChunk(transcript: Turn[], chunk: string, timestamp: string): Turn[] {
+function appendAssistantChunk(
+  transcript: Turn[],
+  chunk: string,
+  timestamp: string,
+  turnOpen: boolean,
+): Turn[] {
   const last = transcript.at(-1);
   const next =
-    last && last.role === "assistant"
+    last && last.role === "assistant" && turnOpen
       ? [...transcript.slice(0, -1), { ...last, text: last.text + chunk }]
       : [...transcript, { role: "assistant" as const, text: chunk, timestamp }];
   return trimTranscript(next, MAX_TRANSCRIPT_CHARS);
@@ -228,6 +246,10 @@ export function addUserTurn(
     [...node.transcript, { role: "user", text, timestamp }],
     MAX_TRANSCRIPT_CHARS,
   );
+  // A user turn always ends whatever assistant turn preceded it (there isn't one open here
+  // anyway, since sends only happen between turns), and guarantees the *next* agent_output
+  // chunk opens a fresh assistant turn rather than merging into stale prior text.
+  node.turnOpen = false;
   next.agents.set(agentId, node);
   return next;
 }
@@ -257,7 +279,13 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     }
     case "agent_output": {
       const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
-      node.transcript = appendAssistantChunk(node.transcript, event.chunk, event.timestamp);
+      node.transcript = appendAssistantChunk(
+        node.transcript,
+        event.chunk,
+        event.timestamp,
+        node.turnOpen,
+      );
+      node.turnOpen = true;
       next.agents.set(event.agentId, node);
       return next;
     }
@@ -267,6 +295,10 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
         node.statusSince = event.timestamp;
       }
       node.status = event.status;
+      // DH-0066: leaving "running" closes whatever assistant turn was accumulating, so the
+      // next agent_output chunk (a new turn, whenever the agent goes running again) opens a
+      // fresh turn instead of silently concatenating onto the previous one.
+      if (event.status !== "running") node.turnOpen = false;
       next.agents.set(event.agentId, node);
       // DH-0012: only a status change can newly make an agent terminal, so eviction only
       // needs to run here (matching the TUI's placement in `src/tui/state.ts`).
@@ -354,6 +386,7 @@ export function seedFromTree(
       outputTokens: 0,
       costUsd: 0,
       spawnOrder: spawnCounter++,
+      turnOpen: false,
       statusSince: nowIso,
     });
   }
@@ -417,10 +450,46 @@ export function orderedAgents(state: WebState): AgentNode[] {
   return [...state.agents.values()].sort((a, b) => a.spawnOrder - b.spawnOrder);
 }
 
+/**
+ * DH-0066: depth of `agentId` in the spawn tree (root is 0), by walking `parentAgentId`
+ * links. The sidebar previously rendered `orderedAgents` as a flat list with no depth
+ * information at all — this is what lets the render layer indent rows so parent/child
+ * actually reads as a tree. Guards against a cyclic/dangling `parentAgentId` (shouldn't
+ * happen, but a render-layer helper should never infinite-loop on bad data) by capping at
+ * the number of known agents.
+ */
+export function agentDepth(state: WebState, agentId: string): number {
+  let depth = 0;
+  let current = state.agents.get(agentId);
+  const limit = state.agents.size;
+  while (current?.parentAgentId != null && depth < limit) {
+    const parent = state.agents.get(current.parentAgentId);
+    if (!parent) break;
+    depth++;
+    current = parent;
+  }
+  return depth;
+}
+
 export interface SessionTotals {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+}
+
+/**
+ * DH-0066: browser-tab title reflecting session state, since the tab was previously always
+ * the static, anonymous "Dark Harness" no matter what was happening — an operator with
+ * several tabs open (or the tab backgrounded) had no way to tell at a glance whether
+ * anything needed attention.
+ */
+export function documentTitle(state: WebState): string {
+  if (state.sessionEnded) {
+    const ok = state.exitCode === 0;
+    return `${ok ? "✓" : "✗"} session ended — Dark Harness`;
+  }
+  const anyRunning = [...state.agents.values()].some((agent) => agent.status === "running");
+  return anyRunning ? "● running — Dark Harness" : "Dark Harness";
 }
 
 export function sessionTotals(state: WebState): SessionTotals {

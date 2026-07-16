@@ -10,9 +10,11 @@ import type {
 } from "../../contracts/index.ts";
 import {
   addUserTurn,
+  agentDepth,
   applyEvent,
   createInitialState,
   dismissPossibleGap,
+  documentTitle,
   isRoot,
   logError,
   markPossibleGap,
@@ -180,6 +182,27 @@ describe("state reducer", () => {
     ]);
   });
 
+  // DH-0066: the architect review found two consecutive assistant turns concatenating into
+  // one bubble with no boundary ("Root coordinated two levels of sub-agents." shown twice,
+  // glued together). That happened whenever two separate turns both had role "assistant"
+  // with no user turn in between (e.g. a sub-agent that runs a second turn on its own,
+  // triggered by something other than a fresh operator message) — `turnOpen` closes the
+  // in-flight turn as soon as the agent leaves "running", so the next agent_output opens a
+  // genuinely new turn instead of merging into stale prior text.
+  test("agent_output after the agent leaves running (with no intervening user turn) opens a new turn, not a merge", () => {
+    let state = createInitialState();
+    state = applyEvent(state, statusEvent("a1", "running"));
+    state = applyEvent(state, output("a1", "Root coordinated two levels of sub-agents."));
+    state = applyEvent(state, statusEvent("a1", "done"));
+    state = applyEvent(state, statusEvent("a1", "running"));
+    state = applyEvent(state, output("a1", "Root coordinated two levels of sub-agents."));
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    expect(transcript.map((t) => ({ role: t.role, text: t.text }))).toEqual([
+      { role: "assistant", text: "Root coordinated two levels of sub-agents." },
+      { role: "assistant", text: "Root coordinated two levels of sub-agents." },
+    ]);
+  });
+
   test("agent_status updates status, defaulting unseen agents to waiting first", () => {
     let state = createInitialState();
     expect(state.agents.has("a1")).toBe(false);
@@ -342,6 +365,53 @@ describe("orderedAgents", () => {
     state = applyEvent(state, output("early", "x"));
     state = applyEvent(state, spawned("root-1", null));
     expect(orderedAgents(state).map((a) => a.agentId)).toEqual(["early", "root-1"]);
+  });
+});
+
+describe("agentDepth (DH-0066: sidebar tree indentation)", () => {
+  test("root is depth 0, each generation adds one", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null));
+    state = applyEvent(state, spawned("child-1", "root-1"));
+    state = applyEvent(state, spawned("grandchild-1", "child-1"));
+    expect(agentDepth(state, "root-1")).toBe(0);
+    expect(agentDepth(state, "child-1")).toBe(1);
+    expect(agentDepth(state, "grandchild-1")).toBe(2);
+  });
+
+  test("an unknown agent id is depth 0", () => {
+    expect(agentDepth(createInitialState(), "nope")).toBe(0);
+  });
+
+  test("a dangling parentAgentId (parent not known) stops the walk rather than throwing", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("child-1", "missing-parent"));
+    expect(agentDepth(state, "child-1")).toBe(0);
+  });
+});
+
+describe("documentTitle (DH-0066: informative browser tab)", () => {
+  test("plain 'Dark Harness' when idle", () => {
+    expect(documentTitle(createInitialState())).toBe("Dark Harness");
+  });
+
+  test("shows a running indicator while any agent is running", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null));
+    state = applyEvent(state, statusEvent("root-1", "running"));
+    expect(documentTitle(state)).toBe("● running — Dark Harness");
+  });
+
+  test("shows a success mark once the session ends with exit code 0", () => {
+    let state = createInitialState();
+    state = applyEvent(state, sessionEnded(0));
+    expect(documentTitle(state)).toBe("✓ session ended — Dark Harness");
+  });
+
+  test("shows a failure mark once the session ends with a nonzero exit code", () => {
+    let state = createInitialState();
+    state = applyEvent(state, sessionEnded(1));
+    expect(documentTitle(state)).toBe("✗ session ended — Dark Harness");
   });
 });
 

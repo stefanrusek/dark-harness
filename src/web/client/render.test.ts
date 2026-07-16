@@ -36,6 +36,7 @@ function fakeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
     outputTokens: 0,
     costUsd: 0,
     spawnOrder: 0,
+    turnOpen: false,
     statusSince: "2026-07-15T00:00:00.000Z",
     ...overrides,
   };
@@ -506,7 +507,10 @@ describe("renderTranscript / appendTranscript (Round 4 — structured conversati
         lastTurnTextLength: 0,
       },
     );
-    expect(root.querySelectorAll(".turn").length).toBe(1);
+    // The agent's default fixture status is "running" with no open assistant turn yet after
+    // the user's message, so a thinking placeholder (also a `.turn`) is expected alongside
+    // the one real turn — filtered out here since it isn't what this test is checking.
+    expect(root.querySelectorAll(".turn:not(.turn-thinking)").length).toBe(1);
     expect(state).toEqual({ turnCount: 1, lastTurnTextLength: 2 });
   });
 
@@ -525,7 +529,10 @@ describe("renderTranscript / appendTranscript (Round 4 — structured conversati
       fakeAgentNode({ transcript: [turn("user", "hi")] }),
     );
     state = appendTranscript(document, root, fakeAgentNode({ transcript: [] }), state);
-    expect(root.querySelectorAll(".turn").length).toBe(0);
+    // Same thinking-placeholder caveat as above: the default fixture is "running" with no
+    // transcript at all, so a placeholder `.turn-thinking` is expected even though there's
+    // no real turn.
+    expect(root.querySelectorAll(".turn:not(.turn-thinking)").length).toBe(0);
     expect(state).toEqual({ turnCount: 0, lastTurnTextLength: 0 });
   });
 });

@@ -40,6 +40,7 @@ import {
   applyEvent,
   createInitialState,
   dismissPossibleGap,
+  documentTitle,
   logError,
   markPossibleGap,
   seedFromTree,
@@ -258,6 +259,9 @@ export class AppView {
       hideGapBanner(this.shell.gapBanner);
     }
     renderErrorLog(doc, this.shell.errorLogPanel, this.state);
+    // DH-0066: keep the browser tab itself informative (running/ended/idle) — see
+    // `documentTitle`'s doc comment for why this matters with the tab backgrounded.
+    doc.title = documentTitle(this.state);
     this.updateOutput();
   }
 

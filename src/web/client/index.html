@@ -4,7 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Dark Harness</title>
-    <link rel="icon" href="data:," />
+    <!-- DH-0066: the ◆ brand mark (see .brand::before in styles.css) as an inlined SVG data
+         URI favicon — trivially inlinable, CSP-safe (no external request, DH-0023 posture),
+         and replaces the previously-blank `data:,` icon that left every tab anonymous. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 L30 16 L16 30 L2 16 Z' fill='%23f5a524'/%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
