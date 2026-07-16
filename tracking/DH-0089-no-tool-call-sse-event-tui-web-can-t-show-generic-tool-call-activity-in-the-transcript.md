@@ -238,3 +238,27 @@ already covers spawns, and rendering both would double-mark every spawn. Excepti
 > logic in `src/tui/sse-parser.ts`/`state.ts`, replacing Grace's placeholder default case.
 > Web (Susan) — D5: new `"tool"` turn kind, pending-map, `render.ts` `.turn-tool` row,
 > replacing Grace's placeholder case in `state.ts`. E2E (Hedy) — D6 follow-up, sequenced last.
+
+> [!NOTE]
+> **2026-07-16 — Server's piece (D4) done (Radia).** Added `sanitizeEvent(event,
+> knownSecrets)` to `src/server/redact.ts`: for `type === "tool_call"` returns a shallow
+> copy with `inputSummary` passed through the existing `redactSecrets`; identity (same
+> reference) for every other event type. Applied at both `agentLoop.onEvent` subscription
+> sites in `src/server/server.ts` — the `EventBuffer` intake in `start()` and the live
+> per-connection broadcast in the SSE stream's `start` callback — via a new
+> `DhServer`-private `knownSecrets` field (reusing the same `options.knownSecrets` DH-0020
+> already threads to `SessionLogger`, rather than adding a second config surface). No
+> `EventBuffer` resize (D3 already ruled that out — untouched). Accepted residual risk from
+> the design (Core's 200-char truncation happening before this redaction runs, so a secret
+> straddling the truncation boundary can lose exact-match redaction) is left as documented,
+> not fixed — pattern-based redaction still catches recognizable truncated prefixes. Gates:
+> `bun run typecheck`/`bun run lint` clean, `bun run test:coverage` 1549 pass/0 fail with
+> 100% line+function coverage on every changed file (`redact.ts`, `server.ts`, plus their
+> test files — new tests cover a known-secret redaction and a pattern-only redaction on
+> `tool_call`, both at the live-broadcast and buffered-replay paths, and identity
+> pass-through for `agent_output`/`tool_result`). `bun run e2e`: 30 pass/2 fail, both
+> pre-existing headless-Chromium sandbox gaps (`web.test.ts`/`connect-web.test.ts`),
+> unrelated to this change — no `src/server/` e2e test regressed.
+>
+> **Still open, not closed:** TUI (Mary) and Web (Susan) — D5 client rendering. E2E (Hedy)
+> — D6 follow-up, sequenced last.

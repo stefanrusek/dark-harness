@@ -17,7 +17,7 @@
 // Every pattern here must be linear-time-safe (no nested quantifiers prone to catastrophic
 // backtracking) since this runs on every logged line.
 
-import type { DhConfig } from "../contracts/index.ts";
+import type { DhConfig, ServerSentEvent } from "../contracts/index.ts";
 
 /** Guard: a secret shorter than this is not redacted by exact match — a pathological
  * 1-char "token" in config must not shred the log (per the design's explicit guard). */
@@ -138,4 +138,26 @@ export function collectConfigSecrets(config: DhConfig): string[] {
   // architect design's explicit requirement.
   if (config.web?.search?.apiKey) secrets.push(config.web.search.apiKey);
   return secrets;
+}
+
+/**
+ * DH-0089 D4: redacts a single live SSE event before it reaches the wire or the resume
+ * buffer. Unlike `SessionLogger.append` (which redacts an already-serialized JSON line),
+ * this runs on the in-memory event object — only `tool_call`'s `inputSummary` can ever carry
+ * secret-shaped text (an MCP tool call's arguments), since every other event type's fields
+ * are either structural (ids, counts, timestamps) or already-vetted display text. Identity
+ * (same reference) for every other event type, so callers that don't need to reallocate
+ * (e.g. hot paths with no `tool_call` events) pay no cost.
+ *
+ * Accepted residual risk (documented in the design, not fixed here): Core truncates
+ * `inputSummary` to 200 chars before this runs, so a secret straddling the truncation
+ * boundary can lose exact-match (known-secret) redaction — pattern-based redaction still
+ * catches recognizable prefixes (e.g. `sk-ant-…`) even when truncated.
+ */
+export function sanitizeEvent(
+  event: ServerSentEvent,
+  knownSecrets: readonly string[] = [],
+): ServerSentEvent {
+  if (event.type !== "tool_call") return event;
+  return { ...event, inputSummary: redactSecrets(event.inputSummary, knownSecrets) };
 }

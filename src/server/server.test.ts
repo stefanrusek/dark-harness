@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentOutputEvent, AgentTreeNode, SessionEndedEvent } from "../contracts/index.ts";
+import type {
+  AgentOutputEvent,
+  AgentTreeNode,
+  SessionEndedEvent,
+  ToolCallEvent,
+} from "../contracts/index.ts";
 import { FakeAgentLoop } from "./fake-agent-loop.ts";
 import { DhServer } from "./server.ts";
 
@@ -17,6 +22,19 @@ function outputEvent(id: string, chunk = "hello"): AgentOutputEvent {
     type: "agent_output",
     agentId: "root",
     chunk,
+  };
+}
+
+function toolCallEvent(id: string, inputSummary: string): ToolCallEvent {
+  return {
+    version: 1,
+    id,
+    timestamp: "2026-07-15T00:00:00.000Z",
+    type: "tool_call",
+    agentId: "root",
+    toolUseId: id,
+    toolName: "Bash",
+    inputSummary,
   };
 }
 
@@ -252,6 +270,38 @@ describe("DhServer", () => {
       });
       const events = await readSseEvents(res, 2);
       expect(events).toEqual([outputEvent("2"), outputEvent("3")]);
+    });
+
+    test("DH-0089: redacts a known secret in a tool_call event's inputSummary on the live broadcast path", async () => {
+      server = new DhServer({
+        agentLoop: loop,
+        sessionId: "s1",
+        logDir: dir,
+        port: 0,
+        knownSecrets: ["mysecretvalue123"],
+      });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/api/events`);
+      const readPromise = readSseEvents(res, 1);
+      loop.emitEvent(toolCallEvent("tc1", "curl -H mysecretvalue123"));
+      const events = await readPromise;
+      expect(events).toEqual([toolCallEvent("tc1", "curl -H [REDACTED:config-secret]")]);
+    });
+
+    test("DH-0089: redacts a known secret in a tool_call event's inputSummary on the buffered replay path", async () => {
+      server = new DhServer({
+        agentLoop: loop,
+        sessionId: "s1",
+        logDir: dir,
+        port: 0,
+        knownSecrets: ["mysecretvalue123"],
+      });
+      const port = server.start();
+      loop.emitEvent(toolCallEvent("tc1", "curl -H mysecretvalue123"));
+
+      const res = await fetch(`http://localhost:${port}/api/events`);
+      const events = await readSseEvents(res, 1);
+      expect(events).toEqual([toolCallEvent("tc1", "curl -H [REDACTED:config-secret]")]);
     });
 
     test("GET /api/events with no prior events and no live pushes returns an open, empty stream", async () => {

@@ -312,3 +312,29 @@ requirement held.
 
 Closed DH-0067 (resolution: done) — confident every user story/functional requirement in
 the ticket is addressed. No new open threads.
+
+### 2026-07-16 — DH-0089, my piece only (D4 SSE redaction)
+
+Full ticket context/design is Fable's (architect); Core (Grace) already landed D1-D3
+(`ToolCallEvent`/`ToolResultEvent` contracts, `loop.ts` emission). This round was just D4:
+the live SSE stream needed the same secret-redaction guarantee DH-0020 gave the JSONL log,
+since `ToolCallEvent.inputSummary` is a new place tool arguments (e.g. an MCP API key) can
+reach the wire.
+
+- New `sanitizeEvent(event, knownSecrets)` in `src/server/redact.ts`: identity for every
+  event type except `tool_call`, where it returns a shallow copy with `inputSummary` run
+  through the existing `redactSecrets`. Applied at both `agentLoop.onEvent` subscriptions in
+  `server.ts` (the `EventBuffer` intake in `start()`, and the live per-connection broadcast
+  inside the SSE stream's `start` callback) via a new private `knownSecrets` field on
+  `DhServer`, populated from the same `options.knownSecrets` DH-0020 already threads to
+  `SessionLogger` — no new config surface, no `cli.ts` touch needed this round since Core's
+  earlier `collectConfigSecrets(config)` wiring already reaches `DhServerOptions`.
+- Left the documented residual risk (truncation-then-redaction ordering can drop exact-match
+  redaction for a secret straddling the 200-char boundary) as accepted, not fixed — matches
+  the design's own call.
+- Gates all clean: typecheck, lint, `test:coverage` (1549 pass/0 fail, 100% line+function on
+  every changed file), `e2e` (30 pass/2 fail — both the long-standing pre-existing
+  headless-Chromium sandbox gap, unrelated).
+
+Left DH-0089 open (not closed) — TUI (Mary)/Web (Susan) D5 client rendering and E2E (Hedy)
+D6 follow-up still outstanding. No new open threads from this round.
