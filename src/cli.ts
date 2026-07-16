@@ -94,24 +94,58 @@ const FLAGS_WITH_VALUES = new Set([
   "--resume",
 ]);
 
-/** DH-0035: the minimal, valid `dh.json` scaffolded by `dh init` — kept byte-for-byte in sync
- * with README.md's own sample config so the two never drift apart. */
+/** DH-0035/DH-0096: the `dh.json` scaffolded by `dh init` — kept byte-for-byte in sync with
+ * README.md's own sample config so the two never drift apart.
+ *
+ * DH-0096: every model id below was verified live against the real provider APIs (Bedrock
+ * `ListFoundationModels`/`ListInferenceProfiles` + a smoke-test `Converse` call; Anthropic-
+ * direct ids cross-checked against the Claude API skill's model catalog) rather than typed
+ * from memory — see DH-0092, the incident this ticket exists to prevent from recurring at
+ * larger scale. The Bedrock model/inference-profile ids are verified correct for the
+ * `us-east-1` region specifically (via cross-region `us.*` inference profiles for the Claude
+ * tiers) — Bedrock catalogs are region-specific and change over time, so a scaffold that's
+ * correct here may 404 in another region; re-verify before relying on this list elsewhere.
+ * This is a menu of working entries to trim to what you actually use, not a recommendation
+ * to run `dh doctor` against all of them by default (see the `dh init` stdout note below). */
 export const SAMPLE_DH_JSON = `{
-  "options": { "defaultModel": "sonnet", "runInBackgroundDefault": true, "maxTurns": 100 },
+  "options": { "defaultModel": "gemma4", "runInBackgroundDefault": true, "maxTurns": 100 },
   "models": [
+    { "name": "fable-anthropic", "provider": "anthropic", "model": "claude-fable-5" },
+    { "name": "fable-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-fable-5" },
+    { "name": "opus-anthropic", "provider": "anthropic", "model": "claude-opus-4-8" },
+    { "name": "opus-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-opus-4-8" },
     {
-      "name": "sonnet",
+      "name": "sonnet-anthropic",
       "provider": "anthropic",
       "model": "claude-sonnet-5",
       "inputPricePerMToken": 3,
       "outputPricePerMToken": 15
     },
-    { "name": "gemma4", "provider": "bedrock", "model": "gemma4" }
+    { "name": "sonnet-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-sonnet-5" },
+    { "name": "haiku-anthropic", "provider": "anthropic", "model": "claude-haiku-4-5" },
+    {
+      "name": "haiku-bedrock",
+      "provider": "bedrock",
+      "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    },
+    { "name": "gemma4", "provider": "bedrock", "model": "google.gemma-3-12b-it" },
+    { "name": "gpt-oss-20b", "provider": "bedrock", "model": "openai.gpt-oss-20b-1:0" },
+    { "name": "gpt-oss-120b", "provider": "bedrock", "model": "openai.gpt-oss-120b-1:0" },
+    {
+      "name": "llama3-3-70b",
+      "provider": "bedrock",
+      "model": "us.meta.llama3-3-70b-instruct-v1:0"
+    },
+    {
+      "name": "mistral-large-3",
+      "provider": "bedrock",
+      "model": "mistral.mistral-large-3-675b-instruct"
+    }
   ],
   "provider": [
     { "name": "anthropic", "type": "anthropic", "apiKey": "$(ANTHROPIC_API_KEY)" },
     { "name": "bedrock", "type": "bedrock", "region": "$(AWS_REGION)" },
-    { "name": "local", "type": "anthropic", "baseURL": "http://localhost:8080" }
+    { "name": "local", "type": "anthropic", "baseURL": "$(LOCAL_AI_PROVIDER)" }
   ],
   "skillPaths": ["./skills"],
   "mcpServers": {},
@@ -998,7 +1032,7 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
   }
 
   io.stdout(
-    `dh: wrote a starter config to ${targetPath}. Edit it to add your API key/model, then run "dh" to start (or "dh doctor" to verify it first).`,
+    `dh: wrote a starter config to ${targetPath}. The models list is a menu covering every Claude tier on both anthropic and bedrock, plus a few Bedrock OpenAI and open-weight models — trim it down to the ones you'll actually use before running "dh doctor" or "dh --check", which probe every configured model's credentials. Bedrock model/inference-profile ids are verified for the us-east-1 region; re-verify if you're on a different region. Edit the config to add your API key/model, then run "dh" to start.`,
   );
   io.exit(ExitCode.Success);
   return ExitCode.Success;

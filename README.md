@@ -140,21 +140,44 @@ This is exactly what `dh init` scaffolds:
 
 ```json
 {
-  "options": { "defaultModel": "sonnet", "runInBackgroundDefault": true, "maxTurns": 100 },
+  "options": { "defaultModel": "gemma4", "runInBackgroundDefault": true, "maxTurns": 100 },
   "models": [
+    { "name": "fable-anthropic", "provider": "anthropic", "model": "claude-fable-5" },
+    { "name": "fable-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-fable-5" },
+    { "name": "opus-anthropic", "provider": "anthropic", "model": "claude-opus-4-8" },
+    { "name": "opus-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-opus-4-8" },
     {
-      "name": "sonnet",
+      "name": "sonnet-anthropic",
       "provider": "anthropic",
       "model": "claude-sonnet-5",
       "inputPricePerMToken": 3,
       "outputPricePerMToken": 15
     },
-    { "name": "gemma4", "provider": "bedrock", "model": "gemma4" }
+    { "name": "sonnet-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-sonnet-5" },
+    { "name": "haiku-anthropic", "provider": "anthropic", "model": "claude-haiku-4-5" },
+    {
+      "name": "haiku-bedrock",
+      "provider": "bedrock",
+      "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    },
+    { "name": "gemma4", "provider": "bedrock", "model": "google.gemma-3-12b-it" },
+    { "name": "gpt-oss-20b", "provider": "bedrock", "model": "openai.gpt-oss-20b-1:0" },
+    { "name": "gpt-oss-120b", "provider": "bedrock", "model": "openai.gpt-oss-120b-1:0" },
+    {
+      "name": "llama3-3-70b",
+      "provider": "bedrock",
+      "model": "us.meta.llama3-3-70b-instruct-v1:0"
+    },
+    {
+      "name": "mistral-large-3",
+      "provider": "bedrock",
+      "model": "mistral.mistral-large-3-675b-instruct"
+    }
   ],
   "provider": [
     { "name": "anthropic", "type": "anthropic", "apiKey": "$(ANTHROPIC_API_KEY)" },
     { "name": "bedrock", "type": "bedrock", "region": "$(AWS_REGION)" },
-    { "name": "local", "type": "anthropic", "baseURL": "http://localhost:8080" }
+    { "name": "local", "type": "anthropic", "baseURL": "$(LOCAL_AI_PROVIDER)" }
   ],
   "skillPaths": ["./skills"],
   "mcpServers": {},
@@ -162,6 +185,17 @@ This is exactly what `dh init` scaffolds:
   "security": { "token": null, "tls": null }
 }
 ```
+
+This is a **menu, not a recommendation to use all of it** — trim it down to the models you
+actually plan to use before running `dh doctor`/`dh --check`, which probes every configured
+model's credentials. The Bedrock model/inference-profile ids above were verified live against
+the real Bedrock API (`ListFoundationModels`/`ListInferenceProfiles` plus a smoke-test
+`Converse` call) for the **`us-east-1`** region specifically — Bedrock catalogs are
+region-specific and change over time, so re-verify before relying on this list in another
+region. The Claude tiers use cross-region `us.*` inference profile ids on Bedrock (the bare
+on-demand model ids aren't invokable directly for those); `us.anthropic.claude-fable-5` also
+requires your AWS org to be configured for 30-day (or longer) data retention — it returns a
+validation error under the default zero/short retention configuration.
 
 - **`models`** — named entries mapping to a named `provider` plus a provider-side model id.
   Tools and options refer to models by `name`, never by the provider-side id directly.
@@ -361,9 +395,10 @@ means:
   opted in, `WebFetch`/`WebSearch` (see below). There's no telemetry, update-checker, or
   other phone-home behavior.
 - **Fully offline is possible** if you point `provider` at a local, Anthropic-compatible
-  endpoint (`type: "anthropic"` with a `baseURL` like `http://localhost:8080`, as the sample
-  config's `"local"` provider does) — e.g. LM Studio or any other local inference server
-  speaking that API shape. With a local provider and no other outbound tool calls, a
+  endpoint (`type: "anthropic"` with a `baseURL` set via the `$(LOCAL_AI_PROVIDER)` env-var
+  interpolation, as the sample config's `"local"` provider does — e.g.
+  `LOCAL_AI_PROVIDER=http://localhost:8080`) — e.g. LM Studio or any other local inference
+  server speaking that API shape. With a local provider and no other outbound tool calls, a
   container running `dh` needs no network egress at all.
 - **The recommended deployment boundary is a container**, on a private network, behind an
   SSH tunnel, or behind a reverse proxy you control — never with a headless `--server`'s port

@@ -2135,6 +2135,42 @@ describe("main — dh init", () => {
     expect(local.region).toBeUndefined();
   });
 
+  // DH-0096: the scaffolded catalog should cover all four Claude tiers on both providers,
+  // a working default gemma model on Bedrock, a few OpenAI-on-Bedrock and open-weight
+  // Bedrock models, and the local provider's baseURL as an env-var interpolation placeholder
+  // rather than a hardcoded localhost URL.
+  test("scaffolds a richer, real model catalog (DH-0096)", () => {
+    const parsed = JSON.parse(SAMPLE_DH_JSON);
+    const names = (parsed.models as Array<{ name: string; provider: string; model: string }>).map(
+      (m) => m.name,
+    );
+
+    // All four Claude tiers, both providers.
+    for (const tier of ["fable", "opus", "sonnet", "haiku"]) {
+      expect(names).toContain(`${tier}-anthropic`);
+      expect(names).toContain(`${tier}-bedrock`);
+    }
+
+    // Default model is a working Bedrock gemma config, not a placeholder string.
+    expect(parsed.options.defaultModel).toBe("gemma4");
+    const gemma = parsed.models.find((m: { name: string }) => m.name === "gemma4");
+    expect(gemma.provider).toBe("bedrock");
+    expect(gemma.model).not.toBe("gemma4"); // real Bedrock model id, not the DH-0092 mistake shape
+    expect(gemma.model).toMatch(/^google\.gemma-/);
+
+    // A few OpenAI-on-Bedrock and open-weight (Llama/Mistral) Bedrock models.
+    const bedrockModelIds = parsed.models
+      .filter((m: { provider: string }) => m.provider === "bedrock")
+      .map((m: { model: string }) => m.model);
+    expect(bedrockModelIds.some((id: string) => id.startsWith("openai."))).toBe(true);
+    expect(bedrockModelIds.some((id: string) => /(^|\.)meta\.llama/.test(id))).toBe(true);
+    expect(bedrockModelIds.some((id: string) => id.startsWith("mistral."))).toBe(true);
+
+    // local provider baseURL is an env-var interpolation placeholder, not a hardcoded URL.
+    const local = parsed.provider.find((p: { name: string }) => p.name === "local");
+    expect(local.baseURL).toBe("$(LOCAL_AI_PROVIDER)");
+  });
+
   test("refuses to overwrite an existing config file", async () => {
     const io = fakeIo();
     const target = join(dir, "dh.json");
@@ -2155,11 +2191,14 @@ describe("main — dh init", () => {
     // placeholders, so loadConfig needs the referenced env vars set to resolve cleanly.
     const prevApiKey = process.env.ANTHROPIC_API_KEY;
     const prevRegion = process.env.AWS_REGION;
+    const prevLocalProvider = process.env.LOCAL_AI_PROVIDER;
     process.env.ANTHROPIC_API_KEY = "test-key";
     process.env.AWS_REGION = "us-west-2";
+    // DH-0096: the local provider's baseURL is now a $(LOCAL_AI_PROVIDER) placeholder too.
+    process.env.LOCAL_AI_PROVIDER = "http://localhost:8080";
     try {
       const config = await loadConfig(target);
-      expect(config.options.defaultModel).toBe("sonnet");
+      expect(config.options.defaultModel).toBe("gemma4");
     } finally {
       // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
@@ -2167,6 +2206,9 @@ describe("main — dh init", () => {
       // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevRegion === undefined) delete process.env.AWS_REGION;
       else process.env.AWS_REGION = prevRegion;
+      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
+      if (prevLocalProvider === undefined) delete process.env.LOCAL_AI_PROVIDER;
+      else process.env.LOCAL_AI_PROVIDER = prevLocalProvider;
     }
   });
 
