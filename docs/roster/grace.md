@@ -1065,3 +1065,25 @@ Scoped to the Jupyter half only (PDF split to DH-0081, someone else's). Two piec
   least the second occurrence on record, DH-0077 also references it) and the shared-checkout
   race are the same underlying hazard and probably deserve a tracked ticket if one doesn't
   exist yet.
+
+### 2026-07-16 — DH-0070 (per-agent cwd isolation), closed
+
+Same stale-worktree symptom again (`.claude/worktrees/agent-ad7fbe4142ff6ebd4` was branched
+before `src/`/`tracking/` even existed) — went straight to editing/committing directly in
+the shared checkout via `Bash` (Edit/Write stayed sandboxed to the broken worktree and
+refused paths outside it), same workaround prior rounds documented.
+
+- Added `AgentRuntime.agentCwd: Map<agentId, cwd>` (`src/agent/runtime.ts`): root's entry
+  seeded in the constructor from `this.cwd`; `spawnAgent()` sets each new sub-agent's entry
+  from its own parent's entry at spawn time (falls back to `this.cwd` only defensively).
+  `buildToolContext()` now reads `this.agentCwd.get(agentId)` instead of the old single
+  shared `this.cwd` field read by every agent. Deliberately did not add cross-call `cd`
+  persistence — dropped from scope per the ticket's own Notes (empirical test against real
+  Claude Code showed it doesn't do that either).
+- New test (`src/agent/runtime.test.ts`): two concurrently-spawned sub-agents, one from each
+  of two `AgentRuntime` instances with distinct `cwd` options, each report their own agent's
+  cwd via a real `pwd` Bash call — proving no cross-agent leakage and that a mid-run
+  `process.chdir()` never becomes either agent's effective cwd.
+- Gates: typecheck/lint clean; `bun test src --coverage`: 1390 pass, 0 fail, 100% on
+  `runtime.ts`. `bun run e2e`: 30 pass, 2 fail — same pre-existing headless-Chromium-
+  unavailable-in-sandbox failures prior rounds have footnoted, unrelated to this change.
