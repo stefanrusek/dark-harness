@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0046
 type: feature
-status: ready
+status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["deferred (owner decision 2026-07-16): cutting for now, real feature wanted later — GitHub issue #8 created to gauge demand"]
 created: 2026-07-15
 relations:
   depends_on: []
