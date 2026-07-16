@@ -149,3 +149,57 @@ remembering here:
 
 Both DH-0019 and DH-0021 closed (`status: closed`, `resolution: done`); view regenerated.
 No new open threads from this round.
+
+### 2026-07-15 — DH-0012 (EventBuffer byte-bound) and DH-0020 (logger robustness/redaction)
+
+**DH-0012, my slice only (EventBuffer):** `EventBuffer` now evicts on total serialized
+bytes (default 10MB) in addition to the existing event-count cap (default 1000) — same
+oldest-first eviction loop, just also checking `totalBytes` each iteration. Always keeps at
+least one event even if it alone exceeds `maxBytes`, so a single oversized chunk can't empty
+the buffer to nothing (a fresh connection should still get best-effort replay of the latest
+event). Left an explicit doc-comment note: neither `maxSize` nor the new `maxBytes` is wired
+through `dh.json` yet — `cli.ts` (Core) always constructs `DhServer` with defaults today.
+Threading a `dh.json` knob to `DhServerOptions.eventBufferMaxEvents`/`eventBufferMaxBytes`
+at that construction site is a Core follow-through, not a Server edit of `cli.ts` — same
+shape as DH-0020's D4 split below. The other three structures in DH-0012 (TaskRegistry,
+TUI/Web `agents` maps) are Core/TUI/Web's slices, not touched here.
+
+**DH-0020 (logger write-errors/durability/redaction) — full ticket, per Fable's design
+pass:**
+- `SessionLogger.append` never throws now: write/fsync failures are caught, the line is
+  dropped, and per-file `{droppedCount, lastErrorCode}` state drives a one-time stderr
+  failure notice and a one-time stderr recovery notice (with dropped count) on the next
+  success. No retry, no buffering — matches the design's rationale that disk-full/perm
+  errors don't resolve between adjacent appends.
+- Two-tier durability: ordinary lines stay `appendFileSync` (process-crash-safe only);
+  `header`/`completed`/`failed`/terminal-`status_change` (`done`/`failed`/`stopped`) lines
+  go through `openSync`/`writeSync`/`fsyncSync`/`closeSync` (host-crash-safe). Doc comment
+  rewritten to state both tiers and explicitly name what's *not* guaranteed (event-line
+  durability across host crash). An fsync failure is caught by the same try/catch as a write
+  failure — no separate code path.
+- New `src/server/redact.ts`: `redactSecrets(text, knownSecrets)` (known-value exact match
+  on the JSON-escaped form, ≥8 chars, applied before the fixed pattern table — sk-ant-,
+  generic sk-, AKIA/ASIA, aws_secret_access_key/aws_session_token key=value,
+  Authorization header, ghp_-family, JWT, xox-prefixed Slack, AIza Google) and
+  `collectConfigSecrets(config)` (pulls `security.token`, every provider `apiKey`, every MCP
+  header value — no length filtering there, the ≥8 guard lives in `redactSecrets` so every
+  caller gets it uniformly). Redaction happens inside `SessionLogger.append` on the already-
+  serialized JSON line, per the design — not in `loop.ts`, and not applied to the live SSE
+  stream (deliberate, documented adjacency, not scope creep).
+- `SessionLogger`'s constructor now takes an optional `knownSecrets?: readonly string[]`;
+  `DhServer`'s options gained `knownSecrets?: readonly string[]` threaded straight to its
+  `SessionLogger`. Exported `redactSecrets`/`collectConfigSecrets` from `src/server/index.ts`
+  so Core's `cli.ts` can import them (same precedent as `SessionLogger` itself).
+- **Core follow-through still needed** (D4, not done here — explicitly not mine per the
+  design): `cli.ts` needs to call `collectConfigSecrets(config)` once and pass the result
+  into both `DhServer`'s options and the standalone-mode `SessionLogger` it constructs
+  directly in `createStandaloneRuntime`. Until that lands, redaction only ever applies the
+  pattern table (still real protection, just not the config-secret exact-match layer).
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass; 100% line/
+function coverage on `event-buffer.ts`, `logger.ts`, `redact.ts`, `server.ts` (the
+changed/new files). No `e2e` re-run this round (no protocol/route surface changed — only
+internal Server-owned modules and options).
+
+No new open threads beyond the two Core follow-throughs noted above (both explicitly
+scoped as Core's, not mine, per the tickets' own domain assignment).
