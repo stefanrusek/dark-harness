@@ -6,6 +6,7 @@ import type { LogHeader, LogLine } from "../contracts/index.ts";
 import {
   buildAgentLogTree,
   formatSessionLogTree,
+  readAgentLogLines,
   readSessionLogSummaries,
 } from "./log-analysis.ts";
 
@@ -175,5 +176,33 @@ describe("readSessionLogSummaries / formatSessionLogTree", () => {
     expect(output).toContain("[failed]");
     expect(output).toContain("1ms");
     expect(output.split("\n").length).toBe(3);
+  });
+});
+
+describe("readAgentLogLines (DH-0038)", () => {
+  test("returns [] for a missing file rather than throwing", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-analysis-"));
+    expect(readAgentLogLines(dir, "agent-root")).toEqual([]);
+  });
+
+  test("reads an agent's file by percent-encoded agentId, matching SessionLogger.filePathFor", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-analysis-"));
+    writeJsonl(join(dir, `${encodeURIComponent("agent-root")}.jsonl`), [
+      header({ agentId: "agent-root" }),
+      { version: 1, timestamp: "2026-07-15T00:00:01.000Z", type: "completed", success: true },
+    ]);
+    const lines = readAgentLogLines(dir, "agent-root");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]?.type).toBe("header");
+    expect(lines[1]?.type).toBe("completed");
+  });
+
+  test("tolerates a corrupt/truncated final line, keeping every earlier valid one", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-analysis-"));
+    const path = join(dir, "agent-root.jsonl");
+    writeFileSync(path, `${JSON.stringify(header({ agentId: "agent-root" }))}\n{"trunc`);
+    const lines = readAgentLogLines(dir, "agent-root");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.type).toBe("header");
   });
 });

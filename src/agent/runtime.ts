@@ -18,7 +18,7 @@ import {
 import { runAgentLoop } from "./loop.ts";
 import { searchConfiguredMcpTools } from "./mcp.ts";
 import { createProvider } from "./providers/index.ts";
-import type { ModelProvider } from "./providers/types.ts";
+import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
 import { loadSkillFromPaths } from "./skills.ts";
 import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { ALL_TOOLS, buildToolMap } from "./tools/index.ts";
@@ -61,6 +61,14 @@ export interface AgentRuntimeOptions {
    * per-runtime-instance setting, not per-call, because a single `AgentRuntime` is always
    * entirely one or the other in practice (one process, one CLI invocation, one mode). */
   interactive?: boolean;
+  /** DH-0038 (`--resume <sessionId>`): when present, `runRoot()` seeds the root agent's
+   * conversation from replayed history (`src/agent/resume.ts`'s `loadResumeSession`) instead
+   * of starting fresh, and defaults `runRoot()`'s own model resolution to `model` (the
+   * original session's alias, resolved by the caller against the *current* config — src/
+   * cli.ts's job, not this class's) rather than `config.options.defaultModel`, unless an
+   * explicit `modelName` is still passed to `runRoot()` itself. Root agent only (v1 scope,
+   * D1) — never threaded into `spawnAgent()`'s sub-agent calls. */
+  resume?: { messages: ProviderMessage[]; fromSessionId: string; model: string };
 }
 
 /** Builds loop.ts's `AgentLoopParams.pricing` from a model's optional config prices — round
@@ -137,6 +145,7 @@ export class AgentRuntime {
   private readonly onLogLine: ((agentId: string, line: LogLine) => void) | undefined;
   private readonly interactive: boolean;
   private readonly client: SessionClientKind;
+  private readonly resume: AgentRuntimeOptions["resume"];
 
   // Root-agent bookkeeping: runRoot() isn't tracked in `tasks` (it IS the session, per its
   // own doc comment below), so getAgentTree()/sendMessageToRoot() need their own small
@@ -187,6 +196,7 @@ export class AgentRuntime {
     this.onLogLine = options.onLogLine;
     this.interactive = options.interactive ?? false;
     this.client = options.client;
+    this.resume = options.resume;
     // DH-0012: wired to handleTaskSettled() so every *background* Bash/Agent task's
     // completion pushes a notification into its parent's conversation — see that method's
     // doc comment for the full design, including the orphaned-grandchild case. Retention cap
@@ -482,7 +492,12 @@ export class AgentRuntime {
     instruction: string,
     modelName?: string,
   ): Promise<{ success: boolean; finalOutput: string }> {
-    const model = this.resolveModel(modelName ?? this.config.options.defaultModel);
+    // DH-0038: an explicit modelName argument always wins; otherwise a resumed session
+    // defaults to the original root header's model alias (D3) rather than
+    // config.options.defaultModel, so a resume never silently switches models.
+    const model = this.resolveModel(
+      modelName ?? this.resume?.model ?? this.config.options.defaultModel,
+    );
     const provider = this.providerFor(model);
 
     this.rootStarted = true;
@@ -530,6 +545,9 @@ export class AgentRuntime {
           ? { maxTurns: this.config.options.maxTurns }
           : {}),
         ...pricingOverride(model),
+        ...(this.resume
+          ? { resume: { messages: this.resume.messages, fromSessionId: this.resume.fromSessionId } }
+          : {}),
         onEvent: (event) => {
           // Round 5: keep rootStatus (what getAgentTree() reads) in sync with the loop's own
           // mid-conversation waiting/running transitions, the same way spawnAgent() keeps the

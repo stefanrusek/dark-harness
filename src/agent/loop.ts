@@ -132,6 +132,14 @@ export interface AgentLoopParams {
    * via runtime.ts into every runAgentLoop() call (root and every sub-agent alike — a
    * session's client kind doesn't vary per agent within it). */
   client: SessionClientKind;
+  /** DH-0038 (`--resume <sessionId>`): when present, seeds `messages` from the replayed
+   * history (`src/agent/resume.ts`'s `loadResumeSession`) instead of starting from an empty
+   * history, and stamps the new header's `resumedFrom` field. `params.instruction` (the wake-
+   * up notice, and/or `--instructions` content — composed by src/cli.ts) is still applied via
+   * the normal trailing-role merge below; when `resume` is absent this is a no-op change from
+   * the original behavior (empty history, so the merge always appends a fresh user message,
+   * exactly as before this round). Root agent only — never set for a spawnAgent() call. */
+  resume?: { messages: ProviderMessage[]; fromSessionId: string };
 }
 
 /** Computes a `token_usage` event's `costUsd`, or undefined if pricing wasn't configured at
@@ -265,9 +273,19 @@ async function runToolCalls(
 
 export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopResult> {
   const maxTurns = params.maxTurns ?? DEFAULT_MAX_TURNS;
-  const messages: ProviderMessage[] = [
-    { role: "user", content: [{ type: "text", text: params.instruction }] },
-  ];
+  // DH-0038: seeded from replayed resume history when resuming, empty otherwise. Either way,
+  // `params.instruction` (the wake-up notice / --instructions content) is applied right after
+  // via the same trailing-role merge (D1): appended to the last message if it's already a
+  // `user` turn, or pushed as a new one otherwise — never two adjacent same-role messages.
+  // With no resume history this always takes the "push a new user message" branch, exactly
+  // reproducing the original (pre-resume) behavior.
+  const messages: ProviderMessage[] = params.resume ? [...params.resume.messages] : [];
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage && lastMessage.role === "user") {
+    lastMessage.content = [...lastMessage.content, { type: "text", text: params.instruction }];
+  } else {
+    messages.push({ role: "user", content: [{ type: "text", text: params.instruction }] });
+  }
   const pendingMessages: string[] = [];
   // Round 5: when the loop is paused in "waiting" (interactive mode only — see below), a
   // newly-arrived message wakes it up immediately instead of sitting unread until some other
@@ -306,6 +324,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     client: params.client,
     build: BUILD_INFO,
     ...(params.description !== undefined ? { description: params.description } : {}),
+    ...(params.resume ? { resumedFrom: { sessionId: params.resume.fromSessionId } } : {}),
   });
   emitLog(params, {
     version: 1,
