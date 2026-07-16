@@ -338,3 +338,49 @@ reach the wire.
 
 Left DH-0089 open (not closed) — TUI (Mary)/Web (Susan) D5 client rendering and E2E (Hedy)
 D6 follow-up still outstanding. No new open threads from this round.
+
+### 2026-07-16 — DH-0022: opt-in `security.hostname` bind-address config field
+
+Owner pre-decided the design (default bind stays 0.0.0.0/all-interfaces; new field is
+opt-in, config-only, not a CLI flag) — this round was pure implementation, no ambiguity
+to resolve.
+
+- Added `hostname?: string` to `SecurityConfig` (`src/contracts/config.ts`), same
+  optional/omit-means-unchanged shape as `token`/`tls`. Validation in
+  `src/config/validate.ts` follows the exact `null`-means-unset normalization already used
+  for `token`/`tls`.
+- Threaded through both `Bun.serve` call sites: `DhServer.start()`
+  (`src/server/server.ts`, conditionally spreads `{ hostname }` when
+  `this.security?.hostname` is set) and `serveWebUi` (`src/web/server.ts`, new
+  `ServeWebUiOptions.hostname` field). `src/cli.ts` passes `config.security` wholesale to
+  `createServer` already (existing pattern), and now also passes
+  `config.security?.hostname` explicitly at both `serveWebUi` call sites (local `--web` and
+  `--connect --web`) since that options type only had a flat `token`, not a whole-`security`
+  passthrough.
+- Fixed the one place this made an existing doc/output claim stale: the `--server` startup
+  line used to hardcode `bound to 0.0.0.0:<port>` — now reads `config.security?.hostname ??
+  "0.0.0.0"`. Confirmed this doesn't break the e2e byte-stability contract: the *default*
+  case still emits the exact string every `waitForStdout` grep depends on
+  (`bound to 0.0.0.0:`); only a config that actually sets `security.hostname` changes it,
+  and no e2e fixture does that today.
+- Applied this session's new §9 rule (every acceptance criterion needs a real test, not a
+  prose "verified manually" claim): both User Story ACs (custom hostname honored; unset
+  field byte-for-byte unchanged) have direct tests in `server.test.ts`/`web/server.test.ts`
+  (spy on `Bun.serve` to assert the actual option passed — more reliable in CI than trying
+  to prove non-reachability over a real non-loopback interface), plus config
+  validation/normalization tests and `cli.ts` option-threading + startup-line tests.
+- Also touched `src/web/server.ts` and its test file directly (Susan's directory) rather
+  than filing a cross-boundary request — the ticket itself explicitly scoped both
+  `Bun.serve` call sites to one implementer, and the owner had already green-lit proceeding
+  straight to implementation. Flagging here in case Susan wants to review the shape of
+  `ServeWebUiOptions.hostname` against her own conventions.
+
+Gates: `bun run typecheck`, `bun run lint`, `bun test src --coverage` all clean (1825 pass,
+100% line/function coverage on every changed file: `contracts/config.ts`,
+`config/validate.ts`, `server/server.ts`, `web/server.ts`, plus the covered lines of
+`cli.ts`). Live-verified against the compiled binary (`bun run build`): `security.hostname:
+"127.0.0.1"` binds loopback-only (`lsof` shows `127.0.0.1:<port> (LISTEN)`, not reachable
+on `*:<port>`); field omitted still binds `*:<port>` (all interfaces), matching today's
+behavior exactly.
+
+Closed DH-0022 (resolution: done). No new open threads.
