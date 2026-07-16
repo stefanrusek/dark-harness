@@ -81,6 +81,16 @@ Build a haiku-sub-agent-runnable test plan + prompt set that drives the real com
 - A failing prompt must produce a clear, specific pass/fail signal (not just "something looked
   wrong") — e.g. "expected fenced code block content to render without a leading '```'
   character; captured pane shows: <text>".
+- **Owner requirement (2026-07-15): the overnight run produces one comprehensive report, not
+  scattered per-scenario output.** The orchestrating agent (whatever runs the full suite
+  end-to-end, dispatching each stamped prompt) must collect every scenario's captured pane
+  ("text screenshot") and PASS/FAIL verdict, and assemble a single report enumerating every
+  Test Plan item / acceptance criterion by name with its verdict and evidence — a human
+  reading only that one report in the morning should be able to tell, for every acceptance
+  criterion in this ticket's Test Plan, whether it passed, without opening any other file.
+  Implementer's call on exact report format (Markdown file is the natural choice, consistent
+  with this project's existing reporting conventions), but it must include the captured pane
+  text for every scenario, not just a pass/fail line.
 
 ## Spikes (architect design pass, 2026-07-15 — Fable; executed and verified, not just written)
 

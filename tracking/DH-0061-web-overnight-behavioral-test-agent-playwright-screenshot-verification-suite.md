@@ -76,6 +76,16 @@ Build a haiku-sub-agent-runnable test plan + prompt set that drives the real com
   dispatch guidance (these are anonymous, single-shot verification runs).
 - A failing prompt must produce a clear, specific pass/fail signal plus the screenshot as
   evidence (not just "something looked wrong").
+- **Owner requirement (2026-07-15): the overnight run produces one comprehensive report, not
+  scattered per-scenario output.** The orchestrating agent (whatever runs the full suite
+  end-to-end, dispatching each stamped prompt) must collect every scenario's screenshot and
+  PASS/FAIL/EXPECTED-FAIL verdict, and assemble a single report enumerating every Test Plan
+  item / acceptance criterion by name with its verdict and an embedded/linked screenshot — a
+  human reading only that one report in the morning should be able to tell, for every
+  acceptance criterion in this ticket's Test Plan, whether it passed, without opening any
+  other file or artifact directory by hand. Implementer's call on exact report format (an
+  HTML or Markdown file with embedded/linked screenshots is the natural choice), but it must
+  include the actual screenshot for every scenario, not just a pass/fail line.
 
 ## Notes
 
