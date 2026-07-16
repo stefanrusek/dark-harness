@@ -65,7 +65,6 @@ source: tracking/
 | [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
-| [DH-0069](../DH-0069-agent-tool-s-description-should-be-required-and-the-tree-ui-should-actually-use-it.md) | Agent tool's description should be required, and the tree UI should actually use it | feature | stefan |
 
 ### implementing
 
@@ -87,6 +86,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0069](../DH-0069-agent-tool-s-description-should-be-required-and-the-tree-ui-should-actually-use-it.md) | Agent tool's description should be required, and the tree UI should actually use it | done |
 | [DH-0064](../DH-0064-e2e-web-test-ts-and-connect-web-test-ts-assert-a-stale-agent-output-selector.md) | e2e/web.test.ts and connect-web.test.ts assert a stale .agent-output selector | done |
 | [DH-0063](../DH-0063-spile-ops-skill-id-based-ticket-resolution-rename-on-retitle-tool.md) | spile-ops skill: ID-based ticket resolution + rename-on-retitle tool | done |
 | [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | done |
@@ -101,4 +101,3 @@ source: tracking/
 | [DH-0033](../DH-0033-mock-provider-cannot-simulate-errors-or-streaming.md) | The e2e mock provider can't simulate provider errors or streaming, so the harness's failure-handling path is completely untested end-to-end | done |
 | [DH-0032](../DH-0032-release-binaries-untested-on-real-target-os.md) | Windows and macOS release binaries are cross-compiled but never actually executed anywhere, and the e2e-tested binary isn't the same artifact as what ships | done |
 | [DH-0030](../DH-0030-ci-coverage-gate-text-parsing-fragility.md) | CI's coverage/completeness/e2e gates rely on fragile text-parsing and a fail-open conditional, not structured checks | done |
-| [DH-0029](../DH-0029-web-accessibility-and-error-surfacing-gaps.md) | Web UI has no keyboard-reachable agent list, no ARIA live regions, a missing "stopped" status color, and both clients drop errors after a few seconds with no history | done |
