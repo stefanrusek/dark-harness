@@ -14,7 +14,6 @@ source: tracking/
 | ID | Title | Blocked by |
 | --- | --- | --- |
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance | deferred (owner decision 2026-07-15): no incident behind this, revisit near real release cut |
-| [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | architect design pass in progress (resume mechanism); message-fix piece is unblocked |
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | architect design pass in progress |
 | [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback | deferred (owner decision 2026-07-15): sweep-sourced idea, not a real requested need |
 | [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | architect design pass in progress |
@@ -39,7 +38,6 @@ source: tracking/
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
-| [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session 🔒 | feature | stefan |
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support 🔒 | feature | stefan |
 | [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop 🔒 | bug | stefan |
 
@@ -59,6 +57,7 @@ source: tracking/
 | [DH-0023](../DH-0023-web-ui-token-leak-cors-csp-clickjacking.md) | Web UI CORS/Host-header/CSP/clickjacking hardening | bug | stefan |
 | [DH-0025](../DH-0025-tui-terminal-safety-and-rendering-correctness.md) | TUI wide-character/resize/redraw rendering bugs | bug | stefan |
 | [DH-0028](../DH-0028-tui-missing-token-cost-display-and-usage-accounting-mismatch.md) | TUI never displays token/cost data it already tracks, and TUI vs. Web disagree on whether `token_usage` is a delta or a running total | bug | stefan |
+| [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
 | [DH-0040](../DH-0040-bash-env-secrets-exposure-and-provider-error-redaction.md) | Bash tool's full-environment inheritance and unredacted provider error messages are undocumented secrets-exposure vectors | bug | stefan |
 | [DH-0044](../DH-0044-no-streaming-partial-output.md) | No streaming of partial model output — `agent_output` events only fire once per completed turn | feature | stefan |
 | [DH-0050](../DH-0050-no-structured-final-output-or-headless-json-progress.md) | No structured final-result convention beyond the `TASK_FAILED` text marker, and no machine-readable progress stream for `--job` | feature | stefan |
