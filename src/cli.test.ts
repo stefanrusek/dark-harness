@@ -120,6 +120,7 @@ describe("parseArgs", () => {
       port: null,
       instructions: null,
       job: false,
+      json: false,
       config: "dh.json",
       env: null,
       check: false,
@@ -157,6 +158,7 @@ describe("parseArgs", () => {
       port: 5050,
       instructions: "plan.md",
       job: true,
+      json: false,
       config: "custom.json",
       env: "secrets.env",
       check: true,
@@ -1023,7 +1025,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
         stopRoot: () => {},
         close: async () => {
           closeCalled = true;
@@ -1058,7 +1060,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
         stopRoot: () => {},
       }),
     });
@@ -1071,7 +1073,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
         stopRoot: () => {},
       }),
     });
@@ -1086,7 +1088,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
-        runRoot: async () => ({ success: false, finalOutput: "nope" }),
+        runRoot: async () => ({ success: false, finalOutput: "nope", turns: 1 }),
         stopRoot: () => {},
       }),
     });
@@ -1100,7 +1102,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       ...interactiveOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
         stopRoot: () => {},
       }),
     });
@@ -1126,7 +1128,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       createRuntime: (config, systemPrompt) => {
         received = { config, systemPrompt };
         return {
-          runRoot: async () => ({ success: true, finalOutput: "ok" }),
+          runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
           stopRoot: () => {},
         };
       },
@@ -1144,7 +1146,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
       createRuntime: (_config, _systemPrompt, client) => {
         receivedClient = client;
         return {
-          runRoot: async () => ({ success: true, finalOutput: "ok" }),
+          runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
           stopRoot: () => {},
         };
       },
@@ -1172,7 +1174,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
         runRoot: async () => {
           // Simulate the signal firing while the root agent is mid-run.
           capturedOnSignal?.("SIGTERM");
-          return { success: false, finalOutput: "partial work" };
+          return { success: false, finalOutput: "partial work", turns: 1 };
         },
         stopRoot: () => {
           stopRootCalled = true;
@@ -1242,7 +1244,7 @@ describe("main — --resume <sessionId> (DH-0038)", () => {
         return {
           runRoot: async (instruction: string) => {
             receivedInstruction = instruction;
-            return { success: true, finalOutput: "done" };
+            return { success: true, finalOutput: "done", turns: 1 };
           },
           stopRoot: () => {},
         };
@@ -1282,7 +1284,7 @@ describe("main — --resume <sessionId> (DH-0038)", () => {
       createRuntime: () => ({
         runRoot: async (instruction: string) => {
           receivedInstruction = instruction;
-          return { success: true, finalOutput: "done" };
+          return { success: true, finalOutput: "done", turns: 1 };
         },
         stopRoot: () => {},
       }),
@@ -1467,7 +1469,7 @@ describe("main — real filesystem-backed default deps", () => {
       createRuntime: (_config, systemPrompt) => ({
         runRoot: async (instruction: string) => {
           received = { instruction, systemPrompt };
-          return { success: true, finalOutput: "ok" };
+          return { success: true, finalOutput: "ok", turns: 1 };
         },
         stopRoot: () => {},
       }),
@@ -1489,38 +1491,61 @@ describe("main — real filesystem-backed default deps", () => {
   });
 
   test("the real loadSystemPrompt dep falls back to the real built-in prompt when unset", async () => {
+    // DH-0055: the real loadSystemPrompt dep reads CLAUDE.md from process.cwd(), so this
+    // must run from `dir` (empty, no CLAUDE.md) rather than the repo root's real process
+    // cwd — the repo's own CLAUDE.md would otherwise get injected and break the exact
+    // equality check below.
     const io = fakeIo();
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "go");
     let received: unknown;
-    await main(["--instructions", instructionsPath, "--job"], {
-      loadConfig: async () => TEST_CONFIG,
-      createRuntime: (_config, systemPrompt) => {
-        received = systemPrompt;
-        return { runRoot: async () => ({ success: true, finalOutput: "ok" }), stopRoot: () => {} };
-      },
-      io,
-      installSignalHandlers: fakeInstallSignalHandlers(),
-    });
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await main(["--instructions", instructionsPath, "--job"], {
+        loadConfig: async () => TEST_CONFIG,
+        createRuntime: (_config, systemPrompt) => {
+          received = systemPrompt;
+          return {
+            runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
+            stopRoot: () => {},
+          };
+        },
+        io,
+        installSignalHandlers: fakeInstallSignalHandlers(),
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
     expect(received).toBe(await buildDefaultSystemPrompt(TEST_CONFIG));
   });
 
   test("the real loadSystemPrompt dep reads the configured systemPrompt file", async () => {
+    // See the chdir note in the previous test — same CLAUDE.md-leak reason.
     const io = fakeIo();
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "go");
     const systemPromptPath = join(dir, "system.md");
     await Bun.write(systemPromptPath, "custom system prompt");
     let received: unknown;
-    await main(["--instructions", instructionsPath, "--job"], {
-      loadConfig: async () => ({ ...TEST_CONFIG, systemPrompt: systemPromptPath }),
-      createRuntime: (_config, systemPrompt) => {
-        received = systemPrompt;
-        return { runRoot: async () => ({ success: true, finalOutput: "ok" }), stopRoot: () => {} };
-      },
-      io,
-      installSignalHandlers: fakeInstallSignalHandlers(),
-    });
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      await main(["--instructions", instructionsPath, "--job"], {
+        loadConfig: async () => ({ ...TEST_CONFIG, systemPrompt: systemPromptPath }),
+        createRuntime: (_config, systemPrompt) => {
+          received = systemPrompt;
+          return {
+            runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
+            stopRoot: () => {},
+          };
+        },
+        io,
+        installSignalHandlers: fakeInstallSignalHandlers(),
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
     expect(received).toBe(`custom system prompt\n\n${REQUIRED_CONTRACT}`);
   });
 

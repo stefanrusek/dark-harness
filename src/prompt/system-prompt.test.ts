@@ -6,10 +6,12 @@ import { BUILD_INFO } from "../config/build-info.ts";
 import type { DhConfig, ModelConfig } from "../contracts/index.ts";
 import type { Skill } from "./skills.ts";
 import {
+  CLAUDE_MD_MAX_BYTES,
   CLI_TOOLS_SKILL,
   REQUIRED_CONTRACT,
   buildDefaultSystemPrompt,
   loadSystemPrompt,
+  readProjectClaudeMd,
   renderSelfInfoSection,
   renderSkillsSection,
 } from "./system-prompt.ts";
@@ -200,9 +202,12 @@ describe("loadSystemPrompt", () => {
   });
 
   test("builds the default prompt when systemPrompt is unset", async () => {
+    // Uses `root` (an empty temp dir with no CLAUDE.md) as cwd, not the real process cwd —
+    // this repo's own CLAUDE.md would otherwise get injected and break the exact-equality
+    // check below (see the CLAUDE.md-specific describe block for that behavior).
     const config = baseConfig();
     const [loaded, built] = await Promise.all([
-      loadSystemPrompt(config),
+      loadSystemPrompt(config, root),
       buildDefaultSystemPrompt(config),
     ]);
     expect(loaded).toBe(built);
@@ -212,7 +217,7 @@ describe("loadSystemPrompt", () => {
     const overridePath = join(root, "custom-prompt.txt");
     await writeFile(overridePath, "\n  You are a custom agent.  \n");
 
-    const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }));
+    const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }), root);
 
     expect(prompt).toBe(`You are a custom agent.\n\n${REQUIRED_CONTRACT}`);
     expect(prompt).not.toContain("Available skills");
@@ -233,8 +238,100 @@ describe("loadSystemPrompt", () => {
     const overridePath = join(root, "custom-prompt2.txt");
     await writeFile(overridePath, "You are a custom agent.");
 
-    const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }));
+    const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }), root);
 
     expect(prompt).toContain("## Output format");
+  });
+});
+
+describe("readProjectClaudeMd / DH-0055 CLAUDE.md injection", () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "dh-claude-md-"));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("returns null (silent no-op) when no CLAUDE.md exists", async () => {
+    expect(await readProjectClaudeMd(root)).toBeNull();
+  });
+
+  test("reads and trims CLAUDE.md content when present", async () => {
+    await writeFile(join(root, "CLAUDE.md"), "\n  Always say hi.  \n");
+    expect(await readProjectClaudeMd(root)).toBe("Always say hi.");
+  });
+
+  test("truncates a CLAUDE.md larger than the cap and appends an explicit, non-silent marker", async () => {
+    const big = "x".repeat(CLAUDE_MD_MAX_BYTES + 500);
+    await writeFile(join(root, "CLAUDE.md"), big);
+
+    const result = await readProjectClaudeMd(root);
+
+    expect(result).not.toBeNull();
+    expect(result?.length).toBeLessThan(big.length);
+    expect(result).toContain("truncated");
+    expect(result).toContain(String(big.length));
+    expect(result).toContain(String(CLAUDE_MD_MAX_BYTES));
+  });
+
+  test("a CLAUDE.md exactly at the cap is not truncated", async () => {
+    const exact = "y".repeat(CLAUDE_MD_MAX_BYTES);
+    await writeFile(join(root, "CLAUDE.md"), exact);
+
+    const result = await readProjectClaudeMd(root);
+
+    expect(result).toBe(exact);
+    expect(result).not.toContain("truncated");
+  });
+
+  test("loadSystemPrompt: no CLAUDE.md leaves the default prompt unchanged", async () => {
+    const config = baseConfig();
+    const prompt = await loadSystemPrompt(config, root);
+    const built = await buildDefaultSystemPrompt(config);
+    expect(prompt).toBe(built);
+    expect(prompt).not.toContain("Project instructions");
+  });
+
+  test("loadSystemPrompt: injects CLAUDE.md additively on top of the default prompt", async () => {
+    await writeFile(join(root, "CLAUDE.md"), "Always end every response with FOOBAR_MARKER.");
+
+    const prompt = await loadSystemPrompt(baseConfig(), root);
+
+    // Additive: the default discipline/skills content is still present...
+    expect(prompt).toContain("## Available skills");
+    expect(prompt).toContain(REQUIRED_CONTRACT);
+    // ...and the project's CLAUDE.md content is appended on top of it.
+    expect(prompt).toContain("## Project instructions");
+    expect(prompt).toContain("Always end every response with FOOBAR_MARKER.");
+    expect(prompt.indexOf("## Project instructions")).toBeGreaterThan(
+      prompt.indexOf("## Available skills"),
+    );
+  });
+
+  test("loadSystemPrompt: injects CLAUDE.md additively on top of a config.systemPrompt override", async () => {
+    const overridePath = join(root, "custom-prompt.txt");
+    await writeFile(overridePath, "You are a custom persona agent.");
+    await writeFile(join(root, "CLAUDE.md"), "Project rule: always use tabs.");
+
+    const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }), root);
+
+    expect(prompt).toContain("You are a custom persona agent.");
+    expect(prompt).toContain(REQUIRED_CONTRACT);
+    expect(prompt).toContain("Project rule: always use tabs.");
+    expect(prompt.indexOf("Project rule")).toBeGreaterThan(prompt.indexOf(REQUIRED_CONTRACT));
+  });
+
+  test("loadSystemPrompt defaults cwd to process.cwd() when not passed", async () => {
+    // Sanity check the default-parameter wiring itself, independent of file content: calling
+    // with an explicit cwd equal to process.cwd() must match calling with no second arg.
+    const config = baseConfig();
+    const [withDefault, withExplicitCwd] = await Promise.all([
+      loadSystemPrompt(config),
+      loadSystemPrompt(config, process.cwd()),
+    ]);
+    expect(withDefault).toBe(withExplicitCwd);
   });
 });

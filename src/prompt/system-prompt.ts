@@ -210,6 +210,69 @@ export async function buildDefaultSystemPrompt(config: DhConfig): Promise<string
 }
 
 /**
+ * DH-0055 (tracking/DH-0055-*.md): parity with real Claude Code, which automatically reads a
+ * project's `CLAUDE.md` from the working-directory root and injects it as binding
+ * project-specific instructions. Scope is deliberately narrow per the ticket's own
+ * Assumptions section: a single file at the working-directory root only — no nested
+ * subdirectory `CLAUDE.md`s, no user-level `~/.claude/CLAUDE.md`; those are explicit
+ * follow-ups, not this ticket.
+ *
+ * Absent file is a silent no-op (returns `null`) — this must not warn or error, since the
+ * overwhelming majority of `dh` runs have no `CLAUDE.md` at all and this is not a
+ * misconfiguration.
+ */
+const CLAUDE_MD_FILENAME = "CLAUDE.md";
+
+/**
+ * Cap on how much of a project's `CLAUDE.md` gets injected into the system prompt. Chosen as
+ * "generous relative to every real CLAUDE.md observed in this repo and its own ecosystem"
+ * (this project's own `CLAUDE.md` is ~14 KB) while still bounding worst-case context/token
+ * cost from an operator accidentally pointing `dh` at a huge file. Per CLAUDE.md §8's "no
+ * silent truncation" rule, exceeding this never drops content quietly — the returned text
+ * always carries an explicit, human-readable marker stating that truncation happened and by
+ * how much, so an operator reading the actual system prompt (e.g. via `dh doctor` or
+ * `--dry-run`) can tell at a glance that the file was cut rather than assuming full content
+ * made it in.
+ */
+export const CLAUDE_MD_MAX_BYTES = 32 * 1024;
+
+/**
+ * Reads `CLAUDE.md` from `cwd` if present. Returns `null` (not an error) when the file is
+ * absent — the common case. Returns the trimmed file content, or a truncated prefix plus an
+ * explicit truncation marker if the file exceeds `CLAUDE_MD_MAX_BYTES`.
+ */
+export async function readProjectClaudeMd(cwd: string): Promise<string | null> {
+  const file = Bun.file(`${cwd}/${CLAUDE_MD_FILENAME}`);
+  if (!(await file.exists())) {
+    return null;
+  }
+  const text = await file.text();
+  if (text.length <= CLAUDE_MD_MAX_BYTES) {
+    return text.trim();
+  }
+  const truncated = text.slice(0, CLAUDE_MD_MAX_BYTES).trim();
+  return `${truncated}\n\n[dh: CLAUDE.md truncated for the system prompt — file is ${text.length} bytes, only the first ${CLAUDE_MD_MAX_BYTES} bytes were injected. The rest was not read.]`;
+}
+
+/**
+ * Renders the injected `CLAUDE.md` content as its own clearly-labeled section, so the model
+ * (and anyone reading the assembled prompt) can tell this text came from the project rather
+ * than from `dh` itself.
+ */
+function renderProjectInstructionsSection(claudeMd: string): string {
+  return [
+    "## Project instructions (this project's CLAUDE.md)",
+    "",
+    "The working directory has a `CLAUDE.md` file. Real Claude Code treats this as binding, " +
+      "project-specific instructions layered on top of its own base behavior — treat it the " +
+      "same way here: follow it as project law, on top of (not instead of) the discipline " +
+      "above.",
+    "",
+    claudeMd,
+  ].join("\n");
+}
+
+/**
  * Produces the system prompt Core's agent loop passes to the model. If `config.systemPrompt`
  * is set, the file's contents replace the working-discipline preamble, but
  * `REQUIRED_CONTRACT` (the `TASK_FAILED` convention and logging notice) is always appended
@@ -217,13 +280,31 @@ export async function buildDefaultSystemPrompt(config: DhConfig): Promise<string
  * overriding, because the harness's own exit-code contract depends on it (DH-0018).
  * Otherwise builds the default prompt with skill enumeration.
  *
+ * DH-0055 judgment call: a project's `CLAUDE.md`, if present at `cwd`, is injected as an
+ * *additional* section appended after whichever of the two bases above was used — additive
+ * on top of either the default prompt or a `config.systemPrompt` override, never a
+ * replacement for either. This mirrors real Claude Code, which layers project instructions
+ * on top of its own base behavior rather than one replacing the other, and matches the
+ * ticket's own suggested precedence. `cwd` defaults to `process.cwd()` (the directory `dh`
+ * was actually invoked from) and is only ever overridden in tests, for determinism.
+ *
  * Sub-agents receive this same base prompt plus their spawn prompt; that composition happens
  * in `src/agent/` (Core's territory) — this function only produces the base text.
  */
-export async function loadSystemPrompt(config: DhConfig): Promise<string> {
-  if (config.systemPrompt) {
-    const text = (await Bun.file(config.systemPrompt).text()).trim();
-    return `${text}\n\n${REQUIRED_CONTRACT}`;
+export async function loadSystemPrompt(
+  config: DhConfig,
+  cwd: string = process.cwd(),
+): Promise<string> {
+  const [base, claudeMd] = await Promise.all([
+    config.systemPrompt
+      ? Bun.file(config.systemPrompt)
+          .text()
+          .then((text) => `${text.trim()}\n\n${REQUIRED_CONTRACT}`)
+      : buildDefaultSystemPrompt(config),
+    readProjectClaudeMd(cwd),
+  ]);
+  if (claudeMd === null) {
+    return base;
   }
-  return buildDefaultSystemPrompt(config);
+  return `${base}\n\n${renderProjectInstructionsSection(claudeMd)}\n`;
 }
