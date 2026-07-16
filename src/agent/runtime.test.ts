@@ -907,7 +907,9 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
       const result = await runPromise;
       // DH-0017 fix: a deliberate stop reports "stopped" everywhere, not "failed" — the root
       // conversation didn't succeed, but it also wasn't a self-reported/harness failure.
-      expect(result.success).toBe(false);
+      // DH-0059: stopping while paused "waiting" (as it is here) is a graceful end of the
+      // conversation, so `success` is true (unlike a stop mid-work).
+      expect(result.success).toBe(true);
       expect(runtime.getAgentTree()[0]?.status).toBe("stopped");
     } finally {
       server.stop(true);
@@ -1023,7 +1025,9 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
 
     runtime.stopRoot();
     const result = await runPromise;
-    expect(result.success).toBe(false); // DH-0017: stopped, reported as "stopped", not "failed"
+    // DH-0017: stopped, reported as "stopped", not "failed". DH-0059: the root was paused
+    // "waiting" (asserted above) when stopped, so this is a graceful end — success: true.
+    expect(result.success).toBe(true);
   });
 });
 
@@ -1162,7 +1166,9 @@ describe("AgentRuntime — DH-0013: session-wide budgets", () => {
     // end this session except the wall-clock budget.
     const runPromise = runtime.runRoot("please just answer");
     const result = await runPromise;
-    expect(result.success).toBe(false);
+    // DH-0059: the budget fires while the root is paused "waiting" (per the comment above),
+    // so this is the graceful-stop path — success: true, not a task failure.
+    expect(result.success).toBe(true);
     expect(
       logLines.some(
         (l) => l.type === "message" && l.role === "system" && l.content.includes("maxWallClockMs"),

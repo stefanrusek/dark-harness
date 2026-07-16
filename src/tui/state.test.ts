@@ -566,6 +566,122 @@ describe("reducer: key handling — global", () => {
     const { effects } = reducer(state, { type: "key", key: { kind: "ctrl_c" } });
     expect(effects).toEqual([{ type: "quit" }]);
   });
+
+  // DH-0059: ownsServer: true changes Ctrl+C from an unconditional quit into a graceful
+  // stop_agent/session_ended handshake — but only once the root has actually done something.
+  test("ctrl_c with ownsServer: true but a root that was never active quits immediately (no stop_agent)", () => {
+    const state = initialState(size(), { ownsServer: true });
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "ctrl_c" } });
+    expect(effects).toEqual([{ type: "quit" }]);
+    expect(next.shutdownRequested).toBe(false);
+  });
+
+  test("ctrl_c with ownsServer: true and rootAgentId unknown quits immediately", () => {
+    let state = initialState(size(), { ownsServer: true });
+    state = { ...state, rootActive: true }; // rootAgentId still null
+    const { effects } = reducer(state, { type: "key", key: { kind: "ctrl_c" } });
+    expect(effects).toEqual([{ type: "quit" }]);
+  });
+
+  test("ctrl_c with ownsServer: true and an already-ended session quits immediately", () => {
+    let state = initialState(size(), { ownsServer: true });
+    state = {
+      ...state,
+      rootAgentId: "agent-root",
+      rootActive: true,
+      sessionEnded: { exitCode: 0 },
+    };
+    const { effects } = reducer(state, { type: "key", key: { kind: "ctrl_c" } });
+    expect(effects).toEqual([{ type: "quit" }]);
+  });
+
+  test("ctrl_c with ownsServer: true and an active root sends stop_agent and sets shutdownRequested", () => {
+    let state = initialState(size(), { ownsServer: true });
+    state = { ...state, rootAgentId: "agent-root", rootActive: true };
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "ctrl_c" } });
+    expect(effects).toEqual([
+      { type: "send_command", command: { type: "stop_agent", agentId: "agent-root" } },
+    ]);
+    expect(next.shutdownRequested).toBe(true);
+    expect(next.statusMessage).toBe("stopping session… (Ctrl+C again to force quit)");
+  });
+
+  test("a second ctrl_c while shutdownRequested is already set force-quits immediately", () => {
+    let state = initialState(size(), { ownsServer: true });
+    state = {
+      ...state,
+      rootAgentId: "agent-root",
+      rootActive: true,
+      shutdownRequested: true,
+    };
+    const { effects } = reducer(state, { type: "key", key: { kind: "ctrl_c" } });
+    expect(effects).toEqual([{ type: "quit" }]);
+  });
+
+  test("agent_spawned for the root marks rootActive true", () => {
+    const { state } = reducer(initialState(size()), { type: "sse_event", event: spawned() });
+    expect(state.rootActive).toBe(true);
+  });
+
+  test("agent_output for a non-root agent does not mark rootActive", () => {
+    let state = initialState(size());
+    state = { ...state, rootAgentId: "agent-root" };
+    const { state: next } = reducer(state, {
+      type: "sse_event",
+      event: {
+        version: 1,
+        id: "e2",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        type: "agent_output",
+        agentId: "some-other-agent",
+        chunk: "hi",
+      },
+    });
+    expect(next.rootActive).toBe(false);
+  });
+
+  test("sending a message from the root view marks rootActive true", () => {
+    let state = initialState(size());
+    state = {
+      ...state,
+      rootAgentId: "agent-root",
+      input: "hello",
+      inputCursor: 5,
+    };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.rootActive).toBe(true);
+  });
+
+  test("session_ended while shutdownRequested emits a deferred quit effect", () => {
+    let state = initialState(size(), { ownsServer: true });
+    state = { ...state, rootAgentId: "agent-root", rootActive: true, shutdownRequested: true };
+    const { state: next, effects } = reducer(state, {
+      type: "sse_event",
+      event: {
+        version: 1,
+        id: "e3",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        type: "session_ended",
+        exitCode: 0,
+      },
+    });
+    expect(next.sessionEnded).toEqual({ exitCode: 0 });
+    expect(effects).toEqual([{ type: "quit", afterMs: 1000 }]);
+  });
+
+  test("session_ended with no shutdown in progress does not emit a quit effect", () => {
+    const { effects } = reducer(initialState(size()), {
+      type: "sse_event",
+      event: {
+        version: 1,
+        id: "e4",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        type: "session_ended",
+        exitCode: 0,
+      },
+    });
+    expect(effects).toEqual([]);
+  });
 });
 
 describe("reducer: key handling — root view", () => {

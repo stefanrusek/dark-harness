@@ -1,17 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type {
-  AgentOutputEvent,
-  AgentSpawnedEvent,
   AgentTreeResponse,
   ClientCommand,
   CommandAck,
+  ServerSentEvent,
 } from "../contracts/index.ts";
 import { startTui } from "./app.ts";
 import type { StdinLike, StdoutLike } from "./app.ts";
 import { COMMAND_PATH } from "./http-client.ts";
 import { EVENTS_PATH } from "./sse-client.ts";
 
-function sseFrame(event: AgentSpawnedEvent | AgentOutputEvent): string {
+function sseFrame(event: ServerSentEvent): string {
   return `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
@@ -166,7 +165,7 @@ async function flush(times = 5): Promise<void> {
   }
 }
 
-function enqueueSse(server: FakeServer, event: AgentSpawnedEvent | AgentOutputEvent): void {
+function enqueueSse(server: FakeServer, event: ServerSentEvent): void {
   const encoder = new TextEncoder();
   server.sseController?.enqueue(encoder.encode(sseFrame(event)));
 }
@@ -180,7 +179,9 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
     expect(stdout.writes[0]).toContain(ALT_SCREEN_ENTER);
     expect(stdin.rawMode).toBe(true);
@@ -194,7 +195,9 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     enqueueSse(server, {
@@ -227,7 +230,9 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
     enqueueSse(server, {
       version: 1,
@@ -265,7 +270,9 @@ describe("startTui", () => {
       ],
     });
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     stdin.type("\x1b[D");
@@ -289,7 +296,9 @@ describe("startTui", () => {
       ],
     });
 
-    const done = startTui("http://x", "s3cret", { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", "s3cret", {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     // The SSE connection and the automatic startup request_agent_tree command (Round 3's
@@ -316,7 +325,9 @@ describe("startTui", () => {
     const server = makeFakeServer();
     server.commandResponses.push({ ok: true, tree: [] });
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
     // Index 0 is the automatic startup request_agent_tree command.
     expect(server.sseHeaders[0]?.has("Authorization")).toBe(false);
@@ -335,7 +346,9 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     expect(server.commands).toContainEqual({ type: "request_agent_tree" });
@@ -362,7 +375,9 @@ describe("startTui", () => {
       ],
     });
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     // Deliberately no enqueueSse(...) call here — this is the whole point of the
@@ -390,7 +405,9 @@ describe("startTui", () => {
     const server = makeFakeServer();
     server.commandResponses.push({ ok: false, error: "agent not found" });
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     stdin.type("\x1b[D");
@@ -420,7 +437,7 @@ describe("startTui", () => {
       return new Response(new ReadableStream<Uint8Array>({ start() {} }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl });
+    const done = startTui("http://x", undefined, { io: { stdin, stdout, fetchImpl } });
     await flush();
 
     stdin.type("\x1b[D");
@@ -438,7 +455,9 @@ describe("startTui", () => {
     const server = makeFakeServer();
     server.nextCommandThrows = true;
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     stdin.type("\x1b[D");
@@ -455,7 +474,9 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
     const writesBefore = stdout.writes.length;
 
@@ -481,7 +502,9 @@ describe("startTui", () => {
       ],
     });
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     // DH-0028/DH-0025: the tick only redraws when the rendered frame actually changes
@@ -518,7 +541,9 @@ describe("startTui", () => {
     const stdout = new FakeStdout();
     const server = makeFakeServer();
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
 
     stdin.type("\x03");
@@ -541,7 +566,9 @@ describe("startTui", () => {
       ],
     });
 
-    const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
     await flush();
     enqueueSse(server, {
       version: 1,
@@ -568,5 +595,120 @@ describe("startTui", () => {
 
     stdin.type("\x03");
     await done;
+  });
+});
+
+describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
+  test("ownsServer: false keeps today's detach-only behavior — no stop_agent sent", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      ownsServer: false,
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+    enqueueSse(server, {
+      version: 1,
+      id: "1",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "agent_spawned",
+      agentId: "agent-root",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    await flush();
+
+    stdin.type("\x03");
+    await done;
+
+    expect(server.commands).not.toContainEqual({ type: "stop_agent", agentId: "agent-root" });
+  });
+
+  test("ownsServer: true with a root that was never active quits immediately, no stop_agent", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      ownsServer: true,
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+
+    stdin.type("\x03");
+    await done;
+
+    expect(server.commands).not.toContainEqual({ type: "stop_agent", agentId: "agent-root" });
+  });
+
+  test("ownsServer: true with an active root sends stop_agent, shows a stopping hint, then quits on session_ended", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      ownsServer: true,
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+    enqueueSse(server, {
+      version: 1,
+      id: "1",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "agent_spawned",
+      agentId: "agent-root",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    await flush();
+
+    stdin.type("\x03");
+    await flush();
+
+    expect(server.commands).toContainEqual({ type: "stop_agent", agentId: "agent-root" });
+    expect(stdout.allWrites()).toContain("stopping session");
+
+    enqueueSse(server, {
+      version: 1,
+      id: "2",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "session_ended",
+      exitCode: 0,
+    });
+    await done;
+
+    expect(stdout.allWrites()).toContain("session ended (exit 0)");
+    expect(stdout.allWrites()).toContain(ALT_SCREEN_EXIT);
+  });
+
+  test("a second ctrl_c after shutdown was requested force-quits without waiting for session_ended", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      ownsServer: true,
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+    enqueueSse(server, {
+      version: 1,
+      id: "1",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "agent_spawned",
+      agentId: "agent-root",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    await flush();
+
+    stdin.type("\x03");
+    await flush();
+    stdin.type("\x03");
+
+    await done;
+    expect(stdout.allWrites()).toContain(ALT_SCREEN_EXIT);
   });
 });

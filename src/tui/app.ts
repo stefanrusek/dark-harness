@@ -67,6 +67,22 @@ const TICK_INTERVAL_MS = 1000;
  * the final terminal size without a full-clear-and-rewrite per intermediate size. */
 const RESIZE_DEBOUNCE_MS = 50;
 
+/** DH-0059: how long an operator-initiated shutdown (Ctrl+C, `ownsServer: true`) waits for
+ * `session_ended` to arrive before force-quitting anyway — the escape hatch for a stop that
+ * never completes (e.g. `stopRoot()` deliberately doesn't interrupt a tool call already in
+ * progress). A second Ctrl+C forces the same outcome sooner; this is only the backstop. */
+export const SHUTDOWN_FALLBACK_MS = 5000;
+
+export interface StartTuiOptions {
+  /** DH-0059: true when this process also constructed the `DhServer` this TUI talks to
+   * (local mode) — passed by `src/cli.ts`, which is the only place that knows. Defaults to
+   * `false`, preserving `--connect` mode's existing "Ctrl+C just detaches" behavior. */
+  ownsServer?: boolean;
+  /** Lets tests inject fake stdin/stdout/fetch; production callers (Core's `src/cli.ts`)
+   * can omit it to use the real terminal and network. */
+  io?: Partial<TuiIO>;
+}
+
 /**
  * Start the console TUI against the server at `baseUrl`. Resolves once the user quits
  * (Ctrl+C).
@@ -76,25 +92,25 @@ const RESIZE_DEBOUNCE_MS = 50;
  * never as a URL query parameter (same constraint as the Web client, see
  * `src/web/client/commands.ts` / `sse.ts`). Pass `undefined` (or omit) against an
  * unauthenticated server.
- *
- * `io` lets tests inject fake stdin/stdout/fetch; production callers (Core's `src/cli.ts`)
- * can omit it to use the real terminal and network.
  */
 export async function startTui(
   baseUrl: string,
   token?: string,
-  io: Partial<TuiIO> = {},
+  opts: StartTuiOptions = {},
 ): Promise<void> {
-  const resolved: TuiIO = { ...defaultIO(), ...io };
+  const resolved: TuiIO = { ...defaultIO(), ...opts.io };
   const { stdin, stdout, fetchImpl } = resolved;
   const authHeaders: Record<string, string> | undefined = token
     ? { Authorization: `Bearer ${token}` }
     : undefined;
 
-  let state: TuiState = initialState({
-    rows: stdout.rows ?? 24,
-    cols: stdout.columns ?? 80,
-  });
+  let state: TuiState = initialState(
+    {
+      rows: stdout.rows ?? 24,
+      cols: stdout.columns ?? 80,
+    },
+    { ownsServer: opts.ownsServer ?? false },
+  );
 
   return new Promise<void>((resolve) => {
     const abortController = new AbortController();
@@ -113,9 +129,31 @@ export async function startTui(
       stdout.write(frame);
     }
 
+    // DH-0059: once the reducer sets `shutdownRequested` (Ctrl+C's rule 3 — first press,
+    // ownsServer, root active), start the hard fallback timer here rather than inside the
+    // reducer (which is pure and has no timers) — if `session_ended` never arrives (wire
+    // failure, or a blocking tool call `stopRoot()` deliberately doesn't interrupt), this
+    // forces the same outcome a second Ctrl+C would. `finish()` (below) is idempotent, so
+    // this racing with a normal completion is harmless either way.
+    let shutdownFallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    let finished = false;
+
+    function finish(): void {
+      if (finished) return;
+      finished = true;
+      if (shutdownFallbackTimer !== undefined) clearTimeout(shutdownFallbackTimer);
+      cleanup();
+      resolve();
+    }
+
     function dispatch(action: Action): void {
+      const wasShutdownRequested = state.shutdownRequested;
       const result = reducer(state, action);
       state = result.state;
+      if (!wasShutdownRequested && state.shutdownRequested && shutdownFallbackTimer === undefined) {
+        shutdownFallbackTimer = setTimeout(finish, SHUTDOWN_FALLBACK_MS);
+        shutdownFallbackTimer.unref?.();
+      }
       for (const effect of result.effects) {
         void runEffect(effect);
       }
@@ -124,8 +162,19 @@ export async function startTui(
 
     async function runEffect(effect: Effect): Promise<void> {
       if (effect.type === "quit") {
-        cleanup();
-        resolve();
+        // DH-0059: the effects loop above runs before `draw()` is called in `dispatch()` —
+        // an immediate `finish()` here (the `afterMs`-less case, unchanged from before this
+        // round) still tears the terminal down ahead of that trailing `draw()`, exactly as
+        // it always has. The deferred case (`afterMs` set, from the `session_ended`
+        // completion of an operator-initiated shutdown) deliberately does NOT call `finish()`
+        // synchronously — it schedules it, so this tick's `draw()` gets to paint the final
+        // "session ended (exit N)" frame first, and only after `afterMs` does the terminal
+        // actually get torn down.
+        if (effect.afterMs !== undefined) {
+          setTimeout(finish, effect.afterMs);
+        } else {
+          finish();
+        }
         return;
       }
       try {

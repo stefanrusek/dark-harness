@@ -191,6 +191,7 @@ function reportStopped(
   finalText: string,
   turns: number,
   reason: string,
+  success = false,
 ): AgentLoopResult {
   emitEvent(params, {
     version: 1,
@@ -207,7 +208,7 @@ function reportStopped(
     status: "stopped",
     reason,
   });
-  return { success: false, finalOutput: finalText, turns };
+  return { success, finalOutput: finalText, turns };
 }
 
 function textOf(content: ProviderContentBlock[]): string {
@@ -474,7 +475,14 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       }
 
       if (params.signal?.aborted) {
-        return reportStopped(params, finalText, turns, STOPPED_WHILE_WAITING_REASON);
+        // DH-0059: a stop while paused in "waiting" (between turns, conversationally idle —
+        // as opposed to STOPPED_BETWEEN_TURNS_REASON/STOPPED_DURING_PROVIDER_CALL_REASON,
+        // which interrupt genuinely active work) is a graceful end of an interactive
+        // conversation, not an interrupted task — `success: true` here is what lets
+        // `session_ended` report exitCode 0 for an operator-ended waiting session (via
+        // runtime.ts's `result.success ? Success : TaskFailure` mapping). See ADR 0005's
+        // amendment note for the full reasoning.
+        return reportStopped(params, finalText, turns, STOPPED_WHILE_WAITING_REASON, true);
       }
 
       emitEvent(params, {

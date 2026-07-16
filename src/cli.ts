@@ -476,7 +476,11 @@ export interface CliDeps {
     client: SessionClientKind,
   ) => AgentLoopHandle;
   createServer: (options: DhServerOptions) => DhServerLike;
-  startTui: (baseUrl: string, token?: string) => Promise<void>;
+  /** DH-0059: `ownsServer` tells the TUI whether this process also constructed the
+   * `DhServer` it's talking to (local mode) — only this module knows, since it's the one
+   * that did or didn't build one. Local mode passes `{ ownsServer: true }`; `--connect`
+   * mode passes nothing, defaulting to `false` (unchanged detach-only behavior). */
+  startTui: (baseUrl: string, token?: string, opts?: { ownsServer?: boolean }) => Promise<void>;
   serveWebUi: (options: {
     port: number;
     targetBaseUrl: string;
@@ -548,7 +552,7 @@ function defaultDeps(): CliDeps {
     createAgentLoop: (config, systemPrompt, client) =>
       new AgentRuntimeLoopAdapter({ config, systemPrompt, client }),
     createServer: (options) => new DhServer(options),
-    startTui: (baseUrl, token) => startTuiClient(baseUrl, token),
+    startTui: (baseUrl, token, opts) => startTuiClient(baseUrl, token, opts),
     serveWebUi: (options) => serveWebUiClient(options),
     io: {
       stdout: (message) => console.log(message),
@@ -694,7 +698,16 @@ async function runInteractiveMode(
       return ExitCode.Success;
     }
 
-    await deps.startTui(baseUrl, config.security?.token);
+    await deps.startTui(baseUrl, config.security?.token, { ownsServer: true });
+    // DH-0059 backstop: guarantees no orphaned root agent regardless of *how* the TUI
+    // resolved — a graceful Ctrl+C shutdown already stopped it (this is then a no-op re-abort
+    // of an already-idempotent stopRoot()), but a force quit, the TUI's own fallback timer, or
+    // a root that was never started all resolve `startTui` without ever having stopped it.
+    try {
+      agentLoop.stopAgent(ROOT_AGENT_ID);
+    } catch {
+      // best-effort — nothing running yet, or already stopped.
+    }
     uninstallSignals();
     server.stop();
     return ExitCode.Success;

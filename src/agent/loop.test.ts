@@ -574,7 +574,10 @@ describe("runAgentLoop — Round 5: interactive mode pauses instead of ending on
     }
     controller.abort();
     const result = await resultPromise;
-    expect(result.success).toBe(false);
+    // DH-0059: stopping an agent paused in "waiting" is a graceful end of the conversation,
+    // not an interrupted task — unlike the between-turns/mid-provider-call stop points,
+    // this one reports success so `session_ended` carries exitCode 0.
+    expect(result.success).toBe(true);
     expect(result.finalOutput).toBe("waiting for you");
     expect(
       logLines.some(

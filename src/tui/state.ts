@@ -68,7 +68,16 @@ function trimTranscript(transcript: Turn[], max: number): Turn[] {
   return out;
 }
 
-export function initialState(size: { rows: number; cols: number }): TuiState {
+/** DH-0059: how long the TUI lingers on the final "session ended (exit N)" frame after
+ * `session_ended` arrives (during an operator-initiated shutdown) before actually quitting
+ * — long enough for a slow terminal/capture to observe it (e2e's poll is 150ms), short
+ * enough not to feel like a hang. */
+export const SESSION_ENDED_LINGER_MS = 1000;
+
+export function initialState(
+  size: { rows: number; cols: number },
+  opts: { ownsServer?: boolean } = {},
+): TuiState {
   return {
     view: { kind: "root" },
     agents: new Map(),
@@ -83,6 +92,9 @@ export function initialState(size: { rows: number; cols: number }): TuiState {
     statusMessage: null,
     reconnectNotice: null,
     now: Date.now(),
+    ownsServer: opts.ownsServer ?? false,
+    shutdownRequested: false,
+    rootActive: false,
   };
 }
 
@@ -211,12 +223,14 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
         model: event.model,
       });
       if (event.parentAgentId === null && next.rootAgentId === null) {
-        next = { ...next, rootAgentId: event.agentId };
+        next = { ...next, rootAgentId: event.agentId, rootActive: true };
       }
       return noEffects(next);
     }
-    case "agent_output":
-      return noEffects(appendOutput(state, event.agentId, at, event.chunk));
+    case "agent_output": {
+      const next = appendOutput(state, event.agentId, at, event.chunk);
+      return noEffects(event.agentId === state.rootAgentId ? { ...next, rootActive: true } : next);
+    }
     case "agent_status": {
       const next = withAgent(state, event.agentId, at, { status: event.status });
       return noEffects(evictCompletedAgents(next, DEFAULT_COMPLETED_RETENTION));
@@ -230,16 +244,24 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
       const existing = state.agents.get(event.agentId);
       const priorCost = existing?.costUsd ?? null;
       const nextCost = event.costUsd === undefined ? priorCost : (priorCost ?? 0) + event.costUsd;
-      return noEffects(
-        withAgent(state, event.agentId, at, {
-          inputTokens: (existing?.inputTokens ?? 0) + event.inputTokens,
-          outputTokens: (existing?.outputTokens ?? 0) + event.outputTokens,
-          costUsd: nextCost,
-        }),
-      );
+      const next = withAgent(state, event.agentId, at, {
+        inputTokens: (existing?.inputTokens ?? 0) + event.inputTokens,
+        outputTokens: (existing?.outputTokens ?? 0) + event.outputTokens,
+        costUsd: nextCost,
+      });
+      return noEffects(event.agentId === state.rootAgentId ? { ...next, rootActive: true } : next);
     }
-    case "session_ended":
-      return noEffects({ ...state, sessionEnded: { exitCode: event.exitCode } });
+    case "session_ended": {
+      const next: TuiState = { ...state, sessionEnded: { exitCode: event.exitCode } };
+      // DH-0059: this is the completion side of an operator-initiated Ctrl+C shutdown
+      // (handleKey's ctrl_c rule 3 sent stop_agent and set shutdownRequested) — quit, but
+      // only after the current frame (which now renders "session ended (exit N)") has had
+      // a chance to actually draw; see the Effect.quit doc comment for why `afterMs` exists.
+      if (state.shutdownRequested) {
+        return { state: next, effects: [{ type: "quit", afterMs: SESSION_ENDED_LINGER_MS }] };
+      }
+      return noEffects(next);
+    }
     case "resync":
       return noEffects({
         ...state,
@@ -273,9 +295,48 @@ function applyTreeResponse(state: TuiState, tree: TuiState["tree"]): TuiState {
   return next;
 }
 
+/** DH-0059 Ctrl+C rules (see the ticket's §2 for the full design):
+ *
+ * 1. `ownsServer === false` (a `--connect` client) — quit immediately, unchanged behavior:
+ *    the agent lives in a server this process doesn't own, so Ctrl+C only detaches.
+ * 2. `ownsServer === true` but there's nothing to stop — the session already ended, the
+ *    root was never active (a `stop_agent` on a never-started root is a no-op and
+ *    `session_ended` would never arrive), or `rootAgentId` is still unknown — quit
+ *    immediately, no shutdown wait.
+ * 3. `ownsServer === true`, root has been active, first press — send `stop_agent` for the
+ *    root, set `shutdownRequested`, and show a "stopping…" hint. `session_ended` (handled
+ *    in `handleSseEvent` above) completes the shutdown with a deferred quit.
+ * 4. `ownsServer === true`, second press (`shutdownRequested` already set) — force quit;
+ *    the escape hatch for a stop that never completes (e.g. a tool call still blocking).
+ */
+function handleCtrlC(state: TuiState): ReducerResult {
+  if (!state.ownsServer) {
+    return { state, effects: [{ type: "quit" }] };
+  }
+  if (state.shutdownRequested) {
+    return { state, effects: [{ type: "quit" }] };
+  }
+  if (state.sessionEnded !== null || !state.rootActive || state.rootAgentId === null) {
+    return { state, effects: [{ type: "quit" }] };
+  }
+  return {
+    state: {
+      ...state,
+      shutdownRequested: true,
+      statusMessage: "stopping session… (Ctrl+C again to force quit)",
+    },
+    effects: [
+      {
+        type: "send_command",
+        command: { type: "stop_agent", agentId: state.rootAgentId },
+      },
+    ],
+  };
+}
+
 function handleKey(state: TuiState, key: KeyEvent): ReducerResult {
   if (key.kind === "ctrl_c") {
-    return { state, effects: [{ type: "quit" }] };
+    return handleCtrlC(state);
   }
 
   switch (state.view.kind) {
@@ -352,7 +413,13 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
     const message = state.input;
     const withUserTurn = appendUserTurn(state, state.rootAgentId, state.now, message);
     return {
-      state: { ...withUserTurn, input: "", inputCursor: 0, statusMessage: null },
+      state: {
+        ...withUserTurn,
+        input: "",
+        inputCursor: 0,
+        statusMessage: null,
+        rootActive: true,
+      },
       effects: [
         {
           type: "send_command",
