@@ -2120,6 +2120,21 @@ describe("main — dh init", () => {
     expect(io.stdoutLines[0]).toContain(target);
   });
 
+  // DH-0090: dh init used to scaffold anthropic/bedrock provider entries with no
+  // credential fields at all, leaving a first-time operator to discover apiKey/region
+  // from README on their own. The scaffolded config should come with $(VAR) interpolation
+  // placeholders already in place.
+  test("scaffolds anthropic apiKey and bedrock region as $(VAR) placeholders", () => {
+    const parsed = JSON.parse(SAMPLE_DH_JSON);
+    const anthropic = parsed.provider.find((p: { name: string }) => p.name === "anthropic");
+    const bedrock = parsed.provider.find((p: { name: string }) => p.name === "bedrock");
+    const local = parsed.provider.find((p: { name: string }) => p.name === "local");
+    expect(anthropic.apiKey).toBe("$(ANTHROPIC_API_KEY)");
+    expect(bedrock.region).toBe("$(AWS_REGION)");
+    expect(local.apiKey).toBeUndefined();
+    expect(local.region).toBeUndefined();
+  });
+
   test("refuses to overwrite an existing config file", async () => {
     const io = fakeIo();
     const target = join(dir, "dh.json");
@@ -2136,8 +2151,21 @@ describe("main — dh init", () => {
     const target = join(dir, "dh.json");
     await main(["init", "--config", target], { io });
     const { loadConfig } = await import("./config/index.ts");
-    const config = await loadConfig(target);
-    expect(config.options.defaultModel).toBe("sonnet");
+    // DH-0090: the scaffolded anthropic/bedrock entries now use $(VAR) interpolation
+    // placeholders, so loadConfig needs the referenced env vars set to resolve cleanly.
+    const prevApiKey = process.env.ANTHROPIC_API_KEY;
+    const prevRegion = process.env.AWS_REGION;
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.AWS_REGION = "us-west-2";
+    try {
+      const config = await loadConfig(target);
+      expect(config.options.defaultModel).toBe("sonnet");
+    } finally {
+      if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prevApiKey;
+      if (prevRegion === undefined) delete process.env.AWS_REGION;
+      else process.env.AWS_REGION = prevRegion;
+    }
   });
 
   test("--config requires a value", async () => {

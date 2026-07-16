@@ -152,8 +152,8 @@ This is exactly what `dh init` scaffolds:
     { "name": "gemma4", "provider": "bedrock", "model": "gemma4" }
   ],
   "provider": [
-    { "name": "anthropic", "type": "anthropic" },
-    { "name": "bedrock", "type": "bedrock" },
+    { "name": "anthropic", "type": "anthropic", "apiKey": "$(ANTHROPIC_API_KEY)" },
+    { "name": "bedrock", "type": "bedrock", "region": "$(AWS_REGION)" },
     { "name": "local", "type": "anthropic", "baseURL": "http://localhost:8080" }
   ],
   "skillPaths": ["./skills"],
