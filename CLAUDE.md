@@ -174,3 +174,31 @@ scoped spikes and mockups belong in that ticket's own Spile sidecar directory in
 - No silent truncation: if an agent caps its coverage (top-N, sampling, deferred scope),
   it says so explicitly in its report.
 - PRs: optional per task; the coordinator (Ada) is responsible for merging.
+
+## 9. Acceptance criteria → verification (TDD/BDD)
+
+This project commits to a stronger TDD/BDD discipline: a ticket's User Stories are already
+written in Given/When/Then form (BDD's native shape) — closing the loop means each of those
+bullets must correspond to an actual executable test, not just prose that reads like one.
+"Done" is a claim the test suite proves, not a claim an implementer or the coordinator
+asserts.
+
+- **Unit/component test** (`bun test src`, the existing 100%-coverage gate) is the default
+  home for any criterion exercisable against mocked providers/deterministic state.
+- **Integration test** (a new tier — real network calls against real provider APIs) is
+  required for any criterion that can only be verified against real model behavior: a
+  model's actual tool-calling reliability, a real Bedrock/Anthropic response shape, anything
+  the mocked e2e suite structurally can't see. E2E's existing mock-provider-only policy (§5)
+  is unchanged — this is an additional tier, not a loophole in it.
+  - Cost/scope: acceptable for haiku-class models and cheaper, for now (owner decision,
+    2026-07-16). Don't default this to pricier tiers without asking.
+  - Not part of the default `bun run test:coverage`/CI gate (real calls cost money, need
+    live credentials) — but must exist, be checked in, and be re-runnable on demand.
+  - Location, ownership, and CI wiring are still open — to be settled before this tier's
+    infrastructure is built (as of 2026-07-16: not yet decided whether these live under a
+    new top-level `integration/` directory or a gated subfolder of `e2e/`, who owns the
+    harness vs. individual test cases, and whether they ever run in CI at all given the
+    security-posture implications of real API credentials — see §4.3 — of doing so).
+- A ticket cannot move to `closed` without each User Story bullet naming the specific test
+  (file + case) that proves it. A prose "I manually verified this" is no longer sufficient
+  close-out evidence.
