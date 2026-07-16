@@ -13,6 +13,28 @@ export { wrapText } from "./width.ts";
 
 const HEADER_ROWS = 2;
 
+// DH-0095: DH-0065's "chrome" pass (see `STATUS_COLOR`/`CONNECTION_COLOR` comments below)
+// only ever touched color/bold/dim styling — it never added a left/right margin, so content
+// was (and, per a live-binary screenshot, still is) flush against column 0 and the
+// terminal's right edge with zero buffer. This is the fix: every rendered row gets a fixed
+// `MARGIN`-wide space prefix, and every width-aware computation (wrapping, separators, tree-
+// view scrolling) is sized against `cols - 2 * MARGIN` rather than the raw terminal width, so
+// text never reaches either edge. Applied once, uniformly, in `renderFrame` (via
+// `applyMargin`) rather than scattered per-view so no view can accidentally skip it.
+const MARGIN = 1;
+
+/** Prefix a single already-composed row with the left margin. Only the left side needs an
+ * actual character: the row itself is wrapped to `cols - 2 * MARGIN` columns (see `MARGIN`'s
+ * doc comment above), so it's already short enough to leave a right-edge gap without any
+ * trailing padding — and `frameToAnsi`'s clear-to-end-of-line erases anything past it. */
+function applyMargin(row: string): string {
+  // An empty row (a blank transcript separator, or padRows' bottom-fill) stays empty rather
+  // than becoming a bare margin of trailing whitespace — there's no content to indent, and
+  // callers that detect "blank separator line" via `row === ""` (renderTranscript's own
+  // turn-separator convention) still work unmodified.
+  return row === "" ? "" : `${" ".repeat(MARGIN)}${row}`;
+}
+
 const RESET = "\x1b[0m";
 const INVERSE = "\x1b[7m";
 /** Synthetic cursor marker: an inverse-video space appended after the input text. The alt-
@@ -336,18 +358,22 @@ function renderAgent(
 /** Render the full frame as an exact-height array of plain rows (no leading/trailing ANSI). */
 export function renderFrame(state: TuiState): string[] {
   const { rows, cols } = state.size;
-  const header = headerRows(state, cols);
+  // DH-0095: every view's content is wrapped/measured against `innerCols`, not the raw
+  // terminal width, so nothing ever reaches the left/right edge; `applyMargin` below adds
+  // the actual left-side space back onto each finished row.
+  const innerCols = Math.max(1, cols - 2 * MARGIN);
+  const header = headerRows(state, innerCols);
   const footerRows = state.view.kind === "root" ? 2 : 1;
   const contentRows = Math.max(0, rows - HEADER_ROWS - footerRows);
 
   const { content, footer } =
     state.view.kind === "root"
-      ? renderRoot(state, contentRows, cols)
+      ? renderRoot(state, contentRows, innerCols)
       : state.view.kind === "tree"
-        ? renderTree(state, contentRows, cols)
-        : renderAgent(state, contentRows, cols);
+        ? renderTree(state, contentRows, innerCols)
+        : renderAgent(state, contentRows, innerCols);
 
-  const frame = [...header, ...content, ...footer];
+  const frame = [...header, ...content, ...footer].map(applyMargin);
   return padRows(frame, rows);
 }
 

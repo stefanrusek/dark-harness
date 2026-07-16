@@ -444,3 +444,42 @@ worth carrying forward for whoever resumes this role:
   `e2e/spikes/tui/*.ts` for literal substrings/regexes against that shape before calling it
   done — `bun run e2e` (the `bun:test` suite) doesn't run these standalone scripts, so a
   clean gate run doesn't prove they still pass.
+
+### 2026-07-16 — DH-0095: added the left/right frame margin DH-0065 never touched
+Investigated the "chrome looks unchanged" report against the real compiled binary (built
+via `scripts/build.ts`, ran under a real tmux pane at 60x15 with a scaffolded `dh.json` and
+dummy API keys just to get past config loading). Finding, precisely stated: DH-0065's own
+status log and code comments (`render.ts`'s "DH-0065: chrome styling" comment) describe only
+color/bold/dim styling work — bold app name, colored connection pill, dim secondary info —
+and never mention padding or margins anywhere. So this isn't DH-0065 lying or a regression;
+padding was simply never in that round's scope, and the owner's live-binary read (flush
+against column 0, no buffer) was accurate. Confirmed via the tmux capture: every rendered
+row began at column 0 with no leading space, `frameToAnsi`/`renderFrame` had no margin
+concept at all.
+
+Fix: added `MARGIN = 1` and `applyMargin()` in `render.ts`, applied once in `renderFrame`
+to every composed row (header/content/footer alike) — no per-view special-casing, so no
+view can skip it. The wrapping/measurement width fed to `headerRows`/`renderRoot`/
+`renderTree`/`renderAgent` is `cols - 2 * MARGIN`, not the raw terminal width, so the right
+edge is a byproduct of narrower wrapping rather than trailing pad characters (simpler, and
+`frameToAnsi`'s existing clear-to-EOL already erases anything past the shorter row). Blank
+rows (padRows fill, transcript turn separators) are left as `""` rather than a bare margin
+space, so `row === ""` blank-line detection elsewhere keeps working unmodified.
+
+Re-verified against the real binary afterward: every non-blank captured pane row now starts
+with a leading space. Rebuilt binary confirms it, not just unit tests.
+
+Gates: typecheck/lint/test:coverage all clean, `render.ts` still 100%/100%. Added a
+dedicated `render.test.ts` case asserting the margin (left-space prefix on every non-blank
+row, and that a 40-char run of "x" at 30 cols never produces an unwrapped 30-char row).
+Fixed one now-brittle existing test (`spike-tree-scroll`-adjacent `render.test.ts` case
+whose `cols: 40` fixture no longer left enough post-margin width for its selection-marker
+assertion — bumped to 42, documented why inline). `bun run e2e`: 30/32 pass; the 2 failures
+are pre-existing web/chromium-launch environment failures (`/opt/pw-browsers/chromium`
+missing in this sandbox) unrelated to this change — confirmed by checking they're in
+`e2e/web.test.ts`/`e2e/connect-web.test.ts`, not TUI. Grepped `e2e/spikes/tui/*.ts` per my
+own prior-round note: the one file measuring column position
+(`spike-agent-tree-hierarchy.ts`) does it via a relative comparison (`childIndent >
+rootIndent`), unaffected by a uniform +1 shift — no spike changes needed this round.
+
+Closed DH-0095 via `transition.py`.

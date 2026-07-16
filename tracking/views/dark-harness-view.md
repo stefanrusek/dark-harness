@@ -75,7 +75,6 @@ source: tracking/
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
 | [DH-0094](../DH-0094-agent-has-no-self-awareness-of-its-own-dh-build-current-model-or-other-available-models.md) | Agent has no self-awareness of its own dh build, current model, or other available models | feature | stefan |
-| [DH-0095](../DH-0095-tui-chrome-padding-looks-unchanged-despite-dh-0065-closing-as-fully-done.md) | TUI chrome/padding looks unchanged despite DH-0065 closing as fully done | bug | stefan |
 
 ### implementing
 
@@ -98,6 +97,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0095](../DH-0095-tui-chrome-padding-looks-unchanged-despite-dh-0065-closing-as-fully-done.md) | TUI chrome/padding looks unchanged despite DH-0065 closing as fully done | done |
 | [DH-0092](../DH-0092-scaffolded-dh-init-config-uses-invalid-anthropic-model-id-every-real-api-call-404s.md) | Scaffolded dh init config uses invalid Anthropic model id, every real API call 404s | done |
 | [DH-0091](../DH-0091-dh-doesn-t-read-a-project-s-mcp-json-into-its-mcp-server-config.md) | dh doesn't read a project's .mcp.json into its MCP server config | done |
 | [DH-0090](../DH-0090-dh-init-s-scaffolded-config-has-no-api-key-region-placeholders-using-var-env-interpolation.md) | dh init's scaffolded config has no API-key/region placeholders using $(VAR) env interpolation | done |
@@ -112,4 +112,3 @@ source: tracking/
 | [DH-0079](../DH-0079-read-tool-s-truncation-model-diverges-from-real-claude-code-line-cap-notice-vs-byte-cap-hard-error.md) | Read tool's truncation model diverges from real Claude Code: line-cap+notice vs byte-cap+hard-error | done |
 | [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | done |
 | [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | done |
-| [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | done |

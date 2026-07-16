@@ -107,6 +107,28 @@ describe("renderFrame", () => {
     expect(rows).toHaveLength(15);
   });
 
+  test("every row carries a 1-char left margin, and content never reaches the right edge (DH-0095)", () => {
+    let state = baseState({ size: { rows: 8, cols: 30 } });
+    state.agents.set("root", agentInfo({ transcript: [assistantTurn("x".repeat(40))] }));
+    state = { ...state, rootAgentId: "root" };
+    const rows = renderFrame(state);
+    for (const row of rows) {
+      if (row === "") continue;
+      // Left margin: every non-blank row starts with the margin space, not column 0. (A
+      // transcript continuation row legitimately has its own 2-space gutter indent on top
+      // of this, so this only checks for at least the margin, not exactly one space.)
+      expect(row.startsWith(" ")).toBe(true);
+    }
+    // Right margin: a run of "x" long enough to fill the full 30-col terminal width still
+    // wraps before reaching the raw width — i.e. no single row's plain-text run of "x" is
+    // 30 characters long (it's wrapped to `cols - 2` = 28 at most).
+    const longestXRun = Math.max(
+      0,
+      ...rows.map((row) => (row.match(/x+/g) ?? []).reduce((m, s) => Math.max(m, s.length), 0)),
+    );
+    expect(longestXRun).toBeLessThan(30);
+  });
+
   test("header shows the reconnect notice when set, regardless of the current view (DH-0024)", () => {
     const state = baseState({
       reconnectNotice: "Reconnected — history may be incomplete.",
@@ -269,8 +291,12 @@ describe("renderFrame", () => {
   test("tree view scrolls to keep a selection below the fold visible (DH-0027)", () => {
     // 10 total rows: HEADER_ROWS(2) + footer(1) leaves 7 content rows for the tree.
     const tree = Array.from({ length: 20 }, (_, i) => treeNode(`agent-${i}`));
+    // DH-0095: cols is 2 wider than the original 40 to offset the new 1-char left/right
+    // frame margin (`MARGIN` in render.ts) eating into the tree view's effective wrap width
+    // — otherwise this entry's ANSI-code-inflated text wraps one row earlier and "agent-19"
+    // lands on a continuation row without the "> " selection marker.
     const state = baseState({
-      size: { rows: 10, cols: 40 },
+      size: { rows: 10, cols: 42 },
       view: { kind: "tree", selectedIndex: 19 },
       tree,
     });
