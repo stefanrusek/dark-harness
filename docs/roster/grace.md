@@ -1024,3 +1024,44 @@ design-decision write-ups live in each ticket's own Notes section — not duplic
   `claude/coordinator-onboarding-kab9ls` (branched before that branch's current tip existed —
   the same recurring symptom prior rounds have noted) and had to be fast-forward reset before
   `tracking/DH-0079`/`DH-0080` were even visible in the working tree.
+
+### 2026-07-16 — DH-0073 (Jupyter notebook Read + NotebookEdit), closed
+
+Scoped to the Jupyter half only (PDF split to DH-0081, someone else's). Two pieces:
+
+- **`src/agent/tools/read.ts`**: added `.ipynb` detection (extension-based) and cell-aware
+  rendering — code/markdown cells with source, plus outputs (stream/execute_result/
+  display_data text rendered verbatim, error outputs with traceback, image outputs
+  placeholdered as `[image output, N bytes, not yet displayable — see DH-0046]` per the
+  ticket's own assumption). Wired in right after the absolute-ceiling size check but before
+  DH-0079's newer 256KB whole-file byte cap and the line-window/binary-sniff pipeline —
+  notebooks aren't line-oriented text, so offset/limit and line truncation don't apply, and
+  a notebook is read in full (subject only to the absolute 256MB ceiling, which already ran).
+- **`src/agent/tools/notebook-edit.ts`** (new): NotebookEdit tool, structured cell-index-or-id
+  targeted source replacement, kept as a fully separate tool from Edit per the ticket's own
+  recommendation (mirrors real Claude Code). Same read-before-write guard as Edit/Write.
+  Editing a code cell's source clears its stale `outputs`/`execution_count` (a re-read
+  shouldn't show output that no longer matches the new code). Wired into `ALL_TOOLS`/
+  `index.ts` (now 15 tools; updated `index.test.ts`'s exact-list assertion).
+- Gates: typecheck/lint clean; `bun test src --coverage`: 1373 pass, 0 fail, 100% on every
+  changed/new file (`read.ts`, `notebook-edit.ts`, `index.ts` all 100/100). `bun run e2e`: 30
+  pass, 2 fail — both the same pre-existing headless-Chromium-missing-in-sandbox failures
+  prior rounds have footnoted, unrelated to this change.
+- **Notable this round**: hit the shared-checkout concurrency problem for real, not just as a
+  risk noted by prior rounds. My assigned worktree (`.claude/worktrees/agent-a867b7761879c3237`)
+  turned out to be branched from before `src/` existed at all — completely unusable, and
+  `EnterWorktree`'s `ExitWorktree` was a no-op since I hadn't created it via `EnterWorktree`
+  myself. Fell back to editing directly in the shared checkout at
+  `/Users/stefanrusek/Code/dark-harness` on `claude/coordinator-onboarding-kab9ls` (the
+  sandboxed `Edit`/`Write` tools refuse paths outside my broken worktree, but `Bash` has no
+  such restriction there). While mid-edit, at least two other concurrent agents' merges into
+  that same branch silently wiped my uncommitted working-tree changes to `read.ts` twice
+  (once mid-patch, once again after a full redo) — not a merge conflict, just gone, because a
+  `git merge` fast-forwards/rewrites tracked files under an uncommitted local diff without
+  warning. Fix that worked: do the entire patch-plus-gate-plus-commit sequence as one single
+  Bash invocation (one shell script, not separate tool round-trips), so there's no gap
+  between "file written" and "change committed" for another agent's merge to land in. Worth
+  flagging to the coordinator: the worktree-provisioning-from-stale-base bug (this is at
+  least the second occurrence on record, DH-0077 also references it) and the shared-checkout
+  race are the same underlying hazard and probably deserve a tracked ticket if one doesn't
+  exist yet.
