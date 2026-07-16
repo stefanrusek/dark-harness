@@ -1172,3 +1172,54 @@ worth a future instance not being surprised by this again.
 headless-Chromium-unavailable-in-sandbox failures prior rounds have footnoted
 (`/opt/pw-browsers/chromium` missing), unrelated to this change. Closed DH-0090 via
 `spile-ops`/`transition.py` (`resolution: done`).
+
+### 2026-07-16 — Round 16 (DH-0076: TodoCreate/TodoGet/TodoList/TodoUpdate)
+
+Architect (Fable) had already produced a complete design in the ticket itself — naming,
+schemas, storage model, semantics for advisory dependencies and the sole-mutator delete
+convention — so this was faithful implementation, not a design round. New `TodoStore`
+(`src/agent/todos.ts`): an ordered `Map<string, TodoRecord>` with a monotonic `todo-N`
+counter, deliberately sharing zero code with `TaskRegistry` (per the ticket's own framing —
+one supervises real concurrent processes, the other is a dumb planning-record store).
+`blockedBy`/`blocks` are two sides of one edge set kept in sync by every mutator
+(`create`'s initial `blockedBy`, `update`'s `add_blocked_by`/`add_blocks`/their removals,
+and `deleteRecord`'s edge-severing sweep over every other record). Four thin tools
+(`todo-create.ts`/`todo-get.ts`/`todo-list.ts`/`todo-update.ts`) follow the exact
+`isError`-result convention of `task-output.ts`/`task-stop.ts` — no tool ever throws for a
+user-facing validation problem, only genuinely unexpected internal errors propagate (and I
+added a dedicated test forcing that rethrow path in `todo-create.test.ts` since the real
+store never actually produces one, matching this identity's "test the branch, not just the
+happy path" habit).
+
+**Wiring point worth remembering:** `ToolContext.todos` is constructed once per
+`buildToolContext(agentId)` call in `runtime.ts` (`todos: new TodoStore()`), the exact same
+per-agent-lifetime scoping precedent Round 13 established for `readRegistry`/
+`activatedTools` — one store per agent, created fresh at spawn/root time, never shared
+across siblings, dies when the agent's `ToolContext` goes out of scope. No new constructor
+parameter, no config plumbing — this made the change purely additive to `buildToolContext`'s
+return object plus the one shared `test-helpers.ts` fixture (`makeToolContext`), rather than
+touching every call site that builds a `ToolContext` by hand (there's exactly one, by
+design).
+
+**Semantics I implemented literally rather than "improving": advisory-only dependencies, no
+cycle detection, free status transitions in any direction.** The ticket was explicit that
+completing a todo with open blockers should succeed with a warning, not fail — I resisted
+the temptation to add an opt-in "strict" mode or cycle detection nobody asked for; the
+ticket's own reasoning (edges are self-authored planning metadata with no execution
+semantics) is a real argument, not just scope-trimming, so I left it exactly that simple.
+
+**Known, explained coverage gap (same class as Round 1's `tasks.ts` note):** `todos.ts`
+reports 90.91% func coverage (10/11) despite 100% line coverage — every line in every real
+method fires under the test suite (confirmed by inspecting `lcov.info` directly: `LH:98`
+`LF:98`, zero uncovered `DA` lines). This is the same synthetic-slot artifact Round 1
+documented for `tasks.ts` (bun's `FNF`/`FNH` counting what's almost certainly an implicit
+class field-initializer constructor slot as a separate "function" no source line maps to),
+not a real gap — not re-instrumented by hand this time since the precedent and its
+verification method are already on record.
+
+**Gates:** typecheck/lint clean. `bun run test:coverage`: 1533 pass, 0 fail; all four new
+files 100% lines, `todo-create.ts`/`todo-get.ts`/`todo-list.ts`/`todo-update.ts` all 100%
+funcs too; `todos.ts`'s 90.91% func figure is the explained non-gap above. `bun run e2e`: 30
+pass, 2 fail — the same pre-existing headless-Chromium-unavailable-in-sandbox failures
+every prior round has footnoted, unrelated to this change. Closed DH-0076 via `spile-ops`/
+`transition.py` (`resolution: done`).

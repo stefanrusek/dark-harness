@@ -3,6 +3,7 @@
 
 import type { DhConfig } from "../../contracts/index.ts";
 import { TaskRegistry } from "../tasks.ts";
+import { TodoStore } from "../todos.ts";
 import type { ToolContext } from "./types.ts";
 
 export const TEST_CONFIG: DhConfig = {
@@ -25,6 +26,7 @@ export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolConte
     searchDeferredTools: async () => ({ results: [] }),
     readRegistry: new Map(),
     activatedTools: new Set(),
+    todos: new TodoStore(),
     ...overrides,
   };
   return context;

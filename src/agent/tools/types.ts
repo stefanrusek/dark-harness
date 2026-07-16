@@ -4,6 +4,7 @@
 
 import type { DhConfig } from "../../contracts/index.ts";
 import type { TaskRegistry } from "../tasks.ts";
+import type { TodoStore } from "../todos.ts";
 
 /** JSON Schema subset sufficient to describe tool inputs to a model provider. */
 export interface JsonSchema {
@@ -92,6 +93,12 @@ export interface ToolContext {
    * tools never need activation (they never set `deferred`); loop.ts's per-turn `toolDefs`
    * filter hides any `deferred` tool whose name isn't in this set from the provider. */
   activatedTools: Set<string>;
+  /** DH-0076: this agent's own self-authored todo/plan store, backing the TodoCreate/
+   * TodoGet/TodoList/TodoUpdate tool family. Deliberately separate from `tasks` (TaskRegistry
+   * supervises real concurrent jobs; TodoStore is a dumb ordered map of planning records with
+   * zero execution semantics) — same per-ToolContext, per-agent-lifetime scoping precedent as
+   * `readRegistry`/`activatedTools` above. */
+  todos: TodoStore;
 }
 
 export interface Tool {

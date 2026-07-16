@@ -13,6 +13,10 @@ import { sendMessageTool } from "./send-message.ts";
 import { skillTool } from "./skill.ts";
 import { taskOutputTool } from "./task-output.ts";
 import { taskStopTool } from "./task-stop.ts";
+import { todoCreateTool } from "./todo-create.ts";
+import { todoGetTool } from "./todo-get.ts";
+import { todoListTool } from "./todo-list.ts";
+import { todoUpdateTool } from "./todo-update.ts";
 import { toolSearchTool } from "./tool-search.ts";
 import type { Tool } from "./types.ts";
 import { writeTool } from "./write.ts";
@@ -37,6 +41,10 @@ export const ALL_TOOLS: Tool[] = [
   grepTool,
   globTool,
   notebookEditTool,
+  todoCreateTool,
+  todoGetTool,
+  todoListTool,
+  todoUpdateTool,
 ];
 
 export function buildToolMap(tools: Tool[] = ALL_TOOLS): Map<string, Tool> {
@@ -56,6 +64,10 @@ export * from "./send-message.ts";
 export * from "./skill.ts";
 export * from "./task-output.ts";
 export * from "./task-stop.ts";
+export * from "./todo-create.ts";
+export * from "./todo-get.ts";
+export * from "./todo-list.ts";
+export * from "./todo-update.ts";
 export * from "./tool-search.ts";
 export * from "./types.ts";
 export * from "./write.ts";

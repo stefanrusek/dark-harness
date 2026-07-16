@@ -22,6 +22,7 @@ import { createProvider } from "./providers/index.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
 import { loadSkillFromPaths } from "./skills.ts";
 import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
+import { TodoStore } from "./todos.ts";
 import { ALL_TOOLS, buildToolMap } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
@@ -422,6 +423,9 @@ export class AgentRuntime {
       // DH-0002: fresh per agent lifetime, same scoping precedent as readRegistry above —
       // captured by this closure so searchDeferredTools (above) can mutate it directly.
       activatedTools,
+      // DH-0076: fresh per agent lifetime, same scoping precedent as readRegistry/
+      // activatedTools above — this agent's own self-authored todo/plan store.
+      todos: new TodoStore(),
     };
   }
 

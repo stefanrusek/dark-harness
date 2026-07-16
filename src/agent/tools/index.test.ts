@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ALL_TOOLS, buildToolMap } from "./index.ts";
 
 describe("tool registry", () => {
-  test("exposes exactly the 15 tools (HANDOFF.md §4's original 12, DH-0054's Grep/Glob, DH-0073's NotebookEdit)", () => {
+  test("exposes exactly the 19 tools (HANDOFF.md §4's original 12, DH-0054's Grep/Glob, DH-0073's NotebookEdit, DH-0076's Todo family)", () => {
     const names = ALL_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual(
       [
@@ -19,6 +19,10 @@ describe("tool registry", () => {
         "Skill",
         "TaskOutput",
         "TaskStop",
+        "TodoCreate",
+        "TodoGet",
+        "TodoList",
+        "TodoUpdate",
         "ToolSearch",
         "Write",
       ].sort(),
