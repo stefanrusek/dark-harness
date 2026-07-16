@@ -117,7 +117,7 @@ export class DhServer {
     this.bunServer = Bun.serve({
       port: this.requestedPort,
       ...(tls ? { tls } : {}),
-      fetch: (req) => this.handleFetch(req),
+      fetch: (req, server) => this.handleFetch(req, server),
     });
     // Bun.serve()'s `.port` is typed `number | undefined` to cover unix-socket servers;
     // we always pass a numeric `port` option (never `unix`), so it is always bound to a
@@ -147,7 +147,7 @@ export class DhServer {
     };
   }
 
-  private async handleFetch(req: Request): Promise<Response> {
+  private async handleFetch(req: Request, server: ReturnType<typeof Bun.serve>): Promise<Response> {
     if (req.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
@@ -159,7 +159,7 @@ export class DhServer {
     const url = new URL(req.url);
 
     if (url.pathname === EVENTS_PATH && req.method === "GET") {
-      return this.handleSse(req);
+      return this.handleSse(req, server);
     }
 
     if (url.pathname === COMMANDS_PATH && req.method === "POST") {
@@ -169,7 +169,18 @@ export class DhServer {
     return new Response(null, { status: 404, headers: CORS_HEADERS });
   }
 
-  private handleSse(req: Request): Response {
+  private handleSse(req: Request, server: ReturnType<typeof Bun.serve>): Response {
+    // Bun.serve() closes a connection after 10s of inactivity by default (its own
+    // `idleTimeout`, independent of and *shorter than* our SSE heartbeat interval below) —
+    // "inactivity" includes a streamed response that hasn't written bytes in that window,
+    // which is exactly what a quiet SSE connection looks like between heartbeats. Left
+    // alone, Bun kills every SSE connection at the 10s mark regardless of the heartbeat,
+    // forcing a client reconnect roughly every 10s even on an otherwise-healthy connection
+    // (root cause of DH-0058: the TUI's "Reconnected — history may be incomplete" banner
+    // firing, and events emitted in the gap being missed, on any turn slower than ~10s).
+    // `server.timeout(req, 0)` disables Bun's idle timeout for this one request/connection;
+    // our own heartbeat interval remains the sole keep-alive mechanism for it.
+    server.timeout(req, 0);
     const lastEventId = req.headers.get("Last-Event-ID");
     const { events: replay, gap } = this.eventBuffer.getEventsAfter(lastEventId);
     const encoder = new TextEncoder();

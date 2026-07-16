@@ -374,11 +374,18 @@ describe("DhServer", () => {
         heartbeatIntervalMs: 1,
       });
       server.start();
-      // Reaching a private method deliberately, for the reason explained above.
-      const handleSse = (
-        server as unknown as { handleSse: (req: Request) => Response }
-      ).handleSse.bind(server);
-      const res: Response = handleSse(new Request("http://localhost/api/events"));
+      // Reaching a private method (and the private `bunServer` it now needs to disable
+      // Bun's own idle timeout on the SSE connection, per DH-0058) deliberately, for the
+      // reason explained above.
+      const internals = server as unknown as {
+        handleSse: (req: Request, bunServer: ReturnType<typeof Bun.serve>) => Response;
+        bunServer: ReturnType<typeof Bun.serve>;
+      };
+      const handleSse = internals.handleSse.bind(server);
+      const res: Response = handleSse(
+        new Request("http://localhost/api/events"),
+        internals.bunServer,
+      );
 
       // Let the unread connection saturate past the backpressure threshold and self-close,
       // entirely without draining it.
