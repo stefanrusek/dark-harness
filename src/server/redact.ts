@@ -118,9 +118,10 @@ export function redactSecrets(text: string, knownSecrets: readonly string[] = []
 
 /**
  * Collects every real secret value the loaded config holds — `security.token`, every
- * provider `apiKey`, and every MCP server header value — for exact-match redaction via
- * `redactSecrets`. No length filtering here (the guard lives in `redactSecrets` itself so
- * every caller gets it uniformly); duplicates are harmless (just a redundant regex pass).
+ * provider `apiKey`, every MCP server header value, and (DH-0074) `web.search.apiKey` — for
+ * exact-match redaction via `redactSecrets`. No length filtering here (the guard lives in
+ * `redactSecrets` itself so every caller gets it uniformly); duplicates are harmless (just a
+ * redundant regex pass).
  */
 export function collectConfigSecrets(config: DhConfig): string[] {
   const secrets: string[] = [];
@@ -133,5 +134,8 @@ export function collectConfigSecrets(config: DhConfig): string[] {
       secrets.push(value);
     }
   }
+  // DH-0074: WebSearch's Brave API key joins the same redaction set — never logged, per the
+  // architect design's explicit requirement.
+  if (config.web?.search?.apiKey) secrets.push(config.web.search.apiKey);
   return secrets;
 }

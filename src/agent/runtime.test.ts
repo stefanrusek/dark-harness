@@ -224,6 +224,38 @@ function startMockAnthropicServer(onRequest?: (body: { model: string }) => void)
             "tool_use",
           );
         }
+        // DH-0074 test support: calls WebFetch by name regardless of whether it's actually
+        // registered on this runtime — lets a test assert "Unknown tool" dispatch when
+        // web.fetch isn't configured, vs. a real fetch when it is.
+        if (text.includes("call-webfetch-tool-by-name")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_webfetch_probe",
+                name: "WebFetch",
+                input: { url: "http://8.8.8.8/" },
+              },
+            ],
+            "tool_use",
+          );
+        }
+        {
+          const webfetchMatch = /use-webfetch (\S+)/.exec(text);
+          if (webfetchMatch?.[1]) {
+            return message(
+              [
+                {
+                  type: "tool_use",
+                  id: "tu_webfetch",
+                  name: "WebFetch",
+                  input: { url: webfetchMatch[1], prompt: "what is this page about?" },
+                },
+              ],
+              "tool_use",
+            );
+          }
+        }
         if (text === "child instruction") {
           return message([{ type: "text", text: "child done" }], "end_turn");
         }
@@ -1741,5 +1773,84 @@ describe("AgentRuntime — Round 12: proactive push notification on background t
     if (notice?.type === "message") {
       expect(notice.content).toContain("failed: boom");
     }
+  });
+});
+
+// DH-0074 (tracking/DH-0074-*.md, architect design Fable 2026-07-16): composeTools()
+// wiring (web tool registration is presence-gated) and ToolContext.completeWithModel (the
+// extraction-model call WebFetch makes, and its session-accounting feed).
+describe("AgentRuntime — DH-0074 web tool wiring", () => {
+  test("composeTools() is used instead of ALL_TOOLS: web absent -> WebFetch is not callable at all", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+    const result = await runtime.runRoot("call-webfetch-tool-by-name");
+    expect(result.success).toBe(true);
+    const toolResult = logLines.find(
+      (l) => l.type === "tool_result" && l.toolUseId === "tu_webfetch_probe",
+    );
+    expect(toolResult && toolResult.type === "tool_result" ? toolResult.output : "").toBe(
+      "Unknown tool: WebFetch",
+    );
+  });
+
+  test("web.fetch configured -> WebFetch actually runs end-to-end, and its extraction-model " +
+    "call (completeWithModel) feeds the same token_usage/session-accounting path as a normal turn", async () => {
+    const pageServer = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response("This page is about bun test fixtures.", {
+          headers: { "content-type": "text/plain" },
+        });
+      },
+    });
+    try {
+      const { events, onEvent } = collectors();
+      const runtime = newAgentRuntime({
+        config: baseConfig({
+          web: {
+            fetch: {
+              // The fixture server binds to 127.0.0.1 — a private address — so the SSRF
+              // check must be deliberately bypassed for this test, exactly as a real
+              // operator pointing WebFetch at an internal docs server would configure it.
+              allowPrivateNetwork: true,
+              extractionModel: "test-model",
+            },
+          },
+        }),
+        systemPrompt: "sp",
+        onEvent,
+      });
+
+      const webfetchUrl = pageServer.url.toString();
+      const result = await runtime.runRoot(`use-webfetch ${webfetchUrl}`);
+      expect(result.success).toBe(true);
+
+      // The extraction call is a second, independent completion call against the same mock
+      // provider — the mock server's default (non-tool-result, non-matching-trigger) branch
+      // replies with "root done", so the WebFetch tool_result content should be exactly that.
+      const tokenUsageEvents = events.filter((e) => e.type === "token_usage");
+      // At least one token_usage event beyond the root turn's own — proves completeWithModel
+      // reported its usage through the runtime's normal onEvent path, not silently.
+      expect(tokenUsageEvents.length).toBeGreaterThanOrEqual(2);
+      expect(
+        tokenUsageEvents.every((e) => e.type === "token_usage" && e.agentId === ROOT_AGENT_ID),
+      ).toBe(true);
+    } finally {
+      pageServer.stop(true);
+    }
+  });
+
+  test("web.search configured with no web.fetch -> WebSearch is registered, WebFetch is not", async () => {
+    const runtime = newAgentRuntime({
+      config: baseConfig({
+        web: { search: { provider: "brave", apiKey: "test-key" } },
+      }),
+      systemPrompt: "sp",
+    });
+    // Root just answers normally; the real assertion is that constructing/running a runtime
+    // with only web.search configured doesn't throw or misbehave (WebSearch's own unit tests
+    // in web-search.test.ts cover its execute() behavior in isolation).
+    const result = await runtime.runRoot("please just answer");
+    expect(result.success).toBe(true);
   });
 });

@@ -141,4 +141,17 @@ describe("collectConfigSecrets", () => {
   test("returns an empty array when config holds no secrets", () => {
     expect(collectConfigSecrets(config())).toEqual([]);
   });
+
+  // DH-0074: web.search.apiKey joins the same redaction set as every other config secret.
+  test("collects web.search.apiKey", () => {
+    const secrets = collectConfigSecrets(
+      config({ web: { search: { provider: "brave", apiKey: "brave-key-12345" } } }),
+    );
+    expect(secrets).toEqual(["brave-key-12345"]);
+  });
+
+  test("does not collect anything when web.fetch is configured with no web.search", () => {
+    const secrets = collectConfigSecrets(config({ web: { fetch: {} } }));
+    expect(secrets).toEqual([]);
+  });
 });

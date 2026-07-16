@@ -27,6 +27,9 @@ export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolConte
     readRegistry: new Map(),
     activatedTools: new Set(),
     todos: new TodoStore(),
+    completeWithModel: async () => {
+      throw new Error("completeWithModel not wired in this test context");
+    },
     ...overrides,
   };
   return context;

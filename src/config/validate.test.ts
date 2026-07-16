@@ -549,3 +549,174 @@ describe("validateConfig — rejections", () => {
     expect(() => validateConfig(baseConfig({ limitz: {} }))).toThrow(/unknown config key "limitz"/);
   });
 });
+
+// DH-0074 (tracking/DH-0074-*.md, architect design Fable 2026-07-16): the opt-in `web`
+// block. Absence of the block, or of either sub-key, means that tool isn't registered at all
+// — see composeTools() in src/agent/tools/index.ts.
+describe("validateConfig — web (DH-0074)", () => {
+  test("web is omitted (not defaulted) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.web).toBeUndefined();
+  });
+
+  test("an empty web object is accepted as-is (both tools remain absent)", () => {
+    const config = validateConfig(baseConfig({ web: {} }));
+    expect(config.web).toEqual({});
+  });
+
+  test("rejects a non-object web", () => {
+    expect(() => validateConfig(baseConfig({ web: "on" }))).toThrow(/web must be an object/);
+  });
+
+  test("rejects an unknown key at the web top level", () => {
+    expect(() => validateConfig(baseConfig({ web: { fetc: {} } }))).toThrow(
+      /web has unknown key "fetc"/,
+    );
+  });
+
+  test("web.fetch: an empty object is a valid minimal opt-in (all fields default)", () => {
+    const config = validateConfig(baseConfig({ web: { fetch: {} } }));
+    expect(config.web?.fetch).toEqual({});
+  });
+
+  test("web.fetch: accepts every documented field", () => {
+    const config = validateConfig(
+      baseConfig({
+        web: {
+          fetch: {
+            timeoutMs: 5000,
+            maxResponseBytes: 1024,
+            maxOutputChars: 500,
+            allowPrivateNetwork: true,
+            allowedHosts: ["docs.example.com"],
+            extractionModel: "haiku",
+          },
+        },
+      }),
+    );
+    expect(config.web?.fetch).toEqual({
+      timeoutMs: 5000,
+      maxResponseBytes: 1024,
+      maxOutputChars: 500,
+      allowPrivateNetwork: true,
+      allowedHosts: ["docs.example.com"],
+      extractionModel: "haiku",
+    });
+  });
+
+  test("web.fetch: rejects a non-object value", () => {
+    expect(() => validateConfig(baseConfig({ web: { fetch: "yes" } }))).toThrow(
+      /web.fetch must be an object/,
+    );
+  });
+
+  test("web.fetch: rejects an unknown key", () => {
+    expect(() => validateConfig(baseConfig({ web: { fetch: { bogus: 1 } } }))).toThrow(
+      /web.fetch has unknown key "bogus"/,
+    );
+  });
+
+  test("web.fetch: rejects a non-positive-integer timeoutMs/maxResponseBytes/maxOutputChars", () => {
+    expect(() => validateConfig(baseConfig({ web: { fetch: { timeoutMs: -1 } } }))).toThrow(
+      /web.fetch.timeoutMs must be a positive integer/,
+    );
+    expect(() => validateConfig(baseConfig({ web: { fetch: { maxResponseBytes: 0 } } }))).toThrow(
+      /web.fetch.maxResponseBytes must be a positive integer/,
+    );
+    expect(() => validateConfig(baseConfig({ web: { fetch: { maxOutputChars: 1.5 } } }))).toThrow(
+      /web.fetch.maxOutputChars must be a positive integer/,
+    );
+  });
+
+  test("web.fetch: rejects a non-boolean allowPrivateNetwork", () => {
+    expect(() =>
+      validateConfig(baseConfig({ web: { fetch: { allowPrivateNetwork: "yes" } } })),
+    ).toThrow(/web.fetch.allowPrivateNetwork must be a boolean/);
+  });
+
+  test("web.fetch: rejects a non-array-of-strings allowedHosts", () => {
+    expect(() =>
+      validateConfig(baseConfig({ web: { fetch: { allowedHosts: "example.com" } } })),
+    ).toThrow(/web.fetch.allowedHosts must be an array of non-empty strings/);
+    expect(() => validateConfig(baseConfig({ web: { fetch: { allowedHosts: [""] } } }))).toThrow(
+      /web.fetch.allowedHosts must be an array of non-empty strings/,
+    );
+  });
+
+  test("web.fetch: rejects a non-string extractionModel", () => {
+    expect(() => validateConfig(baseConfig({ web: { fetch: { extractionModel: 42 } } }))).toThrow(
+      /web.fetch.extractionModel must be a string/,
+    );
+  });
+
+  test("web.search: requires provider and apiKey", () => {
+    expect(() => validateConfig(baseConfig({ web: { search: {} } }))).toThrow(
+      /web.search.provider must be one of brave/,
+    );
+    expect(() => validateConfig(baseConfig({ web: { search: { provider: "brave" } } }))).toThrow(
+      /web.search.apiKey must be a non-empty string/,
+    );
+  });
+
+  test("web.search: accepts a valid minimal config, applying $(VAR)-free literal apiKey", () => {
+    const config = validateConfig(
+      baseConfig({ web: { search: { provider: "brave", apiKey: "key-123" } } }),
+    );
+    expect(config.web?.search).toEqual({ provider: "brave", apiKey: "key-123" });
+  });
+
+  test("web.search: accepts optional timeoutMs/maxResults", () => {
+    const config = validateConfig(
+      baseConfig({
+        web: { search: { provider: "brave", apiKey: "key", timeoutMs: 5000, maxResults: 15 } },
+      }),
+    );
+    expect(config.web?.search).toEqual({
+      provider: "brave",
+      apiKey: "key",
+      timeoutMs: 5000,
+      maxResults: 15,
+    });
+  });
+
+  test("web.search: rejects an unsupported provider", () => {
+    expect(() =>
+      validateConfig(baseConfig({ web: { search: { provider: "google", apiKey: "key" } } })),
+    ).toThrow(/web.search.provider must be one of brave/);
+  });
+
+  test("web.search: rejects an unknown key", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ web: { search: { provider: "brave", apiKey: "key", bogus: 1 } } }),
+      ),
+    ).toThrow(/web.search has unknown key "bogus"/);
+  });
+
+  test("web.search: rejects a non-object value", () => {
+    expect(() => validateConfig(baseConfig({ web: { search: "yes" } }))).toThrow(
+      /web.search must be an object/,
+    );
+  });
+
+  test("web.search: rejects maxResults above the hard cap of 20", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ web: { search: { provider: "brave", apiKey: "key", maxResults: 21 } } }),
+      ),
+    ).toThrow(/web.search.maxResults must not exceed 20/);
+  });
+
+  test("both web.fetch and web.search can be configured together, independently", () => {
+    const config = validateConfig(
+      baseConfig({
+        web: {
+          fetch: { timeoutMs: 1000 },
+          search: { provider: "brave", apiKey: "key" },
+        },
+      }),
+    );
+    expect(config.web?.fetch).toEqual({ timeoutMs: 1000 });
+    expect(config.web?.search).toEqual({ provider: "brave", apiKey: "key" });
+  });
+});

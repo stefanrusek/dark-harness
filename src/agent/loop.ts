@@ -147,7 +147,7 @@ export interface AgentLoopParams {
  * all for this model. If only one side of the split (input/output) is configured, the other
  * side is treated as $0/MToken rather than making the whole result undefined — a partial
  * price is still a real, deliberately-configured value, not "unconfigured". */
-function computeCostUsd(
+export function computeCostUsd(
   pricing: AgentLoopParams["pricing"],
   inputTokens: number,
   outputTokens: number,

@@ -9,6 +9,9 @@ import type {
   ProviderConfig,
   ProviderType,
   SecurityTlsConfig,
+  WebConfig,
+  WebFetchConfig,
+  WebSearchConfig,
 } from "../contracts/index.ts";
 import { ConfigError } from "./errors.ts";
 
@@ -39,7 +42,21 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   "security",
   "limits",
   "logRetention",
+  "web",
 ]);
+
+// DH-0074: `web.fetch`/`web.search` opt-in blocks — see src/contracts/config.ts's WebConfig
+// doc comment for the "presence registers the tool, absence means it doesn't exist" semantics.
+const KNOWN_WEB_FETCH_KEYS = new Set([
+  "timeoutMs",
+  "maxResponseBytes",
+  "maxOutputChars",
+  "allowPrivateNetwork",
+  "allowedHosts",
+  "extractionModel",
+]);
+const KNOWN_WEB_SEARCH_KEYS = new Set(["provider", "apiKey", "timeoutMs", "maxResults"]);
+const WEB_SEARCH_PROVIDERS = new Set(["brave"]);
 
 const KNOWN_LIMITS_KEYS = new Set(["completedRetention"]);
 
@@ -217,6 +234,117 @@ function validateLogRetention(raw: unknown): DhConfig["logRetention"] {
   };
 }
 
+/** DH-0074: validates the optional `web.fetch` block. Every field is optional (defaults are
+ * applied by the tool itself at execute time, not here) except that `allowedHosts`, when
+ * present, must be an array of non-empty strings. */
+function validateWebFetch(raw: unknown): WebFetchConfig {
+  if (!isRecord(raw)) {
+    throw new ConfigError("web.fetch must be an object");
+  }
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_WEB_FETCH_KEYS.has(key)) {
+      throw new ConfigError(
+        `web.fetch has unknown key "${key}"; known keys: ${[...KNOWN_WEB_FETCH_KEYS].join(", ")}`,
+      );
+    }
+  }
+  const timeoutMs = validatePositiveNumber(raw.timeoutMs, "web.fetch.timeoutMs", true);
+  const maxResponseBytes = validatePositiveNumber(
+    raw.maxResponseBytes,
+    "web.fetch.maxResponseBytes",
+    true,
+  );
+  const maxOutputChars = validatePositiveNumber(
+    raw.maxOutputChars,
+    "web.fetch.maxOutputChars",
+    true,
+  );
+  const allowPrivateNetwork = raw.allowPrivateNetwork;
+  if (allowPrivateNetwork !== undefined && typeof allowPrivateNetwork !== "boolean") {
+    throw new ConfigError("web.fetch.allowPrivateNetwork must be a boolean when present");
+  }
+  let allowedHosts: string[] | undefined;
+  if (raw.allowedHosts !== undefined) {
+    if (
+      !Array.isArray(raw.allowedHosts) ||
+      raw.allowedHosts.some((h) => typeof h !== "string" || h.length === 0)
+    ) {
+      throw new ConfigError("web.fetch.allowedHosts must be an array of non-empty strings");
+    }
+    allowedHosts = raw.allowedHosts as string[];
+  }
+  const extractionModel = raw.extractionModel;
+  if (extractionModel !== undefined && typeof extractionModel !== "string") {
+    throw new ConfigError("web.fetch.extractionModel must be a string when present");
+  }
+  return {
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(maxResponseBytes !== undefined ? { maxResponseBytes } : {}),
+    ...(maxOutputChars !== undefined ? { maxOutputChars } : {}),
+    ...(allowPrivateNetwork !== undefined ? { allowPrivateNetwork } : {}),
+    ...(allowedHosts !== undefined ? { allowedHosts } : {}),
+    ...(extractionModel !== undefined ? { extractionModel } : {}),
+  };
+}
+
+/** DH-0074: validates the optional `web.search` block. Unlike `web.fetch`, `provider` and
+ * `apiKey` are required — a `web.search` block that's missing either is a config-load-time
+ * error, not a silently-absent tool (see WebSearchConfig's doc comment). */
+function validateWebSearch(raw: unknown): WebSearchConfig {
+  if (!isRecord(raw)) {
+    throw new ConfigError("web.search must be an object");
+  }
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_WEB_SEARCH_KEYS.has(key)) {
+      throw new ConfigError(
+        `web.search has unknown key "${key}"; known keys: ${[...KNOWN_WEB_SEARCH_KEYS].join(", ")}`,
+      );
+    }
+  }
+  const provider = raw.provider;
+  if (typeof provider !== "string" || !WEB_SEARCH_PROVIDERS.has(provider)) {
+    throw new ConfigError(
+      `web.search.provider must be one of ${[...WEB_SEARCH_PROVIDERS].join(", ")}, got ${JSON.stringify(provider)}`,
+    );
+  }
+  const apiKey = requireString(raw.apiKey, "web.search.apiKey");
+  const timeoutMs = validatePositiveNumber(raw.timeoutMs, "web.search.timeoutMs", true);
+  const maxResults = validatePositiveNumber(raw.maxResults, "web.search.maxResults", true);
+  if (maxResults !== undefined && maxResults > 20) {
+    throw new ConfigError("web.search.maxResults must not exceed 20");
+  }
+  return {
+    provider: provider as "brave",
+    apiKey,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(maxResults !== undefined ? { maxResults } : {}),
+  };
+}
+
+/** DH-0074: validates the optional top-level `web` block. Absence of the whole block, or of
+ * either sub-key, means that tool does not exist at all — see WebConfig's doc comment. */
+function validateWeb(raw: unknown): WebConfig | undefined {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) {
+    throw new ConfigError("web must be an object");
+  }
+  const knownWebKeys = new Set(["fetch", "search"]);
+  for (const key of Object.keys(raw)) {
+    if (!knownWebKeys.has(key)) {
+      throw new ConfigError(`web has unknown key "${key}"; known keys: fetch, search`);
+    }
+  }
+  const fetchConfig = raw.fetch !== undefined ? validateWebFetch(raw.fetch) : undefined;
+  const searchConfig = raw.search !== undefined ? validateWebSearch(raw.search) : undefined;
+  if (fetchConfig === undefined && searchConfig === undefined) {
+    return {};
+  }
+  return {
+    ...(fetchConfig !== undefined ? { fetch: fetchConfig } : {}),
+    ...(searchConfig !== undefined ? { search: searchConfig } : {}),
+  };
+}
+
 function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | undefined {
   if (raw === undefined) return undefined;
   if (!isRecord(raw)) {
@@ -360,6 +488,7 @@ export function validateConfig(raw: unknown): DhConfig {
 
   const limits = validateLimits(raw.limits);
   const logRetention = validateLogRetention(raw.logRetention);
+  const web = validateWeb(raw.web);
 
   const config: DhConfig = {
     options: {
@@ -380,6 +509,7 @@ export function validateConfig(raw: unknown): DhConfig {
     ...(security !== undefined ? { security } : {}),
     ...(limits !== undefined ? { limits } : {}),
     ...(logRetention !== undefined ? { logRetention } : {}),
+    ...(web !== undefined ? { web } : {}),
   };
   return config;
 }
