@@ -204,6 +204,31 @@ duplicates sit unconnected; comprehensive capture (§9) means some redundancy ac
 independent sweeps is expected, and it's the coordinator's job to notice and connect it, not
 silently ignore or merge away the record of it.
 
+### Gating speculative features on real demand, not guesswork
+
+A subclass of bucket 3 deserves a specific default, not just "leave it in the backlog": a
+sweep- or comparison-driven finding proposing real capability nobody has actually asked for or
+hit a need for yet (as opposed to a confirmed bug, a security gap, or something the owner
+explicitly wants). The default for these is to **defer the whole thing, not a cheap partial
+version of it** — don't scope down to "just the easy part" as a middle ground; if it's not
+worth doing, a smaller version of not-doing-it is still not doing it. This applies to
+speculative hardening (a threat with no observed incident) exactly as much as speculative
+features (a capability with no observed request) — the same judgment call, just two flavors
+of "nobody's actually hit this yet."
+
+For a project with real users/community, one useful default-deferral shape: rather than
+silently dropping the idea, have the product **detect the situation and point at a public
+place to register interest** (e.g. a GitHub issue describing the gap, linked back to the
+internal ticket for whoever eventually picks it up) instead of either building it speculatively
+or losing the idea entirely. This turns "nobody's asked for this" from a guess into something
+that can actually be measured — real demand shows up as issue engagement, not as a sub-agent's
+assessment of what sounds useful. Keep the internal ticket itself in the backlog regardless
+(deferred, not closed) so the two stay linked and the eventual build has a real design behind
+it already. Note that filing a real public issue is a genuine visible/external action per the
+"executing actions with care" guidance the underlying agent framework already carries — confirm
+with the owner before actually posting one, the same way you would before any other action
+visible outside the local repo.
+
 ---
 
 ## 5. Handoff document conventions
