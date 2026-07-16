@@ -7,6 +7,8 @@ import type {
   ResyncEvent,
   SessionEndedEvent,
   TokenUsageEvent,
+  ToolCallEvent,
+  ToolResultEvent,
 } from "../../contracts/index.ts";
 import {
   addUserTurn,
@@ -100,6 +102,33 @@ function resync(): ResyncEvent {
     id: "evt-resync",
     timestamp: new Date().toISOString(),
     type: "resync",
+  };
+}
+
+function toolCall(agentId: string, toolUseId: string): ToolCallEvent {
+  return {
+    version: 1,
+    id: `evt-toolcall-${toolUseId}`,
+    timestamp: new Date().toISOString(),
+    type: "tool_call",
+    agentId,
+    toolUseId,
+    toolName: "Bash",
+    inputSummary: "echo hi",
+  };
+}
+
+function toolResult(agentId: string, toolUseId: string, isError = false): ToolResultEvent {
+  return {
+    version: 1,
+    id: `evt-toolresult-${toolUseId}`,
+    timestamp: new Date().toISOString(),
+    type: "tool_result",
+    agentId,
+    toolUseId,
+    toolName: "Bash",
+    isError,
+    durationMs: 12,
   };
 }
 
@@ -284,6 +313,19 @@ describe("setConnectionStatus", () => {
 });
 
 describe("markPossibleGap / dismissPossibleGap (DH-0024)", () => {
+  // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
+  // DH-0089). Rendering them as a live transcript marker is a separate Web round (D5,
+  // assigned to Susan) — this build's handler just needs to accept them without corrupting
+  // state (bumped lastEventId aside, applyEvent is otherwise a no-op for these two types).
+  test("tool_call/tool_result events are accepted without altering agent state (D5 deferred to a later Web round)", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("agent-1", null));
+    const before = state.agents.get("agent-1");
+    state = applyEvent(state, toolCall("agent-1", "tu_1"));
+    state = applyEvent(state, toolResult("agent-1", "tu_1", true));
+    expect(state.agents.get("agent-1")).toEqual(before);
+  });
+
   test("markPossibleGap sets possibleGap", () => {
     const state = createInitialState();
     expect(state.possibleGap).toBe(false);

@@ -106,6 +106,70 @@ describe("runAgentLoop", () => {
       type: "tool_result",
       toolUseId: "tu_1",
     });
+
+    // DH-0089: tool_call/tool_result SSE events are emitted, shaped per
+    // src/contracts/events.ts, and appear immediately before their JSONL counterparts.
+    const toolCallEvent = events.find((e) => e.type === "tool_call");
+    expect(toolCallEvent).toMatchObject({
+      type: "tool_call",
+      agentId: "agent-root",
+      toolUseId: "tu_1",
+      toolName: "Bash",
+      inputSummary: "echo hi",
+    });
+    const toolResultEvent = events.find((e) => e.type === "tool_result");
+    expect(toolResultEvent).toMatchObject({
+      type: "tool_result",
+      agentId: "agent-root",
+      toolUseId: "tu_1",
+      toolName: "Bash",
+      isError: false,
+    });
+    expect(
+      toolResultEvent && toolResultEvent.type === "tool_result" && toolResultEvent.durationMs,
+    ).toBeGreaterThanOrEqual(0);
+  });
+
+  // DH-0089 D2: verifies the exact emission ordering the design calls for — the SSE event
+  // fires immediately before its JSONL log-line counterpart, for both the call and the
+  // result — by recording both sinks into one combined, interleaved sequence.
+  test("tool_call/tool_result SSE events are each emitted immediately before their JSONL counterpart", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo hi", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "All done, task succeeded." }],
+        usage: { inputTokens: 12, outputTokens: 6 },
+      },
+    ]);
+    const sequence: string[] = [];
+    const { params } = baseParams({
+      provider,
+      onEvent: (e: ServerSentEvent) => sequence.push(`event:${e.type}`),
+      onLogLine: (l: LogLine) => sequence.push(`log:${l.type}`),
+    });
+    await runAgentLoop(params);
+
+    const callEventIdx = sequence.indexOf("event:tool_call");
+    const callLogIdx = sequence.indexOf("log:tool_call");
+    const resultEventIdx = sequence.indexOf("event:tool_result");
+    const resultLogIdx = sequence.indexOf("log:tool_result");
+
+    expect(callEventIdx).toBeGreaterThanOrEqual(0);
+    expect(callLogIdx).toBe(callEventIdx + 1);
+    expect(resultEventIdx).toBeGreaterThan(callLogIdx);
+    expect(resultLogIdx).toBe(resultEventIdx + 1);
   });
 
   // Round 11 regression (docs/handoffs/core.md status log): the provider must receive
@@ -184,13 +248,29 @@ describe("runAgentLoop", () => {
         usage: { inputTokens: 1, outputTokens: 1 },
       },
     ]);
-    const { params, logLines } = baseParams({ provider });
+    const { params, events, logLines } = baseParams({ provider });
     const result = await runAgentLoop(params);
     expect(result.success).toBe(true);
     const toolResultLog = logLines.find((l) => l.type === "tool_result");
     expect(toolResultLog && toolResultLog.type === "tool_result" && toolResultLog.isError).toBe(
       true,
     );
+
+    // DH-0089: the unknown-tool-name branch still emits both SSE events, with the tool_call
+    // event's inputSummary falling back to compact JSON (empty input object) and the
+    // tool_result event correctly marked as an error.
+    const toolCallEvent = events.find((e) => e.type === "tool_call");
+    expect(toolCallEvent).toMatchObject({
+      type: "tool_call",
+      toolName: "NotARealTool",
+      inputSummary: "{}",
+    });
+    const toolResultEvent = events.find((e) => e.type === "tool_result");
+    expect(toolResultEvent).toMatchObject({
+      type: "tool_result",
+      toolName: "NotARealTool",
+      isError: true,
+    });
   });
 
   test("exceeding maxTurns reports failure without throwing", async () => {

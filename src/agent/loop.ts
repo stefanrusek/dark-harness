@@ -51,6 +51,7 @@ import type {
   ProviderContentBlock,
   ProviderMessage,
 } from "./providers/types.ts";
+import { summarizeToolInput } from "./tool-summary.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
 export const TASK_FAILED_MARKER = "TASK_FAILED";
@@ -232,6 +233,17 @@ async function runToolCalls(
 ): Promise<ProviderContentBlock[]> {
   const results: ProviderContentBlock[] = [];
   for (const toolUse of toolUses) {
+    const startedAt = Date.now();
+    emitEvent(params, {
+      version: 1,
+      id: randomUUID(),
+      timestamp: nowIso(),
+      type: "tool_call",
+      agentId: params.agentId,
+      toolUseId: toolUse.id,
+      toolName: toolUse.name,
+      inputSummary: summarizeToolInput(toolUse.name, toolUse.input),
+    });
     emitLog(params, {
       version: 1,
       timestamp: nowIso(),
@@ -257,6 +269,17 @@ async function runToolCalls(
       isError = result.isError;
     }
 
+    emitEvent(params, {
+      version: 1,
+      id: randomUUID(),
+      timestamp: nowIso(),
+      type: "tool_result",
+      agentId: params.agentId,
+      toolUseId: toolUse.id,
+      toolName: toolUse.name,
+      isError,
+      durationMs: Date.now() - startedAt,
+    });
     emitLog(params, {
       version: 1,
       timestamp: nowIso(),

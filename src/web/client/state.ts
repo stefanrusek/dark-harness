@@ -320,6 +320,15 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     case "resync":
       next.possibleGap = true;
       return next;
+    // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
+    // DH-0089) not yet consumed here — a live tool-turn marker is a separate Web round (D5,
+    // assigned to Susan: new "tool" turn kind, pending-map keyed by toolUseId, Agent
+    // suppression rule). Handled explicitly (not folded into the exhaustiveness-check
+    // default below) so `assertNever` still guards against a truly *unhandled* future
+    // variant, rather than being defeated by these two.
+    case "tool_call":
+    case "tool_result":
+      return next;
     default:
       // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added to
       // src/contracts/ without a case here (assertNever's parameter type is `never`, which

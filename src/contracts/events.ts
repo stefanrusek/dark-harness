@@ -50,6 +50,47 @@ export interface TokenUsageEvent extends SseEventBase {
   costUsd?: number;
 }
 
+/**
+ * Emitted immediately before a tool's `execute()` call (see `src/agent/loop.ts`'s
+ * `runToolCalls()`). Named to match its JSONL log-line counterpart (`tool_call` in
+ * `src/contracts/log.ts`) — precedent: `token_usage` already shares its name across both
+ * schemas. DH-0089.
+ */
+export interface ToolCallEvent extends SseEventBase {
+  type: "tool_call";
+  agentId: string;
+  /** Correlates with the matching `tool_result` event (same id as the JSONL line's
+   * toolUseId). */
+  toolUseId: string;
+  toolName: string;
+  /** Display-only, single-line, <= TOOL_INPUT_SUMMARY_MAX_CHARS (200) chars, "…"-suffixed
+   * when truncated. NEVER the full arguments — the JSONL log's `tool_call` line carries
+   * those (redacted per DH-0020); this field exists solely for a compact live indicator.
+   * Produced by `src/agent/tool-summary.ts` (Core) and secret-redacted server-side before it
+   * reaches the wire. Not parseable — clients must not attempt to reconstruct arguments. */
+  inputSummary: string;
+}
+
+/**
+ * Emitted immediately after a tool's output/isError are determined (both the normal execute
+ * path and the unknown-tool-name error branch). DH-0089. Deliberately no output content —
+ * outputs can be huge (whole-file Reads) and are the largest secret surface; a compact
+ * indicator only needs success/failure. Full output lives in the JSONL log, already redacted
+ * per DH-0020.
+ */
+export interface ToolResultEvent extends SseEventBase {
+  type: "tool_result";
+  agentId: string;
+  toolUseId: string;
+  /** Repeated from the `tool_call` event so clients that missed the call (resume gap) can
+   * still render something meaningful without a join. */
+  toolName: string;
+  isError: boolean;
+  /** Wall-clock duration of the execute() call. For run_in_background tools (Bash bg, Agent)
+   * this measures the synchronous spawn/dispatch, not background completion. */
+  durationMs: number;
+}
+
 export interface SessionEndedEvent extends SseEventBase {
   type: "session_ended";
   exitCode: number;
@@ -73,5 +114,7 @@ export type ServerSentEvent =
   | AgentStatusEvent
   | AgentSpawnedEvent
   | TokenUsageEvent
+  | ToolCallEvent
+  | ToolResultEvent
   | SessionEndedEvent
   | ResyncEvent;

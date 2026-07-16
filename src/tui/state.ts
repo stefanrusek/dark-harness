@@ -293,6 +293,15 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
         ...state,
         reconnectNotice: "Reconnected — history may be incomplete.",
       });
+    // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
+    // DH-0089) not yet consumed here — that's a separate TUI round (D5). Not in
+    // sse-parser.ts's KNOWN_TYPES yet either, so these never actually reach this reducer at
+    // runtime; this default exists purely to keep this switch's exhaustiveness check
+    // compiling now that the union has grown, without pre-empting the real TUI-round design
+    // (pending marker text, error suffix, per-agent toolUseId pending map) that ticket
+    // explicitly assigns to Mary.
+    default:
+      return noEffects(state);
   }
 }
 

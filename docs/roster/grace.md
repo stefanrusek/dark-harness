@@ -1223,3 +1223,73 @@ funcs too; `todos.ts`'s 90.91% func figure is the explained non-gap above. `bun 
 pass, 2 fail — the same pre-existing headless-Chromium-unavailable-in-sandbox failures
 every prior round has footnoted, unrelated to this change. Closed DH-0076 via `spile-ops`/
 `transition.py` (`resolution: done`).
+
+### 2026-07-16 — Round 17 (DH-0089: tool_call/tool_result SSE events, Core's piece)
+
+Architect (Fable) had already produced a complete, implementer-ready design in the ticket
+(D1–D6) — this was faithful implementation of D1/D2/D3 only; D4 (Server redaction), D5
+(TUI/Web consumption), D6's E2E follow-up are explicitly out of scope for this round, left
+for Radia/Mary/Susan/Hedy.
+
+Added `ToolCallEvent`/`ToolResultEvent` to `src/contracts/events.ts` (additive to the
+`ServerSentEvent` union, per the exact shapes D1 specifies) and a new
+`src/agent/tool-summary.ts` (`summarizeToolInput`/`TOOL_INPUT_SUMMARY_MAX_CHARS`)
+implementing the priority-key/fallback/truncation heuristic verbatim. Wired emission into
+`loop.ts`'s `runToolCalls()`: `tool_call` SSE event (capturing `startedAt`) immediately
+before the existing JSONL `tool_call` emitLog, `tool_result` SSE event (with computed
+`durationMs`) immediately before the existing JSONL `tool_result` emitLog — covers both the
+normal execute path and the unknown-tool-name error branch, no other emission sites, no
+throttling (D3's conclusion taken as-is).
+
+**Cross-domain compile fallout, fixed minimally:** growing the `ServerSentEvent` union broke
+two *other* domains' exhaustive switches over `event.type` — `src/tui/state.ts`'s
+`handleSseEvent` (implicit exhaustiveness via a bare switch with no default, now missing
+statements on some paths) and `src/web/client/state.ts`'s `applyEvent` (explicit
+`assertNever(event)` exhaustiveness guard in its `default` case). Left both TUI and Web's
+actual DH-0089 D5 rendering work (pending-marker text, error suffix, `toolUseId` maps, Agent
+suppression) entirely for Mary/Susan's rounds — but a contracts-only PR that leaves
+`bun run typecheck` red for every other domain isn't a defensible handoff, so I added the
+minimal fix in each: TUI gets a `default: return noEffects(state)` (matches the design's own
+"KNOWN_TYPES-style graceful drop of unrecognized event types" framing); Web gets explicit
+`case "tool_call": case "tool_result": return next;` above its `assertNever` default (so the
+guard still catches a genuinely new, truly unhandled future variant instead of being
+silently defeated by these two). Both are pure no-ops — no rendering, no state change beyond
+what `applyEvent`/`handleSseEvent` already do for every event (advancing `lastEventId` etc.)
+— and both are commented pointing at DH-0089/D5 so Mary and Susan don't mistake this for the
+finished feature.
+
+Added test coverage for both of those minimal touches (`src/tui/state.ts`'s new default
+branch is already covered at 100% lines by existing tests reaching it transitively;
+`src/web/client/state.test.ts` got an explicit new test asserting `tool_call`/`tool_result`
+leave agent state untouched) so this round's changed lines don't create a coverage gap in
+files it doesn't own.
+
+**Worktree note (repeat of a prior round's flag, still true):** this agent's assigned git
+worktree was created against a stale/empty `origin/main` (2 commits, no `src/` tree at all)
+— had to `git merge --ff-only local/claude/coordinator-onboarding-kab9ls` inside the worktree
+before any of the real source existed to edit. Worth whoever owns worktree provisioning
+fixing the base-ref selection; every round so far has hit this same surprise.
+
+**Gates:** typecheck/lint clean (after the two cross-domain switch fixes above).
+`bun run test:coverage`: 1543 pass, 0 fail; `src/agent/tool-summary.ts`,
+`src/contracts/events.ts` both 100% lines/funcs; `src/agent/loop.ts` 100% lines (99.72% func
+is the same synthetic-slot non-gap documented in prior rounds, unaffected by this change);
+`src/web/client/state.ts` 100% lines/funcs. `bun run e2e`: 30 pass, 2 fail — the same
+pre-existing headless-Chromium-unavailable-in-sandbox failures every prior round has
+footnoted, unrelated to this change.
+
+**What remains open on DH-0089** (left at `status: ready`, not closed — do not close until
+all rounds land):
+- **Server (Radia):** D4 — `sanitizeEvent(event, knownSecrets)` redaction wrapper applied at
+  both `agentLoop.onEvent` subscription sites in `src/server/server.ts` (EventBuffer intake
+  and the live per-connection broadcast), redacting `tool_call.inputSummary` before it
+  reaches the wire.
+- **TUI (Mary):** D5 — add `"tool_call"`/`"tool_result"` to `sse-parser.ts`'s `KNOWN_TYPES`,
+  then replace my placeholder `default` case in `state.ts`'s `handleSseEvent` with the real
+  pending-`toolUseId`-map/marker-append/error-suffix logic the design specifies (and the
+  `toolName === "Agent"` suppression rule, with its error-result exception).
+- **Web (Susan):** D5 — new `"tool"` turn kind, pending-map keyed by `toolUseId`, `render.ts`
+  branch for the compact `.turn-tool` row; replace my placeholder
+  `case "tool_call": case "tool_result": return next;` in `state.ts` with the real logic.
+- **E2E (Hedy):** D6 follow-up, sequenced last — mock-provider `tool_use` turn, assert TUI
+  shows a `⚙ Bash:` marker and Web transcript grows a `.turn-tool` row.

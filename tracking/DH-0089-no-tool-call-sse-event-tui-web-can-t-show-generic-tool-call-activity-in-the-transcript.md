@@ -219,3 +219,22 @@ already covers spawns, and rendering both would double-mark every spawn. Excepti
 > Found 2026-07-16 while implementing DH-0065 (TUI visual polish) — the implementer correctly
 > declined to guess at a contracts change from within a single domain and flagged it here
 > instead, per Constitution §6.2.
+
+> [!NOTE]
+> **2026-07-16 — Core's piece (D1/D2/D3) done (Grace).** `ToolCallEvent`/`ToolResultEvent`
+> added to `src/contracts/events.ts`; `src/agent/tool-summary.ts` (`summarizeToolInput`,
+> `TOOL_INPUT_SUMMARY_MAX_CHARS`) implements the priority-key/fallback/truncation heuristic
+> verbatim; `src/agent/loop.ts`'s `runToolCalls()` emits both events at the exact points D2
+> specifies (including the unknown-tool-name error branch), no throttling per D3. Growing the
+> `ServerSentEvent` union broke `src/tui/state.ts`'s and `src/web/client/state.ts`'s
+> exhaustive switches over `event.type`; added a minimal no-op case to each (commented,
+> pointing here) purely to keep `bun run typecheck` green — no rendering logic, D5 untouched.
+> Gates: typecheck/lint clean, `bun run test:coverage` 1543 pass/0 fail with 100% lines on
+> all new/changed files, `bun run e2e` 30 pass/2 fail (pre-existing headless-Chromium
+> sandbox gap, unrelated). Full details in `docs/roster/grace.md`'s Round 17 entry.
+>
+> **Still open, not closed:** Server (Radia) — D4 redaction wrapper in `src/server/server.ts`.
+> TUI (Mary) — D5: `KNOWN_TYPES` + real marker/pending-map/error-suffix/Agent-suppression
+> logic in `src/tui/sse-parser.ts`/`state.ts`, replacing Grace's placeholder default case.
+> Web (Susan) — D5: new `"tool"` turn kind, pending-map, `render.ts` `.turn-tool` row,
+> replacing Grace's placeholder case in `state.ts`. E2E (Hedy) — D6 follow-up, sequenced last.
