@@ -42,6 +42,12 @@ source: tracking/
 | [DH-0068](../DH-0068-readme-hero-compelling-promo-screenshot-and-visual-identity-for-the-landing-page.md) | README hero: compelling promo screenshot and visual identity for the landing page | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut 🔒 | feature | stefan |
+| [DH-0100](../DH-0100-adopt-one-canonical-agent-status-color-glyph-word-model-across-tui-web-and-cli.md) | Adopt one canonical agent-status color/glyph/word model across TUI, Web, and CLI | feature | stefan |
+| [DH-0101](../DH-0101-give-cli-command-output-a-real-visual-system-glyphs-hierarchy-color-liveness-beyond-dh-doctor.md) | Give CLI command output a real visual system (glyphs, hierarchy, color, liveness) beyond dh doctor | feature | stefan |
+| [DH-0102](../DH-0102-dh-doctor-migrate-to-the-canonical-pending-spinner-and-check-cross-verdict-glyphs.md) | dh doctor: migrate to the canonical pending spinner and check/cross verdict glyphs | feature | stefan |
+| [DH-0103](../DH-0103-dh-help-styled-width-aware-visually-structured-output.md) | dh --help: styled, width-aware, visually structured output | feature | stefan |
+| [DH-0104](../DH-0104-unify-number-cost-elapsed-and-token-formatting-across-tui-web-and-cli.md) | Unify number, cost, elapsed, and token formatting across TUI, Web, and CLI | feature | stefan |
+| [DH-0105](../DH-0105-unify-connection-state-and-status-vocabulary-across-tui-and-web.md) | Unify connection-state and status vocabulary across TUI and Web | feature | stefan |
 
 ### ready
 

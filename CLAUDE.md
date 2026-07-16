@@ -146,7 +146,7 @@ Roster file template:
 | Grace | she/her | Core domain lead (`src/agent/`, `src/config/`, `src/cli.ts`) | Persistent | `docs/roster/grace.md` |
 | Susan | she/her | Web domain lead (`src/web/`) | Persistent | `docs/roster/susan.md` |
 | Hedy | she/her | E2E domain lead (`e2e/`) | Persistent | `docs/roster/hedy.md` |
-| *(TBD)* | *(TBD)* | Design crew lead — cross-cutting UX/polish (`docs/design/`; see below) | Persistent | *(names itself on first spawn)* |
+| Muriel | she/her | Design crew lead — cross-cutting UX/polish (`docs/design/`; see below) | Persistent | `docs/roster/muriel.md` |
 
 Domain leads/implementers are spawned ad hoc per handoff and name themselves on arrival;
 this table grows as they come online. Architect-on-call is Fable, invoked per §6 — not a
