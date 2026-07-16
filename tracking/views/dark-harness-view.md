@@ -24,7 +24,7 @@ source: tracking/
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
-| [DH-0002](../DH-0002-full-mcp-client-support.md) | Full MCP client support | feature | stefan |
+| [DH-0002](../DH-0002-full-mcp-client-support.md) | Full MCP client support (transport discovery) | feature | stefan |
 | [DH-0003](../DH-0003-sendmessage-resume-finished-conversation.md) | `SendMessage` should resume a finished agent's conversation, not just error cleanly | feature | stefan |
 | [DH-0004](../DH-0004-npm-packaging-single-platform.md) | npm package only ships a single-platform binary 🔒 | feature | stefan |
 | [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) 🔒 | feature | stefan |
@@ -41,6 +41,7 @@ source: tracking/
 | [DH-0051](../DH-0051-no-git-native-artifacts-or-log-replay-tooling.md) | No git-native session artifacts, and no evaluation/replay tooling built on the JSONL logs | feature | stefan |
 | [DH-0052](../DH-0052-windows-console-support-unverified.md) | Windows console/TUI support is unverified — no Windows-specific console-mode handling found, and no Windows execution anywhere in CI | bug | stefan |
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | feature | stefan |
+| [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 
 ### ready
 

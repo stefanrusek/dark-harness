@@ -15,17 +15,20 @@ implementation:
   - repo: dark-harness
 ---
 
-# DH-0002: Full MCP client support
+# DH-0002: Full MCP client support (transport discovery)
 
 ## Summary
 
-`dh.json`'s `mcpServers` config and the `ToolSearch`/`McpAuth` tools exist, but neither is
-real yet. `ToolSearch` returns one synthetic descriptor per configured server rather than
-discovering and returning genuinely callable tools, and doesn't support the real Claude Code
-query grammar (`select:Name1,Name2` exact selection, `+term` required-token ranking,
-`max_results`). `McpAuth` is an honest, documented stub with no OAuth flow. This is
-substantial, not a quick fix — it needs a real design pass before it's pipeline-ready, hence
-`draft` status rather than `ready`.
+`dh.json`'s `mcpServers` config and the `ToolSearch` tool exist, but `ToolSearch` returns one
+synthetic descriptor per configured server rather than discovering and returning genuinely
+callable tools, and doesn't support the real Claude Code query grammar (`select:Name1,Name2`
+exact selection, `+term` required-token ranking, `max_results`). This is substantial, not a
+quick fix — it needs a real design pass before it's pipeline-ready, hence `draft` status
+rather than `ready`.
+
+**Scope note (owner decision, 2026-07-15):** McpAuth/OAuth support split out to **DH-0057**,
+deferred further out than this ticket. This ticket (real transport discovery + query grammar)
+stays queued as genuine eventually-doing scope, not a "won't do."
 
 ## User Stories
 
@@ -37,11 +40,6 @@ substantial, not a quick fix — it needs a real design pass before it's pipelin
 - Given a `ToolSearch` query using the real convention (`select:Name1,Name2`, `+term`,
   keyword ranking, `max_results`), when the query runs, then results match that grammar, not
   a bare substring match against server name/transport.
-
-### As an operator with an authenticated MCP server, I want to complete its OAuth flow through `McpAuth`
-
-- Given an `mcpServers` entry requiring OAuth, when the agent calls `McpAuth`, then it
-  actually drives the OAuth flow rather than returning a stub error.
 
 ## Functional Requirements
 
