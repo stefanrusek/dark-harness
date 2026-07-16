@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: ["deferred (owner decision 2026-07-15): no incident behind this, revisit near real release cut"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -18,6 +18,13 @@ implementation:
 # DH-0031: GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance
 
 ## Summary
+
+**Deferred in full (owner decision, 2026-07-15).** This is speculative hardening against
+threats with no observed incident behind them, for a project with no real release cadence
+yet — the same category of call as DH-0040's deferred redaction story. Not implementing any
+part of this now, including the mechanically cheap SHA-pin/permissions pieces. Revisit only
+if/when real public releases are being cut and this becomes concretely relevant, or if a
+real incident (compromised action, tampered artifact) is ever observed.
 
 A cluster of standard supply-chain hardening gaps across `.github/workflows/`: third-party actions
 (`actions/checkout@v4`, `oven-sh/setup-bun@v2`, `actions/upload-artifact@v4`,
@@ -52,3 +59,10 @@ on whatever the repo/org default `GITHUB_TOKEN` permission is.
 
 > [!NOTE]
 > Source: CI/Release/E2E sweep findings #4, #5, #8, #9, #12.
+
+> [!NOTE]
+> Owner decision (2026-07-15): deferred in full, no partial/cheap-fix carve-out. This is
+> speculative defensive hardening (AI-agent-analysis-sourced, no real incident behind it) for
+> a project not yet cutting real releases — same category of call as DH-0040's deferred
+> redaction story. Revisit if a real incident is observed or the project starts cutting
+> public releases people actually rely on.
