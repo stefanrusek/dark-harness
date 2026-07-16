@@ -1724,3 +1724,75 @@ exists in `e2e/` to re-run.
 
 Closed DH-0102 (`transition.py DH-0102 closed --resolution done`) after all verification
 above.
+
+### 2026-07-16 — Round (DH-0103: `dh --help` structured/width-aware output)
+
+Replaced the static, hand-spaced `HELP_TEXT` template literal with `renderHelpText(columns,
+tty)` — computes the flag/subcommand column width from `Math.max(...items.map(name.length))`
+per section (Usage/Flags), word-wraps descriptions with hang-indent via `wrapText` imported
+directly from `src/tui/width.ts`, degrades to a single-column stacked form once the
+description column would drop below 24 chars, and TTY-gates styling per style-guide §2.2/§2.3
+(bold title, bold+cyan `\x1b[1;36m` section headers, bold flag names, dim `\x1b[2m`
+descriptions). Content (every flag/subcommand name and description string) is byte-identical
+to the old template — layout/styling only, per the ticket's explicit scope.
+
+**Import-vs-extract call:** the ticket asked me to try a direct import of TUI's `wrapText`
+before extracting a third shared module (DH-0102's `src/terminal.ts` pattern). `wrapText` (and
+its `src/tui/width.ts` module) turned out to be a pure text utility — no TUI-specific state,
+no DOM, no other TUI-domain imports — so a direct `import { wrapText } from "./tui/width.ts"`
+in `src/cli.ts` was clean with zero extraction needed. Verified `bun test src/tui` still
+passes with the file completely untouched (I only read it, never edited it) — TUI's own
+`wrapText` behavior/tests are unaffected.
+
+**Width signal:** `process.stdout.columns` first (same signal the TUI uses), else a parsed
+`$COLUMNS` env var (many shells/wrappers set this even when stdout isn't a TTY — e.g. piped
+through `less` or captured by a wrapper script), else 80 — matches the ticket's explicit "e.g.
+80 cols, or $COLUMNS if set" non-TTY requirement. Confirmed empirically that in this sandbox,
+`process.stdout.columns` is `undefined` whenever stdout isn't a real TTY (piping through the
+Bash tool always hits this), so without the `$COLUMNS` fallback the "verify at 40/80/120
+cols" ask would have been unverifiable here without a real PTY — built and used a real
+compiled binary (`bun build src/cli.ts --compile --outfile /tmp/dh-test`) with `COLUMNS=N`
+set to actually exercise each width rather than trusting the unit tests alone.
+
+**Live verification (real compiled binary, `COLUMNS=N /tmp/dh-test --help`):**
+- **120 cols:** full two-column layout, description column starts right after the longest
+  name in each section (`dh --connect <host> --web` in Usage, `--instructions <file>` in
+  Flags); most descriptions fit on one line, a few (e.g. `dh logs <sessionDir>`, `--check`)
+  wrap once with the continuation hang-indented to the same description column.
+- **80 cols:** same two-column shape, more descriptions wrap to 2-3 lines each (e.g.
+  `--dry-run`, `--resume <sessionId>`), continuation lines still hang-indent correctly; no
+  line exceeds 80 columns.
+- **40 cols:** below the 24-char description-column threshold for both sections → single-
+  column stacked form: name alone on its line (`  --web`), description wrapped to `columns -
+  4` and indented 4 spaces below it (`    Local server + locally-served web UI.` split across
+  lines as needed). No line exceeds 40 columns.
+- **Non-TTY (piped, no `COLUMNS` set):** falls back to 80-col two-column layout, confirmed
+  zero ESC bytes anywhere in the output (`grep -c $'\x1b'` → 0) — clean plain text, byte-
+  identical content to the TTY path minus the SGR codes.
+- **TTY color path:** proved via `renderHelpText(120, true)` unit assertions on exact byte
+  sequences (couldn't get a real PTY working reliably in this sandbox — tried Python's `pty`
+  module, the child process hung/produced no output within a timeout on a couple of attempts)
+  — `\x1b[1m` on the title, `\x1b[1;36mUsage:\x1b[0m`/`\x1b[1;36mFlags:\x1b[0m` on headers,
+  `\x1b[2m` present on description text. Judged this sufficient given the exact-byte-sequence
+  assertions leave no ambiguity about what a real terminal would render.
+
+**Existing tests needed zero changes** — `src/cli.test.ts`'s two pre-existing `--help`/`-h`
+tests only asserted `toContain("dh — Dark Harness")` / `toContain("--help, -h")` against
+`stdoutLines[0]`, both still true. Added a new `describe("renderHelpText — DH-0103 ...")`
+block (7 tests) covering: content preserved at 120 cols, computed (non-hardcoded) column
+width via a same-column proof between a short and long flag name, single-column fallback at
+40 cols, no line exceeding the requested width at both 80 and 40 cols, zero-ANSI at non-TTY,
+and exact SGR bytes at TTY.
+
+**Gates:** `bun run typecheck`/`bun run lint` clean for `src/cli.ts`/`src/cli.test.ts` (the
+only files this round touched — pre-existing failures in `src/tui/`/`src/web/` at the time of
+this round belong to a concurrent DH-0105 agent's in-flight, uncommitted work, confirmed via
+`git status` before touching anything and left untouched). `bun test src/cli.test.ts
+--coverage`: 166 pass, 0 fail; `src/cli.ts` line coverage 99.59% (new code 100% covered), the
+same pre-existing `listModels`/`switchModel`/`listSkills` thin-delegation func-coverage gap
+from earlier rounds, not a regression. `bun test src/tui`: ran to confirm zero TUI regression
+from the `wrapText` import — 2 pre-existing failures, both in files already modified by the
+concurrent DH-0105 agent (`sse-client.test.ts`), not touched by this round.
+
+Closed DH-0103 (`transition.py DH-0103 closed --resolution done`) after all verification
+above.
