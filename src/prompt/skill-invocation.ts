@@ -23,10 +23,5 @@ export function composeSkillInvocation(
   skill: SkillForInvocation,
   args: string | undefined,
 ): string {
-  return (
-    `<command-name>/${skill.name}</command-name>\n` +
-    `<command-args>${args ?? ""}</command-args>\n` +
-    `The operator invoked the /${skill.name} slash command. Follow the skill's instructions below.\n\n` +
-    skill.content
-  );
+  return `<command-name>/${skill.name}</command-name>\n<command-args>${args ?? ""}</command-args>\nThe operator invoked the /${skill.name} slash command. Follow the skill's instructions below.\n\n${skill.content}`;
 }

@@ -141,6 +141,24 @@ export interface AgentLoopParams {
    * the original behavior (empty history, so the merge always appends a fresh user message,
    * exactly as before this round). Root agent only — never set for a spawnAgent() call. */
   resume?: { messages: ProviderMessage[]; fromSessionId: string };
+  /** DH-0093: installs a sink runtime.ts's `AgentRuntime.switchModel()` can push a new
+   * `ModelBinding` through — the exact mirror of `registerSendMessage` above. A pushed switch
+   * takes effect on the very next `provider.complete()` call/`computeCostUsd()` computation,
+   * never mid-flight, and the loop is never restarted — the in-memory `messages` history
+   * (the whole point of a live switch instead of a fresh session) survives intact. See the
+   * mutable `binding` local in `runAgentLoop` below for where this is actually read. */
+  registerModelSwitch?: (fn: (binding: ModelBinding) => void) => void;
+}
+
+/** DH-0093: the mutable per-loop state a model switch replaces — everything a provider call
+ * or cost computation needs that used to be read directly off `AgentLoopParams`. Exported so
+ * `runtime.ts`'s `AgentRuntime.switchModel()` can construct one to push through the
+ * `registerModelSwitch` sink. */
+export interface ModelBinding {
+  model: string;
+  providerModel: string;
+  provider: ModelProvider;
+  pricing?: AgentLoopParams["pricing"];
 }
 
 /** Computes a `token_usage` event's `costUsd`, or undefined if pricing wasn't configured at
@@ -326,6 +344,41 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     }
   });
 
+  // DH-0093: mutable binding a live model switch replaces — every provider.complete() call
+  // and computeCostUsd() computation below reads from this, not from `params` directly, so a
+  // pushed switch takes effect on the very next turn without restarting the loop (messages
+  // history stays intact — see AgentLoopParams.registerModelSwitch's doc comment).
+  const binding: ModelBinding = {
+    model: params.model,
+    providerModel: params.providerModel,
+    provider: params.provider,
+    pricing: params.pricing,
+  };
+  params.registerModelSwitch?.((newBinding: ModelBinding) => {
+    const from = binding.model;
+    const to = newBinding.model;
+    binding.providerModel = newBinding.providerModel;
+    binding.provider = newBinding.provider;
+    binding.pricing = newBinding.pricing;
+    binding.model = to;
+    emitEvent(params, {
+      version: 1,
+      id: randomUUID(),
+      timestamp: nowIso(),
+      type: "model_switched",
+      agentId: params.agentId,
+      from,
+      to,
+    });
+    emitLog(params, {
+      version: 1,
+      timestamp: nowIso(),
+      type: "model_switched",
+      from,
+      to,
+    });
+  });
+
   emitEvent(params, {
     version: 1,
     id: randomUUID(),
@@ -401,9 +454,9 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
 
     let completion: ProviderCompletionResult;
     try {
-      completion = await params.provider.complete(
+      completion = await binding.provider.complete(
         {
-          model: params.providerModel,
+          model: binding.providerModel,
           system: params.systemPrompt,
           messages,
           tools: toolDefs,
@@ -440,7 +493,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     }
 
     const costUsd = computeCostUsd(
-      params.pricing,
+      binding.pricing,
       completion.usage.inputTokens,
       completion.usage.outputTokens,
     );

@@ -12,17 +12,21 @@ import {
   ExitCode,
   type LogLine,
   type ModelConfig,
+  type ModelInfo,
   type ServerSentEvent,
   type SessionClientKind,
+  type SkillInfo,
 } from "../contracts/index.ts";
+import { composeSkillInvocation } from "../prompt/index.ts";
+import { type Skill, discoverSkills } from "../prompt/skills.ts";
 import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
-import { computeCostUsd, runAgentLoop } from "./loop.ts";
+import { type ModelBinding, computeCostUsd, runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { loadProjectMcpServers } from "./mcp/project-config.ts";
 import { buildMcpTools } from "./mcp/tools.ts";
 import { createProvider } from "./providers/index.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
-import { loadSkillFromPaths } from "./skills.ts";
+import { BUILTIN_CLI_TOOLS_SKILL, loadSkillFromPaths } from "./skills.ts";
 import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { TodoStore } from "./todos.ts";
 import { buildToolMap, composeTools } from "./tools/index.ts";
@@ -145,6 +149,29 @@ export class RootNotListeningError extends Error {
   }
 }
 
+/** DH-0093: `switchModel()` v1 scope is root-only (see the ticket's design section — no
+ * operator story requires retargeting an ad-hoc, short-lived sub-agent's model mid-run).
+ * Server (src/server/commands.ts) catches this and translates it to a 400 ack, the same
+ * pattern as ConfigModelError elsewhere. */
+export class RootOnlyModelSwitchError extends Error {
+  constructor(agentId: string) {
+    super(
+      `switch_model is root-only in v1; "${agentId}" is not the root agent (sub-agents are ad-hoc and short-lived — no operator story needs mid-run retargeting of one).`,
+    );
+    this.name = "RootOnlyModelSwitchError";
+  }
+}
+
+/** DH-0093: thrown by `invokeSkill()` when the named skill can't be found via
+ * `loadSkillFromPaths` — Server (src/server/commands.ts) catches this and translates it to a
+ * 404 ack, per the ticket's design section. */
+export class UnknownSkillError extends Error {
+  constructor(name: string) {
+    super(`unknown skill "${name}"`);
+    this.name = "UnknownSkillError";
+  }
+}
+
 /** Wires dh.json into a runnable agent runtime: providers, tools, and the task registry that
  * lets Agent/Monitor/TaskOutput/SendMessage/TaskStop cooperate in-process. */
 export class AgentRuntime {
@@ -188,6 +215,15 @@ export class AgentRuntime {
   private rootModel: string | undefined;
   private rootStatus: AgentStatus = "waiting";
   private rootSendMessage: ((message: string) => void) | undefined;
+  /** DH-0093: root-not-started-yet model switch — set by `switchModel()` when
+   * `!this.rootStarted`, consulted by `runRoot()`'s own model-resolution precedence chain (an
+   * explicit `runRoot(instruction, modelName)` argument still wins over this; this wins over
+   * `this.resume?.model`/`config.options.defaultModel`). */
+  private pendingInitialModel: string | undefined;
+  /** DH-0093: mirrors `rootSendMessage` above — installed via `registerModelSwitch` on every
+   * `runRoot()` call so `switchModel()` can push a live binding into the root's currently-
+   * running loop (see loop.ts's `ModelBinding`/`registerModelSwitch` doc comments). */
+  private rootModelSwitch: ((binding: ModelBinding) => void) | undefined;
   // Round 3 (docs/handoffs/core.md status log): the root isn't a TaskRegistry entry, so it
   // needs its own AbortController — mirrors the one TaskRegistry.start() already creates
   // per task, which is what makes stopAgent(subAgentId) reach the loop after this round's
@@ -230,6 +266,12 @@ export class AgentRuntime {
    * when that's unset) rather than introducing a new dh.json field for it. */
   private liveWorktreeCount = 0;
   private budgetTripped = false;
+  /** DH-0093: one eager `discoverSkills()` scan at construction time (not re-scanned per
+   * `listSkills()` call) — same fire-and-forget-eagerly pattern as `McpManager.connectAll()`
+   * above. Starts with just the builtin `cli-tools` entry so `listSkills()` never has a gap
+   * before the on-disk scan resolves; `discoverSkills()`'s own results are prepended by (never
+   * shadow) it once ready. */
+  private skillsCache: Skill[] = [BUILTIN_CLI_TOOLS_SKILL];
 
   constructor(options: AgentRuntimeOptions) {
     this.config = options.config;
@@ -259,6 +301,13 @@ export class AgentRuntime {
     // logs a clear error to stderr rather than crashing startup — the same "degrade
     // gracefully, never block startup" contract connectAll() already has.
     void this.loadAndMergeProjectMcpServers();
+    // DH-0093: eager, fire-and-forget scan at construction time — same timing precedent as
+    // connectAll() above. discoverSkills() never throws (per-directory failures are swallowed
+    // internally), so this can't produce an unhandled rejection; listSkills() just sees the
+    // builtin-only cache until this resolves.
+    void discoverSkills(options.config.skillPaths).then((discovered) => {
+      this.skillsCache = [BUILTIN_CLI_TOOLS_SKILL, ...discovered];
+    });
     this.onEvent = options.onEvent;
     this.onLogLine = options.onLogLine;
     this.interactive = options.interactive ?? false;
@@ -774,8 +823,14 @@ export class AgentRuntime {
     // DH-0038: an explicit modelName argument always wins; otherwise a resumed session
     // defaults to the original root header's model alias (D3) rather than
     // config.options.defaultModel, so a resume never silently switches models.
+    // DH-0093: a pending switch_model() call made before the root ever started wins over the
+    // resume/defaultModel fallback (but not over an explicit modelName argument) — see
+    // pendingInitialModel's own doc comment.
     const model = this.resolveModel(
-      modelName ?? this.resume?.model ?? this.config.options.defaultModel,
+      modelName ??
+        this.pendingInitialModel ??
+        this.resume?.model ??
+        this.config.options.defaultModel,
     );
     const provider = this.providerFor(model);
 
@@ -816,6 +871,11 @@ export class AgentRuntime {
         toolContext: this.buildToolContext(ROOT_AGENT_ID),
         registerSendMessage: (fn) => {
           this.rootSendMessage = fn;
+        },
+        // DH-0093: mirrors registerSendMessage above — lets switchModel() push a new binding
+        // into the root's currently-running loop once it's live.
+        registerModelSwitch: (fn) => {
+          this.rootModelSwitch = fn;
         },
         signal: this.rootController.signal,
         interactive: this.interactive,
@@ -913,6 +973,92 @@ export class AgentRuntime {
    * idempotent). */
   stopRoot(): void {
     this.rootController?.abort();
+  }
+
+  /** DH-0093: wire-facing `ModelInfo[]` for the `list_models` command — maps `config.models`
+   * into the display shape the `/model` picker (TUI/Web, a later round) needs. `isActive`
+   * reflects the *root's* currently-active model (`this.rootModel`, kept in sync immediately
+   * by both `runRoot()` and `switchModel()` below) — v1 has no notion of a sub-agent's model
+   * being "the" active one for this purpose. */
+  listModels(): ModelInfo[] {
+    const activeModel = this.rootModel ?? this.config.options.defaultModel;
+    return this.config.models.map((model) => ({
+      name: model.name,
+      provider: model.provider,
+      model: model.model,
+      isDefault: model.name === this.config.options.defaultModel,
+      isActive: model.name === activeModel,
+    }));
+  }
+
+  /** DH-0093: v1 scope is root-only — see `RootOnlyModelSwitchError`'s doc comment. Resolves
+   * `modelName` via the existing `resolveModel` (propagates `ConfigModelError` on an unknown
+   * alias, same as every other method here), then either records a pending initial model (root
+   * not started yet) or pushes a live binding through the registered sink (root already
+   * running) — see `pendingInitialModel`/`rootModelSwitch`'s own doc comments for the two
+   * branches. Either way, `this.rootModel` is updated immediately so `getAgentTree()` reflects
+   * the switch even before the root actually starts/before the loop's next turn picks it up. */
+  switchModel(agentId: string, modelName: string): void {
+    if (agentId !== ROOT_AGENT_ID) {
+      throw new RootOnlyModelSwitchError(agentId);
+    }
+    const model = this.resolveModel(modelName);
+
+    if (!this.rootStarted) {
+      this.pendingInitialModel = modelName;
+      this.rootModel = model.name;
+      return;
+    }
+
+    const provider = this.providerFor(model);
+    this.rootModel = model.name;
+    this.rootModelSwitch?.({
+      model: model.name,
+      providerModel: model.model,
+      provider,
+      ...pricingOverride(model),
+    });
+  }
+
+  /** DH-0093: the wire-facing `SkillInfo[]` for the `list_skills` command — drops the
+   * `source` field `Skill` (src/prompt/skills.ts) carries internally, which isn't part of the
+   * wire `SkillInfo` shape. Backed by the eager `skillsCache` scan (see its own doc comment),
+   * never re-scanned per call. */
+  listSkills(): SkillInfo[] {
+    return this.skillsCache.map(({ name, description }) => ({ name, description }));
+  }
+
+  /** DH-0093: loads the named skill (via `loadSkillFromPaths`, the same lookup the `Skill`
+   * tool itself uses — so `/name` and `Skill(skill: "name")` always agree on what "name"
+   * resolves to) and delivers the composed invocation text through the same message-delivery
+   * path `send_message` uses for that `agentId`: the root (lazily starting it if it hasn't
+   * started yet, mirroring `AgentRuntimeLoopAdapter.sendMessage`'s own root-lazy-start
+   * convention in src/cli.ts) or an existing sub-agent task. Throws `UnknownSkillError` when
+   * the skill can't be found, for Server to translate into a 404 ack. */
+  async invokeSkill(agentId: string, skillName: string, args: string | undefined): Promise<void> {
+    const loaded = await loadSkillFromPaths(skillName, this.config.skillPaths ?? []);
+    if (!loaded) {
+      throw new UnknownSkillError(skillName);
+    }
+    const composed = composeSkillInvocation({ name: loaded.name, content: loaded.content }, args);
+
+    if (agentId === ROOT_AGENT_ID) {
+      if (!this.rootStarted) {
+        // Fire-and-forget, mirroring AgentRuntimeLoopAdapter.sendMessage()'s own lazy-start
+        // convention for a fresh root (src/cli.ts) — a harness-level start failure still
+        // surfaces via runRoot()'s own onEvent/session_ended handling, not swallowed here.
+        this.runRoot(composed).catch(() => {
+          // Deliberately swallowed here: runRoot()'s own try/catch already updates
+          // rootStatus/emits a synthetic agent_status + session_ended for this class of
+          // failure (see its doc comment) — nothing further to do at this call site.
+        });
+        return;
+      }
+      this.sendMessageToRoot(composed);
+      return;
+    }
+
+    this.tasks.sendMessage(agentId, composed);
   }
 
   /** Builds the nested AgentTreeNode[] shape Server's AgentLoopHandle.getAgentTree() needs,

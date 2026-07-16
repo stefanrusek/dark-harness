@@ -26,6 +26,8 @@ import {
   ConfigModelError,
   ROOT_AGENT_ID,
   RootNotListeningError,
+  RootOnlyModelSwitchError,
+  UnknownSkillError,
 } from "./runtime.ts";
 import { bashTool } from "./tools/bash.ts";
 
@@ -2008,5 +2010,266 @@ describe("AgentRuntime — DH-0074 web tool wiring", () => {
     // in web-search.test.ts cover its execute() behavior in isolation).
     const result = await runtime.runRoot("please just answer");
     expect(result.success).toBe(true);
+  });
+});
+
+// DH-0093: backend support for the slash-command system (model switching, skill invocation).
+describe("AgentRuntime.listModels/switchModel (DH-0093)", () => {
+  function twoModelConfig(): DhConfig {
+    return baseConfig({
+      models: [
+        { name: "test-model", provider: "mock", model: "mock-1" },
+        { name: "other-model", provider: "mock", model: "mock-2" },
+      ],
+    });
+  }
+
+  test("listModels() maps config.models into wire ModelInfo[], marking the default and the root's currently-active model", () => {
+    const runtime = newAgentRuntime({ config: twoModelConfig(), systemPrompt: "sp" });
+    expect(runtime.listModels()).toEqual([
+      {
+        name: "test-model",
+        provider: "mock",
+        model: "mock-1",
+        isDefault: true,
+        isActive: true,
+      },
+      {
+        name: "other-model",
+        provider: "mock",
+        model: "mock-2",
+        isDefault: false,
+        isActive: false,
+      },
+    ]);
+  });
+
+  test("listModels() reflects the active model after runRoot() ran with a non-default model", async () => {
+    const runtime = newAgentRuntime({ config: twoModelConfig(), systemPrompt: "sp" });
+    await runtime.runRoot("please just answer", "other-model");
+    const models = runtime.listModels();
+    expect(models.find((m) => m.name === "other-model")?.isActive).toBe(true);
+    expect(models.find((m) => m.name === "test-model")?.isActive).toBe(false);
+  });
+
+  test("switchModel() rejects a non-root agentId with RootOnlyModelSwitchError", () => {
+    const runtime = newAgentRuntime({ config: twoModelConfig(), systemPrompt: "sp" });
+    expect(() => runtime.switchModel("agent-some-child", "other-model")).toThrow(
+      RootOnlyModelSwitchError,
+    );
+  });
+
+  test("switchModel() propagates ConfigModelError for an unknown model alias", () => {
+    const runtime = newAgentRuntime({ config: twoModelConfig(), systemPrompt: "sp" });
+    expect(() => runtime.switchModel(ROOT_AGENT_ID, "nope")).toThrow(ConfigModelError);
+  });
+
+  test("switchModel() before the root has started records a pending initial model that runRoot() then uses, and updates rootModel/getAgentTree() immediately", async () => {
+    const runtime = newAgentRuntime({ config: twoModelConfig(), systemPrompt: "sp" });
+    runtime.switchModel(ROOT_AGENT_ID, "other-model");
+    // Reflected immediately, before the root has even started.
+    expect(runtime.getAgentTree()[0]?.model).toBe("other-model");
+
+    receivedModels = [];
+    const result = await runtime.runRoot("please just answer");
+    expect(result.success).toBe(true);
+    // runRoot() with no explicit modelName argument honored the pending switch over
+    // options.defaultModel.
+    expect(receivedModels).toContain("mock-2");
+    expect(receivedModels).not.toContain("mock-1");
+  });
+
+  test("an explicit runRoot() modelName argument still wins over a pending switch", async () => {
+    const runtime = newAgentRuntime({ config: twoModelConfig(), systemPrompt: "sp" });
+    runtime.switchModel(ROOT_AGENT_ID, "other-model");
+    receivedModels = [];
+    const result = await runtime.runRoot("please just answer", "test-model");
+    expect(result.success).toBe(true);
+    expect(receivedModels).toContain("mock-1");
+  });
+
+  test("switchModel() while the root is live pushes a new binding into the running loop's next turn, and updates rootModel/getAgentTree() immediately", async () => {
+    const requestBodies: { model: string }[] = [];
+    const dedicatedServer = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as { model: string };
+        requestBodies.push(body);
+        const isFirstCall = requestBodies.length === 1;
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: isFirstCall
+            ? [
+                {
+                  type: "tool_use",
+                  id: "tu_1",
+                  name: "Bash",
+                  input: { command: "echo hi", run_in_background: false },
+                },
+              ]
+            : [{ type: "text", text: "done" }],
+          stop_reason: isFirstCall ? "tool_use" : "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+    try {
+      const runtime = newAgentRuntime({
+        config: baseConfig({
+          models: [
+            { name: "test-model", provider: "mock", model: "mock-1" },
+            { name: "other-model", provider: "mock", model: "mock-2" },
+          ],
+          provider: [
+            {
+              name: "mock",
+              type: "anthropic",
+              baseURL: dedicatedServer.url.toString(),
+              apiKey: "sk-test",
+            },
+          ],
+        }),
+        systemPrompt: "sp",
+      });
+      const rootPromise = runtime.runRoot("use-bash-pwd");
+      // registerModelSwitch's sink is installed synchronously at the top of runAgentLoop, so
+      // this is safe to call right away — it lands in time for turn 2's request.
+      runtime.switchModel(ROOT_AGENT_ID, "other-model");
+      expect(runtime.getAgentTree()[0]?.model).toBe("other-model");
+      const result = await rootPromise;
+      expect(result.success).toBe(true);
+      expect(requestBodies[1]?.model).toBe("mock-2");
+    } finally {
+      dedicatedServer.stop(true);
+    }
+  });
+});
+
+describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
+  test("listSkills() includes the builtin cli-tools entry even with no skillPaths configured", () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const skills = runtime.listSkills();
+    expect(skills.some((s) => s.name === "cli-tools" && s.description.length > 0)).toBe(true);
+  });
+
+  test("listSkills() eventually includes an on-disk skillPaths skill alongside the builtin", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dh-runtime-skills-"));
+    const { mkdirSync, writeFileSync: writeFile } = await import("node:fs");
+    mkdirSync(join(dir, "reviewer"));
+    writeFile(
+      join(dir, "reviewer", "SKILL.md"),
+      '---\nname: reviewer\ndescription: "Reviews things."\n---\n\nDo a review.',
+    );
+    const runtime = newAgentRuntime({
+      config: baseConfig({ skillPaths: [dir] }),
+      systemPrompt: "sp",
+    });
+    // The eager discoverSkills() scan is fire-and-forget at construction — give it a beat.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const skills = runtime.listSkills();
+    expect(skills.some((s) => s.name === "cli-tools")).toBe(true);
+    expect(skills.some((s) => s.name === "reviewer" && s.description === "Reviews things.")).toBe(
+      true,
+    );
+  });
+
+  test("invokeSkill() throws UnknownSkillError for a skill name that can't be found", async () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    await expect(runtime.invokeSkill(ROOT_AGENT_ID, "nope-not-real", undefined)).rejects.toThrow(
+      UnknownSkillError,
+    );
+  });
+
+  test("invokeSkill() against the root before it has started lazily starts it with the composed invocation as the instruction", async () => {
+    const { events, onEvent } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onEvent });
+    await runtime.invokeSkill(ROOT_AGENT_ID, "cli-tools", "some args");
+    // Fire-and-forget lazy start — wait for the root to actually finish.
+    while (!events.some((e) => e.type === "session_ended")) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(runtime.getAgentTree()[0]?.status).not.toBe("waiting");
+  });
+
+  test("invokeSkill() against an already-running root delivers the composed message via sendMessageToRoot", async () => {
+    const requestBodies: { messages: { content: { type: string; text?: string }[] }[] }[] = [];
+    const dedicatedServer = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as {
+          messages: { content: { type: string; text?: string }[] }[];
+        };
+        requestBodies.push(body);
+        const isFirstCall = requestBodies.length === 1;
+        return Response.json({
+          id: "msg_mock",
+          type: "message",
+          role: "assistant",
+          model: "mock",
+          content: isFirstCall
+            ? [
+                {
+                  type: "tool_use",
+                  id: "tu_1",
+                  name: "Bash",
+                  input: { command: "echo hi", run_in_background: false },
+                },
+              ]
+            : [{ type: "text", text: "done" }],
+          stop_reason: isFirstCall ? "tool_use" : "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+    try {
+      const runtime = newAgentRuntime({
+        config: baseConfig({
+          provider: [
+            {
+              name: "mock",
+              type: "anthropic",
+              baseURL: dedicatedServer.url.toString(),
+              apiKey: "sk-test",
+            },
+          ],
+        }),
+        systemPrompt: "sp",
+      });
+      const rootPromise = runtime.runRoot("use-bash-pwd");
+      await runtime.invokeSkill(ROOT_AGENT_ID, "cli-tools", "my args");
+      const result = await rootPromise;
+      expect(result.success).toBe(true);
+      const secondRequest = requestBodies[1];
+      const sawComposed = secondRequest?.messages.some((m) =>
+        m.content.some(
+          (c) =>
+            c.type === "text" &&
+            c.text?.includes("<command-name>/cli-tools</command-name>") &&
+            c.text?.includes("<command-args>my args</command-args>"),
+        ),
+      );
+      expect(sawComposed).toBe(true);
+    } finally {
+      dedicatedServer.stop(true);
+    }
+  });
+
+  test("invokeSkill() against a sub-agent task delivers via tasks.sendMessage", async () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    // spawnAgent() with a prompt that keeps calling a tool forever, so the task stays live
+    // long enough for invokeSkill() to actually reach tasks.sendMessage() rather than racing
+    // its natural completion.
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "loop-forever",
+    });
+    await runtime.invokeSkill(taskId, "cli-tools", undefined);
+    runtime.tasks.stop(taskId);
+    await runtime.tasks.awaitDone(taskId).catch(() => {});
   });
 });

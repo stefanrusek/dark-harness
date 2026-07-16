@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { LogLine, ServerSentEvent } from "../contracts/index.ts";
 import {
+  type ModelBinding,
   STOPPED_BETWEEN_TURNS_REASON,
   STOPPED_DURING_PROVIDER_CALL_REASON,
   TASK_FAILED_MARKER,
@@ -411,6 +412,154 @@ describe("runAgentLoop", () => {
       m.content.some((c) => c.type === "text" && c.text.includes("steer towards X")),
     );
     expect(hasInjected).toBe(true);
+  });
+});
+
+// DH-0093: model-switch mechanism — a pushed ModelBinding takes effect on the very next turn
+// (not mid-flight), the loop is never restarted, and both the emitted SSE event/log line and
+// cost accounting follow the new binding.
+describe("runAgentLoop — DH-0093: mid-session model switch via registerModelSwitch", () => {
+  test("a pushed model switch takes effect starting the next provider.complete() call, not the in-flight one, and the messages history survives intact", async () => {
+    const providerA: ModelProvider & { calls: ProviderCompletionRequest[] } = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo hi", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const providerB: ModelProvider & { calls: ProviderCompletionRequest[] } = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "answered by provider B" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+
+    let switchFn: ((binding: ModelBinding) => void) | undefined;
+    const { params, events, logLines } = baseParams({
+      provider: providerA,
+      registerModelSwitch: (fn) => {
+        switchFn = fn;
+      },
+    });
+
+    const resultPromise = runAgentLoop(params);
+    // Push the switch while providerA's first (and only scripted) turn is already in flight —
+    // proves it does NOT affect that in-flight call, only the next one.
+    switchFn?.({ model: "other-model", providerModel: "other-provider-id", provider: providerB });
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+    expect(result.finalOutput).toBe("answered by provider B");
+    // The in-flight (first) call still went to providerA with the original providerModel.
+    expect(providerA.calls).toHaveLength(1);
+    expect(providerA.calls[0]?.model).toBe("sonnet-real-id");
+    // The next turn's call went to providerB with the new providerModel — the switch took
+    // effect starting the next turn, not mid-flight.
+    expect(providerB.calls).toHaveLength(1);
+    expect(providerB.calls[0]?.model).toBe("other-provider-id");
+    // Messages history is the same array threaded across both calls (the loop was never
+    // restarted) — the second call's history includes the first call's tool_use/tool_result.
+    expect(
+      providerB.calls[0]?.messages.some((m) =>
+        m.content.some((c) => c.type === "tool_result" && c.toolUseId === "tu_1"),
+      ),
+    ).toBe(true);
+
+    const switchedEvent = events.find((e) => e.type === "model_switched");
+    expect(switchedEvent).toMatchObject({
+      type: "model_switched",
+      agentId: "agent-root",
+      from: "sonnet",
+      to: "other-model",
+    });
+    const switchedLog = logLines.find((l) => l.type === "model_switched");
+    expect(switchedLog).toMatchObject({
+      type: "model_switched",
+      from: "sonnet",
+      to: "other-model",
+    });
+  });
+
+  test("cost accounting follows the new binding's pricing after a switch", async () => {
+    const providerA = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo hi", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1_000_000, outputTokens: 0 },
+      },
+    ]);
+    const providerB = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1_000_000, outputTokens: 0 },
+      },
+    ]);
+
+    let switchFn: ((binding: ModelBinding) => void) | undefined;
+    const { params, events } = baseParams({
+      provider: providerA,
+      pricing: { inputPricePerMToken: 3 },
+      registerModelSwitch: (fn) => {
+        switchFn = fn;
+      },
+    });
+
+    const resultPromise = runAgentLoop(params);
+    // Wait for the first turn's own token_usage (and its costUsd, computed against the
+    // ORIGINAL pricing) to be fully emitted before pushing the switch — pushing it any
+    // earlier would race the first turn's own post-completion cost computation (an artifact
+    // of this synchronous scripted-provider test setup, not a real race in production, where
+    // switch_model always arrives via a separate async HTTP request).
+    while (!events.some((e) => e.type === "token_usage")) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    switchFn?.({
+      model: "other-model",
+      providerModel: "other-provider-id",
+      provider: providerB,
+      pricing: { inputPricePerMToken: 10 },
+    });
+    await resultPromise;
+
+    const usageEvents = events.filter((e) => e.type === "token_usage");
+    // First (in-flight) turn's usage still costed against the ORIGINAL pricing ($3/M).
+    expect(usageEvents[0] && "costUsd" in usageEvents[0] ? usageEvents[0].costUsd : undefined).toBe(
+      3,
+    );
+    // Second turn's usage costed against the NEW binding's pricing ($10/M).
+    expect(usageEvents[1] && "costUsd" in usageEvents[1] ? usageEvents[1].costUsd : undefined).toBe(
+      10,
+    );
+  });
+
+  test("without registerModelSwitch, behavior is exactly unchanged (no regression)", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "no switch involved" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+    expect(result.success).toBe(true);
+    expect(result.finalOutput).toBe("no switch involved");
   });
 });
 

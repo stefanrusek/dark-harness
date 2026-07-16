@@ -32,7 +32,7 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { parseSkillFrontmatter } from "../prompt/skills.ts";
+import { type Skill, parseSkillFrontmatter } from "../prompt/skills.ts";
 import CLI_TOOLS_SKILL_MD from "../prompt/skills/cli-tools/SKILL.md" with { type: "text" };
 
 export interface LoadedSkill {
@@ -42,6 +42,20 @@ export interface LoadedSkill {
 }
 
 const BUILTIN_CLI_TOOLS_NAME = "cli-tools";
+
+/** DH-0093: the builtin `cli-tools` skill, synthesized into the same `Skill` shape
+ * `discoverSkills()` (src/prompt/skills.ts) produces for on-disk skills — used by
+ * `AgentRuntime`'s `listSkills()` to prepend the builtin ahead of the eager `discoverSkills()`
+ * scan (which only ever sees `skillPaths`, never this bundled skill). Parses the same
+ * frontmatter discovery already relies on, so its description can never drift out of sync
+ * with the SKILL.md content actually loaded/invoked. Malformed builtin frontmatter (should
+ * never happen — it ships with the binary) falls back to an empty description rather than
+ * throwing at import time. */
+export const BUILTIN_CLI_TOOLS_SKILL: Skill = {
+  name: BUILTIN_CLI_TOOLS_NAME,
+  description: parseSkillFrontmatter(CLI_TOOLS_SKILL_MD)?.description ?? "",
+  source: "builtin",
+};
 
 /** True if `name` contains anything that could escape a simple `join(base, name, ...)` join —
  * a path separator or a `..` traversal segment. `Skill`'s documented scope is "the skill's
