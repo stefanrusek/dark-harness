@@ -1915,3 +1915,23 @@ Gates: `bun run typecheck`/`lint`/`test:coverage` all green, 100%/100% on every 
 entries). `bun run e2e`: 30/32 pass; the 2 failures are `web.test.ts`/`connect-web.test.ts`
 failing on this sandbox's pre-existing missing-Chromium binary (`/opt/pw-browsers/chromium`),
 unrelated to this change (documented by Mary/Susan in prior rounds too).
+
+### 2026-07-16 — DH-0055 (CLAUDE.md system-prompt parity): note for Core, no Core code touched
+
+Iris (Prompt) closed DH-0055 this round: `src/prompt/system-prompt.ts`'s `loadSystemPrompt`
+now takes an optional `cwd` (defaults to `process.cwd()`) and auto-injects a project's
+`CLAUDE.md` if present at that path. This turned out not to need any change on Core's side —
+`src/cli.ts`'s existing `deps.loadSystemPrompt(config)` call site already runs once at
+startup with the real process cwd, so the new behavior is live for every `dh` invocation
+without a wiring change. Flagging here per the ticket's ownership note (this repo's own
+`CLAUDE.md` now gets read at `dh`'s own startup) purely as an FYI, not a request for action.
+
+One thing that *is* Core-adjacent and worth knowing: two `src/cli.test.ts` real-filesystem
+`loadSystemPrompt` tests needed a `process.chdir(dir)`/restore wrapper added, because this
+repo's root `CLAUDE.md` would otherwise leak into those tests' exact-string assertions when
+run from the repo root (the default `cwd`). If Core ever adds a new test that exercises the
+real `loadSystemPrompt` dep without stubbing it, the same chdir-into-an-empty-tmpdir pattern
+applies — see `src/cli.test.ts`'s "the real loadSystemPrompt dep ..." tests for the shape.
+
+No `src/agent/`, `src/config/`, or `src/cli.ts` source changes made this round — only
+`src/prompt/system-prompt.ts`/`.test.ts` and the two `src/cli.test.ts` test bodies above.

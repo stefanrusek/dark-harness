@@ -229,3 +229,63 @@ system-prompt.ts` and `src/agent/runtime.ts` both 100% lines/funcs. `e2e`: 30/32
 pre-existing headless-Chromium-unavailable-in-sandbox failures every prior round has
 footnoted, unrelated to this change. Closed DH-0094 (`transition.py DH-0094 closed
 --resolution done`).
+
+### 2026-07-16 — DH-0055: CLAUDE.md project-instructions parity (joint with Core/Grace)
+
+Real Claude Code auto-reads a project's `CLAUDE.md` and injects it as binding
+project-specific instructions; `dh` had no equivalent. Added `readProjectClaudeMd(cwd)` and
+`renderProjectInstructionsSection()` to `src/prompt/system-prompt.ts`, and wired both into
+`loadSystemPrompt(config, cwd = process.cwd())`. This landed entirely inside Prompt's own
+module — the call site (`src/cli.ts`'s `deps.loadSystemPrompt(config)`) already invokes this
+once at startup with `process.cwd()` as the implicit default, so no Core wiring was needed
+this round (see judgment call below on why the ticket's "Core config-loading" framing turned
+out not to require a Core-owned code change).
+
+**Judgment calls (both explicitly invited by the ticket):**
+- **Precedence:** CLAUDE.md is always *additive*, appended after whichever base is in use —
+  the built-in default prompt (after the skills section) or a `config.systemPrompt`
+  override (after `REQUIRED_CONTRACT`) — never a replacement for either. Mirrors real Claude
+  Code layering project instructions on top of its own base behavior.
+- **Size cap:** 32 KiB (`CLAUDE_MD_MAX_BYTES`), generous relative to this repo's own
+  `CLAUDE.md` (~14 KB) observed in practice. Exceeding it truncates but always appends an
+  explicit marker naming the actual file size and the cap, per CLAUDE.md §8's "no silent
+  truncation" rule — never a quiet drop.
+- **Absent file:** `readProjectClaudeMd` returns `null`, a true no-op — no warning, since the
+  overwhelming majority of `dh` runs have no `CLAUDE.md` and this isn't misconfiguration.
+- **Scope:** single file at the working-directory root only, per the ticket's own
+  Assumptions section — no nested/subdirectory or `~/.claude/CLAUDE.md` handling, explicit
+  follow-up if ever wanted.
+
+**Test-isolation gotcha worth remembering:** `loadSystemPrompt`'s new `cwd` parameter
+defaults to `process.cwd()`, and this repo's own root now *has* a `CLAUDE.md` (this very
+file) — any test that calls `loadSystemPrompt(config)` without an explicit `cwd` while the
+test runner's cwd is the repo root will pick it up. Two existing `src/cli.test.ts` real-fs
+tests hit exactly this and needed a `process.chdir(dir)`/restore wrapper (same pattern
+already used elsewhere in that file) to stay isolated. Anyone adding a new
+`loadSystemPrompt` test without overriding `cwd` should watch for this.
+
+**Live verification (not just prompt-string assertions):** built the real binary, wrote a
+scratch project's `CLAUDE.md` with a distinctive instruction ("always end every response
+with the literal string CLAUDE_MD_LOADED_OK"), ran `dh --instructions ... --job` against a
+local mock Anthropic-compatible SSE provider (the real `AnthropicProvider` adapter now
+streams — see the concurrent DH-0044 note below), and confirmed both that the captured
+system prompt sent over the wire contained the CLAUDE.md text *and* that the model's actual
+reply was `Task complete. CLAUDE_MD_LOADED_OK` — proof the injected content reached and was
+acted on by a live model call, not just that the prompt string contains it.
+
+**Noted, not mine to fix:** a concurrent, uncommitted round (DH-0044) had switched
+`src/agent/providers/anthropic.ts` to a streaming (`stream: true`, SSE-parsed) request/
+response shape mid-session — my first verification attempt used a non-streaming mock and got
+a silently-empty `finalOutput` until I rewrote the mock to emit the real SSE event sequence
+(`message_start`/`content_block_start`/`content_block_delta`/.../`message_stop`). Left that
+provider work entirely untouched; flagging here only so a future reader isn't confused by why
+the verification script needed the SSE shape.
+
+Gates: `typecheck`/`lint` clean on `src/prompt/system-prompt.ts` and `src/cli.test.ts` (the
+only files this round touched — a large concurrent set of other files was dirty at both
+start and end of this round from unrelated in-flight background rounds per `git status`,
+left untouched). `bun test src/prompt src/cli.test.ts --coverage`: `src/prompt/
+system-prompt.ts` 100%/100% lines+funcs; 215 pass, 2 pre-existing fail (both in the
+`AgentRuntimeLoopAdapter` streaming-adapter suite, caused by that same concurrent DH-0044
+change, unrelated to this ticket). Closed DH-0055 (`transition.py DH-0055 closed
+--resolution done`).
