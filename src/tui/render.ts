@@ -62,7 +62,8 @@ export function formatElapsed(ms: number): string {
 // allowlist constraint.
 const USER_ROLE_SGR = "\x1b[1;33m"; // bold yellow — matches the input box's own "> " marker
 const AGENT_ROLE_SGR = "\x1b[36m"; // cyan — pairs with the tree view's "●" status-glyph language
-const TRANSCRIPT_GUTTER_COLS = 2; // "> " and "● " are both exactly 2 visual columns
+const DIM = "\x1b[2m"; // dim — DH-0056 D3 allowlist code 2, kept visually subordinate to text
+const TRANSCRIPT_GUTTER_COLS = 2; // "> ", "● ", and "⚙ " are all exactly 2 visual columns
 const TRANSCRIPT_CONT_GUTTER = "  "; // continuation rows: aligned blank indent, no marker
 
 /** Render a conversation transcript with real turn separation: each turn wrapped to
@@ -79,7 +80,10 @@ const TRANSCRIPT_CONT_GUTTER = "  "; // continuation rows: aligned blank indent,
  * zero) and turned into styled, reset-terminated ANSI rows by `markdown-ansi.ts`'s safe SGR
  * allowlist — never a raw passthrough of model-authored bytes. User turns are the operator's
  * own echoed input, not Markdown, so they're only run through `sanitizeText` and wrapped as
- * plain text. */
+ * plain text. `"tool"` turns (DH-0065, `state.ts`'s `appendToolMarker`) are synthetic
+ * one-line markers — e.g. a sub-agent spawn — rendered dim with a `"⚙ "` marker, kept
+ * visually subordinate to real conversation content per the ticket's "kept visually
+ * subordinate to text output" requirement. */
 export function renderTranscript(transcript: Turn[], cols: number): string[] {
   const lines: string[] = [];
   const innerCols = Math.max(1, cols - TRANSCRIPT_GUTTER_COLS);
@@ -90,6 +94,12 @@ export function renderTranscript(transcript: Turn[], cols: number): string[] {
       rows.forEach((row, i) => {
         const gutter = i === 0 ? `${USER_ROLE_SGR}>${RESET} ` : TRANSCRIPT_CONT_GUTTER;
         lines.push(`${gutter}${row}`);
+      });
+    } else if (turn.role === "tool") {
+      const rows = wrapText(sanitizeText(turn.text), innerCols);
+      rows.forEach((row, i) => {
+        const marker = i === 0 ? "⚙ " : TRANSCRIPT_CONT_GUTTER;
+        lines.push(`${DIM}${marker}${row}${RESET}`);
       });
     } else {
       const rows = renderMarkdownRows(parseMarkdown(turn.text), innerCols);

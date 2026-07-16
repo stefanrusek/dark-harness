@@ -412,6 +412,20 @@ describe("renderTranscript", () => {
     expect(lines).toEqual(["\x1b[1;33m>\x1b[0m hi", "", "\x1b[36m●\x1b[0m hello back"]);
   });
 
+  test("tool turns render as a dim '⚙ ' marker, subordinate to real turns", () => {
+    const lines = renderTranscript([{ role: "tool", text: 'Agent(sonnet): "Fix flaky test"' }], 40);
+    expect(lines).toEqual(['\x1b[2m⚙ Agent(sonnet): "Fix flaky test"\x1b[0m']);
+  });
+
+  test("a wrapped tool turn's continuation row uses the blank gutter, not a repeated marker", () => {
+    const lines = renderTranscript([{ role: "tool", text: "a b c d e f g h" }], 5);
+    expect(lines[0]?.startsWith("\x1b[2m⚙ ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines.slice(1)) {
+      expect(line.startsWith(`${"\x1b[2m"}  `)).toBe(true);
+    }
+  });
+
   test("an empty transcript renders no lines", () => {
     expect(renderTranscript([], 40)).toEqual([]);
   });

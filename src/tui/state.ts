@@ -186,6 +186,29 @@ function appendUserTurn(state: TuiState, agentId: string, at: number, message: s
   return { ...state, agents, agentOrder };
 }
 
+/** Append a synthetic `"tool"` marker turn to `agentId`'s transcript (DH-0065) — the review
+ * found sub-agent spawns and tool calls invisible in the transcript ("the largest
+ * observability gap in the TUI"). This only covers sub-agent spawns, inferred client-side
+ * from an `agent_spawned` event's existing `parentAgentId`/`model`/`description` fields — no
+ * wire change needed. Generic tool calls (Bash, Read, Edit, ...) have no SSE event at all
+ * today (only `src/contracts/log.ts`'s offline JSONL log schema carries `tool_call`; the live
+ * `ServerSentEvent` union in `src/contracts/events.ts` does not) — surfacing those requires a
+ * new SSE event type, which is a `src/contracts/` change needing architect sign-off (CLAUDE.md
+ * §6.2), so it's left out of this round rather than guessed at. Always starts a fresh turn,
+ * like a user turn — a marker never merges with a neighboring turn. */
+function appendToolMarker(state: TuiState, agentId: string, at: number, text: string): TuiState {
+  const agents = new Map(state.agents);
+  const existing = agents.get(agentId) ?? defaultAgent(agentId, at);
+  const agentOrder = agents.has(agentId) ? state.agentOrder : [...state.agentOrder, agentId];
+  const transcript = [...existing.transcript, { role: "tool" as const, text }];
+  agents.set(agentId, {
+    ...existing,
+    transcript: trimTranscript(transcript, MAX_OUTPUT_CHARS),
+    lastEventAt: at,
+  });
+  return { ...state, agents, agentOrder };
+}
+
 function noEffects(state: TuiState): ReducerResult {
   return { state, effects: [] };
 }
@@ -224,6 +247,9 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
       });
       if (event.parentAgentId === null && next.rootAgentId === null) {
         next = { ...next, rootAgentId: event.agentId, rootActive: true };
+      } else if (event.parentAgentId !== null) {
+        const label = event.description ? `: "${event.description}"` : "";
+        next = appendToolMarker(next, event.parentAgentId, at, `Agent(${event.model})${label}`);
       }
       return noEffects(next);
     }

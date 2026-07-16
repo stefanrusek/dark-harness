@@ -22,9 +22,16 @@ export type ViewState =
  * back over SSE, so this is the only place they're recorded (Round 6,
  * docs/handoffs/tui.md). `"assistant"` turns accumulate streamed `agent_output` chunks:
  * consecutive chunks with no intervening user turn append to the same turn's `text` rather
- * than starting a new one, so one streamed model response reads as a single turn. */
+ * than starting a new one, so one streamed model response reads as a single turn.
+ *
+ * `"tool"` turns (DH-0065) are synthetic, client-inserted markers for activity the operator
+ * would otherwise never see in the transcript — currently just a sub-agent spawn, inferred
+ * from an `agent_spawned` event whose `parentAgentId` names a tracked agent (no dedicated
+ * SSE event carries generic tool-call boundaries yet; see state.ts's `appendToolMarker` doc
+ * comment for why plain tool calls like Bash/Read aren't covered here). Always its own turn,
+ * never merged with a neighboring turn of any role. */
 export interface Turn {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   text: string;
 }
 
