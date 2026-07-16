@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0080
 type: bug
-status: draft
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-16
 relations:
@@ -95,3 +95,41 @@ Empirical live-run test (2026-07-16, this session, real Claude Code Bash tool in
 > real open design trade-off (head vs tail keeping) and the unresolved scope-boundary
 > question (Bash-specific vs harness-wide) noted above — this needs a design call, not just
 > mechanical parity.
+
+### 2026-07-16 — Implemented (Grace, Core domain)
+
+Added `capOutputWithSavedFile()` in `src/agent/tools/output-cap.ts`, used by `bash.ts`'s
+foreground (non-`run_in_background`) return path only.
+
+- **Shape**: on overflow (same `OUTPUT_CAP_CHARS = 30_000` trigger as before — left as-is,
+  not re-bisected against real Claude Code's single ~48.8KB data point per the ticket's own
+  caveat that the two aren't confirmed identical), the full output is written to
+  `os.tmpdir()/dh-bash-output/<uuid>.txt`, and the returned notice shows a head preview (first
+  `HEAD_PREVIEW_CHARS = 2000` chars — matches real Claude Code's observed behavior exactly)
+  **plus** a tail preview (last `TAIL_PREVIEW_CHARS = 2000` chars) and the saved path.
+- **Head vs tail decision**: implemented real Claude Code's head-only behavior as the
+  baseline, then added the tail preview on top as a deliberate, explicitly-commented dh
+  addition (not silent drift) — command failures often put the actually-useful error at the
+  end, exactly the risk this ticket flagged about going head-only. The full output is always
+  recoverable from the saved file regardless of which preview a given failure needs.
+- **Scope decision (Bash-specific vs shared layer)**: kept this Bash-specific. Did not touch
+  `capOutput()` (the original tail-only, no-save function), which remains in use by
+  `task-output.ts` — TaskOutput already has its own "get the rest" mechanism (incremental
+  delta by default, `full: true` to re-fetch everything), so it doesn't have Bash's specific
+  problem (a one-shot foreground return with output permanently gone past the cap). Documented
+  this reasoning directly in `output-cap.ts`'s header comment, including a note to revisit if
+  a third foreground-and-uncapped tool shows up later.
+- **Cleanup policy**: `ToolContext` carries no session/log directory (checked `types.ts`), so
+  there's no session-end hook to key cleanup off of. Used a fixed-file-count cap instead
+  (`MAX_SAVED_FILES = 50`, oldest-by-mtime eviction run after every save) in a stable temp
+  subdirectory — bounds disk usage without needing session lifecycle plumbing.
+- Updated the Bash tool's `description` to describe the new save+preview behavior instead of
+  the old tail-only claim.
+- Gates: typecheck/lint clean. `bun run test:coverage`: 1331 pass, 0 fail, 100% coverage on
+  the new `output-cap.ts` code (boundary-exact case, save+prune-on-overflow case, head/tail
+  content assertions, a saved-file-count-cap test). `bash.ts`'s 91.67% function-coverage
+  figure is the same pre-existing inline-arrow-function bun-coverage quirk prior Grace rounds
+  have footnoted, not a new gap — line coverage is 99.23%, unaffected by this change's own
+  code paths. `bun run e2e`: 30 pass / 2 fail — both pre-existing headless-Chromium-missing
+  sandbox failures, confirmed identical via `git stash -u` + re-run with this round's changes
+  stashed out.

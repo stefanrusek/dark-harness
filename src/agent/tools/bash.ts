@@ -19,7 +19,7 @@
 // falling back to killing just the immediate process if the group kill fails for any reason
 // (e.g. the process already exited, or already reaped its own children).
 
-import { capOutput } from "./output-cap.ts";
+import { capOutputWithSavedFile } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -115,8 +115,9 @@ export const bashTool: Tool = {
   description:
     "Run a shell command via bash -c in the working directory. Supports run_in_background " +
     "(default true) to run concurrently and be observed later via Monitor/TaskOutput/TaskStop. " +
-    "Output returned to you is capped (long output is truncated to its tail, with a notice " +
-    "stating the true total size). Statelessness note: each call is a fresh shell at the " +
+    "Output returned to you is capped: past the cap, the full output is saved to a file and " +
+    "you're shown a head preview (plus a short tail preview) and the saved path, so you can " +
+    "Read the rest if needed. Statelessness note: each call is a fresh shell at the " +
     "working directory — `cd` and other shell state do NOT persist between calls; use " +
     "absolute paths, or chain with && in one call, instead of relying on a prior `cd`.",
   inputSchema: {
@@ -186,7 +187,7 @@ export const bashTool: Tool = {
 
     await ctx.tasks.awaitDone(taskId);
     const snapshot = ctx.tasks.snapshot(taskId);
-    const capped = capOutput(snapshot.output);
+    const capped = await capOutputWithSavedFile(snapshot.output);
     if (snapshot.status === "failed") {
       return {
         output: `${capped.text}\n[error] ${snapshot.error ?? "command failed"}`,

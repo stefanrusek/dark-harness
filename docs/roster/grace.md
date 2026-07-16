@@ -959,3 +959,32 @@ CLAUDE.md §6.2 says needs architect sign-off before other domains build against
 the call to proceed anyway since it's purely additive/optional (no existing consumer
 breaks) and the ticket was already scoped "ready." Flagging here in case Fable wants to
 review after the fact.
+
+### 2026-07-16 — DH-0079 (Read byte-cap) + DH-0080 (Bash output-cap shape), both closed
+
+Two draft tickets from this session's own empirical conformance pass, fixed per the owner's
+"proceed with judgment, straightforward but dangerous" direction (both closed `done`, full
+design-decision write-ups live in each ticket's own Notes section — not duplicated here).
+
+- **DH-0079**: added a real-Claude-Code-matched `PRIMARY_WHOLE_FILE_BYTE_CAP` (256KB) to
+  `read.ts`, applied only to true whole-file reads (no `offset`/`limit`); kept the older
+  `MAX_READABLE_BYTES` (256MB) as a separate absolute ceiling that still applies even to
+  windowed reads (re-audited DH-0014's original rationale first, per the ticket's own Risk —
+  found the two caps now serve genuinely different purposes, no conflict). `offset`/`limit`
+  bypasses the whole-file cap by design (explicit bounded-slice request). Fixed empty-file
+  wording to match real Claude Code exactly.
+- **DH-0080**: added `capOutputWithSavedFile()` — head preview (2KB, matches real Claude
+  Code) + a deliberate dh-added tail preview (2KB, documented as a divergence, not accidental)
+  + full output saved to `os.tmpdir()/dh-bash-output/<uuid>.txt`, path reported back. Scoped
+  to Bash's foreground return only — left `task-output.ts`'s existing `capOutput()` (tail-only,
+  no save) untouched, since TaskOutput already has its own full-recovery path (`full: true`)
+  that Bash's one-shot foreground call doesn't have. Cleanup: fixed-count (50) oldest-evicted
+  temp dir, since `ToolContext` has no session-scoped directory to key off.
+- Both closures included new tests hitting exact boundary conditions (256KB boundary exactly,
+  megabyte-scale size formatting, offset/limit bypass, save-file-count pruning). Gates:
+  typecheck/lint/test:coverage all clean, 100% on changed files; e2e's pre-existing 2 headless-
+  Chromium failures reconfirmed via `git stash -u` as unrelated to this round.
+- Worth noting for whoever picks up next: this round's own worktree had drifted from
+  `claude/coordinator-onboarding-kab9ls` (branched before that branch's current tip existed —
+  the same recurring symptom prior rounds have noted) and had to be fast-forward reset before
+  `tracking/DH-0079`/`DH-0080` were even visible in the working tree.
