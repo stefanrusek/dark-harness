@@ -76,7 +76,6 @@ source: tracking/
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | feature | stefan |
-| [DH-0090](../DH-0090-dh-init-s-scaffolded-config-has-no-api-key-region-placeholders-using-var-env-interpolation.md) | dh init's scaffolded config has no API-key/region placeholders using $(VAR) env interpolation | feature | stefan |
 
 ### implementing
 
@@ -99,6 +98,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0090](../DH-0090-dh-init-s-scaffolded-config-has-no-api-key-region-placeholders-using-var-env-interpolation.md) | dh init's scaffolded config has no API-key/region placeholders using $(VAR) env interpolation | done |
 | [DH-0087](../DH-0087-create-github-issue-to-gauge-demand-for-mcp-oauth-support.md) | Create GitHub issue to gauge demand for MCP OAuth support | done |
 | [DH-0086](../DH-0086-create-github-issue-to-gauge-demand-for-model-provider-fallback-chains.md) | Create GitHub issue to gauge demand for model/provider fallback chains | done |
 | [DH-0085](../DH-0085-create-github-issue-to-gauge-demand-for-git-native-session-artifacts-and-replay-tooling.md) | Create GitHub issue to gauge demand for git-native session artifacts and replay tooling | done |
@@ -113,4 +113,3 @@ source: tracking/
 | [DH-0073](../DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness-and-there-is-no-notebookedit-equivalent.md) | Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent | done |
 | [DH-0072](../DH-0072-grep-tool-likely-missing-context-line-flags-multiline-mode-and-file-type-filter-that-real-claude-code-s-grep-supports.md) | Grep tool likely missing context-line flags, multiline mode, and file-type filter that real Claude Code's Grep supports | done |
 | [DH-0070](../DH-0070-bash-tool-s-fresh-shell-per-call-semantics-diverge-from-claude-code-s-persistent-cwd-behavior.md) | Agents don't have their own separate working-directory state | done |
-| [DH-0069](../DH-0069-agent-tool-s-description-should-be-required-and-the-tree-ui-should-actually-use-it.md) | Agent tool's description should be required, and the tree UI should actually use it | done |
