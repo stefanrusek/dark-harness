@@ -645,3 +645,30 @@ Open thread for a future round: E2E (Hedy) still needs to land the PTY-driven
 `/model`→mock-provider-sees-new-model-id assertion per the ticket's own sequencing — this
 round's live verification used a real provider instead of the mock, which proves the same
 thing but isn't a repeatable CI-gate test.
+
+### 2026-07-16 — DH-0058: verify-and-close (joint round with Radia), no code changes
+
+Top-priority ticket claimed the TUI hung on the "Reconnected — history may be incomplete"
+banner and never reached "session ended." Re-ran `bun test e2e/tui.test.ts` fresh against
+current code (per instructions, since DH-0105 landed after this ticket was filed and might
+have changed the shape of the bug) — it did not reproduce. Found via `git log -p
+-S"root cause of DH-0058"` that Radia's side had already fixed the actual root cause the
+same day the ticket was filed (commit `6e49ad6`: `server.timeout(req, 0)` to stop Bun's
+default 10s idle timeout from killing SSE connections before the 20s heartbeat could fire)
+— the ticket just never got transitioned to `closed`. This was a genuine Server-side fix,
+not a TUI reconnect-state issue; DH-0105's later connection-state model rework (my own
+prior round) is unrelated to why this hang happened, even though it did rename the banner
+text elsewhere.
+
+Ran `bun test e2e/tui.test.ts` 4x back-to-back (2 pass/0 fail every time, ~2.7s) and full
+`bun run e2e` twice (30 pass/2 fail both times — only the pre-existing missing-Chromium
+environment gap, unrelated). The existing two e2e scenarios (which force a reconnect past
+the old ~10s idle-timeout mark and assert reaching "session ended") already serve as the
+regression test for this exact bug — no new test needed, just confirmed they're reliable.
+Closed DH-0058 (`resolution: done`) via `spile-ops`.
+
+Worth remembering: when a bug report predates a later, unrelated-looking refactor in the
+same area (DH-0105 here), don't assume the refactor either caused or fixed it without
+checking — read the actual root-cause commit/comment first. `git log -p -S"<distinctive
+string from the bug report>"` found the fixing commit directly rather than guessing from
+current code alone.

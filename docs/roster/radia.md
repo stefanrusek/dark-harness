@@ -384,3 +384,21 @@ on `*:<port>`); field omitted still binds `*:<port>` (all interfaces), matching 
 behavior exactly.
 
 Closed DH-0022 (resolution: done). No new open threads.
+
+### 2026-07-16 — DH-0058: verify-and-close (joint round with Mary), no code changes
+
+This ticket was filed 2026-07-15 for a TUI e2e hang on the SSE-reconnect banner, but the
+actual fix (commit `6e49ad6`, same day) had already landed — `server.timeout(req, 0)` in
+`handleSse` (`src/server/server.ts`) to disable Bun's default 10s idle timeout on SSE
+connections, which was killing every connection before the 20s heartbeat (Round 2) could
+fire, forcing a spurious reconnect (and the resync banner) on any turn slower than ~10s.
+The commit's own message named DH-0058 and explained the mechanism in detail; the ticket
+itself just never got transitioned to `closed` afterward. This round was pure
+verification: reran `bun test e2e/tui.test.ts` (4x, 2 pass/0 fail every time) and full
+`bun run e2e` (2x, 30 pass/2 fail both times — only the pre-existing missing-Chromium
+environment gap, unrelated to Server). No code changes. Closed the ticket via
+`spile-ops`'s `transition.py`.
+
+Worth remembering for next time a ticket references "root cause of DH-NNNN" in a code
+comment: that's a strong signal the fix already shipped and only the ticket's status field
+is stale — check `git log -S"DH-NNNN"` before assuming a reported bug is still live.

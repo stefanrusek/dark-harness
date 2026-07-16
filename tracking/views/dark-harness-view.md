@@ -62,7 +62,6 @@ source: tracking/
 | [DH-0050](../DH-0050-no-structured-final-output-or-headless-json-progress.md) | No structured final-result convention beyond the `TASK_FAILED` text marker, and no machine-readable progress stream for `--job` | feature | stefan |
 | [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
-| [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
 | [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | feature | stefan |
