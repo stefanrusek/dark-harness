@@ -43,11 +43,13 @@ export const agentTool: Tool = {
       description: {
         type: "string",
         description:
-          "Short human-readable label for this sub-agent (shown in the agent tree, Monitor output, and its log header).",
+          "A short (3-5 word) description of the task, shown as this sub-agent's label " +
+          "everywhere it's displayed (the agent tree, Monitor output, and its log header) " +
+          "— the harness never derives a name from the prompt itself, so this is required.",
       },
       run_in_background: { type: "boolean" },
     },
-    required: ["prompt"],
+    required: ["prompt", "description"],
     additionalProperties: false,
   },
 
@@ -57,10 +59,16 @@ export const agentTool: Tool = {
       return { output: "Agent tool error: 'prompt' must be a non-empty string.", isError: true };
     }
 
+    // DH-0069: 'description' is required at the schema level (matching real Claude Code's
+    // own Agent tool, whose required "description" string is the exact label it displays for
+    // a sub-agent — dh never derives a name from the prompt). Schema `required` is only
+    // advisory to the model, so this runtime check makes a model that ignores it get a clear
+    // tool error instead of silently spawning an unlabeled agent that renders as a raw
+    // agentId/UUID in the TUI/Web tree.
     const description = input.description;
-    if (description !== undefined && typeof description !== "string") {
+    if (typeof description !== "string" || description.length === 0) {
       return {
-        output: "Agent tool error: 'description' must be a string when provided.",
+        output: "Agent tool error: 'description' is required and must be a non-empty string.",
         isError: true,
       };
     }
@@ -87,7 +95,7 @@ export const agentTool: Tool = {
         model,
         prompt,
         background: runInBackground,
-        ...(description !== undefined ? { description } : {}),
+        description,
       });
     } catch (err) {
       return {

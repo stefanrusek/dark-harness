@@ -28,7 +28,10 @@ function withFakeSpawn(overrides: Parameters<typeof makeToolContext>[0] = {}) {
 describe("Agent tool", () => {
   test("spawns a background sub-agent and returns a task id immediately", async () => {
     const ctx = withFakeSpawn({ runInBackgroundDefault: true });
-    const result = await agentTool.execute({ prompt: "do the thing" }, ctx);
+    const result = await agentTool.execute(
+      { prompt: "do the thing", description: "do the thing" },
+      ctx,
+    );
     expect(result.isError).toBe(false);
     expect(result.output).toMatch(/Spawned sub-agent as task agent-\d+/);
   });
@@ -36,7 +39,7 @@ describe("Agent tool", () => {
   test("run_in_background: false blocks and returns the sub-agent's output", async () => {
     const ctx = withFakeSpawn();
     const result = await agentTool.execute(
-      { prompt: "do the thing", run_in_background: false },
+      { prompt: "do the thing", description: "do the thing", run_in_background: false },
       ctx,
     );
     expect(result.isError).toBe(false);
@@ -46,7 +49,7 @@ describe("Agent tool", () => {
   test("run_in_background: false surfaces sub-agent failure", async () => {
     const ctx = withFakeSpawn();
     const result = await agentTool.execute(
-      { prompt: "please fail", run_in_background: false },
+      { prompt: "please fail", description: "please fail", run_in_background: false },
       ctx,
     );
     expect(result.isError).toBe(true);
@@ -55,7 +58,10 @@ describe("Agent tool", () => {
 
   test("defaults to options.defaultModel when no model is given", async () => {
     const ctx = withFakeSpawn();
-    const result = await agentTool.execute({ prompt: "hi", run_in_background: true }, ctx);
+    const result = await agentTool.execute(
+      { prompt: "hi", description: "say hi", run_in_background: true },
+      ctx,
+    );
     expect(result.isError).toBe(false);
     expect(result.output).toContain("model: sonnet");
   });
@@ -63,7 +69,7 @@ describe("Agent tool", () => {
   test("accepts an explicit known model name", async () => {
     const ctx = withFakeSpawn();
     const result = await agentTool.execute(
-      { prompt: "hi", model: "sonnet", run_in_background: true },
+      { prompt: "hi", description: "say hi", model: "sonnet", run_in_background: true },
       ctx,
     );
     expect(result.output).toContain("model: sonnet");
@@ -71,33 +77,36 @@ describe("Agent tool", () => {
 
   test("rejects an unknown model name", async () => {
     const ctx = withFakeSpawn();
-    const result = await agentTool.execute({ prompt: "hi", model: "ghost" }, ctx);
+    const result = await agentTool.execute(
+      { prompt: "hi", description: "say hi", model: "ghost" },
+      ctx,
+    );
     expect(result.isError).toBe(true);
     expect(result.output).toContain("unknown model");
   });
 
   test("rejects a non-string model", async () => {
     const ctx = withFakeSpawn();
-    const result = await agentTool.execute({ prompt: "hi", model: 5 }, ctx);
+    const result = await agentTool.execute({ prompt: "hi", description: "say hi", model: 5 }, ctx);
     expect(result.isError).toBe(true);
     expect(result.output).toContain("'model'");
   });
 
   test("rejects a missing prompt", async () => {
     const ctx = withFakeSpawn();
-    const result = await agentTool.execute({}, ctx);
+    const result = await agentTool.execute({ description: "say hi" }, ctx);
     expect(result.isError).toBe(true);
   });
 
   test("rejects an empty prompt", async () => {
     const ctx = withFakeSpawn();
-    const result = await agentTool.execute({ prompt: "" }, ctx);
+    const result = await agentTool.execute({ prompt: "", description: "say hi" }, ctx);
     expect(result.isError).toBe(true);
   });
 
   test("runInBackgroundDefault false runs in the foreground without an explicit flag", async () => {
     const ctx = withFakeSpawn({ runInBackgroundDefault: false });
-    const result = await agentTool.execute({ prompt: "hi" }, ctx);
+    const result = await agentTool.execute({ prompt: "hi", description: "say hi" }, ctx);
     expect(result.output).toContain("ran with prompt: hi");
   });
 
@@ -118,6 +127,23 @@ describe("Agent tool", () => {
   test("rejects a non-string description", async () => {
     const ctx = withFakeSpawn();
     const result = await agentTool.execute({ prompt: "hi", description: 5 }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("'description'");
+  });
+
+  // DH-0069: description is now required (matching real Claude Code's own Agent tool schema)
+  // — schema `required` is only advisory to the model, so this covers a model that omits it
+  // outright, not just a wrong-typed value.
+  test("rejects a missing description", async () => {
+    const ctx = withFakeSpawn();
+    const result = await agentTool.execute({ prompt: "hi" }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("'description'");
+  });
+
+  test("rejects an empty description", async () => {
+    const ctx = withFakeSpawn();
+    const result = await agentTool.execute({ prompt: "hi", description: "" }, ctx);
     expect(result.isError).toBe(true);
     expect(result.output).toContain("'description'");
   });

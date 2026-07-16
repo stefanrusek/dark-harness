@@ -26,6 +26,12 @@ export interface AgentSpawnedEvent extends SseEventBase {
   agentId: string;
   parentAgentId: string | null;
   model: string;
+  /** DH-0069: human-readable label from the Agent tool's `description` parameter (now
+   * required for any spawned sub-agent) — lets the Web client's sidebar/tree row show
+   * something better than a raw agentId/UUID, matching AgentTreeNode.description
+   * (commands.ts), which the TUI already reads from a separate poll path. Undefined only for
+   * the root agent, which has no spawning `Agent` tool call to supply one. */
+  description?: string;
 }
 
 export interface TokenUsageEvent extends SseEventBase {
