@@ -79,9 +79,25 @@ describe("security matrix", () => {
       headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
       body: JSON.stringify({ type: "send_message", agentId: "agent-root", message: "hi" }),
     });
+
+    // The turn completes and the root agent parks in "waiting" status — an interactive
+    // root agent never reaches session_ended on its own (DH-0059). Stop it explicitly: a
+    // graceful stop while "waiting" is a success per the ADR 0006 amendment, so this should
+    // yield exitCode 0, not an interrupted-task exit code.
+    await sse.waitFor(
+      (e) => e.type === "agent_status" && (e as { status?: string }).status === "waiting",
+    );
+
+    const stopRes = await fetch(`${baseUrl}/api/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ type: "stop_agent", agentId: "agent-root" }),
+    });
+    expect(stopRes.status).toBe(200);
+
     const ended = await sse.waitFor((e) => e.type === "session_ended");
     expect(ended).toMatchObject({ exitCode: 0 });
-  });
+  }, 15_000);
 
   test("TLS: self-signed cert round trip over https://", async () => {
     const provider = startMockAnthropicProvider([successTurn("Hello over TLS.")]);

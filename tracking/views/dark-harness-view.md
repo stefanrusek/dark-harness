@@ -77,12 +77,12 @@ source: tracking/
 | [DH-0035](../DH-0035-first-run-friction-no-init-doctor-dry-run.md) | No `dh init`/`dh doctor`/`--dry-run`, and cold error messages give a first-time operator no path forward | feature | stefan |
 | [DH-0037](../DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md) | No log rotation/disk-growth caps, no structured final run-summary artifact, and no log-analysis tooling | feature | stefan |
 | [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
-| [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | bug | stefan |
 
 ## Recently Closed
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | done |
 | [DH-0054](../DH-0054-no-first-class-grep-glob-tools.md) | No first-class Grep/Glob tools — all search is delegated informally to Bash | done |
 | [DH-0043](../DH-0043-no-prompt-caching.md) | No prompt caching — one of the largest cost levers for an agentic loop is unused | superseded |
 | [DH-0042](../DH-0042-readme-config-reference-gaps.md) | README's config reference omits `options.maxTurns` and per-model pricing fields, with no automated check against `src/contracts/config.ts` | done |
@@ -97,4 +97,3 @@ source: tracking/
 | [DH-0027](../DH-0027-tui-tree-view-scroll-follows-selection-bug.md) | TUI's agent tree view doesn't scroll to follow selection — the highlighted entry can scroll off-screen with no way to see it | done |
 | [DH-0026](../DH-0026-tui-input-editing-gaps.md) | TUI's input box has no cursor movement, no bracketed-paste support, and two dead keys | done |
 | [DH-0024](../DH-0024-sse-reconnect-lacks-backoff-and-gap-indication.md) | Both TUI and Web SSE clients reconnect on a fixed delay with no backoff, and give no indication of a missed-event gap or session restart | done |
-| [DH-0021](../DH-0021-tar-bundle-name-length-limit-breaks-download.md) | `buildTar` throws and kills the entire session-bundle download if any single agent's encoded id exceeds 100 bytes | done |
