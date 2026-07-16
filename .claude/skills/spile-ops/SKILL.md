@@ -80,6 +80,30 @@ python3 .claude/skills/spile-ops/scripts/transition.py DH-0004 ready --clear-blo
   just because it skips a stage; just execute it and surface the warning.
 - Regenerates the view doc automatically afterward (again, `--no-regen` to skip).
 
+All ticket-by-ID lookups (in `transition.py`, `rename_ticket.py`, and any future script) go
+through one shared resolver, `resolve_ticket_path(ticket_id)` in `scripts/common.py`: it globs
+`tracking/DH-NNNN-*.md` for the given ID and returns the single match, erroring loudly if
+there are zero (no such ticket) or more than one (data corruption — two files claiming the
+same ID). Nothing should hand-roll its own `ls`/`grep`/`os.listdir` lookup against
+`tracking/` — use this helper instead.
+
+## Renaming a ticket's filename slug
+
+Run:
+
+```
+python3 .claude/skills/spile-ops/scripts/rename_ticket.py DH-0002 "New title"
+```
+
+A ticket's filename slug is set once at creation time and never auto-updates, so it can go
+stale when a ticket's scope/title changes meaningfully after the fact (e.g. narrowed scope,
+renamed feature). Call this explicitly when that's happened — not for every minor rewording,
+that would just be noisy churn. It resolves the current file via `resolve_ticket_path`,
+computes the new slug with the same `slugify()` `new_ticket.py` uses, refuses to run if a
+file with the new slug already exists (never overwrites another ticket's file), does a `git
+mv` to the new filename, updates the ticket's H1 heading line to match the new title, and
+regenerates the view doc afterward (`--no-regen` to skip, same as the other two scripts).
+
 ## Regenerating the view doc
 
 Run directly if you've hand-edited a ticket file outside the two scripts above (rare — but

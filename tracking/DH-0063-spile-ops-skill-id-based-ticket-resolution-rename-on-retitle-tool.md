@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0063
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -54,3 +54,19 @@ Real friction from today's heavy usage: tickets are resolved by shelling out to 
 > (`.claude/skills/spile-ops/`) — no change to the upstream Spile spec
 > (`tracking/SPILE-SPEC.md`) is implied or needed; the spec doesn't mandate a frozen slug or
 > manual lookup, that's just how our tooling currently works.
+
+## Status Log
+
+- 2026-07-15: Implemented. Added `resolve_ticket_path(ticket_id)` to `common.py` (globs
+  `tracking/DH-NNNN-*.md`, errors on zero or multiple matches); refactored `transition.py`'s
+  `find_ticket_path` to use it (`regen_view.py` never did per-ID lookup, only `list_tickets()`,
+  so no change needed there). Added `rename_ticket.py DH-000N "New Title"`: resolves via
+  `resolve_ticket_path`, re-slugs with `new_ticket.py`'s existing `slugify()`, refuses to
+  overwrite an existing target file, `git mv`s tracked files (falls back to a plain
+  `os.rename` for a not-yet-committed ticket, since `git mv` refuses untracked files),
+  updates the H1 heading, and regenerates the view (`--no-regen` supported). Updated
+  `SKILL.md` with a `resolve_ticket_path` paragraph and a "Renaming a ticket's filename slug"
+  section. Verified by minting scratch tickets, renaming them, confirming the file move + H1
+  update + view regen, confirming a nonexistent ID and a duplicate-file ID both error
+  correctly, then deleting the scratch tickets and reverting the ID counter/view so no test
+  artifacts remain.

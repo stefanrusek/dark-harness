@@ -1,5 +1,6 @@
 """Shared helpers for spile-ops scripts. No third-party deps — stdlib only,
 so these run under any python3 without a venv."""
+import glob
 import os
 import re
 import sys
@@ -76,3 +77,25 @@ def list_tickets():
 def slugify(title):
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
     return re.sub(r"-+", "-", slug)
+
+
+def resolve_ticket_path(ticket_id):
+    """Resolve a ticket ID like 'DH-0028' to its file path by globbing
+    tracking/DH-NNNN-*.md — the one shared lookup mechanism every script
+    uses, so a ticket can always be found by ID alone without knowing (or
+    guessing) its current filename slug.
+
+    Errors loudly if there isn't exactly one match: zero means the ID
+    doesn't exist, more than one means real data corruption (two files
+    claiming the same ticket ID) worth surfacing rather than silently
+    picking one.
+    """
+    matches = sorted(glob.glob(os.path.join(TRACKING_DIR, f"{ticket_id}-*.md")))
+    if not matches:
+        die(f"no ticket file found for {ticket_id} in tracking/")
+    if len(matches) > 1:
+        die(
+            f"multiple ticket files found for {ticket_id} in tracking/ "
+            f"(data corruption — expected exactly one): {matches}"
+        )
+    return matches[0]

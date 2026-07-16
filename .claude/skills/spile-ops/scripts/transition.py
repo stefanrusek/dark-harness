@@ -17,14 +17,16 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from common import STATUS_ORDER, TRACKING_DIR, die, get_field, join_front_matter, list_tickets, set_field
-
-
-def find_ticket_path(ticket_id):
-    for name in os.listdir(TRACKING_DIR):
-        if name.startswith(ticket_id + "-") and name.endswith(".md"):
-            return os.path.join(TRACKING_DIR, name)
-    die(f"no ticket file found for {ticket_id} in tracking/")
+from common import (
+    STATUS_ORDER,
+    TRACKING_DIR,
+    die,
+    get_field,
+    join_front_matter,
+    list_tickets,
+    resolve_ticket_path,
+    set_field,
+)
 
 
 def main():
@@ -40,7 +42,7 @@ def main():
     ap.add_argument("--no-regen", action="store_true")
     args = ap.parse_args()
 
-    path = find_ticket_path(args.ticket_id)
+    path = resolve_ticket_path(args.ticket_id)
     with open(path, encoding="utf-8") as f:
         text = f.read()
     fm_lines, body = None, None
