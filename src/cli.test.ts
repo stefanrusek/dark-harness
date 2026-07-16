@@ -66,7 +66,9 @@ function baseOverrides(io: CliIo): Partial<CliDeps> {
 
 /** A minimal AgentLoopHandle fake — used everywhere the real Server/TUI/Web wiring would
  * otherwise open a real socket or block on real terminal I/O, which unit tests must avoid. */
-function fakeAgentLoop(overrides: Partial<AgentLoopHandle> = {}): AgentLoopHandle {
+function fakeAgentLoop(
+  overrides: Partial<AgentLoopHandle> & { close?: () => Promise<void> } = {},
+): AgentLoopHandle & { close?: () => Promise<void> } {
   return {
     onEvent: () => () => {},
     onLog: () => () => {},
@@ -537,6 +539,43 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(io.exitCodes).toContain(ExitCode.Success);
   });
 
+  test("DH-0002: SIGTERM on a --server process also closes the agent loop's MCP manager " +
+    "via the handle's optional close()", async () => {
+    const io = fakeIo();
+    let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
+    let closeCalled = false;
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      installSignalHandlers: (onSignal) => {
+        capturedOnSignal = onSignal;
+        return () => {};
+      },
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          close: async () => {
+            closeCalled = true;
+          },
+        }),
+    });
+    capturedOnSignal?.("SIGTERM");
+    await Promise.resolve();
+    expect(closeCalled).toBe(true);
+  });
+
+  test("DH-0002: shutdown never throws when the agent loop handle has no close() at all", async () => {
+    const io = fakeIo();
+    let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      installSignalHandlers: (onSignal) => {
+        capturedOnSignal = onSignal;
+        return () => {};
+      },
+      createAgentLoop: () => fakeAgentLoop(),
+    });
+    expect(() => capturedOnSignal?.("SIGTERM")).not.toThrow();
+  });
+
   test("--connect starts console client mode with no local server, targeting the given host/port", async () => {
     const io = fakeIo();
     let createServerCalled = false;
@@ -744,6 +783,56 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines[0]).toContain("root agent crashed");
     expect(io.stderrLines[0]).toContain("boom");
+  });
+
+  test("DH-0002: a successful standalone --job run closes the runtime's MCP manager via " +
+    "the optional close()", async () => {
+    const io = fakeIo();
+    let closeCalled = false;
+    await main(["--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "do the thing",
+      createRuntime: () => ({
+        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        stopRoot: () => {},
+        close: async () => {
+          closeCalled = true;
+        },
+      }),
+    });
+    expect(closeCalled).toBe(true);
+  });
+
+  test("DH-0002: a crashed standalone run still closes the runtime's MCP manager", async () => {
+    const io = fakeIo();
+    let closeCalled = false;
+    await main(["--instructions", "plan.md"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "do the thing",
+      createRuntime: () => ({
+        runRoot: async () => {
+          throw new Error("boom");
+        },
+        stopRoot: () => {},
+        close: async () => {
+          closeCalled = true;
+        },
+      }),
+    });
+    expect(closeCalled).toBe(true);
+  });
+
+  test("DH-0002: standalone shutdown never throws when createRuntime's return has no close()", async () => {
+    const io = fakeIo();
+    const code = await main(["--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "do the thing",
+      createRuntime: () => ({
+        runRoot: async () => ({ success: true, finalOutput: "yay" }),
+        stopRoot: () => {},
+      }),
+    });
+    expect(code).toBe(ExitCode.Success);
   });
 
   test("--job exits 0 and prints the final output when the root agent succeeds", async () => {
@@ -1453,6 +1542,20 @@ describe("AgentRuntimeLoopAdapter", () => {
       ],
     };
   }
+
+  test("DH-0002: close() delegates to the wrapped AgentRuntime.close()", async () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+        client: "tui",
+      });
+      await expect(adapter.close()).resolves.toBeUndefined();
+    } finally {
+      server.stop(true);
+    }
+  });
 
   test("getAgentTree() delegates to the wrapped runtime — a 'waiting' root node before start", () => {
     const server = startMockAnthropicServer();

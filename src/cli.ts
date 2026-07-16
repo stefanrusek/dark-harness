@@ -450,6 +450,13 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
   getAgentTree(): AgentTreeNode[] {
     return this.runtime.getAgentTree();
   }
+
+  /** DH-0002: delegates to the underlying AgentRuntime.close() (closes the shared
+   * McpManager, terminating any stdio MCP child processes) — called from this module's own
+   * SIGTERM/SIGINT shutdown handling below, not a separate mechanism. */
+  async close(): Promise<void> {
+    await this.runtime.close();
+  }
 }
 
 export interface DhServerLike {
@@ -500,15 +507,20 @@ export interface CliDeps {
     systemPrompt: string,
     client: SessionClientKind,
     resume?: AgentRuntimeOptions["resume"],
-  ) => Pick<AgentRuntime, "runRoot" | "stopRoot">;
+  ) => Pick<AgentRuntime, "runRoot" | "stopRoot"> & { close?: () => Promise<void> };
   /** Used by every interactive mode (server/local/connect). `resume` (DH-0038): same shape
-   * and purpose as `createRuntime`'s. */
+   * and purpose as `createRuntime`'s. DH-0002: the returned handle's optional `close()` —
+   * present on the real `AgentRuntimeLoopAdapter` (delegates to its `AgentRuntime.close()`,
+   * which in turn closes the shared McpManager, terminating any stdio MCP child processes)
+   * — is called from this module's own SIGTERM/SIGINT handling below, coordinating with the
+   * existing shutdown path (DH-0011) rather than adding a second one; `AgentLoopHandle`
+   * itself (Server's own cross-domain contract, src/server/agent-loop.ts) is untouched. */
   createAgentLoop: (
     config: DhConfig,
     systemPrompt: string,
     client: SessionClientKind,
     resume?: AgentRuntimeOptions["resume"],
-  ) => AgentLoopHandle;
+  ) => AgentLoopHandle & { close?: () => Promise<void> };
   createServer: (options: DhServerOptions) => DhServerLike;
   /** DH-0059: `ownsServer` tells the TUI whether this process also constructed the
    * `DhServer` it's talking to (local mode) — only this module knows, since it's the one
@@ -777,6 +789,10 @@ async function runInteractiveMode(
       } catch {
         // best-effort.
       }
+      // DH-0002: best-effort — closes the shared McpManager (terminating stdio MCP child
+      // processes); `.close` is optional on the handle type so tests injecting a bare fake
+      // AgentLoopHandle (no MCP involved) don't need to implement it.
+      void agentLoop.close?.()?.catch(() => {});
       uninstallSignals();
       io.exit(ExitCode.Success);
     });
@@ -1135,16 +1151,22 @@ export async function main(
     result = await runtime.runRoot(instructionText);
   } catch (err) {
     uninstallSignals();
+    await runtime.close?.()?.catch(() => {});
     return fail(io, `root agent crashed: ${(err as Error).message}`);
   }
   uninstallSignals();
   if (interrupted) {
     io.stdout(result.finalOutput);
+    await runtime.close?.()?.catch(() => {});
     io.exit(ExitCode.HarnessError);
     return ExitCode.HarnessError;
   }
 
   io.stdout(result.finalOutput);
+  // DH-0002: best-effort — closes the shared McpManager (terminating stdio MCP child
+  // processes) now that this standalone run has finished; the `--job` branch below starts a
+  // brand-new AgentRuntime/session, so this one's MCP connections have no further use.
+  await runtime.close?.()?.catch(() => {});
 
   if (!options.job) {
     // Without --job the process stays alive after completion for inspection (HANDOFF.md
