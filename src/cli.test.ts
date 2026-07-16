@@ -41,6 +41,70 @@ const TEST_CONFIG: DhConfig = {
   provider: [{ name: "anthropic", type: "anthropic" }],
 };
 
+/** Builds a fake Anthropic-shaped SSE streaming HTTP response, matching what DH-0044's real
+ * `AnthropicProvider` now decodes (`stream: true` always) — mirrors the identically-named
+ * helper in `src/agent/runtime.test.ts`; see that file's doc comment for the full rationale. */
+function sseMessageResponse(
+  contentBlocks: ReadonlyArray<
+    { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input?: unknown }
+  >,
+  stopReason: string,
+  usage: { input_tokens: number; output_tokens: number } = { input_tokens: 5, output_tokens: 5 },
+): Response {
+  const events: { type: string; [key: string]: unknown }[] = [
+    {
+      type: "message_start",
+      message: {
+        id: "msg_mock",
+        type: "message",
+        role: "assistant",
+        model: "mock",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: usage.input_tokens, output_tokens: 0 },
+      },
+    },
+  ];
+  contentBlocks.forEach((block, index) => {
+    if (block.type === "text") {
+      events.push({
+        type: "content_block_start",
+        index,
+        content_block: { type: "text", text: "", citations: null },
+      });
+      events.push({
+        type: "content_block_delta",
+        index,
+        delta: { type: "text_delta", text: block.text },
+      });
+    } else {
+      events.push({
+        type: "content_block_start",
+        index,
+        content_block: { type: "tool_use", id: block.id, name: block.name, input: {} },
+      });
+      events.push({
+        type: "content_block_delta",
+        index,
+        delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input ?? {}) },
+      });
+    }
+    events.push({ type: "content_block_stop", index });
+  });
+  events.push({
+    type: "message_delta",
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: usage.output_tokens },
+  });
+  events.push({ type: "message_stop" });
+
+  const body = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  return new Response(body, {
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 function fakeIo(): CliIo & { stdoutLines: string[]; stderrLines: string[]; exitCodes: number[] } {
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
@@ -1680,15 +1744,9 @@ describe("main — real filesystem-backed default deps", () => {
     const mockProvider = Bun.serve({
       port: 0,
       fetch() {
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: [{ type: "text", text: "all done" }],
-          stop_reason: "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 3, output_tokens: 5 },
+        return sseMessageResponse([{ type: "text", text: "all done" }], "end_turn", {
+          input_tokens: 3,
+          output_tokens: 5,
         });
       },
     });
@@ -1865,15 +1923,9 @@ describe("AgentRuntimeLoopAdapter", () => {
           ?.content.filter((c): c is { type: "text"; text: string } => c.type === "text")
           .map((c) => c.text)
           .join("");
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: [{ type: "text", text: `handled: ${text ?? ""}` }],
-          stop_reason: "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
+        return sseMessageResponse([{ type: "text", text: `handled: ${text ?? ""}` }], "end_turn", {
+          input_tokens: 1,
+          output_tokens: 1,
         });
       },
     });
@@ -2152,15 +2204,9 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
     return Bun.serve({
       port: 0,
       fetch() {
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: [{ type: "text", text: finalText }],
-          stop_reason: "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
+        return sseMessageResponse([{ type: "text", text: finalText }], "end_turn", {
+          input_tokens: 1,
+          output_tokens: 1,
         });
       },
     });
@@ -2198,6 +2244,12 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
       agentLoop: adapter,
       sessionId: "s1",
       logDir: `/tmp/dh-test-${Date.now()}`,
+      // Round (post-DH-0044 test-mock fixup): explicit ephemeral port — this constructor
+      // used to omit `port` entirely, silently defaulting to the real 4000 (DhServerOptions'
+      // doc comment) and colliding with any other test/process bound to that fixed port
+      // ("Failed to start server. Is port 4000 in use?"). Every other real Bun.serve() mock
+      // in this suite already uses `port: 0`; DhServer just needed the same treatment.
+      port: 0,
     });
     const port = dhServer.start();
     try {
@@ -2259,15 +2311,9 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
           ?.content.filter((c): c is { type: "text"; text: string } => c.type === "text")
           .map((c) => c.text)
           .join("");
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: [{ type: "text", text: `handled: ${text ?? ""}` }],
-          stop_reason: "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
+        return sseMessageResponse([{ type: "text", text: `handled: ${text ?? ""}` }], "end_turn", {
+          input_tokens: 1,
+          output_tokens: 1,
         });
       },
     });
@@ -2288,6 +2334,8 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
       agentLoop: adapter,
       sessionId: "s3",
       logDir: `/tmp/dh-test-${Date.now()}`,
+      // See the "s1" DhServer above for why: explicit ephemeral port, not the real 4000.
+      port: 0,
     });
     const port = dhServer.start();
     try {

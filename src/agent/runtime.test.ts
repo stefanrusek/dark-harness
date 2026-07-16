@@ -36,6 +36,75 @@ import { bashTool } from "./tools/bash.ts";
  * predates that field and doesn't care which value it takes. This helper defaults it to
  * `"none"` (the standalone/no-client value) so existing fixtures don't need to repeat it at
  * every call site; tests that specifically care about `client` still override it. */
+/** Builds a fake Anthropic-shaped SSE streaming HTTP response (`text/event-stream`, one
+ * `event:`/`data:` pair per raw stream event) from a whole-message content array + stop
+ * reason — the same inputs the pre-DH-0044 non-streaming fixtures used, but encoded the way
+ * `AnthropicProvider.complete()` now actually expects to decode them (see anthropic.ts's
+ * `consumeAnthropicStream`, and `providers/anthropic.test.ts`'s `streamOf`/`textBlock`/
+ * `toolUseBlock` helpers for the SDK-level equivalent of this same event shape). Centralizing
+ * this here means every mock Anthropic HTTP server in this suite emits a real SSE body
+ * instead of a single non-streaming JSON blob. */
+function sseMessageResponse(
+  contentBlocks: ReadonlyArray<
+    { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input?: unknown }
+  >,
+  stopReason: string,
+  usage: { input_tokens: number; output_tokens: number } = { input_tokens: 5, output_tokens: 5 },
+): Response {
+  const events: { type: string; [key: string]: unknown }[] = [
+    {
+      type: "message_start",
+      message: {
+        id: "msg_mock",
+        type: "message",
+        role: "assistant",
+        model: "mock",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: usage.input_tokens, output_tokens: 0 },
+      },
+    },
+  ];
+  contentBlocks.forEach((block, index) => {
+    if (block.type === "text") {
+      events.push({
+        type: "content_block_start",
+        index,
+        content_block: { type: "text", text: "", citations: null },
+      });
+      events.push({
+        type: "content_block_delta",
+        index,
+        delta: { type: "text_delta", text: block.text },
+      });
+    } else {
+      events.push({
+        type: "content_block_start",
+        index,
+        content_block: { type: "tool_use", id: block.id, name: block.name, input: {} },
+      });
+      events.push({
+        type: "content_block_delta",
+        index,
+        delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input ?? {}) },
+      });
+    }
+    events.push({ type: "content_block_stop", index });
+  });
+  events.push({
+    type: "message_delta",
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: usage.output_tokens },
+  });
+  events.push({ type: "message_stop" });
+
+  const body = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  return new Response(body, {
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
 function newAgentRuntime(
   options: Omit<AgentRuntimeOptions, "client"> & Partial<Pick<AgentRuntimeOptions, "client">>,
 ) {
@@ -67,17 +136,10 @@ function startMockAnthropicServer(onRequest?: (body: { model: string; system?: s
         .map((c) => c.text)
         .join("");
 
-      const message = (contentBlocks: unknown[], stopReason: string): Response =>
-        Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: contentBlocks,
-          stop_reason: stopReason,
-          stop_sequence: null,
-          usage: { input_tokens: 5, output_tokens: 5 },
-        });
+      const message = (
+        contentBlocks: Parameters<typeof sseMessageResponse>[0],
+        stopReason: string,
+      ): Response => sseMessageResponse(contentBlocks, stopReason);
 
       // Round 6c test support: keeps calling a tool forever, regardless of tool_result
       // feedback, so the maxTurns safety valve is the only thing that can end the run —
@@ -278,7 +340,13 @@ function startMockAnthropicServer(onRequest?: (body: { model: string; system?: s
         if (text === "child instruction") {
           return message([{ type: "text", text: "child done" }], "end_turn");
         }
-        if (text.includes("fail please")) {
+        // DH-0050 note: checked against `firstText` (the conversation's original instruction),
+        // not `text` (the latest message) — a non-tool-use, non-ReportOutcome turn now gets
+        // one harness-injected "missed-call nudge" turn (loop.ts's REPORT_OUTCOME_NUDGE_MESSAGE)
+        // before the legacy TASK_FAILED-marker fallback applies, so this branch must still
+        // match and repeat the TASK_FAILED-marked reply on that follow-up turn, whose own
+        // latest message is the nudge text, not "fail please".
+        if (firstText.includes("fail please")) {
           return message([{ type: "text", text: "could not do it TASK_FAILED" }], "end_turn");
         }
         return message([{ type: "text", text: "root done" }], "end_turn");
@@ -600,7 +668,13 @@ describe("AgentRuntime", () => {
 
   test("buildToolContext wires searchDeferredTools so the ToolSearch tool can query it", async () => {
     const runtime = newAgentRuntime({
-      config: baseConfig({ mcpServers: { docs: { url: "https://example.com" } } }),
+      // Deliberately unreachable (nothing listens on 127.0.0.1:1) rather than a real
+      // internet host — this test only cares that the wiring itself works, not that the
+      // configured MCP server ever actually connects, so it shouldn't make a real outbound
+      // network call. A prior "https://example.com" here did (McpManager's connectAll()
+      // eagerly attempts a real streamable-HTTP POST), a stray real network hit noticed
+      // while chasing the post-DH-0044 mock breakage — separate root cause, fixed here.
+      config: baseConfig({ mcpServers: { docs: { url: "http://127.0.0.1:1" } } }),
       systemPrompt: "sp",
     });
     const result = await runtime.runRoot("use-toolsearch");
@@ -958,12 +1032,14 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
         const body = await req.json();
         requestBodies.push(body);
         const isFirstCall = requestBodies.length === 1;
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: isFirstCall
+        // DH-0050: the second turn calls ReportOutcome directly (a real model's expected
+        // behavior) rather than ending its turn with plain text — that lets the loop's tier-1
+        // authoritative-ReportOutcome check end the run right here, in exactly the 2 calls
+        // this test asserts on. Ending with plain text/end_turn instead would have hit tier
+        // 2's missed-call nudge (loop.ts's REPORT_OUTCOME_NUDGE_MESSAGE), silently adding a
+        // 3rd request this test doesn't expect.
+        return sseMessageResponse(
+          isFirstCall
             ? [
                 {
                   type: "tool_use",
@@ -972,11 +1048,17 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
                   input: { command: "echo hi", run_in_background: false },
                 },
               ]
-            : [{ type: "text", text: "done" }],
-          stop_reason: isFirstCall ? "tool_use" : "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
-        });
+            : [
+                {
+                  type: "tool_use",
+                  id: "tu_report",
+                  name: "ReportOutcome",
+                  input: { status: "success", summary: "done" },
+                },
+              ],
+          "tool_use",
+          { input_tokens: 1, output_tokens: 1 },
+        );
       },
     });
 
@@ -1214,16 +1296,11 @@ describe("AgentRuntime — Round 5: an interactive session survives more than on
           .map((c) => c.text)
           .join("");
         if (text) seenTexts.push(text);
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: [{ type: "text", text: `seen so far: ${seenTexts.join(" | ")}` }],
-          stop_reason: "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
-        });
+        return sseMessageResponse(
+          [{ type: "text", text: `seen so far: ${seenTexts.join(" | ")}` }],
+          "end_turn",
+          { input_tokens: 1, output_tokens: 1 },
+        );
       },
     });
   }
@@ -2096,12 +2173,8 @@ describe("AgentRuntime.listModels/switchModel (DH-0093)", () => {
         const body = (await req.json()) as { model: string };
         requestBodies.push(body);
         const isFirstCall = requestBodies.length === 1;
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: isFirstCall
+        return sseMessageResponse(
+          isFirstCall
             ? [
                 {
                   type: "tool_use",
@@ -2111,10 +2184,9 @@ describe("AgentRuntime.listModels/switchModel (DH-0093)", () => {
                 },
               ]
             : [{ type: "text", text: "done" }],
-          stop_reason: isFirstCall ? "tool_use" : "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
-        });
+          isFirstCall ? "tool_use" : "end_turn",
+          { input_tokens: 1, output_tokens: 1 },
+        );
       },
     });
     try {
@@ -2205,12 +2277,8 @@ describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
         };
         requestBodies.push(body);
         const isFirstCall = requestBodies.length === 1;
-        return Response.json({
-          id: "msg_mock",
-          type: "message",
-          role: "assistant",
-          model: "mock",
-          content: isFirstCall
+        return sseMessageResponse(
+          isFirstCall
             ? [
                 {
                   type: "tool_use",
@@ -2220,10 +2288,9 @@ describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
                 },
               ]
             : [{ type: "text", text: "done" }],
-          stop_reason: isFirstCall ? "tool_use" : "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 1, output_tokens: 1 },
-        });
+          isFirstCall ? "tool_use" : "end_turn",
+          { input_tokens: 1, output_tokens: 1 },
+        );
       },
     });
     try {
