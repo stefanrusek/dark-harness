@@ -8,6 +8,44 @@
 
 ## Memory
 
+### 2026-07-16 — DH-0071: Monitor unread-output count (non-advancing peek)
+
+Implemented the architect's (Fable) resolved design exactly: kept Monitor as the
+lightweight multi-task status-snapshot poll, no push/streaming redesign, no merge with
+TaskOutput, no contracts touch. Added `TaskRegistry.unreadLength(id, readerId)` in
+`src/agent/tasks.ts` — reads the same `readCursors` map `outputSince()` advances, but never
+writes to it. Monitor (`src/agent/tools/monitor.ts`) now appends `unread=N chars` to every
+status line via a shared `formatLine` helper (dedup'd the old duplicated task_ids/names
+formatting logic in the process) and got the ticket's exact new tool description.
+
+Judgment call: the ticket's FR3 description text didn't mention the `names` param (that's
+DH-0078, which postdates the ticket's original draft but predates this round) — kept the
+`names` capability sentence from the old description appended alongside the ticket's exact
+text rather than dropping it, since removing it would regress discoverability of a real,
+tested feature.
+
+Tests: `src/agent/tasks.test.ts` gets a new `unreadLength` describe block (unread before/after
+outputSince, non-advancement across repeated peeks + a following outputSince still getting
+the full delta, per-reader isolation, unknown-id throw). `src/agent/tools/monitor.test.ts`
+gets a matching describe block, including a same-registry Monitor-then-TaskOutput test that
+pins the ticket's core risk: Monitor peeking twice never advances the cursor, so TaskOutput
+still sees the full pending delta and Monitor reports 0 immediately after. 100% coverage on
+all four changed files confirmed via `bun test --coverage` scoped run.
+
+Live verification: built the real binary (`bun run build`), then ran a standalone script
+against the actual `TaskRegistry`/`monitorTool`/`taskOutputTool` (a real Bash-kind
+background task appending output on a timer) rather than a full CLI+mock-provider spin-up
+— that's proportionate for two units this small and self-contained, and it exercised the
+exact same code path as production. Confirmed: Monitor reported `unread=12 chars` twice in
+a row while the task was mid-flight (no advancement), TaskOutput then retrieved the full
+12-char delta, and Monitor immediately after read `unread=0 chars`.
+
+Left a large pre-existing dirty tree alone (concurrent DH-0044/0050/0058 rounds touching
+`src/agent/providers/`, `src/agent/loop.ts`, `src/agent/runtime.ts`, `src/contracts/`,
+`src/prompt/`) — staged and committed only the four files this ticket touches. Pre-existing
+`bun run typecheck`/`bun run lint` failures are all in those other files, not mine (verified
+by grep before committing).
+
 ### 2026-07-16 — DH-0106: dh init default off gemma4/Gemma 3, dh doctor tool-use probe
 
 Swapped `dh init`'s `SAMPLE_DH_JSON` (`options.defaultModel`) from `"gemma4"` to
