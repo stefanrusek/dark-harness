@@ -67,7 +67,6 @@ source: tracking/
 | [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
-| [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | feature | stefan |
 | [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | bug | stefan |
 
 ### implementing
@@ -77,6 +76,7 @@ source: tracking/
 | [DH-0035](../DH-0035-first-run-friction-no-init-doctor-dry-run.md) | No `dh init`/`dh doctor`/`--dry-run`, and cold error messages give a first-time operator no path forward | feature | stefan |
 | [DH-0037](../DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md) | No log rotation/disk-growth caps, no structured final run-summary artifact, and no log-analysis tooling | feature | stefan |
 | [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
+| [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | feature | stefan |
 
 ## Recently Closed
 
