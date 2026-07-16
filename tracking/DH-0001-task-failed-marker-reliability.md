@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0001
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: wontfix
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -133,3 +133,21 @@ implementation task). `blocked_by` cleared — the architect decision it was blo
 this entry. Ticket stays open past implementation for the piece no gate can cover: a live
 re-test against gemma-4-31b or a comparable small local model to confirm the nudge+tool
 path closes the observed failure.
+
+### 2026-07-16 — Owner decision: close as won't implement
+
+Owner's call before dispatching further work here: reproduce the missed-marker failure
+against a real Claude-tier model (haiku) first, and if it doesn't have the same compliance
+problem, close this out rather than build DH-0050's structural fix on its account.
+
+Reproduced live: `claude-haiku-4-5`, given the same genuinely-impossible-task shape (delete a
+nonexistent file, no workarounds permitted), correctly refused *and* emitted the literal
+`TASK_FAILED` marker — exit code 1, working exactly as designed. No compliance gap on a real
+Claude-tier model; the original finding was specific to gemma-4-31b, a much weaker
+instruction-following model that was never this project's primary target.
+
+**Closing as `wontfix`** — the marker convention works correctly on the models `dh` is
+actually designed around. DH-0050's `ReportOutcome`/structured-final-output work retains its
+own independent value (machine-readable `--job` progress, structured result payload beyond
+pass/fail) and is unaffected by this closure — it should be evaluated on its own merits, not
+as a fix for a bug that turned out to be model-specific.
