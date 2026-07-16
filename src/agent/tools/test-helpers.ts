@@ -25,6 +25,9 @@ export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolConte
     searchDeferredTools: async () => ({ results: [] }),
     readRegistry: new Map(),
     activatedTools: new Set(),
+    completeWithModel: async () => {
+      throw new Error("completeWithModel not wired in this test context");
+    },
     ...overrides,
   };
   return context;

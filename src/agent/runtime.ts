@@ -15,14 +15,14 @@ import {
   type ServerSentEvent,
   type SessionClientKind,
 } from "../contracts/index.ts";
-import { runAgentLoop } from "./loop.ts";
+import { computeCostUsd, runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { buildMcpTools } from "./mcp/tools.ts";
 import { createProvider } from "./providers/index.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
 import { loadSkillFromPaths } from "./skills.ts";
 import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
-import { ALL_TOOLS, buildToolMap } from "./tools/index.ts";
+import { buildToolMap, composeTools } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 import {
@@ -236,7 +236,9 @@ export class AgentRuntime {
     // transitively from here via the same map, never from `this.cwd` directly.
     this.agentCwd.set(ROOT_AGENT_ID, this.cwd);
     this.sessionId = options.sessionId ?? randomUUID();
-    this.toolMap = buildToolMap(options.tools ?? ALL_TOOLS);
+    // DH-0074: composeTools() adds WebFetch/WebSearch on top of ALL_TOOLS only when the
+    // matching `dh.json` `web.fetch`/`web.search` block is present — see its own doc comment.
+    this.toolMap = buildToolMap(options.tools ?? composeTools(this.config));
     // DH-0002: constructed and connected here, not lazily on first ToolSearch call — eager
     // connection keeps ToolSearch fast and surfaces misconfigured servers in the startup
     // logs. connectAll() never throws/rejects (every per-server failure is caught inside
@@ -422,6 +424,36 @@ export class AgentRuntime {
       // DH-0002: fresh per agent lifetime, same scoping precedent as readRegistry above —
       // captured by this closure so searchDeferredTools (above) can mutate it directly.
       activatedTools,
+      // DH-0074: WebFetch's `extractionModel` step (and any future tool needing a one-off
+      // model inference) goes through here rather than calling a provider directly — this is
+      // what makes its token usage feed the same session-wide cumulative cost/token budgets
+      // (DH-0013) and `token_usage` SSE/log reporting every agent turn already gets.
+      completeWithModel: async (modelName, request) => {
+        const model = this.resolveModel(modelName);
+        const provider = this.providerFor(model);
+        const result = await provider.complete({ ...request, model: model.model });
+        const costUsd = computeCostUsd(
+          buildPricing(model),
+          result.usage.inputTokens,
+          result.usage.outputTokens,
+        );
+        this.recordUsageAndCheckBudgets(
+          result.usage.inputTokens,
+          result.usage.outputTokens,
+          costUsd,
+        );
+        this.onEvent?.({
+          version: 1,
+          id: randomUUID(),
+          timestamp: new Date().toISOString(),
+          type: "token_usage",
+          agentId,
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          ...(costUsd !== undefined ? { costUsd } : {}),
+        });
+        return result;
+      },
     };
   }
 

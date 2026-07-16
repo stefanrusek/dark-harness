@@ -1,5 +1,7 @@
-// The fixed tool set (HANDOFF.md §4). Every root and sub-agent gets exactly this set.
+// The fixed tool set (HANDOFF.md §4). Every root and sub-agent gets exactly this set, plus
+// whatever composeTools() below adds on top for opt-in config (DH-0074).
 
+import type { DhConfig } from "../../contracts/index.ts";
 import { agentTool } from "./agent.ts";
 import { bashTool } from "./bash.ts";
 import { editTool } from "./edit.ts";
@@ -15,6 +17,8 @@ import { taskOutputTool } from "./task-output.ts";
 import { taskStopTool } from "./task-stop.ts";
 import { toolSearchTool } from "./tool-search.ts";
 import type { Tool } from "./types.ts";
+import { webFetchTool } from "./web-fetch.ts";
+import { webSearchTool } from "./web-search.ts";
 import { writeTool } from "./write.ts";
 
 // DH-0054 (tracking/DH-0054-no-first-class-grep-glob-tools.md): Grep/Glob join the fixed
@@ -43,6 +47,23 @@ export function buildToolMap(tools: Tool[] = ALL_TOOLS): Map<string, Tool> {
   return new Map(tools.map((tool) => [tool.name, tool]));
 }
 
+/**
+ * DH-0074 (tracking/DH-0074-*.md, architect design Fable 2026-07-16): builds the actual tool
+ * set for a runtime from `dh.json`. Deliberately NOT the MCP deferred-tool mechanism (DH-0002)
+ * — a `deferred` tool is hidden per-turn but still discoverable/activatable via ToolSearch,
+ * which would violate the "absent entirely when not configured" requirement WebFetch/
+ * WebSearch need. Presence of `config.web.fetch` registers WebFetch; presence of
+ * `config.web.search` registers WebSearch; each is fully independent of the other. Called
+ * once at `AgentRuntime` construction (runtime.ts) — the resulting set is uniform across the
+ * root agent and every sub-agent it spawns, same as `ALL_TOOLS` itself.
+ */
+export function composeTools(config: DhConfig): Tool[] {
+  const tools = [...ALL_TOOLS];
+  if (config.web?.fetch) tools.push(webFetchTool);
+  if (config.web?.search) tools.push(webSearchTool);
+  return tools;
+}
+
 export * from "./agent.ts";
 export * from "./bash.ts";
 export * from "./edit.ts";
@@ -58,4 +79,6 @@ export * from "./task-output.ts";
 export * from "./task-stop.ts";
 export * from "./tool-search.ts";
 export * from "./types.ts";
+export * from "./web-fetch.ts";
+export * from "./web-search.ts";
 export * from "./write.ts";

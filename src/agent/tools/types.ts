@@ -3,6 +3,7 @@
 // tool mirrors the semantics of the Claude-Code tool of the same name (HANDOFF.md §4).
 
 import type { DhConfig } from "../../contracts/index.ts";
+import type { ProviderCompletionRequest, ProviderCompletionResult } from "../providers/types.ts";
 import type { TaskRegistry } from "../tasks.ts";
 
 /** JSON Schema subset sufficient to describe tool inputs to a model provider. */
@@ -92,6 +93,17 @@ export interface ToolContext {
    * tools never need activation (they never set `deferred`); loop.ts's per-turn `toolDefs`
    * filter hides any `deferred` tool whose name isn't in this set from the provider. */
   activatedTools: Set<string>;
+  /** DH-0074: makes one non-streaming completion call against a `ModelConfig.name` (looked
+   * up the same way `spawnAgent`'s `model` param is), for tools that need a small model
+   * inference step of their own rather than spawning a whole sub-agent (WebFetch's
+   * `extractionModel`). Its usage is fed into the same session-wide cumulative cost/token
+   * budgets (DH-0013) and SSE/log `token_usage` reporting every agent turn gets — see
+   * runtime.ts's `buildToolContext`. Throws `ConfigModelError` (runtime.ts) if the model name
+   * doesn't resolve. */
+  completeWithModel(
+    modelName: string,
+    request: Omit<ProviderCompletionRequest, "model">,
+  ): Promise<ProviderCompletionResult>;
 }
 
 export interface Tool {
