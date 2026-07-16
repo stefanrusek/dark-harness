@@ -5,7 +5,7 @@ type: bug
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["deferred, revisit soon (2026-07-15)"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -41,3 +41,8 @@ correctly for a Windows operator, and nothing would catch a regression either wa
 > live failure). Overlaps with **DH-0032**'s "Windows binary never executed in CI" — that ticket
 > covers the release-pipeline testing gap; this one covers the TUI's own Windows-specific
 > console-mode correctness question.
+
+> [!NOTE]
+> Deferred, revisit soon (owner decision, 2026-07-15) — all testing so far has been macOS, no
+> real Windows operator yet, but unlike the indefinite-defer tickets today (DH-0031/47/48/49/51)
+> this one should come back up soon rather than wait for an incident.
