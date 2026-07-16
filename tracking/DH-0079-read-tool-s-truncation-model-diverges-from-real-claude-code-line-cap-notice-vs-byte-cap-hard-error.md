@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0079
 type: bug
-status: draft
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-16
 relations:
@@ -98,3 +98,38 @@ Empirical live-run comparison (2026-07-16, this session, real Claude Code Read t
 > message wording). This is a genuinely new finding — none of DH-0069 through DH-0078 covers
 > Read's truncation/size-cap semantics; DH-0073 covers a different Read gap (notebook/PDF
 > awareness).
+
+### 2026-07-16 — Implemented (Grace, Core domain)
+
+Fixed in `src/agent/tools/read.ts`:
+
+- Added `PRIMARY_WHOLE_FILE_BYTE_CAP = 256 * 1024` — real-Claude-Code-matched — enforced only
+  when a Read call supplies neither `offset` nor `limit`; error text matches the ticket's
+  quoted real-Claude-Code shape exactly (`File content (SIZE) exceeds maximum allowed size
+  (256KB). Use offset and limit parameters...`), with a new `formatBytes()` helper for the
+  `256KB`/`3.2MB`-style size formatting.
+- **Open question resolved**: supplying `offset`/`limit` bypasses this whole-file cap entirely
+  (an explicit request for a bounded slice) — the sane default the ticket itself suggested.
+  It's still bounded by the pre-existing `MAX_READABLE_BYTES` (256MB) absolute ceiling and by
+  the existing memory-safe line-windowed streaming, so this can't regress DH-0014.
+- **Risk audited**: reread DH-0014's rationale (docs/handoffs/core.md Round 14) for the 256MB
+  ceiling before touching it — found no reason it needs to equal the new, much smaller
+  whole-file cap; the two constants now serve genuinely different purposes (one matches real
+  Claude Code's common-case behavior, the other guards against unbounded line-counting time
+  even on a windowed read) and are named/commented distinctly in the code
+  (`PRIMARY_WHOLE_FILE_BYTE_CAP` vs `MAX_READABLE_BYTES`). No existing dh caller/test relied on
+  reading a 256KB–256MB file whole with no offset/limit — the only place that pattern
+  previously worked was exactly the case this ticket says is dangerous.
+- Removed the old default 2000-line truncation for genuine whole-file reads (file is now
+  guaranteed under 256KB by the time lines are read) — `DEFAULT_LIMIT = 2000` still applies as
+  the default page size once a caller opts into windowed paging via `offset` and/or `limit`.
+- Fixed the empty-file message to real Claude Code's exact wording: `"Warning: the file exists
+  but the contents are empty."`
+- Updated the Read tool's `description` field; confirmed no `src/prompt/` doc advertised the
+  old "2000 lines by default" behavior.
+- Gates: typecheck/lint clean. `bun run test:coverage`: 1331 pass, 0 fail, 100% line coverage
+  on `read.ts` (new tests cover the 256KB boundary exactly, an offset/limit bypass case, a
+  megabyte-scale size-formatting case, and the absolute-ceiling-still-applies-with-offset/limit
+  case). `bun run e2e`: 30 pass / 2 fail — both pre-existing headless-Chromium-missing sandbox
+  failures, confirmed identical via `git stash -u` + re-run with this round's changes stashed
+  out.

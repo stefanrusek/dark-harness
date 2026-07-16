@@ -22,11 +22,32 @@ const MAX_LINE_LENGTH = 2000;
 // enough to catch binary formats' headers/magic bytes without reading (and decoding) an
 // entire large file just to reject it.
 const BINARY_SNIFF_BYTES = 8_000;
-// DH-0014: files larger than this are refused outright — checked from `Bun.file(...).size`
-// (filesystem metadata only), before any byte of the file is read. 256MB comfortably covers
-// any legitimate source file/log an agent should be reading whole; anything past that should
-// be sliced with offset/limit, or searched with Bash/grep, not read wholesale.
+// DH-0079 (tracking/DH-0079-*.md): real Claude Code's Read hard-errors a whole-file read (no
+// offset/limit given) once the file exceeds ~256KB — an all-or-nothing byte cap, not a soft
+// line-count truncation. This is the PRIMARY, Claude-Code-matched behavior for the common
+// "just read this file" call. Named distinctly from `MAX_READABLE_BYTES` below: this cap can
+// be bypassed by supplying `offset`/`limit` (an explicit request for a bounded slice), the
+// absolute ceiling below cannot.
+const PRIMARY_WHOLE_FILE_BYTE_CAP = 256 * 1024;
+// DH-0014: an absolute ceiling — checked from `Bun.file(...).size` (filesystem metadata only,
+// before any byte of the file is read) — that applies unconditionally, even to offset/limit
+// windowed reads, because `streamLines` below still has to walk the entire file byte-by-byte
+// to count lines outside the requested window; without this ceiling a single `offset`/`limit`
+// call against a multi-GB file would still take O(file size) time. DH-0079 shrunk the
+// *whole-file* cap (`PRIMARY_WHOLE_FILE_BYTE_CAP` above) to match real Claude Code, but left
+// this larger absolute ceiling in place for that reason — see this ticket's Notes for the
+// audit of DH-0014's original rationale before reusing this constant's old, larger value here.
 const MAX_READABLE_BYTES = 256 * 1024 * 1024;
+
+/** Human-readable size for error messages, matching real Claude Code's observed format
+ * (`256KB`, `3.2MB` — no space between number and unit, one decimal place above 1KB). */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)}KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)}MB`;
+}
 
 function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
@@ -101,9 +122,12 @@ export const readTool: Tool = {
   name: "Read",
   description:
     "Read a file from the local filesystem, returned with cat -n style line numbers. " +
-    "Truncates to at most 2000 lines by default (override with 'limit'); when truncated, a " +
-    "notice states how many lines remain. Refuses binary files, and files above a size cap, " +
-    "with a clear error instead of returning decoded garbage or exhausting memory.",
+    "Whole-file reads (no 'offset'/'limit') are read in full, but hard-refuse above a ~256KB " +
+    "size cap — pass 'offset'/'limit' to page through a larger file in bounded slices instead " +
+    "(each windowed read defaults to 2000 lines unless 'limit' says otherwise, with a notice " +
+    "stating how many lines remain). Refuses binary files, and files above an absolute size " +
+    "ceiling even when windowed, with a clear error instead of returning decoded garbage or " +
+    "exhausting memory.",
   inputSchema: {
     type: "object",
     properties: {
@@ -139,10 +163,24 @@ export const readTool: Tool = {
       return { output: `Read tool error: file does not exist: ${absPath}`, isError: true };
     }
 
-    // DH-0014: size cap enforced from metadata alone, before any byte is read.
+    // DH-0014: absolute ceiling enforced from metadata alone, before any byte is read — applies
+    // unconditionally, even to offset/limit windowed reads (see the constant's doc comment).
     if (file.size > MAX_READABLE_BYTES) {
       return {
         output: `Read tool error: file is ${file.size} bytes, exceeding the ${MAX_READABLE_BYTES}-byte readable limit. Use 'offset'/'limit' to read a smaller window, or search it with Bash (e.g. grep) instead of reading it whole.`,
+        isError: true,
+      };
+    }
+
+    // DH-0079: a whole-file read (no offset/limit given) additionally hard-errors past a much
+    // smaller ~256KB cap, matching real Claude Code's observed behavior — no soft line-count
+    // truncation below this. Supplying `offset`/`limit` is treated as an explicit request for a
+    // bounded slice, so it bypasses this whole-file check entirely (still subject to the
+    // absolute ceiling above); the requested slice itself stays memory-bounded regardless of
+    // file size because `streamLines` below never buffers outside `[startIndex, endIndex)`.
+    if (offset === undefined && limit === undefined && file.size > PRIMARY_WHOLE_FILE_BYTE_CAP) {
+      return {
+        output: `Read tool error: File content (${formatBytes(file.size)}) exceeds maximum allowed size (${formatBytes(PRIMARY_WHOLE_FILE_BYTE_CAP)}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.`,
         isError: true,
       };
     }
@@ -153,7 +191,8 @@ export const readTool: Tool = {
       // (read-guard.ts) needs to know.
       await recordRead(ctx, absPath);
       return {
-        output: "<system-reminder>File exists but has empty contents.</system-reminder>",
+        output:
+          "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>",
         isError: false,
       };
     }
@@ -169,7 +208,14 @@ export const readTool: Tool = {
     }
 
     const startIndex = offset !== undefined ? offset - 1 : 0;
-    const maxLines = limit !== undefined ? limit : DEFAULT_LIMIT;
+    // DH-0079: a true whole-file read (neither offset nor limit given) has already passed the
+    // 256KB whole-file byte cap above, so it's safe to read every line with no further
+    // line-count truncation — matching real Claude Code, which doesn't truncate below its byte
+    // cap. `DEFAULT_LIMIT` only kicks in once the caller has opted into windowed paging by
+    // supplying `offset` and/or `limit` explicitly.
+    const windowed = offset !== undefined || limit !== undefined;
+    const maxLines =
+      limit !== undefined ? limit : windowed ? DEFAULT_LIMIT : Number.POSITIVE_INFINITY;
     const endIndex = startIndex + maxLines;
 
     const { lines: slice, remaining } = await streamLines(absPath, startIndex, endIndex);

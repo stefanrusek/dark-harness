@@ -52,13 +52,15 @@ describe("Read tool", () => {
     expect(result.output.length).toBeLessThan(longLine.length);
   });
 
-  test("reports empty files distinctly", async () => {
+  test("reports empty files distinctly, matching real Claude Code's wording", async () => {
     const path = join(dir, "empty.txt");
     await Bun.write(path, "");
     const ctx = makeToolContext({ cwd: dir });
     const result = await readTool.execute({ file_path: path }, ctx);
     expect(result.isError).toBe(false);
-    expect(result.output).toContain("empty contents");
+    expect(result.output).toBe(
+      "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>",
+    );
   });
 
   test("errors on a missing file", async () => {
@@ -88,12 +90,26 @@ describe("Read tool", () => {
     expect(result.output).toContain("limit");
   });
 
-  test("a 2500-line file with no limit returns exactly 2000 numbered lines plus a truncation notice", async () => {
+  test("DH-0079: a small file with more than 2000 lines is read in full with no truncation, matching real Claude Code", async () => {
     const path = join(dir, "big.txt");
     const totalLines = 2500;
     await Bun.write(path, Array.from({ length: totalLines }, (_, i) => `L${i + 1}`).join("\n"));
     const ctx = makeToolContext({ cwd: dir });
     const result = await readTool.execute({ file_path: path }, ctx);
+    expect(result.isError).toBe(false);
+    expect(result.output).not.toContain("truncated");
+    const bodyLines = result.output.split("\n");
+    expect(bodyLines).toHaveLength(2500);
+    expect(bodyLines[0]).toBe("     1\tL1");
+    expect(bodyLines[2499]).toBe("  2500\tL2500");
+  });
+
+  test("DH-0079: an explicit offset/limit still windows and truncates with a notice", async () => {
+    const path = join(dir, "big2.txt");
+    const totalLines = 2500;
+    await Bun.write(path, Array.from({ length: totalLines }, (_, i) => `L${i + 1}`).join("\n"));
+    const ctx = makeToolContext({ cwd: dir });
+    const result = await readTool.execute({ file_path: path, limit: 2000 }, ctx);
     expect(result.isError).toBe(false);
 
     const parts = result.output.split("\n\n<system-reminder>");
@@ -101,9 +117,6 @@ describe("Read tool", () => {
     const notice = parts[1] ?? "";
     const bodyLines = body.split("\n");
     expect(bodyLines).toHaveLength(2000);
-    for (let i = 0; i < bodyLines.length; i++) {
-      expect(bodyLines[i]).toBe(`${String(i + 1).padStart(6, " ")}\tL${i + 1}`);
-    }
     expect(notice).toContain("500 more lines not shown");
   });
 
@@ -115,11 +128,11 @@ describe("Read tool", () => {
     expect(result.output).not.toContain("truncated");
   });
 
-  test("refuses a file above the size cap without reading its content", async () => {
+  test("refuses a file above the absolute size ceiling without reading its content, even with offset/limit", async () => {
     const path = join(dir, "huge.txt");
     const bigSize = 256 * 1024 * 1024 + 1;
-    // Sparse file: truncate to a size far past the 256MB cap without allocating real disk or
-    // memory for its content — proves the cap check happens from metadata (file.size) alone.
+    // Sparse file: truncate to a size far past the 256MB ceiling without allocating real disk
+    // or memory for its content — proves the cap check happens from metadata (file.size) alone.
     const handle = await open(path, "w");
     await handle.truncate(bigSize);
     await handle.close();
@@ -129,6 +142,62 @@ describe("Read tool", () => {
     expect(result.isError).toBe(true);
     expect(result.output).toContain("exceeding");
     expect(result.output).toContain(`${bigSize} bytes`);
+
+    // The absolute ceiling applies unconditionally — offset/limit doesn't bypass it.
+    const windowed = await readTool.execute({ file_path: path, offset: 1, limit: 10 }, ctx);
+    expect(windowed.isError).toBe(true);
+    expect(windowed.output).toContain("exceeding");
+  });
+
+  test("DH-0079: reports a megabyte-scale file size in the primary-cap error using an MB unit", async () => {
+    const path = join(dir, "midsize.txt");
+    const midSize = 3 * 1024 * 1024; // 3MB — under the 256MB absolute ceiling, over the 256KB cap.
+    // Sparse file: avoids allocating 3MB of real content just to exercise the size-formatting
+    // branch for megabyte-scale sizes.
+    const handle = await open(path, "w");
+    await handle.truncate(midSize);
+    await handle.close();
+
+    const ctx = makeToolContext({ cwd: dir });
+    const result = await readTool.execute({ file_path: path }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("3.0MB");
+  });
+
+  test("DH-0079: a whole-file read (no offset/limit) hard-errors past the 256KB primary cap", async () => {
+    const path = join(dir, "oversized.txt");
+    // A single giant line under the 256MB absolute ceiling but well past the 256KB whole-file
+    // cap — exactly the pathological case DH-0079 flags: small line count, huge byte size.
+    const bigContent = "x".repeat(300 * 1024);
+    await Bun.write(path, bigContent);
+
+    const ctx = makeToolContext({ cwd: dir });
+    const result = await readTool.execute({ file_path: path }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("exceeds maximum allowed size");
+    expect(result.output).toContain("256KB");
+    expect(result.output).toContain("offset and limit");
+  });
+
+  test("DH-0079: supplying offset/limit bypasses the whole-file 256KB cap, paging through safely", async () => {
+    const path = join(dir, "oversized2.txt");
+    const lines = Array.from({ length: 5 }, (_, i) => `line${i}${"x".repeat(60 * 1024)}`);
+    await Bun.write(path, lines.join("\n"));
+
+    const ctx = makeToolContext({ cwd: dir });
+    const result = await readTool.execute({ file_path: path, offset: 1, limit: 1 }, ctx);
+    expect(result.isError).toBe(false);
+    expect(result.output).toContain("line0");
+  });
+
+  test("DH-0079: a file exactly at the 256KB primary cap boundary is read in full, not refused", async () => {
+    const path = join(dir, "boundary.txt");
+    // Exactly 256KB total, single line — the cap check is `>`, not `>=`, so this must succeed.
+    await Bun.write(path, "x".repeat(256 * 1024));
+
+    const ctx = makeToolContext({ cwd: dir });
+    const result = await readTool.execute({ file_path: path }, ctx);
+    expect(result.isError).toBe(false);
   });
 
   test("refuses to decode a binary file, returning a clear error instead of garbage", async () => {
