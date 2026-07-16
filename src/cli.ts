@@ -1062,7 +1062,34 @@ interface DoctorResult {
 
 const DOCTOR_PASS_COLOR = "\x1b[32m";
 const DOCTOR_FAIL_COLOR = "\x1b[31m";
+const DOCTOR_PENDING_COLOR = "\x1b[2m"; // dim — distinguishes "still checking" from a verdict
 const DOCTOR_RESET = "\x1b[0m";
+
+/** Formats one resolved (pass/fail) row — shared by `formatDoctorReport` (the non-TTY /
+ * final-summary path) and `runDoctor`'s TTY live-update path, so both agree on alignment and
+ * colorization instead of drifting into two subtly different renderings of the same result. */
+function formatDoctorRow(r: DoctorResult, nameWidth: number, color: boolean): string {
+  const verdict = r.ok ? "PASS" : "FAIL";
+  const coloredVerdict = color
+    ? `${r.ok ? DOCTOR_PASS_COLOR : DOCTOR_FAIL_COLOR}${verdict}${DOCTOR_RESET}`
+    : verdict;
+  // A detail starting with ":" (the "no provider named..." case) reads as
+  // "<name>: <message>", not "<name> : <message>" — every other detail ("(provider ...)")
+  // gets a space before it as usual.
+  const separator = r.detail.startsWith(":") ? "" : " ";
+  return `${coloredVerdict} ${r.modelName.padEnd(nameWidth)}${separator}${r.detail}`;
+}
+
+/** DH-0099: the in-flight row shown the moment a model's check starts, before its
+ * `provider.complete()` call resolves — same column alignment as the resolved row so the
+ * later `\r` + clear-to-end-of-line rewrite lands in exactly the same place. Never used
+ * outside a TTY (there's no "in flight" concept for a piped/CI run that only prints once at
+ * the end). */
+function formatDoctorPendingRow(modelName: string, nameWidth: number, color: boolean): string {
+  const verdict = "....";
+  const coloredVerdict = color ? `${DOCTOR_PENDING_COLOR}${verdict}${DOCTOR_RESET}` : verdict;
+  return `${coloredVerdict} ${modelName.padEnd(nameWidth)} checking... (query sent)`;
+}
 
 /** DH-0067: unaligned `PASS <name> (provider "...")` lines with no summary read as a raw
  * dump, not a report an operator could paste into an incident/status update. Pads every
@@ -1071,17 +1098,7 @@ const DOCTOR_RESET = "\x1b[0m";
  * logs`' status colorization, same reasoning (a piped/redirected run stays plain text). */
 export function formatDoctorReport(results: DoctorResult[], color: boolean): string[] {
   const nameWidth = Math.max(0, ...results.map((r) => r.modelName.length));
-  const lines = results.map((r) => {
-    const verdict = r.ok ? "PASS" : "FAIL";
-    const coloredVerdict = color
-      ? `${r.ok ? DOCTOR_PASS_COLOR : DOCTOR_FAIL_COLOR}${verdict}${DOCTOR_RESET}`
-      : verdict;
-    // A detail starting with ":" (the "no provider named..." case) reads as
-    // "<name>: <message>", not "<name> : <message>" — every other detail ("(provider ...)")
-    // gets a space before it as usual.
-    const separator = r.detail.startsWith(":") ? "" : " ";
-    return `${coloredVerdict} ${r.modelName.padEnd(nameWidth)}${separator}${r.detail}`;
-  });
+  const lines = results.map((r) => formatDoctorRow(r, nameWidth, color));
   const passCount = results.filter((r) => r.ok).length;
   const failCount = results.length - passCount;
   lines.push(
@@ -1090,48 +1107,73 @@ export function formatDoctorReport(results: DoctorResult[], color: boolean): str
   return lines;
 }
 
+/** DH-0099: on a real terminal, each model's row appears the instant its check starts (a
+ * dim "...." pending row) and is then rewritten in place — `\r` back to column 0, `\x1b[K` to
+ * clear whatever pending text was there, then the resolved PASS/FAIL row — once
+ * `provider.complete()` settles, so an operator watching a multi-model config never stares at
+ * a blank terminal wondering whether anything is happening. Piped/non-TTY output (CI, logs)
+ * is untouched: no row is printed until every model has been checked, and the whole report is
+ * printed once via the ordinary `io.stdout` path exactly as before this ticket. */
 async function runDoctor(config: DhConfig, deps: CliDeps): Promise<ExitCodeType> {
   const { io } = deps;
   const providersByName = new Map(config.provider.map((p) => [p.name, p]));
   const results: DoctorResult[] = [];
+  const isTTY = process.stdout.isTTY === true;
+  const nameWidth = Math.max(0, ...config.models.map((m) => m.name.length));
 
   for (const model of config.models) {
+    if (isTTY) {
+      process.stdout.write(formatDoctorPendingRow(model.name, nameWidth, true));
+    }
+
     const providerConfig = providersByName.get(model.provider);
+    let result: DoctorResult;
     if (!providerConfig) {
       // Shouldn't happen post-validateConfig (models reference known providers), but a
       // provider-agnostic guard costs nothing and keeps this loop crash-free either way.
-      results.push({
+      result = {
         modelName: model.name,
         ok: false,
         detail: `: no provider named "${model.provider}" in config`,
-      });
-      continue;
+      };
+    } else {
+      try {
+        const provider = deps.createProvider(providerConfig);
+        await provider.complete({
+          model: model.model,
+          system: "dh doctor: connectivity check.",
+          messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
+          tools: [],
+          maxTokens: 1,
+        });
+        result = {
+          modelName: model.name,
+          ok: true,
+          detail: `(provider "${providerConfig.name}")`,
+        };
+      } catch (err) {
+        result = {
+          modelName: model.name,
+          ok: false,
+          detail: `(provider "${providerConfig.name}"): ${(err as Error).message}`,
+        };
+      }
     }
-    try {
-      const provider = deps.createProvider(providerConfig);
-      await provider.complete({
-        model: model.model,
-        system: "dh doctor: connectivity check.",
-        messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
-        tools: [],
-        maxTokens: 1,
-      });
-      results.push({
-        modelName: model.name,
-        ok: true,
-        detail: `(provider "${providerConfig.name}")`,
-      });
-    } catch (err) {
-      results.push({
-        modelName: model.name,
-        ok: false,
-        detail: `(provider "${providerConfig.name}"): ${(err as Error).message}`,
-      });
+    results.push(result);
+
+    if (isTTY) {
+      process.stdout.write(`\r\x1b[K${formatDoctorRow(result, nameWidth, true)}\n`);
     }
   }
 
-  for (const line of formatDoctorReport(results, process.stdout.isTTY === true)) {
-    io.stdout(line);
+  if (isTTY) {
+    // Every row already streamed live above — only the trailing summary line is left.
+    const summaryLine = formatDoctorReport(results, true).at(-1) as string;
+    process.stdout.write(`${summaryLine}\n`);
+  } else {
+    for (const line of formatDoctorReport(results, false)) {
+      io.stdout(line);
+    }
   }
 
   const code = results.every((r) => r.ok) ? ExitCode.Success : ExitCode.HarnessError;

@@ -2364,6 +2364,84 @@ describe("main — dh doctor / --check", () => {
     });
     expect(loopStarted).toBe(false);
   });
+
+  describe("TTY live progress (DH-0099)", () => {
+    let isTTYDescriptor: PropertyDescriptor | undefined;
+    let writeSpy: ReturnType<typeof spyOn<typeof process.stdout, "write">>;
+
+    beforeEach(() => {
+      isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+      writeSpy = spyOn(process.stdout, "write").mockImplementation(() => true);
+    });
+
+    afterEach(() => {
+      writeSpy.mockRestore();
+      if (isTTYDescriptor) {
+        Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
+      } else {
+        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
+        delete (process.stdout as { isTTY?: boolean }).isTTY;
+      }
+    });
+
+    test("prints a pending row before the check resolves, then rewrites it in place on PASS", async () => {
+      const io = fakeIo();
+      const code = await main(["--check"], {
+        ...baseOverrides(io),
+        createProvider: () =>
+          fakeModelProvider({
+            complete: async () => {
+              // The pending row must already be on screen by the time the provider call is
+              // in flight — this is the "prints immediately, before resolving" requirement.
+              expect(
+                writeSpy.mock.calls.some(([chunk]) => String(chunk).includes("checking")),
+              ).toBe(true);
+              return {
+                stopReason: "end_turn",
+                content: [{ type: "text", text: "pong" }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+              };
+            },
+          }),
+      });
+      expect(code).toBe(ExitCode.Success);
+
+      const writes = writeSpy.mock.calls.map(([chunk]) => String(chunk));
+      expect(writes[0]).toContain("checking");
+      expect(writes[0]).not.toContain("\r");
+      expect(writes[1]).toContain("\r\x1b[K");
+      expect(writes[1]).toContain("PASS");
+      expect(writes[1]).toContain("sonnet");
+      expect(writes[1]?.endsWith("\n")).toBe(true);
+      expect(writes.at(-1)).toContain("1 model: 1 pass, 0 fail");
+      // Non-TTY io.stdout must not also fire — otherwise the report would print twice.
+      expect(io.stdoutLines).toEqual([]);
+    });
+
+    test("rewrites the pending row to FAIL in place when the provider call throws", async () => {
+      const io = fakeIo();
+      const code = await main(["--check"], {
+        ...baseOverrides(io),
+        createProvider: () =>
+          fakeModelProvider({
+            complete: async () => {
+              throw new Error("401 unauthorized");
+            },
+          }),
+      });
+      expect(code).toBe(ExitCode.HarnessError);
+
+      const writes = writeSpy.mock.calls.map(([chunk]) => String(chunk));
+      expect(writes[0]).toContain("checking");
+      expect(writes[1]).toContain("\r\x1b[K");
+      expect(writes[1]).toContain("FAIL");
+      expect(writes[1]).toContain("sonnet");
+      expect(writes[1]).toContain("401 unauthorized");
+      expect(writes.at(-1)).toContain("0 pass, 1 fail");
+      expect(io.stdoutLines).toEqual([]);
+    });
+  });
 });
 
 describe("main — --dry-run", () => {
