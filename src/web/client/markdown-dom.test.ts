@@ -65,6 +65,72 @@ describe("renderMarkdownInto — block constructs", () => {
     expect(code?.className).toBe("");
   });
 
+  test("fenced code block gets a copy button wrapped alongside <pre>", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, "```\nconst x = 1;\n```");
+    const wrapper = root.querySelector(".code-block");
+    expect(wrapper).not.toBeNull();
+    expect(wrapper?.querySelector("pre > code")).not.toBeNull();
+    const button = wrapper?.querySelector("button.code-copy-btn");
+    expect(button?.textContent).toBe("Copy");
+    expect(button?.getAttribute("aria-label")).toBe("Copy code block to clipboard");
+  });
+
+  test("copy button writes the code block's raw text to the clipboard, shows feedback, then resets", async () => {
+    const { document, window, root } = createTestDom();
+    renderMd(document, root, "```\nconst x = 1;\n```");
+    const button = root.querySelector("button.code-copy-btn") as HTMLButtonElement;
+    let written: string | undefined;
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (t: string) => {
+          written = t;
+          return Promise.resolve();
+        },
+      },
+    });
+    // Stub `setTimeout` to fire immediately so the reset-after-feedback branch is covered
+    // without the test actually sleeping 1.5s (`COPY_RESET_DELAY_MS`).
+    const win = window as unknown as { setTimeout: (fn: () => void, ms: number) => number };
+    const originalSetTimeout = win.setTimeout;
+    win.setTimeout = ((fn: () => void) => {
+      fn();
+      return 0;
+    }) as typeof win.setTimeout;
+    button.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(written).toBe("const x = 1;");
+    expect(button.textContent).toBe("Copy");
+    win.setTimeout = originalSetTimeout;
+  });
+
+  test("copy button shows failure feedback when the clipboard write rejects", async () => {
+    const { document, window, root } = createTestDom();
+    renderMd(document, root, "```\ncode\n```");
+    const button = root.querySelector("button.code-copy-btn") as HTMLButtonElement;
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("denied")) },
+    });
+    button.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(button.textContent).toBe("Copy failed");
+  });
+
+  test("copy button click is a no-op when the Clipboard API isn't available", () => {
+    const { document, window, root } = createTestDom();
+    renderMd(document, root, "```\ncode\n```");
+    const button = root.querySelector("button.code-copy-btn") as HTMLButtonElement;
+    Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: undefined });
+    expect(() => button.click()).not.toThrow();
+    expect(button.textContent).toBe("Copy");
+  });
+
   test("unordered list renders as <ul><li>", () => {
     const { document, root } = createTestDom();
     renderMd(document, root, "- one\n- two");

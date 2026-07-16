@@ -539,6 +539,112 @@ describe("renderTranscript / appendTranscript (Round 4 — structured conversati
   });
 });
 
+// DH-0066 "cheap delight" nit: echo the sidebar's session-end banner once into the
+// transcript pane so it's visible without looking at the sidebar.
+describe("renderTranscript / appendTranscript: session-end echo (DH-0066)", () => {
+  test("renderTranscript appends a success echo after the transcript when the session ended", () => {
+    const { document, root } = createTestDom();
+    renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("assistant", "done")] }),
+      true,
+      0,
+    );
+    const echo = root.querySelector(".session-end-echo");
+    expect(echo?.textContent).toContain("Session ended");
+    expect(echo?.classList.contains("session-banner-ok")).toBe(true);
+    // Lands after the last real turn, not before it.
+    expect(root.lastElementChild).toBe(echo);
+  });
+
+  test("renderTranscript appends a failure echo when exitCode is non-zero", () => {
+    const { document, root } = createTestDom();
+    renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("assistant", "done")] }),
+      true,
+      1,
+    );
+    const echo = root.querySelector(".session-end-echo");
+    expect(echo?.classList.contains("session-banner-fail")).toBe(true);
+  });
+
+  test("renderTranscript appends the echo alongside the empty-transcript state too", () => {
+    const { document, root } = createTestDom();
+    renderTranscript(document, root, fakeAgentNode({ transcript: [] }), true, 0);
+    expect(root.querySelector(".empty-state")).not.toBeNull();
+    expect(root.querySelector(".session-end-echo")).not.toBeNull();
+  });
+
+  test("renderTranscript omits the echo when the session hasn't ended", () => {
+    const { document, root } = createTestDom();
+    renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("assistant", "done")] }),
+      false,
+      null,
+    );
+    expect(root.querySelector(".session-end-echo")).toBeNull();
+  });
+
+  test("renderTranscript omits the echo when sessionEnded is true but exitCode isn't known yet", () => {
+    const { document, root } = createTestDom();
+    renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("assistant", "done")] }),
+      true,
+      null,
+    );
+    expect(root.querySelector(".session-end-echo")).toBeNull();
+  });
+
+  test("appendTranscript adds the echo once — not duplicated across repeated calls", () => {
+    const { document, root } = createTestDom();
+    const agent = fakeAgentNode({ transcript: [turn("assistant", "done")] });
+    let state = renderTranscript(document, root, agent, true, 0);
+    state = appendTranscript(document, root, agent, state, true, 0);
+    expect(root.querySelectorAll(".session-end-echo").length).toBe(1);
+  });
+
+  test("appendTranscript adds the echo after a new turn streams in post-session-end reconnect replay", () => {
+    const { document, root } = createTestDom();
+    let state = renderTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("user", "hi")] }),
+    );
+    state = appendTranscript(
+      document,
+      root,
+      fakeAgentNode({ transcript: [turn("user", "hi"), turn("assistant", "done")] }),
+      state,
+      true,
+      0,
+    );
+    const echo = root.querySelector(".session-end-echo");
+    expect(echo).not.toBeNull();
+    expect(root.lastElementChild).toBe(echo);
+  });
+
+  test("appendTranscript on an empty transcript with nothing rendered yet still shows the echo", () => {
+    const { document, root } = createTestDom();
+    const state = appendTranscript(
+      document,
+      root,
+      null,
+      { turnCount: 0, lastTurnTextLength: 0 },
+      true,
+      0,
+    );
+    expect(root.querySelector(".session-end-echo")).not.toBeNull();
+    expect(state).toEqual({ turnCount: 0, lastTurnTextLength: 0 });
+  });
+});
+
 describe("renderComposer", () => {
   test("renders nothing when no agent is selected", () => {
     const { document, root } = createTestDom();

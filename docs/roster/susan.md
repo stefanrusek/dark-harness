@@ -610,3 +610,51 @@ headings, reference-style links) — none produce a `<table>`/heading/`<a>` elem
 plain text nodes inside the paragraph, no crash. `markdown-dom.ts` itself needed no production
 changes — this ticket was pure test coverage over already-shipped DH-0056 behavior, confirmed
 by `git stash` diffing typecheck output before/after.
+
+### 2026-07-16 — DH-0066: closed (sidebar bug investigated live, both delight nits shipped)
+
+Real Chromium finally available this round. Full detail in the ticket's own status log
+(second-pass entry) — this file is the durable judgment-call summary.
+
+**Discovered mid-round: this sandbox's real Core agent loop is currently broken** for any
+send through the actual `--web` UI (`send_message` never produces `agent_output`/a terminal
+`agent_status`) — confirmed independently via `e2e/server-protocol.test.ts` timing out on
+plain SSE waits with zero Web code involved. Heavy unrelated concurrent fleet activity was
+landing in this shared worktree throughout the round (DH-0050, DH-0110, DH-0111) — did not
+chase or fix the regression (not `src/web/client/` scope, not something a Web-only pass
+should touch), just worked around it for verification purposes.
+
+**Technique worth remembering for next time a live-browser check is needed but the real
+agent loop can't complete a turn:** drive the real compiled `dh --web` binary and a real
+headless Chromium against the *actual* client bundle, but intercept only the network
+boundary (`page.route` on `GET /api/events` / `POST /api/commands`) with a hand-built SSE
+event sequence matching the real wire format exactly. Everything downstream — `sse.ts`
+parsing, `state.ts` reduction, `render.ts`/`markdown-dom.ts` DOM construction — stays 100%
+real, unmocked. Used this for both the sidebar-empty repro attempt (not reproducible: two
+agents, select the sub-agent, feed a `session_ended`-terminated reconnect — sidebar still
+shows both rows, correctly indented) and the two delight-nit verifications.
+
+**A real bug the live check caught that a code-only review wouldn't have:** the code-block
+copy button's naive `top/right` corner positioning overlapped the code text itself on
+short/narrow blocks — visually confirmed (`42;` partially hidden under the button). Fixed
+by reserving a dedicated top strip in `pre`'s padding so the button always sits in dead
+space regardless of code width. Exactly the kind of thing this ticket's "looks done in
+code, not actually verified visually" bitten-before note was warning about — worth treating
+any new absolutely-positioned overlay element as needing an actual pixel check, not just a
+DOM-presence assertion.
+
+**Closed the ticket** (`spile-ops transition ... closed --resolution done`) — sidebar bug
+confirmed not-currently-reproducible after both a live repro attempt and a full code trace,
+both delight nits shipped and verified live in light+dark, syntax highlighting still
+correctly skipped. Tool-call chips / spawn-prompt-as-opening-turn remain out of scope,
+blocked on DH-0089's own Web round, noted explicitly in the ticket rather than silently
+dropped.
+
+Gates: typecheck/lint clean (two pre-existing formatter findings elsewhere in the tree are
+other agents' concurrent uncommitted work, not mine — left untouched), test:coverage 1959
+pass/0 fail, 100% on every file this round touched. `bun run e2e`'s
+`web.test.ts`/`connect-web.test.ts` hardcoded-Chromium-path issue is fixed (both now resolve
+via `resolveChromiumExecutable()`) — that fix landed already via this shared worktree's
+known cross-round file-sweep pattern (folded into DH-0110's commit before I could commit it
+myself; confirmed present at HEAD). The full `e2e` gate remains red for the unrelated Core
+regression above, not from anything in this round's diff.

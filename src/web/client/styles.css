@@ -352,6 +352,20 @@ button {
   color: var(--danger);
 }
 
+/* DH-0066 "cheap delight" nit: echoes the sidebar's session-end banner once into the
+   transcript pane so it's visible without looking at the sidebar. Reuses the sidebar
+   banner's ok/fail color classes; layout is its own since this sits at the end of a
+   scrolling turn list rather than a fixed sidebar strip. */
+.session-end-echo {
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  text-align: center;
+  animation: fade-in-up 0.3s var(--ease);
+}
+
 /* ---------- Agent header ---------- */
 
 .agent-header {
@@ -583,9 +597,19 @@ button {
   padding: 1px 4px;
 }
 
-.turn-text pre {
+.turn-text .code-block {
+  position: relative;
   margin: var(--space-2) 0;
-  padding: var(--space-3);
+}
+
+.turn-text pre {
+  margin: 0;
+  /* Extra top padding reserves a clear strip for `.code-copy-btn` below — without it, a
+     narrow/short code block (content stops well short of the block's full bubble width)
+     puts the button directly on top of the first line's trailing characters on hover,
+     verified live: a two-line snippet rendered the button overlapping "42;". This keeps
+     the button in dead space regardless of how wide the code content itself is. */
+  padding: 28px var(--space-3) var(--space-3);
   background: var(--panel-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -600,6 +624,43 @@ button {
   font-size: 12.5px;
   line-height: 1.5;
   white-space: pre;
+}
+
+/* DH-0066: hover-revealed copy button on a code block — cheap, high-utility per the
+   ticket's "delight" list. Hidden by default (opacity, not display:none, so it stays in the
+   layout/focus order for keyboard users) and shown on hover or keyboard focus of the block
+   or the button itself. */
+.code-copy-btn {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  color: var(--text-dim);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.code-block:hover .code-copy-btn,
+.code-copy-btn:focus-visible {
+  opacity: 1;
+}
+
+.code-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-copy-btn {
+    transition: none;
+  }
 }
 
 /* ---------- Thinking indicator (DH-0066) ---------- */

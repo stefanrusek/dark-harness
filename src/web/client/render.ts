@@ -486,6 +486,8 @@ export function renderTranscript(
   doc: Document,
   container: HTMLElement,
   agent: AgentNode | null,
+  sessionEnded = false,
+  exitCode: number | null = null,
 ): TranscriptRenderState {
   container.textContent = "";
   const transcript = agent?.transcript ?? [];
@@ -499,10 +501,37 @@ export function renderTranscript(
     }
   }
   maybeAppendThinkingIndicator(doc, container, agent, transcript);
+  maybeAppendSessionEndEcho(doc, container, sessionEnded, exitCode);
   return {
     turnCount: transcript.length,
     lastTurnTextLength: transcript.at(-1)?.text.length ?? 0,
   };
+}
+
+/**
+ * DH-0066 "cheap delight" nit: echoes the sidebar's end-of-session banner once into
+ * whichever transcript pane is currently open, so a session ending is visible without
+ * having to glance at the sidebar — the sidebar's own banner (`renderSessionSummary`)
+ * stays the source of truth; this is a read-only echo, not a second copy of the state.
+ * Idempotent per render call (removes any stale echo first, matching
+ * `maybeAppendThinkingIndicator`'s pattern) so both the full-rebuild and incremental-append
+ * paths can call it unconditionally without double-appending.
+ */
+function maybeAppendSessionEndEcho(
+  doc: Document,
+  container: HTMLElement,
+  sessionEnded: boolean,
+  exitCode: number | null,
+): void {
+  container.querySelector(".session-end-echo")?.remove();
+  if (!sessionEnded || exitCode === null) return;
+  const echo = el(
+    doc,
+    "div",
+    `session-end-echo ${exitCode === 0 ? "session-banner-ok" : "session-banner-fail"}`,
+  );
+  echo.textContent = `Session ended — ${formatExitCode(exitCode)}`;
+  container.appendChild(echo);
 }
 
 /** DH-0066: real empty state for an agent that hasn't produced any output yet, instead of
@@ -558,15 +587,19 @@ export function appendTranscript(
   container: HTMLElement,
   agent: AgentNode | null,
   rendered: TranscriptRenderState,
+  sessionEnded = false,
+  exitCode: number | null = null,
 ): TranscriptRenderState {
   const transcript = agent?.transcript ?? [];
   if (transcript.length === 0) {
-    return rendered.turnCount === 0
-      ? EMPTY_TRANSCRIPT_RENDER_STATE
-      : renderTranscript(doc, container, agent);
+    if (rendered.turnCount === 0) {
+      maybeAppendSessionEndEcho(doc, container, sessionEnded, exitCode);
+      return EMPTY_TRANSCRIPT_RENDER_STATE;
+    }
+    return renderTranscript(doc, container, agent, sessionEnded, exitCode);
   }
   if (rendered.turnCount === 0) {
-    return renderTranscript(doc, container, agent);
+    return renderTranscript(doc, container, agent, sessionEnded, exitCode);
   }
 
   const lastRenderedTurn = transcript[rendered.turnCount - 1];
@@ -587,6 +620,8 @@ export function appendTranscript(
   // not just transcript length — cheapest correct approach is to drop any stale one before
   // appending new turns (so new turns land before it, not after a stale trailing node) and
   // decide fresh on every call, mirroring what a full renderTranscript would render.
+  // `maybeAppendSessionEndEcho` below does its own equivalent stale-node removal for the
+  // session-end echo, so new turns always land above it rather than after a stale copy.
   container.querySelector(".turn-thinking")?.remove();
 
   for (let i = rendered.turnCount; i < transcript.length; i++) {
@@ -595,6 +630,7 @@ export function appendTranscript(
   }
 
   maybeAppendThinkingIndicator(doc, container, agent, transcript);
+  maybeAppendSessionEndEcho(doc, container, sessionEnded, exitCode);
 
   return {
     turnCount: transcript.length,

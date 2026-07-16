@@ -237,3 +237,99 @@ a regression):
 
 Status moved `draft` → `implementing` (not closed) given the items above are genuinely
 undone, not just deferred detail.
+
+### 2026-07-16 — Susan (Web), second pass (real Chromium now available)
+
+**Environment note first**, since it shaped this whole round: a real headless Chromium is
+now installed (`bunx playwright install chromium` was a no-op; `e2e/spikes/web/support.ts`'s
+`resolveChromiumExecutable()` resolves it via the playwright cache). But the working tree
+also has heavy *concurrent, unrelated* fleet activity landing throughout this round (DH-0050
+ReportOutcome, DH-0110/DH-0111 web asset-chunk-404 fixes) — including, at one point, an
+in-flight uncommitted rewrite of `src/web/server.ts` by another round that I left untouched
+per instructions. More importantly: **the real Core agent loop in this tree is currently
+broken for sends through the actual `--web` UI** — `send_message` never produces an
+`agent_output`/terminal `agent_status` event. Confirmed independently against
+`e2e/server-protocol.test.ts` (no Web code involved at all): "sub-agent spawning" and
+"send_message runs a full turn" both now time out waiting for basic SSE events. This is a
+Core/Server-domain regression, not a Web one — flagging for whoever owns that surface next,
+not attempting to fix it here (out of `src/web/client/` scope, and CLAUDE.md agent-memory
+guidance is to leave concurrent unrelated work alone). It also fully explains why the first
+pass's "no Chromium" excuse was masking a second, deeper blocker: even with a working
+browser, a real end-to-end turn cannot complete in this sandbox right now.
+
+**1. Sidebar-empty-after-`session_ended`-while-viewing-a-sub-agent (`spike-agent-tree.png`)
+— investigated live, NOT REPRODUCIBLE, closing this item out.** Since the real agent loop
+can't complete a turn, I built a live repro that drives the actual compiled `dh --web`
+binary and a real headless Chromium against the exact real client bundle (`sse.ts` →
+`state.ts` → `render.ts`, no mocks in that chain), but replaces only the network boundary
+(`GET /api/events`, `POST /api/commands`) with a scripted event sequence matching the real
+wire format byte-for-byte — root spawns, sub-agent spawns, sub-agent reaches `done`, the
+sub-agent row is selected in the sidebar, then the stream re-delivers with a trailing
+`session_ended`. Result: sidebar still shows both rows, correctly indented, after
+`session_ended`, whether or not a sub-agent is selected — confirmed via DOM dump and
+screenshot. Also traced the code path by hand: `renderSidebar` (`render.ts`) iterates
+`orderedAgents(state)` and only appends the built `<ul>` to the container at the very end of
+the function — the one way this bug shape (container goes empty, not just stale) could
+happen is an uncaught exception mid-loop before that final `appendChild`, and the only
+per-row computation that walks agent state (`agentDepth`, `state.ts`) already has an
+explicit cycle/dangling-parent guard capped at `state.agents.size`. No eviction interaction
+either: `evictCompletedAgents`'s retention (50) is nowhere near hit by 2 agents, and nothing
+client-side re-seeds/wipes state on SSE reconnect (`bootstrapAgentTree` only runs once, at
+`start()`). Between the live repro and the code trace, I'm treating this as
+not-currently-reproducible rather than a real defect — most likely a one-off from whatever
+the overnight capture's actual session looked like, or an artifact of the review process
+itself. Leaving it closed without a client-side change; if it recurs, the next lead will
+need a fuller repro than either of us has managed so far.
+
+**2. Both "cheap delight" nits — implemented, tested, verified live in both themes.**
+- **Code-block copy button** (`markdown-dom.ts`): a hover-revealed "Copy" button wraps every
+  fenced code block (`.code-block` wrapper div around `pre`, kept so `pre > code` — the
+  selector every existing test/fixture already depends on — is unaffected). Uses
+  `navigator.clipboard.writeText`, feature-detected via optional chaining (happy-dom, this
+  file's own test DOM, doesn't implement Clipboard — verified the click handler is a safe
+  no-op there rather than throwing) so it degrades gracefully in any embedding context that
+  lacks it. Shows "Copied"/"Copy failed" feedback for 1.5s. **Found and fixed a real bug
+  during live verification**: the button's original `top/right: var(--space-2)` positioning
+  overlapped the code text itself on short/narrow blocks (verified live — a two-line
+  snippet rendered the button sitting on top of the first line's trailing `42;`). Fixed by
+  reserving a dedicated top strip (`padding: 28px ... ` on `.turn-text pre`) so the button
+  always sits in dead space regardless of how narrow the code content is — reverified live
+  after the fix, clean in both themes.
+- **Session-end echo in the transcript** (`render.ts`): `renderTranscript`/`appendTranscript`
+  now take `sessionEnded`/`exitCode` (defaulted so every existing call site/test keeps
+  compiling) and append a `.session-end-echo` block after the transcript — same ok/fail
+  color convention as the sidebar's own `session-banner`, echoed (not duplicated state) so
+  it's visible without looking at the sidebar. Idempotent across the streaming
+  incremental-append path (mirrors the existing `.turn-thinking` stale-node removal
+  pattern) so reconnects/re-renders never double it.
+
+Both verified live: real Chromium, real compiled `dh --web`, real `sse.ts`→`state.ts`→
+`render.ts` pipeline, network-mocked at the `/api/events`/`/api/commands` boundary per the
+same technique as item 1 (necessary given the Core regression above) — code block renders
+styled, copy button copies the exact code text and shows feedback, session-end echo appears
+in both light and dark `prefers-color-scheme`. Screenshots taken during this round (not
+committed — sandbox scratchpad only, per this round's existing pattern of not committing
+throwaway spike output) confirm both.
+
+**3. Syntax highlighting**: confirmed still out of scope — no code added for it, ticket's
+own recommendation.
+
+**Gates**: `bun run typecheck` clean, `bun run lint` clean on every file this round touched
+(two pre-existing formatter findings in `src/agent/runtime.test.ts`/`src/cli.test.ts` are
+concurrent other-agent work, not mine, left alone), `bun run test:coverage` — 1959 pass, 0
+fail, 100% funcs/lines on every file this round touched (`markdown-dom.ts`, `render.ts`,
+`app.ts`'s changed lines). `bun run e2e`: `e2e/web.test.ts`/`e2e/connect-web.test.ts`'s
+hardcoded `/opt/pw-browsers/chromium` path (this ticket's own instructions flagged it as a
+small side-fix candidate) is now fixed — both files resolve Chromium via the same
+`resolveChromiumExecutable()` used elsewhere (this fix appears to have landed already,
+folded into DH-0110's commit via this shared worktree's known cross-round file-sweep
+pattern — confirmed present at HEAD, not re-committing it here). The full `bun run e2e`
+gate itself is currently red for reasons unrelated to this ticket (the Core regression
+above breaks most real-turn-driven e2e specs); not a Web regression, not fixable from this
+domain.
+
+**Closing DH-0066.** Tool-call chips and a sub-agent's spawn-prompt-as-opening-turn remain
+out of scope per this round's brief — both depend on DH-0089's own Web-consumption round.
+Everything else in the ticket (Markdown surface styling, sidebar hierarchy, transcript
+mechanics, the sidebar-empty investigation, both delight nits) is done or confirmed
+not-reproducible.

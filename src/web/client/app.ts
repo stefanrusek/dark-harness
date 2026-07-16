@@ -424,7 +424,13 @@ export class AppView {
     const currentAgentId = agent?.agentId ?? null;
 
     if (currentAgentId !== this.renderedTranscriptForAgentId) {
-      this.renderedTranscript = renderTranscript(this.deps.doc, this.shell.output, agent);
+      this.renderedTranscript = renderTranscript(
+        this.deps.doc,
+        this.shell.output,
+        agent,
+        this.state.sessionEnded,
+        this.state.exitCode,
+      );
       this.renderedTranscriptForAgentId = currentAgentId;
       this.scrollToBottom();
       return;
@@ -437,6 +443,8 @@ export class AppView {
       this.shell.output,
       agent,
       this.renderedTranscript,
+      this.state.sessionEnded,
+      this.state.exitCode,
     );
     if (wasNearBottom) {
       this.scrollToBottom();
