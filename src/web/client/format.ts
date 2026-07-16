@@ -82,6 +82,23 @@ export function shortAgentId(agentId: string): string {
   return agentId.length <= 10 ? agentId : `${agentId.slice(0, 8)}…`;
 }
 
+/**
+ * DH-0066: phrases the agent header's status-elapsed label without the broken-English
+ * "WAITING for just now" — `formatElapsed`'s "just now" already reads as a complete phrase
+ * on its own, so the "for" prefix only makes sense once there's an actual duration to
+ * attach it to.
+ */
+export function formatStatusElapsed(ms: number): string {
+  const elapsed = formatElapsed(ms);
+  return elapsed === "just now" ? elapsed : `for ${elapsed}`;
+}
+
+/** Compact token-count label with a unit suffix ("80 tok") so a bare integer in the sidebar
+ * doesn't read as a mystery number next to a time label (DH-0066). */
+export function formatTokenLabel(n: number): string {
+  return `${formatTokenCount(n)} tok`;
+}
+
 export function suggestedLogFilename(agentId?: string): string {
   return agentId ? `${agentId}.jsonl` : "dh-session-logs.tar.gz";
 }
