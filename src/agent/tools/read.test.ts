@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { buildCorruptPdf, buildTestPdf } from "./pdf-test-helpers.ts";
 import { readTool } from "./read.ts";
 import { makeToolContext } from "./test-helpers.ts";
 
@@ -364,6 +365,171 @@ describe("Read tool", () => {
     test("records the read for the read-before-write guard", async () => {
       const path = join(dir, "nb.ipynb");
       await Bun.write(path, makeNotebook([{ cell_type: "code", source: "x = 1" }]));
+      const ctx = makeToolContext({ cwd: dir });
+      await readTool.execute({ file_path: path }, ctx);
+      expect(ctx.readRegistry.has(path)).toBe(true);
+    });
+  });
+
+  describe("PDF support (DH-0081)", () => {
+    function pagesOf(
+      n: number,
+      textFor: (i: number) => string | undefined = (i) => `Page ${i} text`,
+    ) {
+      return Array.from({ length: n }, (_, i) => {
+        const text = textFor(i + 1);
+        return text === undefined ? {} : { text };
+      });
+    }
+
+    test("detects a PDF by magic bytes even though it contains NUL bytes (not refused as binary)", async () => {
+      const path = join(dir, "doc.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(2)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).not.toContain("binary file");
+    });
+
+    test("reads all pages of a small multi-page PDF with no 'pages' param", async () => {
+      const path = join(dir, "small.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(3)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("--- Page 1 ---");
+      expect(result.output).toContain("Page 1 text");
+      expect(result.output).toContain("--- Page 3 ---");
+      expect(result.output).toContain("Page 3 text");
+      expect(result.output).not.toContain("more pages");
+    });
+
+    test("requires a 'pages' range above the 10-page threshold", async () => {
+      const path = join(dir, "big.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(12)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("12 pages");
+      expect(result.output).toContain("pages");
+    });
+
+    test("reads a specific 'pages' range from a large PDF and offers a continuation notice", async () => {
+      const path = join(dir, "big2.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(12)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: "1-5" }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("--- Page 1 ---");
+      expect(result.output).toContain("--- Page 5 ---");
+      expect(result.output).not.toContain("--- Page 6 ---");
+      expect(result.output).toContain("12 pages");
+      expect(result.output).toContain('pages="6-12"');
+    });
+
+    test("accepts a single-page 'pages' value", async () => {
+      const path = join(dir, "single.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(3)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: "2" }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("--- Page 2 ---");
+      expect(result.output).not.toContain("--- Page 1 ---");
+      expect(result.output).not.toContain("--- Page 3 ---");
+    });
+
+    test("rejects a malformed 'pages' value", async () => {
+      const path = join(dir, "malformed.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(3)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: "abc" }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("invalid 'pages' value");
+    });
+
+    test("rejects a 'pages' range that goes backwards", async () => {
+      const path = join(dir, "backwards.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(3)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: "3-1" }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("backwards");
+    });
+
+    test("rejects a 'pages' range beyond the document's page count", async () => {
+      const path = join(dir, "outofrange.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(3)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: "2-5" }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("3");
+    });
+
+    test("rejects a 'pages' span over 20 pages", async () => {
+      const path = join(dir, "toobig.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(30)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: "1-25" }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("20-page maximum");
+    });
+
+    test("notices an image-only page instead of silently returning empty content", async () => {
+      const path = join(dir, "image.pdf");
+      await Bun.write(path, buildTestPdf([{ text: "has text" }, {}]));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("no extractable text");
+    });
+
+    test("wraps a corrupt/unparseable PDF in a clear tool error", async () => {
+      const path = join(dir, "corrupt.pdf");
+      await Bun.write(path, buildCorruptPdf());
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("could not be parsed as a PDF");
+    });
+
+    test("rejects 'pages' supplied on a non-PDF file", async () => {
+      const path = join(dir, "plain.txt");
+      await Bun.write(path, "hello");
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: "1" }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("'pages' only applies to PDF files");
+    });
+
+    test("rejects 'offset'/'limit' supplied together with a PDF", async () => {
+      const path = join(dir, "windowed.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(3)));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, offset: 1, limit: 1 }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("not applicable to PDF files");
+    });
+
+    test("rejects a non-string 'pages' value", async () => {
+      const path = join(dir, "plain2.txt");
+      await Bun.write(path, "hello");
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path, pages: 5 }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("'pages' must be a string");
+    });
+
+    test("records the read for the read-before-write guard", async () => {
+      const path = join(dir, "guard.pdf");
+      await Bun.write(path, buildTestPdf(pagesOf(2)));
+      const ctx = makeToolContext({ cwd: dir });
+      await readTool.execute({ file_path: path }, ctx);
+      expect(ctx.readRegistry.has(path)).toBe(true);
+    });
+
+    test("records the read even when the PDF is corrupt", async () => {
+      const path = join(dir, "corrupt2.pdf");
+      await Bun.write(path, buildCorruptPdf());
       const ctx = makeToolContext({ cwd: dir });
       await readTool.execute({ file_path: path }, ctx);
       expect(ctx.readRegistry.has(path)).toBe(true);

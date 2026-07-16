@@ -81,7 +81,6 @@ source: tracking/
 | [DH-0035](../DH-0035-first-run-friction-no-init-doctor-dry-run.md) | No `dh init`/`dh doctor`/`--dry-run`, and cold error messages give a first-time operator no path forward | feature | stefan |
 | [DH-0037](../DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md) | No log rotation/disk-growth caps, no structured final run-summary artifact, and no log-analysis tooling | feature | stefan |
 | [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
-| [DH-0081](../DH-0081-read-tool-has-no-pdf-support-at-all-needs-text-extraction-added-then-pagination.md) | Read tool has no PDF support at all — needs text extraction added, then pagination | feature | stefan |
 
 ### verifying
 
@@ -100,6 +99,7 @@ source: tracking/
 | [DH-0084](../DH-0084-create-github-issue-to-gauge-demand-for-rate-limit-aware-request-scheduling.md) | Create GitHub issue to gauge demand for rate-limit-aware request scheduling | done |
 | [DH-0083](../DH-0083-create-github-issue-to-gauge-demand-for-a-metrics-telemetry-endpoint.md) | Create GitHub issue to gauge demand for a /metrics telemetry endpoint | done |
 | [DH-0082](../DH-0082-create-github-issue-to-gauge-demand-for-checkpoint-rewind-of-file-edits.md) | Create GitHub issue to gauge demand for checkpoint/rewind of file edits | done |
+| [DH-0081](../DH-0081-read-tool-has-no-pdf-support-at-all-needs-text-extraction-added-then-pagination.md) | Read tool has no PDF support at all — needs text extraction added, then pagination | done |
 | [DH-0080](../DH-0080-bash-output-capping-shape-diverges-from-real-claude-code-tail-cut-inline-notice-vs-head-preview-plus-saved-file.md) | Bash output-capping shape diverges from real Claude Code: tail-cut inline notice vs head-preview-plus-saved-file | done |
 | [DH-0079](../DH-0079-read-tool-s-truncation-model-diverges-from-real-claude-code-line-cap-notice-vs-byte-cap-hard-error.md) | Read tool's truncation model diverges from real Claude Code: line-cap+notice vs byte-cap+hard-error | done |
 | [DH-0073](../DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness-and-there-is-no-notebookedit-equivalent.md) | Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent | done |
@@ -108,4 +108,3 @@ source: tracking/
 | [DH-0064](../DH-0064-e2e-web-test-ts-and-connect-web-test-ts-assert-a-stale-agent-output-selector.md) | e2e/web.test.ts and connect-web.test.ts assert a stale .agent-output selector | done |
 | [DH-0063](../DH-0063-spile-ops-skill-id-based-ticket-resolution-rename-on-retitle-tool.md) | spile-ops skill: ID-based ticket resolution + rename-on-retitle tool | done |
 | [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | done |
-| [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | done |

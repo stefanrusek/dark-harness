@@ -13,6 +13,7 @@
 // buffered. Binary sniffing reads only a small prefix via `file.slice()`, not the whole file.
 
 import { isAbsolute, resolve } from "node:path";
+import { getDocumentProxy } from "unpdf";
 import { recordRead } from "./read-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
@@ -143,6 +144,82 @@ export function isNotebookPath(path: string): boolean {
   return path.toLowerCase().endsWith(".ipynb");
 }
 
+// DH-0081 (tracking/DH-0081-read-tool-has-no-pdf-support-at-all-needs-text-extraction-added-then-pagination.md):
+// PDFs are detected by the `%PDF-` magic bytes at file offset 0, not by extension — matching
+// how the binary-vs-text sniff below already works structurally. `unpdf` is the only one of
+// three candidate PDF-parsing libraries (see the ticket's evaluation table) that survives
+// `bun build --compile` into a standalone binary; the other two pull in a native canvas
+// dependency that crashes with `DOMMatrix is not defined` once compiled.
+const PDF_MAGIC = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]); // "%PDF-"
+const MAX_PDF_PAGE_SPAN = 20;
+const PDF_PAGES_REQUIRED_ABOVE = 10;
+
+/** Detects the `%PDF-` magic prefix in an already-sniffed byte buffer. Must be checked before
+ * `looksBinary` below — PDFs legitimately contain NUL bytes in their binary streams and would
+ * otherwise be incorrectly refused as binary files. */
+function looksLikePdf(bytes: Uint8Array): boolean {
+  if (bytes.length < PDF_MAGIC.length) return false;
+  for (let i = 0; i < PDF_MAGIC.length; i++) {
+    if (bytes[i] !== PDF_MAGIC[i]) return false;
+  }
+  return true;
+}
+
+/** Parsed, validated page range: 1-based, inclusive on both ends. */
+interface PageRange {
+  start: number;
+  end: number;
+}
+
+/** Parses and validates the `pages` parameter's `"N"` / `"N-M"` string form against the
+ * document's actual page count. Returns an error message string on any invalid input
+ * (malformed syntax, out-of-range, or a span over `MAX_PDF_PAGE_SPAN`), or the parsed range. */
+function parsePageRange(pages: string, totalPages: number): PageRange | string {
+  const match = /^(\d+)(?:-(\d+))?$/.exec(pages.trim());
+  if (!match) {
+    return `Read tool error: invalid 'pages' value ${JSON.stringify(pages)}. Accepted forms are a single page ("3") or an inclusive range ("1-5").`;
+  }
+  const start = Number.parseInt(match[1] as string, 10);
+  const end = match[2] !== undefined ? Number.parseInt(match[2], 10) : start;
+  if (start < 1 || end < start) {
+    return `Read tool error: invalid 'pages' range ${JSON.stringify(pages)} — start must be >= 1 and the range must not go backwards.`;
+  }
+  if (end > totalPages) {
+    return `Read tool error: 'pages' range ${JSON.stringify(pages)} exceeds this document's page count (${totalPages}).`;
+  }
+  const span = end - start + 1;
+  if (span > MAX_PDF_PAGE_SPAN) {
+    return `Read tool error: 'pages' range ${JSON.stringify(pages)} spans ${span} pages, exceeding the ${MAX_PDF_PAGE_SPAN}-page maximum per request.`;
+  }
+  return { start, end };
+}
+
+/** Extracts and renders text for the given inclusive page range from an already-loaded
+ * `unpdf` document proxy. Each page gets a `--- Page N ---` header; pages with no extractable
+ * text (image-only/scanned pages) get an explicit notice instead of silently rendering empty. */
+async function renderPdfPages(
+  pdf: Awaited<ReturnType<typeof getDocumentProxy>>,
+  range: PageRange,
+): Promise<string> {
+  const sections: string[] = [];
+  for (let pageNum = range.start; pageNum <= range.end; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    let text = "";
+    for (const item of content.items) {
+      if (!("str" in item)) continue;
+      text += item.str;
+      if ("hasEOL" in item && item.hasEOL) text += "\n";
+      else text += " ";
+    }
+    text = text.trim();
+    sections.push(
+      `--- Page ${pageNum} ---\n${text.length > 0 ? text : `[Page ${pageNum}: no extractable text — likely image-only/scanned]`}`,
+    );
+  }
+  return sections.join("\n\n");
+}
+
 /** Round 13: a NUL byte anywhere in the sampled prefix is a reliable binary signal — no valid
  * UTF-8 text file legitimately contains one. Cheap and doesn't require a full decode attempt. */
 function looksBinary(bytes: Uint8Array): boolean {
@@ -217,13 +294,22 @@ export const readTool: Tool = {
     "(each windowed read defaults to 2000 lines unless 'limit' says otherwise, with a notice " +
     "stating how many lines remain). Refuses binary files, and files above an absolute size " +
     "ceiling even when windowed, with a clear error instead of returning decoded garbage or " +
-    "exhausting memory.",
+    "exhausting memory. PDFs are detected automatically and have real text extracted per page " +
+    "(not line-numbered, unlike regular text files); use the 'pages' parameter (e.g. \"3\" or " +
+    '"1-5", max 20 pages per request) to select which pages to read — required for PDFs over ' +
+    "10 pages, and not applicable to 'offset'/'limit' or to non-PDF files.",
   inputSchema: {
     type: "object",
     properties: {
       file_path: { type: "string", description: "Absolute or cwd-relative path to read." },
       offset: { type: "number", description: "1-based line number to start reading from." },
       limit: { type: "number", description: "Maximum number of lines to read." },
+      pages: {
+        type: "string",
+        description:
+          'Page range for PDF files (e.g. "1-5", "3"). Only applicable to PDFs. Max 20 ' +
+          "pages per request; required for PDFs over 10 pages.",
+      },
     },
     required: ["file_path"],
     additionalProperties: false,
@@ -245,6 +331,10 @@ export const readTool: Tool = {
     const limit = input.limit;
     if (limit !== undefined && (typeof limit !== "number" || limit < 1)) {
       return { output: "Read tool error: 'limit' must be a positive number.", isError: true };
+    }
+    const pages = input.pages;
+    if (pages !== undefined && typeof pages !== "string") {
+      return { output: "Read tool error: 'pages' must be a string.", isError: true };
     }
 
     const absPath = resolvePath(filePath, ctx.cwd);
@@ -290,6 +380,75 @@ export const readTool: Tool = {
       return { output: renderNotebook(notebook), isError: false };
     }
 
+    // DH-0081: sniff the same prefix used for binary detection to also check for the `%PDF-`
+    // magic bytes, ahead of both the whole-file byte cap and the NUL-byte binary refusal below
+    // — a PDF legitimately contains NUL bytes in its binary streams and would otherwise be
+    // incorrectly refused as binary, and a PDF's whole-file size has no bearing on how much
+    // text a bounded page range actually extracts.
+    const sniffSize = Math.min(file.size, BINARY_SNIFF_BYTES);
+    const sniffBytes = new Uint8Array(await file.slice(0, sniffSize).arrayBuffer());
+
+    if (looksLikePdf(sniffBytes)) {
+      if (offset !== undefined || limit !== undefined) {
+        return {
+          output:
+            "Read tool error: 'offset'/'limit' are not applicable to PDF files — use 'pages' instead.",
+          isError: true,
+        };
+      }
+
+      let pdf: Awaited<ReturnType<typeof getDocumentProxy>>;
+      try {
+        const data = new Uint8Array(await file.arrayBuffer());
+        pdf = await getDocumentProxy(data);
+      } catch (err) {
+        await recordRead(ctx, absPath);
+        return {
+          output: `Read tool error: ${absPath} could not be parsed as a PDF: ${(err as Error).message}`,
+          isError: true,
+        };
+      }
+
+      const totalPages = pdf.numPages;
+      let range: PageRange;
+      if (pages !== undefined) {
+        const parsed = parsePageRange(pages, totalPages);
+        if (typeof parsed === "string") {
+          await recordRead(ctx, absPath);
+          return { output: parsed, isError: true };
+        }
+        range = parsed;
+      } else if (totalPages > PDF_PAGES_REQUIRED_ABOVE) {
+        await recordRead(ctx, absPath);
+        return {
+          output: `Read tool error: ${absPath} has ${totalPages} pages, exceeding the ${PDF_PAGES_REQUIRED_ABOVE}-page threshold above which a 'pages' range is required (max ${MAX_PDF_PAGE_SPAN} pages per request).`,
+          isError: true,
+        };
+      } else {
+        range = { start: 1, end: totalPages };
+      }
+
+      const body = await renderPdfPages(pdf, range);
+      await recordRead(ctx, absPath);
+
+      if (range.end < totalPages) {
+        const nextStart = range.end + 1;
+        const nextEnd = Math.min(totalPages, nextStart + MAX_PDF_PAGE_SPAN - 1);
+        return {
+          output: `${body}\n\n<system-reminder>PDF has ${totalPages} pages; showing ${range.start}-${range.end}. Pass pages="${nextStart}-${nextEnd}" to continue reading.</system-reminder>`,
+          isError: false,
+        };
+      }
+      return { output: body, isError: false };
+    }
+
+    if (pages !== undefined) {
+      return {
+        output: "Read tool error: 'pages' only applies to PDF files.",
+        isError: true,
+      };
+    }
+
     // DH-0079: a whole-file read (no offset/limit given) additionally hard-errors past a much
     // smaller ~256KB cap, matching real Claude Code's observed behavior — no soft line-count
     // truncation below this. Supplying `offset`/`limit` is treated as an explicit request for a
@@ -315,8 +474,6 @@ export const readTool: Tool = {
       };
     }
 
-    const sniffSize = Math.min(file.size, BINARY_SNIFF_BYTES);
-    const sniffBytes = new Uint8Array(await file.slice(0, sniffSize).arrayBuffer());
     if (looksBinary(sniffBytes)) {
       await recordRead(ctx, absPath);
       return {
