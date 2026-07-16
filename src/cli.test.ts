@@ -232,6 +232,63 @@ describe("composeMode", () => {
   });
 });
 
+describe("main — dh logs <sessionDir>", () => {
+  test("prints the agent tree and exits Success", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dh-cli-logs-"));
+    try {
+      const header = {
+        type: "header",
+        version: 1,
+        sessionId: "s1",
+        agentId: "root",
+        parentAgentId: null,
+        spawnedAt: "2026-07-15T00:00:00.000Z",
+        model: "claude",
+        instructionsSummary: "test",
+        client: "none",
+        build: { version: "0.0.0", gitSha: null, dirty: false, releaseTag: null },
+      };
+      await Bun.write(join(dir, "root.jsonl"), `${JSON.stringify(header)}\n`);
+      const io = fakeIo();
+      const code = await main(["logs", dir], {
+        io,
+        loadConfig: async () => {
+          throw new Error("dh logs must not load config");
+        },
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.exitCodes).toEqual([ExitCode.Success]);
+      expect(io.stdoutLines[0]).toContain("root");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fails with a usage message when no sessionDir is given", async () => {
+    const io = fakeIo();
+    const code = await main(["logs"], {
+      io,
+      loadConfig: async () => {
+        throw new Error("dh logs must not load config");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("usage: dh logs <sessionDir>");
+  });
+
+  test("fails cleanly when the session directory doesn't exist", async () => {
+    const io = fakeIo();
+    const code = await main(["logs", join(tmpdir(), "dh-cli-logs-does-not-exist-xyz")], {
+      io,
+      loadConfig: async () => {
+        throw new Error("dh logs must not load config");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("cannot read session log directory");
+  });
+});
+
 describe("main — --help", () => {
   test("--help prints usage and exits Success without touching config", async () => {
     const io = fakeIo();

@@ -203,3 +203,48 @@ internal Server-owned modules and options).
 
 No new open threads beyond the two Core follow-throughs noted above (both explicitly
 scoped as Core's, not mine, per the tickets' own domain assignment).
+
+### 2026-07-15 — DH-0037: log rotation + `dh logs` analysis tool
+
+Built the two DH-0037 pieces that don't depend on DH-0050's `summary.json` design (that
+piece is explicitly sequenced after DH-0050's Core round per the ticket's own owner note —
+did NOT build a `summary.json` writer this round).
+
+- **`src/server/log-retention.ts`** — `pruneLogDirectories(logsRootDir, config, now,
+  excludeSessionId?)`. Config-gated via a new `LogRetentionConfig`
+  (`maxAgeMs?`/`maxTotalBytes?`) added to `src/contracts/config.ts`'s `DhConfig` as
+  `logRetention?`. Both fields optional and independent; omitting both (including omitting
+  the whole key) is a no-op, matching DH-0012's `LimitsConfig` precedent for new knobs
+  defaulting off. Age-pruning runs first, then oldest-by-last-write size eviction; the
+  session currently being written is always excluded.
+- **`src/server/log-analysis.ts`** — `readSessionLogSummaries`/`buildAgentLogTree`/
+  `formatSessionLogTree`, wired to a new `dh logs <sessionDir>` CLI subcommand in
+  `src/cli.ts` (handled first in `main()`, before flag parsing/config loading, same as
+  `--help`/`--version` — it never touches `dh.json`). Reads header lines for the tree shape
+  (parent/child) but scans each file's full event lines for status/cumulative
+  cost/duration, since HANDOFF §7's "header-only reconstruction" claim covers the tree, not
+  per-agent stats. A corrupt/truncated line or file is skipped, not fatal to the whole
+  directory's analysis.
+
+**Judgment calls, flagged for a sanity check rather than escalated up front:**
+
+- Treated the `src/contracts/config.ts` addition (`LogRetentionConfig`) as routine, not an
+  architect-review trigger — followed the exact shape/precedent DH-0012's `LimitsConfig`
+  already established (optional fields, default-off, same doc-comment pattern), rather than
+  inventing a new shape. If that judgment call is wrong, it's an easy, isolated revert.
+- Touched `src/cli.ts` directly for both the pruning call sites (interactive mode's and
+  `createStandaloneRuntime`'s) and the new `logs` subcommand — Core's file, but the ticket's
+  own framing anticipated exactly this ("you'll need a small `src/cli.ts` touch-point... your
+  call on the cleanest split"). Kept the touch minimal: two near-identical
+  `pruneLogDirectories(...)` calls at the existing `logDir` construction sites, and one new
+  `if (argv[0] === "logs")` branch in `main()` before flag parsing.
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass — 100% line
+coverage on every new/changed file (`log-retention.ts`, `log-analysis.ts`,
+`contracts/config.ts`, `config/validate.ts`, `cli.ts`'s changed lines). `bun run e2e`: 27
+pass / 5 fail, but all 5 failures are pre-existing/environmental — headless Chromium isn't
+installed in this sandbox (`web.test.ts`/`connect-web.test.ts`), and a flaky SSE-reconnect
+TUI PTY timeout already tracked separately (DH-0058) — none touch `src/server/`,
+`src/cli.ts`, or `src/contracts/config.ts`, the only files this round changed.
+
+No new open threads.

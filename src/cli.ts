@@ -33,6 +33,8 @@ import {
   type DhServerOptions,
   SessionLogger,
   type Unsubscribe,
+  formatSessionLogTree,
+  pruneLogDirectories,
 } from "./server/index.ts";
 import { startTui as startTuiClient } from "./tui/index.ts";
 import { serveWebUi as serveWebUiClient } from "./web/server.ts";
@@ -110,6 +112,8 @@ Usage:
   dh --connect <host> --web        Web client, locally served, connected to a remote server.
   dh init                         Scaffold a starter dh.json in the working directory.
   dh doctor                       Alias for --check.
+  dh logs <sessionDir>             Print the agent tree (status/cost/duration) for a
+                                   ".dh-logs/<sessionId>" directory — DH-0037.
 
 Flags:
   --web                    Serve the web UI instead of (or alongside --connect) the console TUI.
@@ -507,7 +511,12 @@ export interface CliDeps {
  */
 function createStandaloneRuntime(config: DhConfig, systemPrompt: string): AgentRuntime {
   const sessionId = randomUUID();
-  const logDir = join(process.cwd(), ".dh-logs", sessionId);
+  const logsRoot = join(process.cwd(), ".dh-logs");
+  // DH-0037: config-gated `.dh-logs` rotation, off by default (see LogRetentionConfig's own
+  // doc comment) — a no-op unless `dh.json` sets `logRetention`. Runs before this session's
+  // own directory is created, so it never prunes itself (excludeSessionId).
+  pruneLogDirectories(logsRoot, config.logRetention, Date.now(), sessionId);
+  const logDir = join(logsRoot, sessionId);
   const logger = new SessionLogger(logDir);
   return new AgentRuntime({
     config,
@@ -625,7 +634,10 @@ async function runInteractiveMode(
       mode.kind === "server" ? "server" : mode.web ? "web" : "tui";
     const agentLoop = deps.createAgentLoop(config, systemPrompt, clientKind);
     const sessionId = randomUUID();
-    const logDir = join(process.cwd(), ".dh-logs", sessionId);
+    const logsRoot = join(process.cwd(), ".dh-logs");
+    // DH-0037: see createStandaloneRuntime's identical call above for the rationale.
+    pruneLogDirectories(logsRoot, config.logRetention, Date.now(), sessionId);
+    const logDir = join(logsRoot, sessionId);
     const server = deps.createServer({
       agentLoop,
       sessionId,
@@ -831,6 +843,23 @@ export async function main(
 ): Promise<ExitCodeType> {
   const deps: CliDeps = { ...defaultDeps(), ...overrides };
   const { io } = deps;
+
+  // DH-0037: `dh logs <sessionDir>` is a standalone subcommand, not one of the interactive
+  // run modes composed by flags — it never touches config/provider/AgentRuntime, so it's
+  // handled first, before flag parsing and `dh.json` loading, same as --help/--version.
+  if (argv[0] === "logs") {
+    const sessionDir = argv[1];
+    if (sessionDir === undefined) {
+      return fail(io, "usage: dh logs <sessionDir>");
+    }
+    try {
+      io.stdout(formatSessionLogTree(sessionDir));
+    } catch (err) {
+      return fail(io, (err as Error).message);
+    }
+    io.exit(ExitCode.Success);
+    return ExitCode.Success;
+  }
 
   if (argv.includes("--help") || argv.includes("-h")) {
     io.stdout(HELP_TEXT);

@@ -499,6 +499,52 @@ describe("validateConfig — rejections", () => {
     ).toThrow(/limits has unknown key "maxThings"/);
   });
 
+  // DH-0037 (tracking/DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md): the
+  // `logRetention` config block controlling `.dh-logs/` rotation/prune.
+  test("DH-0037: accepts logRetention.maxAgeMs and maxTotalBytes", () => {
+    const config = validateConfig(
+      baseConfig({ logRetention: { maxAgeMs: 86_400_000, maxTotalBytes: 1_000_000 } }),
+    );
+    expect(config.logRetention).toEqual({ maxAgeMs: 86_400_000, maxTotalBytes: 1_000_000 });
+  });
+
+  test("DH-0037: logRetention is omitted (not defaulted) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.logRetention).toBeUndefined();
+  });
+
+  test("DH-0037: an empty logRetention object is accepted as-is (no pruning)", () => {
+    const config = validateConfig(baseConfig({ logRetention: {} }));
+    expect(config.logRetention).toEqual({});
+  });
+
+  test("DH-0037: rejects a non-positive-integer logRetention.maxAgeMs", () => {
+    expect(() => validateConfig(baseConfig({ logRetention: { maxAgeMs: 0 } }))).toThrow(
+      /logRetention.maxAgeMs must be a positive integer/,
+    );
+    expect(() => validateConfig(baseConfig({ logRetention: { maxAgeMs: 1.5 } }))).toThrow(
+      /logRetention.maxAgeMs must be a positive integer/,
+    );
+  });
+
+  test("DH-0037: rejects a non-positive-integer logRetention.maxTotalBytes", () => {
+    expect(() => validateConfig(baseConfig({ logRetention: { maxTotalBytes: -1 } }))).toThrow(
+      /logRetention.maxTotalBytes must be a positive integer/,
+    );
+  });
+
+  test("DH-0037: rejects a non-object logRetention", () => {
+    expect(() => validateConfig(baseConfig({ logRetention: "always" }))).toThrow(
+      /logRetention must be an object/,
+    );
+  });
+
+  test("DH-0037: rejects an unknown key inside logRetention", () => {
+    expect(() => validateConfig(baseConfig({ logRetention: { maxAgeMs: 1000, foo: 1 } }))).toThrow(
+      /logRetention has unknown key "foo"/,
+    );
+  });
+
   test("DH-0012: rejects an unknown top-level config key mentioning limits in the error", () => {
     expect(() => validateConfig(baseConfig({ limitz: {} }))).toThrow(/unknown config key "limitz"/);
   });

@@ -16,6 +16,14 @@ export { constantTimeEqual, extractBearerToken, isAuthorized } from "./auth.ts";
 export { buildTar, type TarEntry } from "./tar.ts";
 export { handleCommand, type CommandContext, type CommandResult } from "./commands.ts";
 export { collectConfigSecrets, redactSecrets } from "./redact.ts";
+export { pruneLogDirectories, type PruneResult } from "./log-retention.ts";
+export {
+  buildAgentLogTree,
+  formatSessionLogTree,
+  readSessionLogSummaries,
+  type AgentLogSummary,
+  type AgentLogTreeNode,
+} from "./log-analysis.ts";
 // Test fixture, not production code — see fake-agent-loop.ts's own doc comment. Exported
 // so other domains (TUI/Web/E2E) can develop against a fake before Core lands.
 export { FakeAgentLoop } from "./fake-agent-loop.ts";
