@@ -15,6 +15,7 @@ import {
   type ServerSentEvent,
   type SessionClientKind,
 } from "../contracts/index.ts";
+import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
 import { computeCostUsd, runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { loadProjectMcpServers } from "./mcp/project-config.ts";
@@ -357,6 +358,15 @@ export class AgentRuntime {
     return model;
   }
 
+  /** DH-0094: the base system prompt (`this.systemPrompt`, fixed for the runtime's lifetime)
+   * plus a self-awareness section computed fresh for *this* agent's resolved model — a
+   * sub-agent may run a different `ModelConfig` than its parent/root, so this can't be baked
+   * into `this.systemPrompt` once; every `runAgentLoop()` call site (`runRoot()`,
+   * `spawnAgent()`) calls this with the model it just resolved for that specific agent. */
+  private buildAgentSystemPrompt(model: ModelConfig): string {
+    return `${this.systemPrompt}\n\n${renderSelfInfoSection(this.config, model)}`;
+  }
+
   private providerFor(model: ModelConfig): ModelProvider {
     let provider = this.providers.get(model.provider);
     if (!provider) {
@@ -628,7 +638,7 @@ export class AgentRuntime {
             parentAgentId,
             model: model.name,
             providerModel: model.model,
-            systemPrompt: this.systemPrompt,
+            systemPrompt: this.buildAgentSystemPrompt(model),
             instruction: params.prompt,
             ...(params.description !== undefined ? { description: params.description } : {}),
             provider,
@@ -799,7 +809,7 @@ export class AgentRuntime {
         parentAgentId: null,
         model: model.name,
         providerModel: model.model,
-        systemPrompt: this.systemPrompt,
+        systemPrompt: this.buildAgentSystemPrompt(model),
         instruction,
         provider,
         tools: this.toolMap,

@@ -43,7 +43,7 @@ function newAgentRuntime(
 /** A minimal Anthropic Messages API-shaped mock server. Decides its response from the last
  * message's content, independent of call ordering, so it stays correct under the
  * concurrent sub-agent scenarios this suite exercises. */
-function startMockAnthropicServer(onRequest?: (body: { model: string }) => void) {
+function startMockAnthropicServer(onRequest?: (body: { model: string; system?: string }) => void) {
   return Bun.serve({
     port: 0,
     async fetch(req) {
@@ -309,10 +309,17 @@ function startMockAnthropicServer(onRequest?: (body: { model: string }) => void)
 
 let server: ReturnType<typeof startMockAnthropicServer>;
 let receivedModels: string[] = [];
+// DH-0094: (model, system prompt) pairs for every request the mock server saw — used to
+// assert each agent's own resolved model produced its own per-agent self-info section.
+let receivedSystemPrompts: { model: string; system?: string }[] = [];
 
 beforeAll(() => {
   server = startMockAnthropicServer((req) => {
     receivedModels.push(req.model);
+    receivedSystemPrompts.push({
+      model: req.model,
+      ...(req.system !== undefined ? { system: req.system } : {}),
+    });
   });
 });
 
@@ -414,6 +421,40 @@ describe("AgentRuntime", () => {
     });
     const result = await runtime.runRoot("please just answer", "other-model");
     expect(result.success).toBe(true);
+  });
+
+  // DH-0094: self-awareness section (dh version/build, current model, sibling models) is
+  // computed per-agent, not baked once into a shared systemPrompt string — a sub-agent may
+  // run under a different ModelConfig than its parent/root, so it must see its *own* facts.
+  test("DH-0094: root and a sub-agent running a different model each get their own " +
+    "per-agent self-info section in the system prompt sent to the provider", async () => {
+    receivedSystemPrompts = [];
+    const config = baseConfig({
+      models: [
+        { name: "test-model", provider: "mock", model: "mock-1" },
+        { name: "other-model", provider: "mock", model: "mock-2" },
+      ],
+    });
+    const runtime = newAgentRuntime({ config, systemPrompt: "you are a test agent" });
+
+    const rootResult = await runtime.runRoot("please just answer", "test-model");
+    expect(rootResult.success).toBe(true);
+
+    const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "other-model",
+      prompt: "child instruction",
+    });
+    await runtime.tasks.awaitDone(childTaskId);
+
+    const rootRequest = receivedSystemPrompts.find((r) => r.model === "mock-1");
+    const childRequest = receivedSystemPrompts.find((r) => r.model === "mock-2");
+    expect(rootRequest?.system).toContain("running as model config **test-model**");
+    expect(rootRequest?.system).toContain("- **other-model** -> provider model `mock-2`");
+    expect(childRequest?.system).toContain("running as model config **other-model**");
+    expect(childRequest?.system).toContain("- **test-model** -> provider model `mock-1`");
+    // Each agent's own config name must not appear in its own "other models" list.
+    expect(rootRequest?.system).not.toContain("- **test-model** ->");
+    expect(childRequest?.system).not.toContain("- **other-model** ->");
   });
 
   test("runRoot works without onEvent/onLogLine callbacks", async () => {

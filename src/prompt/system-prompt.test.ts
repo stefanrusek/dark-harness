@@ -2,13 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DhConfig } from "../contracts/index.ts";
+import { BUILD_INFO } from "../config/build-info.ts";
+import type { DhConfig, ModelConfig } from "../contracts/index.ts";
 import type { Skill } from "./skills.ts";
 import {
   CLI_TOOLS_SKILL,
   REQUIRED_CONTRACT,
   buildDefaultSystemPrompt,
   loadSystemPrompt,
+  renderSelfInfoSection,
   renderSkillsSection,
 } from "./system-prompt.ts";
 
@@ -50,6 +52,84 @@ describe("renderSkillsSection", () => {
 
   test("still renders a header with no bullets when given no skills", () => {
     expect(renderSkillsSection([])).toBe("## Available skills\n");
+  });
+});
+
+describe("renderSelfInfoSection", () => {
+  const sonnet: ModelConfig = { name: "sonnet", provider: "anthropic", model: "claude-sonnet-5" };
+  const haiku: ModelConfig = { name: "haiku", provider: "anthropic", model: "claude-haiku-5" };
+  const opus: ModelConfig = { name: "opus", provider: "anthropic", model: "claude-opus-5" };
+
+  test("states the running dh version from BUILD_INFO", () => {
+    const config = baseConfig({ models: [sonnet] });
+    const section = renderSelfInfoSection(config, sonnet);
+    expect(section).toContain(`version ${BUILD_INFO.version}`);
+  });
+
+  test("states the current model's config name and provider model id", () => {
+    const config = baseConfig({ models: [sonnet, haiku] });
+    const section = renderSelfInfoSection(config, sonnet);
+    expect(section).toContain("**sonnet**");
+    expect(section).toContain("`claude-sonnet-5`");
+  });
+
+  test("lists other configured models, excluding the current one", () => {
+    const config = baseConfig({ models: [sonnet, haiku, opus] });
+    const section = renderSelfInfoSection(config, sonnet);
+    expect(section).toContain("- **haiku** -> provider model `claude-haiku-5`");
+    expect(section).toContain("- **opus** -> provider model `claude-opus-5`");
+    // The current model itself must not appear in the "other models" list.
+    expect(section).not.toContain("- **sonnet** ->");
+  });
+
+  test("says explicitly when no other models are configured", () => {
+    const config = baseConfig({ models: [sonnet] });
+    const section = renderSelfInfoSection(config, sonnet);
+    expect(section).toContain("(no other models are configured in this session's dh.json)");
+  });
+
+  test("includes git sha (clean) when BUILD_INFO reports one", () => {
+    const config = baseConfig({ models: [sonnet] });
+    const section = renderSelfInfoSection(config, sonnet, {
+      version: "1.2.3",
+      gitSha: "abc1234",
+      dirty: false,
+      releaseTag: null,
+    });
+    expect(section).toContain("git sha abc1234");
+    expect(section).not.toContain("dirty working tree");
+  });
+
+  test("flags a dirty working tree when BUILD_INFO reports one", () => {
+    const config = baseConfig({ models: [sonnet] });
+    const section = renderSelfInfoSection(config, sonnet, {
+      version: "1.2.3",
+      gitSha: "abc1234",
+      dirty: true,
+      releaseTag: null,
+    });
+    expect(section).toContain("git sha abc1234 (dirty working tree)");
+  });
+
+  test("includes the release tag when BUILD_INFO reports one", () => {
+    const config = baseConfig({ models: [sonnet] });
+    const section = renderSelfInfoSection(config, sonnet, {
+      version: "1.2.3",
+      gitSha: null,
+      dirty: false,
+      releaseTag: "v1.2.3",
+    });
+    expect(section).toContain("release v1.2.3");
+  });
+
+  test("differs per model, so a sub-agent on a different model gets different self-facts", () => {
+    const config = baseConfig({ models: [sonnet, haiku] });
+    const sonnetSection = renderSelfInfoSection(config, sonnet);
+    const haikuSection = renderSelfInfoSection(config, haiku);
+    expect(sonnetSection).not.toBe(haikuSection);
+    expect(sonnetSection).toContain("running as model config **sonnet**");
+    expect(haikuSection).toContain("running as model config **haiku**");
+    expect(haikuSection).toContain("- **sonnet** -> provider model `claude-sonnet-5`");
   });
 });
 

@@ -198,3 +198,34 @@ landing first.
 Gates: `typecheck`, `lint`, `test:coverage` all pass (957/957 tests, 100% coverage retained
 project-wide, including `src/prompt/`). `e2e` not run — unrelated to scope, same
 pre-existing sandbox gaps as prior rounds.
+
+### 2026-07-16 — DH-0094: self-awareness section in the system prompt (joint with Core/Grace)
+
+Added `renderSelfInfoSection(config, model, buildInfo = BUILD_INFO)` to
+`src/prompt/system-prompt.ts`: concrete self-facts (dh version/git sha/dirty flag/release tag
+from `BUILD_INFO`, the current agent's model config name + provider model id, and the other
+model names configured in `dh.json`) instead of the vague hedging the ticket's live-testing
+finding called out. Deliberately NOT folded into `BASE_PROMPT`/`buildDefaultSystemPrompt` —
+those are computed once per config load, but the current model differs per agent (a
+sub-agent may run a different `ModelConfig` than its parent), so it has to be a separate,
+per-agent-callable function. `buildInfo` is an injectable third param (default `BUILD_INFO`)
+purely for test determinism — `computeBuildInfo`'s own doc comment explains gitSha/releaseTag
+are usually null outside a stamped release binary, so a test needs to override them to
+exercise those branches. Wiring into the actual per-agent loop call (appending this section
+after Core's `this.systemPrompt` at both `runRoot()` and `spawnAgent()` call sites) is
+Core/Grace's piece — see her roster note same date.
+
+Noted but out of scope: `src/cli.ts` has its own local `loadSystemPrompt`/
+`DEFAULT_SYSTEM_PROMPT` placeholder that never calls `src/prompt/system-prompt.ts`'s real
+`loadSystemPrompt`/`buildDefaultSystemPrompt` — the default system prompt actually shipped by
+`dh` today is still the `TODO(prompt domain)` placeholder text, not Iris's real discipline
+prompt/skills enumeration. This DH-0094 self-info section still reaches the model regardless
+(it's appended independently of what base prompt is in use), so it isn't blocked by that gap,
+but the gap itself is real and pre-existing — flagging for the coordinator to file separately
+rather than silently expanding this ticket's scope.
+
+Gates: `typecheck`/`lint` clean. `test:coverage`: 1668 pass, 0 fail; `src/prompt/
+system-prompt.ts` and `src/agent/runtime.ts` both 100% lines/funcs. `e2e`: 30/32 pass, same
+pre-existing headless-Chromium-unavailable-in-sandbox failures every prior round has
+footnoted, unrelated to this change. Closed DH-0094 (`transition.py DH-0094 closed
+--resolution done`).

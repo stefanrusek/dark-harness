@@ -11,7 +11,8 @@
 // operator supplying a domain-persona prompt for a legitimate reason must not silently lose
 // it. See DH-0018.
 
-import type { DhConfig } from "../contracts/index.ts";
+import { BUILD_INFO } from "../config/build-info.ts";
+import type { BuildInfo, DhConfig, ModelConfig } from "../contracts/index.ts";
 import { type Skill, discoverSkills, parseSkillFrontmatter } from "./skills.ts";
 import CLI_TOOLS_SKILL_MD from "./skills/cli-tools/SKILL.md" with { type: "text" };
 
@@ -133,6 +134,58 @@ need to call a logging tool or ask anyone to record what you did: your plain-tex
 watching in real time.`;
 
 const BASE_PROMPT = `${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`;
+
+/**
+ * DH-0094 (tracking/DH-0094-*.md): the "self-awareness" section — concrete facts about this
+ * dh build and this specific agent's model, so the model can answer questions about itself
+ * ("what model are you", "what other models are configured") accurately instead of guessing.
+ * Reuses the existing `BUILD_INFO` constant (`src/config/build-info.ts`) rather than a second
+ * build-identity source, per the ticket's scope decision.
+ *
+ * This is deliberately NOT folded into `BASE_PROMPT`/`buildDefaultSystemPrompt` above: both of
+ * those are computed once per config load, but the current model can differ per agent (a
+ * sub-agent may run a different `ModelConfig` than its parent/root) and must be recomputed for
+ * every agent at loop start. Core's `AgentRuntime` (`src/agent/runtime.ts`) calls this once per
+ * `runAgentLoop()` invocation — both `runRoot()` and `spawnAgent()` — passing the `ModelConfig`
+ * it just resolved for that specific agent, and appends the result after whatever system
+ * prompt (default or `config.systemPrompt` override) is already in use.
+ *
+ * `buildInfo` defaults to the real process-wide `BUILD_INFO` and is only ever overridden by
+ * tests — `computeBuildInfo`'s own doc comment (`src/config/build-info.ts`) explains why the
+ * gitSha/releaseTag/dirty fields are frequently `null`/`false` outside a stamped release
+ * binary (e.g. `bun run src/cli.ts`), which a test needs to override to exercise those
+ * branches deterministically rather than depending on how the test runner itself happened to
+ * be invoked.
+ */
+export function renderSelfInfoSection(
+  config: DhConfig,
+  model: ModelConfig,
+  buildInfo: BuildInfo = BUILD_INFO,
+): string {
+  const buildBits = [`version ${buildInfo.version}`];
+  if (buildInfo.gitSha) {
+    buildBits.push(`git sha ${buildInfo.gitSha}${buildInfo.dirty ? " (dirty working tree)" : ""}`);
+  }
+  if (buildInfo.releaseTag) {
+    buildBits.push(`release ${buildInfo.releaseTag}`);
+  }
+  const otherModels = config.models.filter((m) => m.name !== model.name);
+  const otherModelsText =
+    otherModels.length > 0
+      ? otherModels.map((m) => `- **${m.name}** -> provider model \`${m.model}\``).join("\n")
+      : "(no other models are configured in this session's dh.json)";
+  return [
+    "## About this dh instance",
+    "",
+    `You are running dh (Dark Harness), ${buildBits.join(", ")}.`,
+    "",
+    `You are currently running as model config **${model.name}** (underlying provider model id \`${model.model}\`). This is fixed for your lifetime — you cannot switch models yourself mid-session.`,
+    "",
+    "Other model configs available in this session's `dh.json` (a sub-agent you spawn via the " +
+      "`Agent` tool may run under any of these, including this one):",
+    otherModelsText,
+  ].join("\n");
+}
 
 /**
  * Renders the "Available skills" section of the default prompt: name + one-line description
