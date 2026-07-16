@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["deferred (2026-07-15): sweep-sourced, no observed fleet-ops need"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -36,3 +36,8 @@ scraping JSONL logs after the fact.
 
 > [!NOTE]
 > Source: Competitive-differentiation sweep finding #14.
+
+> [!NOTE]
+> Deferred (2026-07-15) — no evidence of a real need for fleet-level scraped metrics yet;
+> sweep-sourced, same pattern as DH-0047 (deferred speculative feature, not a real request).
+> Revisit if a real multi-instance fleet-ops need surfaces.
