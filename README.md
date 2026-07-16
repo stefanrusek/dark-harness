@@ -219,6 +219,9 @@ This is exactly what `dh init` scaffolds:
   directory once its most recently written file is older than that; `maxTotalBytes` then
   deletes the oldest remaining session directories (by last write) until total size is back
   under the cap. Both independent and optional; omitted means no pruning (the default).
+- **`web`** — optional outbound-web opt-in (`WebFetch`/`WebSearch`); absent by default, which
+  means those tools don't exist at all, not just disabled. See
+  [Optional web access](#optional-web-access-webfetch--websearch) below.
 
 Full schema rationale: [`docs/adr/0007-dhjson-schema.md`](docs/adr/0007-dhjson-schema.md).
 
@@ -354,8 +357,9 @@ means:
 
 - **`dh` makes no outbound calls of its own** other than to whichever model provider(s) your
   `dh.json` configures, plus whatever a running agent's own `Bash`/`git`/tool calls choose to
-  reach (your instructions file controls that, not the harness). There's no telemetry,
-  update-checker, or other phone-home behavior.
+  reach (your instructions file controls that, not the harness) — and, if you've deliberately
+  opted in, `WebFetch`/`WebSearch` (see below). There's no telemetry, update-checker, or
+  other phone-home behavior.
 - **Fully offline is possible** if you point `provider` at a local, Anthropic-compatible
   endpoint (`type: "anthropic"` with a `baseURL` like `http://localhost:8080`, as the sample
   config's `"local"` provider does) — e.g. LM Studio or any other local inference server
@@ -371,11 +375,60 @@ means:
   adds user accounts or per-agent scopes; air-gapping is still the stronger control even with
   both enabled.
 
+### Optional web access (`WebFetch` / `WebSearch`)
+
+`dh` ships two more tools an agent can use to look things up on the open internet —
+`WebFetch` (fetch a URL's content) and `WebSearch` (run a search query) — but **both are
+absent by default**, not just disabled: unless you add a `web` block to `dh.json`, neither
+tool exists at all, and no code path in `dh` makes an outbound call to anything other than
+your configured model provider(s). Enabling either is a deliberate, per-tool decision that
+**breaks the air-gapped posture** described above — do this only if your deployment isn't
+meant to be air-gapped, and understand that it hands your agent (and, transitively, whatever
+web content it fetches) a live route to the open internet.
+
+```json
+{
+  "web": {
+    "fetch": {
+      "allowedHosts": ["docs.example.com"],
+      "extractionModel": "haiku"
+    },
+    "search": {
+      "provider": "brave",
+      "apiKey": "$(BRAVE_API_KEY)"
+    }
+  }
+}
+```
+
+- **`web.fetch`** — presence registers `WebFetch`; an empty `{}` is a valid minimal opt-in
+  (every field has a default). It fetches `http`/`https` URLs only, never follows redirects
+  automatically (a 3xx is reported back instead), and refuses private/loopback/link-local
+  addresses by default (SSRF protection) — set `allowPrivateNetwork: true` only if you
+  deliberately want it to reach an internal docs server, and consider pinning `allowedHosts`
+  to the specific domains your agents actually need. If `extractionModel` names a configured
+  model, a `prompt` argument is answered against the fetched page by that model (its usage
+  counts toward your `options.maxCostUsd`/`maxTotalTokens` budgets, same as any other model
+  call) instead of dumping raw page content back to the caller.
+- **`web.search`** — `dh` has no search infrastructure of its own, so this tool only exists
+  once you configure a backend; v1 supports the Brave Search API (`provider: "brave"` +
+  `apiKey`, `$(VAR)`-interpolatable). **Brave's API is not free** (as of this writing it's
+  prepaid metered credits, roughly $3–5 per 1,000 queries) — enabling `web.search` is a real,
+  ongoing operator cost, not just a security decision.
+- **`web.search.apiKey` is never logged** — it joins the same redaction set as
+  `security.token` and every provider `apiKey` (see [`docs/adr/0004-security-posture.md`](docs/adr/0004-security-posture.md)'s
+  logging-redaction notes).
+- **Air-gapped deployments should leave `web` unset entirely** rather than configuring it
+  and expecting it to sit unused — its mere presence is what registers the tool.
+
 ## Tools, skills, and sub-agents
 
 The root agent and every sub-agent get one fixed tool set, with semantics mirroring Claude
 Code's tools of the same name: `Bash`, `Read`, `Edit`, `Write`, `Agent`, `ToolSearch`,
-`Skill`, `TaskOutput`, `SendMessage`, `Monitor`, `TaskStop`, `McpAuth`, `Grep`, `Glob`.
+`Skill`, `TaskOutput`, `SendMessage`, `Monitor`, `TaskStop`, `McpAuth`, `Grep`, `Glob` — plus
+`WebFetch`/`WebSearch` when you've opted into them via `web.fetch`/`web.search` (see
+[Optional web access](#optional-web-access-webfetch--websearch) above); otherwise they don't
+exist at all, not just disabled.
 Sub-agents are purely ad-hoc — `Agent` takes a model name and a prompt, no predefined agent
 definitions, arbitrary nesting depth, and (by default) run concurrently with their parent.
 

@@ -1172,3 +1172,59 @@ worth a future instance not being surprised by this again.
 headless-Chromium-unavailable-in-sandbox failures prior rounds have footnoted
 (`/opt/pw-browsers/chromium` missing), unrelated to this change. Closed DH-0090 via
 `spile-ops`/`transition.py` (`resolution: done`).
+
+### 2026-07-16 — DH-0074, WebFetch/WebSearch
+
+Implemented Fable's full architect design exactly: new top-level `web` config block
+(`web.fetch`/`web.search`, each independently presence-gated — absent means the tool
+literally doesn't exist, not disabled), `src/agent/tools/net-guard.ts`'s pure
+`isPrivateAddress`/`hostMatchesSuffix` helpers, `web-fetch.ts` (SSRF check via
+`dns.promises.lookup` + literal-IP fast path, `redirect: "manual"`, streamed
+`maxResponseBytes` cap, `HTMLRewriter`-based HTML-to-text, extraction-model step), and
+`web-search.ts` (Brave backend only, no synthesis — real CC's prose summary runs on
+Anthropic-side infra dh doesn't have). Registration is a new `composeTools(config)` in
+`tools/index.ts`, replacing `runtime.ts`'s bare `ALL_TOOLS` fallback — deliberately not the
+MCP deferred-tool mechanism, since `deferred` tools stay ToolSearch-discoverable and the
+design explicitly requires "absent entirely." Gave `ToolContext` a new `completeWithModel`
+method (wired in `runtime.ts`'s `buildToolContext`) so WebFetch's extraction-model call is a
+first-class session participant — its usage emits a real `token_usage` SSE/log event and
+feeds DH-0013's cumulative cost/token budget checks, not a side-channel call invisible to
+budget enforcement. Exported `loop.ts`'s previously-private `computeCostUsd` to reuse the
+exact same pricing math rather than duplicating it.
+
+**Worktree-mismatch quirk, again (see Round 14/15's same footnote) — but this time actually
+fixed rather than worked around:** the assigned `.claude/worktrees/agent-...` directory
+started as a disconnected 2-commit checkout (`origin/main` itself was stale at 2 commits;
+the real project history lives on `claude/coordinator-onboarding-kab9ls`). Rather than
+falling back to editing the outer shared checkout path (this round's task explicitly
+required me to work *in* the worktree, and a permission gate correctly stopped me from a
+blind `git reset --hard` without narrating why), I fetched `local`/`origin`, confirmed the
+worktree's own branch had zero unique commits fast-forward-safe onto
+`local/claude/coordinator-onboarding-kab9ls`, and reset onto that tip. Left a note here in
+case a future instance hits the same stale-worktree symptom: check whether `origin/main`
+itself is stale before assuming the fix is "work outside the worktree" — often the real
+project history is one `git reset --hard <the-actual-coordinator-branch-tip>` away, which is
+a much cleaner fix than routing every Edit/Write around the harness's per-file worktree
+guard.
+
+Also pulled the full architect design for this ticket from a *sibling* worktree branch
+(`local/worktree-agent-abf1611bcd61898a6`) that had already run the design pass — this
+worktree's own `tracking/DH-0074-*.md` was still the pre-design `status: refining` version.
+Copied Fable's design verbatim into this worktree's ticket (status bumped to `ready`) before
+implementing, so the ticket file itself carries the real design record, not just my own
+paraphrase of it.
+
+**Gates:** typecheck/lint clean. `bun run test:coverage`: 1580 pass, 0 fail (one single
+flaky fail seen in ~9 total full-suite runs, not reproduced in 5 immediate reruns of
+`runtime.test.ts` alone — didn't chase further given the reproduction rate, flagging here in
+case it recurs for someone else). New files/changed lines all at 100% line coverage except
+two spots reporting sub-100% **function**-count (not line) coverage
+(`web-search.ts` 92.86% funcs, `web-fetch.ts` 99.60% lines with zero lines actually listed as
+uncovered) that look like the same bun-coverage counting quirk already visible pre-existing
+on `bash.ts`/`glob.ts`/`grep.ts`/`cli.ts`/`tui/app.ts` — didn't find an actual missing test
+case chasing it down. `bun run e2e`: 30/32 pass, same pre-existing
+headless-Chromium-unavailable-in-sandbox failures every prior round has footnoted, unrelated
+to this change. Added the README's "Optional web access" section myself this round (small
+enough to fold in rather than hand to Iris — flagged explicitly in the ticket's closing
+note in case she wants to restyle it to match the rest of the doc later). Closed DH-0074 via
+`spile-ops`/`transition.py` (`resolution: done`).

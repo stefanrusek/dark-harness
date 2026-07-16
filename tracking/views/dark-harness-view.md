@@ -22,7 +22,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | deferred (2026-07-15): no observed sustained-outage incident, same as DH-0049 |
 | [DH-0060](../DH-0060-tui-overnight-behavioral-test-agent-tmux-text-screenshot-verification-suite.md) | TUI overnight behavioral test agent: tmux text-screenshot verification suite | status: verifying |
 | [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | status: verifying |
-| [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online | architect design pass in progress |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | deferred (2026-07-16): GitHub issue #7 created to gauge demand |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut | waiting on a real release/binary to exist before this can be written accurately |
 
@@ -44,12 +43,6 @@ source: tracking/
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut 🔒 | feature | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
-
-### refining
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online 🔒 | feature | stefan |
 
 ### ready
 
@@ -111,6 +104,6 @@ source: tracking/
 | [DH-0079](../DH-0079-read-tool-s-truncation-model-diverges-from-real-claude-code-line-cap-notice-vs-byte-cap-hard-error.md) | Read tool's truncation model diverges from real Claude Code: line-cap+notice vs byte-cap+hard-error | done |
 | [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | done |
 | [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | done |
+| [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online | done |
 | [DH-0073](../DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness-and-there-is-no-notebookedit-equivalent.md) | Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent | done |
 | [DH-0072](../DH-0072-grep-tool-likely-missing-context-line-flags-multiline-mode-and-file-type-filter-that-real-claude-code-s-grep-supports.md) | Grep tool likely missing context-line flags, multiline mode, and file-type filter that real Claude Code's Grep supports | done |
-| [DH-0070](../DH-0070-bash-tool-s-fresh-shell-per-call-semantics-diverge-from-claude-code-s-persistent-cwd-behavior.md) | Agents don't have their own separate working-directory state | done |
