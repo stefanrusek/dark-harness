@@ -959,3 +959,39 @@ CLAUDE.md §6.2 says needs architect sign-off before other domains build against
 the call to proceed anyway since it's purely additive/optional (no existing consumer
 breaks) and the ticket was already scoped "ready." Flagging here in case Fable wants to
 review after the fact.
+
+### 2026-07-16 — DH-0072: Grep -A/-B/-C, multiline, type filter
+Additive parameter parity on `src/agent/tools/grep.ts` (does not reopen DH-0054). No real
+Grep tool was available in this session's own tool list to empirically verify against
+(checked first, per the ticket's instruction) — implemented from the ticket's written spec,
+flagged as unverified in the commit message.
+
+Judgment calls made where the spec left things open:
+- `-A`/`-B`/`-C` are **rejected with a clear error** (not silently ignored) when
+  `output_mode` isn't `content` — there's no line content to show context around in
+  `files_with_matches`/`count`, and a silent no-op felt more likely to confuse a model than a
+  clear rejection.
+- Context-only lines use a ripgrep-style `path-line-text` (dash separator) vs. `path:line:text`
+  for actual match lines, with a `--` separator between non-contiguous groups — only when
+  context is actually requested (`-A`/`-B`/`-C` all default 0 reduces to the exact pre-DH-0072
+  output format, verified by keeping the original tests unchanged and green).
+- `multiline: true` switches match-finding from per-line `regex.test` to a whole-file
+  global+dotAll scan; `count` in that mode counts distinct matches (not matched lines) since a
+  single match can span many lines — documented as a semantic difference from line mode in the
+  `findMatches` doc comment.
+- `type` extension map covers ~25 common languages; combines with an explicit `glob` (both
+  filters apply) rather than being mutually exclusive.
+- Left `head_limit` default at 200 — no way to verify real Claude Code's actual default from
+  this environment either, same caveat as the rest of this ticket.
+
+**Gates:** typecheck/lint clean (biome auto-fixed two formatting nits after my edit).
+`bun run test:coverage`: 1335 pass, 0 fail, grep.ts at 100% lines (the 89.47% shown in the
+per-file table is `% Funcs`, not `% Lines` — misread the column order once myself before
+double-checking; this is the same pre-existing inline-arrow-func bun-coverage quirk prior
+rounds have footnoted, not a real gap). `bun run e2e`: 30 pass, 2 fail — both pre-existing
+headless-Chromium-missing-in-sandbox failures (`/opt/pw-browsers/chromium` not present),
+unrelated to this change (grep.ts has no browser surface).
+
+Also had to rebase this round's worktree onto the coordinator branch's current tip again —
+same stale-worktree-branch-point symptom every prior round has hit; noting once more in case
+it's worth fixing at the tooling level instead of every round re-discovering it.
