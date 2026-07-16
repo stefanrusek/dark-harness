@@ -24,7 +24,6 @@ source: tracking/
 | [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | status: verifying |
 | [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online | architect design pass in progress |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | deferred (2026-07-16): GitHub issue #7 created to gauge demand |
-| [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | architect design pass in progress |
 
 ## Board
 
@@ -51,7 +50,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online 🔒 | feature | stefan |
-| [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent 🔒 | feature | stefan |
 
 ### ready
 
@@ -77,6 +75,7 @@ source: tracking/
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
+| [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | feature | stefan |
 | [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | feature | stefan |
 | [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | feature | stefan |
 
