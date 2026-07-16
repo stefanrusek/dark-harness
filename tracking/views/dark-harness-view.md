@@ -37,6 +37,10 @@ source: tracking/
 | [DH-0052](../DH-0052-windows-console-support-unverified.md) | Windows console/TUI support is unverified — no Windows-specific console-mode handling found, and no Windows execution anywhere in CI 🔒 | bug | stefan |
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
+| [DH-0065](../DH-0065-tui-visual-polish-inline-style-bleed-word-wrap-transcript-identity-liveness.md) | TUI visual polish: inline style bleed, word wrap, transcript identity, liveness | feature | stefan |
+| [DH-0066](../DH-0066-web-ui-visual-polish-markdown-surface-styling-sidebar-hierarchy-transcript-details.md) | Web UI visual polish: Markdown surface styling, sidebar hierarchy, transcript details | feature | stefan |
+| [DH-0067](../DH-0067-server-mode-operator-ux-startup-summary-runtime-activity-feed-cli-output-polish.md) | Server-mode operator UX: startup summary, runtime activity feed, CLI output polish | feature | stefan |
+| [DH-0068](../DH-0068-readme-hero-compelling-promo-screenshot-and-visual-identity-for-the-landing-page.md) | README hero: compelling promo screenshot and visual identity for the landing page | feature | stefan |
 
 ### ready
 
