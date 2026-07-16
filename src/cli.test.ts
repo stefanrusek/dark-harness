@@ -114,6 +114,7 @@ describe("parseArgs", () => {
       env: null,
       check: false,
       dryRun: false,
+      resume: null,
     });
   });
 
@@ -134,6 +135,8 @@ describe("parseArgs", () => {
       "secrets.env",
       "--check",
       "--dry-run",
+      "--resume",
+      "abc123",
     ]);
     expect(options).toEqual({
       web: true,
@@ -146,6 +149,7 @@ describe("parseArgs", () => {
       env: "secrets.env",
       check: true,
       dryRun: true,
+      resume: "abc123",
     });
   });
 
@@ -860,6 +864,152 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines.some((l) => l.includes("SIGTERM"))).toBe(true);
     expect(io.stdoutLines).toContain("partial work");
+  });
+});
+
+describe("main — --resume <sessionId> (DH-0038)", () => {
+  test("--resume with --connect is rejected as unsupported", async () => {
+    const io = fakeIo();
+    const code = await main(["--connect", "host1", "--resume", "s1"], baseOverrides(io));
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("not supported with --connect");
+  });
+
+  test("a loadResumeSession failure is reported via the standard fail() path", async () => {
+    const io = fakeIo();
+    const code = await main(["--resume", "missing-session"], {
+      ...baseOverrides(io),
+      loadResumeSession: () => {
+        throw new Error("session directory not found: /tmp/.dh-logs/missing-session");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain('cannot resume session "missing-session"');
+    expect(io.stderrLines[0]).toContain("session directory not found");
+  });
+
+  test("an unresolvable model alias is a clean error, never a silent fallback", async () => {
+    const io = fakeIo();
+    const code = await main(["--resume", "s1"], {
+      ...baseOverrides(io),
+      loadResumeSession: () => ({
+        messages: [],
+        model: "no-longer-configured",
+        resumedFromSessionId: "s1",
+        lostAgents: [],
+      }),
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain('cannot resume session "s1"');
+    expect(io.stderrLines[0]).toContain('model alias "no-longer-configured"');
+    expect(io.stderrLines[0]).toContain("sonnet"); // names the known models
+  });
+
+  test("--resume with --instructions: notice + file content become the standalone instruction, seeded runtime", async () => {
+    const io = fakeIo();
+    let receivedInstruction: string | undefined;
+    let receivedResume: unknown;
+    const code = await main(["--instructions", "plan.md", "--resume", "s1", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "keep going",
+      loadResumeSession: () => ({
+        messages: [{ role: "user", content: [{ type: "text", text: "old turn" }] }],
+        model: "sonnet",
+        resumedFromSessionId: "s1",
+        lostAgents: [],
+      }),
+      createRuntime: (_config, _systemPrompt, _client, resume) => {
+        receivedResume = resume;
+        return {
+          runRoot: async (instruction: string) => {
+            receivedInstruction = instruction;
+            return { success: true, finalOutput: "done" };
+          },
+          stopRoot: () => {},
+        };
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(receivedInstruction).toContain('resumed after a restart from session "s1"');
+    expect(receivedInstruction).toContain("keep going");
+    expect(receivedResume).toEqual({
+      messages: [{ role: "user", content: [{ type: "text", text: "old turn" }] }],
+      fromSessionId: "s1",
+      model: "sonnet",
+    });
+  });
+
+  test("--resume with --instructions lists lost in-flight sub-agents in the composed instruction", async () => {
+    const io = fakeIo();
+    let receivedInstruction: string | undefined;
+    await main(["--instructions", "plan.md", "--resume", "s1", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "keep going",
+      loadResumeSession: () => ({
+        messages: [],
+        model: "sonnet",
+        resumedFromSessionId: "s1",
+        lostAgents: [
+          {
+            agentId: "agent-child-1",
+            parentAgentId: ROOT_AGENT_ID,
+            description: "worker",
+            model: "sonnet",
+            spawnedAt: "2026-07-15T00:00:00.000Z",
+            status: "running",
+          },
+        ],
+      }),
+      createRuntime: () => ({
+        runRoot: async (instruction: string) => {
+          receivedInstruction = instruction;
+          return { success: true, finalOutput: "done" };
+        },
+        stopRoot: () => {},
+      }),
+    });
+    expect(receivedInstruction).toContain("agent-child-1 (worker)");
+    expect(receivedInstruction).toContain("[running]");
+  });
+
+  test("--resume without --instructions auto-kicks the resumed root via sendMessage in interactive mode", async () => {
+    const io = fakeIo();
+    let receivedNotice: string | undefined;
+    let receivedResume: unknown;
+    const code = await main(["--resume", "s1"], {
+      ...interactiveOverrides(io),
+      loadResumeSession: () => ({
+        messages: [],
+        model: "sonnet",
+        resumedFromSessionId: "s1",
+        lostAgents: [],
+      }),
+      createAgentLoop: (_config, _systemPrompt, _client, resume) => {
+        receivedResume = resume;
+        return fakeAgentLoop({
+          sendMessage: (agentId, message) => {
+            if (agentId === ROOT_AGENT_ID) receivedNotice = message;
+          },
+        });
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(receivedResume).toEqual({ messages: [], fromSessionId: "s1", model: "sonnet" });
+    expect(receivedNotice).toContain('resumed after a restart from session "s1"');
+  });
+
+  test("model resolution: resume's model alias must exist among the *current* config's models", async () => {
+    const io = fakeIo();
+    const code = await main(["--resume", "s1"], {
+      ...interactiveOverrides(io),
+      loadResumeSession: () => ({
+        messages: [],
+        model: "sonnet",
+        resumedFromSessionId: "s1",
+        lostAgents: [],
+      }),
+    });
+    expect(code).toBe(ExitCode.Success);
   });
 });
 

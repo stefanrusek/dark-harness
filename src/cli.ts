@@ -13,7 +13,8 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createProvider } from "./agent/providers/index.ts";
 import type { ModelProvider } from "./agent/providers/types.ts";
-import { AgentRuntime, ROOT_AGENT_ID } from "./agent/runtime.ts";
+import { type ResumeResult, loadResumeSession } from "./agent/resume.ts";
+import { AgentRuntime, type AgentRuntimeOptions, ROOT_AGENT_ID } from "./agent/runtime.ts";
 import { BUILD_INFO } from "./config/build-info.ts";
 import { ConfigError, DEFAULT_CONFIG_PATH, loadConfig } from "./config/index.ts";
 import type {
@@ -70,9 +71,20 @@ export interface CliOptions {
   /** DH-0035: validates config/instructions/provider-client construction and exits 0 without
    * ever calling a model. */
   dryRun: boolean;
+  /** DH-0038: `--resume <sessionId>` — reconstructs the root agent's conversation from
+   * `.dh-logs/<sessionId>` (walking any `resumedFrom` chain) instead of starting fresh. Null
+   * when not resuming. */
+  resume: string | null;
 }
 
-const FLAGS_WITH_VALUES = new Set(["--connect", "--port", "--instructions", "--config", "--env"]);
+const FLAGS_WITH_VALUES = new Set([
+  "--connect",
+  "--port",
+  "--instructions",
+  "--config",
+  "--env",
+  "--resume",
+]);
 
 /** DH-0035: the minimal, valid `dh.json` scaffolded by `dh init` — kept byte-for-byte in sync
  * with README.md's own sample config so the two never drift apart. */
@@ -130,6 +142,9 @@ Flags:
                            the "dh doctor" subcommand.
   --dry-run                Validate config parsing, instructions file readability, and
                            provider client construction, then exit 0. Never calls a model.
+  --resume <sessionId>     Reconstruct the root agent's conversation from a prior
+                           ".dh-logs/<sessionId>" directory and continue it as a new session
+                           (DH-0038). Not supported with --connect.
   --help, -h               Show this help and exit.
   --version                Show build identity (version, git sha, dirty flag) and exit.
 
@@ -160,6 +175,7 @@ export function parseArgs(argv: string[]): CliOptions {
     env: null,
     check: false,
     dryRun: false,
+    resume: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -194,6 +210,7 @@ export function parseArgs(argv: string[]): CliOptions {
       else if (arg === "--instructions") options.instructions = value;
       else if (arg === "--config") options.config = value;
       else if (arg === "--env") options.env = value;
+      else if (arg === "--resume") options.resume = value;
       else {
         const parsed = Number(value);
         if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -338,7 +355,12 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
   private readonly eventListeners = new Set<AgentLoopEventListener>();
   private readonly logListeners = new Set<AgentLoopLogListener>();
 
-  constructor(options: { config: DhConfig; systemPrompt: string; client: SessionClientKind }) {
+  constructor(options: {
+    config: DhConfig;
+    systemPrompt: string;
+    client: SessionClientKind;
+    resume?: AgentRuntimeOptions["resume"];
+  }) {
     this.runtime = new AgentRuntime({
       config: options.config,
       systemPrompt: options.systemPrompt,
@@ -348,6 +370,7 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
       // The standalone `--instructions`/`--job` path (defaultDeps().createRuntime) never sets
       // this, preserving its original end-on-first-non-tool-call behavior exactly.
       interactive: true,
+      ...(options.resume ? { resume: options.resume } : {}),
       onEvent: (event) => {
         for (const listener of this.eventListeners) listener(event);
       },
@@ -461,19 +484,30 @@ export interface CliDeps {
    * network. Construction itself (as opposed to `.complete()`) is synchronous today for both
    * built-in adapters, but the signature stays sync-or-throw either way. */
   createProvider: (config: ProviderConfig) => ModelProvider;
+  /** DH-0038: reconstructs a `--resume <sessionId>` session's replayed history + metadata
+   * from `.dh-logs/<sessionId>` (walking any `resumedFrom` chain). Synchronous, throws
+   * `ResumeError` (see src/agent/resume.ts) for every documented failure mode (D6) — callers
+   * route it through the standard `fail()` path, never letting it crash the process.
+   * Injectable so tests never touch the real filesystem. */
+  loadResumeSession: (logsRoot: string, sessionId: string) => ResumeResult;
   /** Used only by the standalone `--instructions` path (see the module doc comment above
    * for why that path never goes through createAgentLoop/createServer). Exposes `stopRoot`
-   * too (DH-0011) so this path's SIGTERM/SIGINT handler has something real to call. */
+   * too (DH-0011) so this path's SIGTERM/SIGINT handler has something real to call.
+   * `resume` (DH-0038) is threaded straight into `AgentRuntimeOptions.resume` when a
+   * `--resume` was requested; omitted for a normal (non-resumed) run. */
   createRuntime: (
     config: DhConfig,
     systemPrompt: string,
     client: SessionClientKind,
+    resume?: AgentRuntimeOptions["resume"],
   ) => Pick<AgentRuntime, "runRoot" | "stopRoot">;
-  /** Used by every interactive mode (server/local/connect). */
+  /** Used by every interactive mode (server/local/connect). `resume` (DH-0038): same shape
+   * and purpose as `createRuntime`'s. */
   createAgentLoop: (
     config: DhConfig,
     systemPrompt: string,
     client: SessionClientKind,
+    resume?: AgentRuntimeOptions["resume"],
   ) => AgentLoopHandle;
   createServer: (options: DhServerOptions) => DhServerLike;
   startTui: (baseUrl: string, token?: string) => Promise<void>;
@@ -509,7 +543,11 @@ export interface CliDeps {
  * reimplemented; `loop.ts` already emits its own `LogHeader` first line per agent, so no
  * separate header-writing logic is needed here either.
  */
-function createStandaloneRuntime(config: DhConfig, systemPrompt: string): AgentRuntime {
+function createStandaloneRuntime(
+  config: DhConfig,
+  systemPrompt: string,
+  resume?: AgentRuntimeOptions["resume"],
+): AgentRuntime {
   const sessionId = randomUUID();
   const logsRoot = join(process.cwd(), ".dh-logs");
   // DH-0037: config-gated `.dh-logs` rotation, off by default (see LogRetentionConfig's own
@@ -525,6 +563,7 @@ function createStandaloneRuntime(config: DhConfig, systemPrompt: string): AgentR
     // The standalone `--instructions`/`--job` dark-factory path has no interactive
     // TUI/Web/server client attached — "none" per SessionClientKind's own doc comment.
     client: "none",
+    ...(resume ? { resume } : {}),
     onLogLine: (agentId, line) => logger.append(agentId, line),
   });
 }
@@ -541,12 +580,14 @@ function defaultDeps(): CliDeps {
       await Bun.write(path, contents);
     },
     createProvider,
+    loadResumeSession,
     // The standalone path's own runtime is always constructed with client: "none" directly
     // inside createStandaloneRuntime() (it's not one of the four interactive modes this
     // `client` param maps from), so the value passed here is intentionally unused.
-    createRuntime: (config, systemPrompt) => createStandaloneRuntime(config, systemPrompt),
-    createAgentLoop: (config, systemPrompt, client) =>
-      new AgentRuntimeLoopAdapter({ config, systemPrompt, client }),
+    createRuntime: (config, systemPrompt, _client, resume) =>
+      createStandaloneRuntime(config, systemPrompt, resume),
+    createAgentLoop: (config, systemPrompt, client, resume) =>
+      new AgentRuntimeLoopAdapter({ config, systemPrompt, client, ...(resume ? { resume } : {}) }),
     createServer: (options) => new DhServer(options),
     startTui: (baseUrl, token) => startTuiClient(baseUrl, token),
     serveWebUi: (options) => serveWebUiClient(options),
@@ -581,6 +622,41 @@ function fail(io: CliIo, message: string): ExitCodeType {
 }
 
 /**
+ * DH-0038: the synthetic wake-up message a `--resume`d root agent's conversation gets
+ * appended (D3) when no `--instructions` file supplies one instead. States plainly what
+ * happened (restart + reconstruction), names any sub-agent/task that didn't survive the
+ * restart (D3's "list lost in-flight sub-agents"), and flags the two things the replayed
+ * history can't fully vouch for: a dangling tool call's real outcome (D1's synthesized
+ * interrupted-tool_result marker covers the *shape*, not the truth) and any `[REDACTED:...]`
+ * placeholder standing in for a secret DH-0020's logging redaction stripped (D5) — re-read
+ * either from source if still needed, rather than trusting what's in the reconstructed text.
+ */
+export function buildResumeNotice(resumeResult: ResumeResult): string {
+  const lines = [
+    `dh: this session was resumed after a restart from session "${resumeResult.resumedFromSessionId}". The conversation above was reconstructed from that session's JSONL logs.`,
+  ];
+  if (resumeResult.lostAgents.length > 0) {
+    lines.push(
+      "The following sub-agents/tasks were still running or waiting when the restart " +
+        "happened and did not survive it — their in-flight work and any background process " +
+        "is gone; re-verify what they'd done and re-spawn them if the work still needs doing:",
+    );
+    for (const agent of resumeResult.lostAgents) {
+      const label = agent.description ? `${agent.agentId} (${agent.description})` : agent.agentId;
+      lines.push(`  - ${label} [${agent.status}]`);
+    }
+  }
+  lines.push(
+    "Any tool call the restart interrupted mid-execution is marked as such above, not as " +
+      "having completed successfully — its real outcome is unknown; verify before trusting or " +
+      'repeating it. Any "[REDACTED:...]" placeholder above stands in for a secret that ' +
+      "logging never wrote to disk — re-read the real value from its original source if you " +
+      "need it again.",
+  );
+  return lines.join("\n");
+}
+
+/**
  * Starts whichever of the four interactive run modes `mode` composes to and returns the
  * exit code to report (Success unless starting the mode itself fails — e.g. the requested
  * `--server`/`--connect` port is already in use, a harness-error class per ADR 0006, not a
@@ -607,6 +683,7 @@ async function runInteractiveMode(
   config: DhConfig,
   systemPrompt: string,
   deps: CliDeps,
+  resumeResult?: ResumeResult,
 ): Promise<ExitCodeType> {
   const { io } = deps;
   try {
@@ -632,7 +709,18 @@ async function runInteractiveMode(
     // depending on which client attaches to the DhServer this process also starts.
     const clientKind: SessionClientKind =
       mode.kind === "server" ? "server" : mode.web ? "web" : "tui";
-    const agentLoop = deps.createAgentLoop(config, systemPrompt, clientKind);
+    const agentLoop = deps.createAgentLoop(
+      config,
+      systemPrompt,
+      clientKind,
+      resumeResult
+        ? {
+            messages: resumeResult.messages,
+            fromSessionId: resumeResult.resumedFromSessionId,
+            model: resumeResult.model,
+          }
+        : undefined,
+    );
     const sessionId = randomUUID();
     const logsRoot = join(process.cwd(), ".dh-logs");
     // DH-0037: see createStandaloneRuntime's identical call above for the rationale.
@@ -646,6 +734,17 @@ async function runInteractiveMode(
       ...(config.security ? { security: config.security } : {}),
     });
     const boundPort = server.start();
+
+    // DH-0038: an interactive session doesn't wait for the operator's first message to start
+    // the root the way a fresh session does (no operator has attached yet when this runs) —
+    // a resumed root should pick up where it crashed off immediately, not sit idle in
+    // "waiting" for someone to notice and type something. Reuses the exact same lazy-start
+    // sendMessage() path a real operator's first message would take (AgentRuntimeLoopAdapter's
+    // doc comment) — from the loop's point of view this is indistinguishable from an operator
+    // kicking things off with the resume notice as their first message.
+    if (resumeResult) {
+      agentLoop.sendMessage(ROOT_AGENT_ID, buildResumeNotice(resumeResult));
+    }
 
     // DH-0011: this process owns real resources from here on (the DhServer's listening
     // socket, the AgentRuntime driving it) — exactly the "container receives SIGTERM on
@@ -932,8 +1031,37 @@ export async function main(
     return runDryRun(options, config, deps);
   }
 
+  // DH-0038: `--resume <sessionId>` — resolved once, up front, before branching into the
+  // standalone vs. interactive paths below (both need the same replayed history/model).
+  let resumeResult: ResumeResult | undefined;
+  if (options.resume !== null) {
+    // No wire command exists for delivering reconstructed history to a remote server (D3);
+    // the logs it would be reconstructed from live on that server's filesystem, not this
+    // process's, so there's nothing local to even read.
+    if (mode.kind === "connect") {
+      return fail(
+        io,
+        "--resume is not supported with --connect (logs live on the server's filesystem).",
+      );
+    }
+    try {
+      resumeResult = deps.loadResumeSession(join(process.cwd(), ".dh-logs"), options.resume);
+    } catch (err) {
+      return fail(io, `cannot resume session "${options.resume}": ${(err as Error).message}`);
+    }
+    // D3: an unresolvable model alias is a clean startup error, never a silent fallback to
+    // config.options.defaultModel — continuing an hours-long run on the wrong model would be
+    // far worse than refusing to start.
+    if (!config.models.some((m) => m.name === resumeResult?.model)) {
+      return fail(
+        io,
+        `cannot resume session "${options.resume}": model alias "${resumeResult.model}" from the original session no longer exists in this config; known models: ${config.models.map((m) => m.name).join(", ")}`,
+      );
+    }
+  }
+
   if (options.instructions === null) {
-    return runInteractiveMode(mode, config, systemPrompt, deps);
+    return runInteractiveMode(mode, config, systemPrompt, deps, resumeResult);
   }
 
   // Standalone dark-factory path: deliberately bypasses Server/TUI/Web entirely, even in
@@ -956,8 +1084,26 @@ export async function main(
   } catch (err) {
     return fail(io, (err as Error).message);
   }
+  // DH-0038: `--instructions` combined with `--resume` (D3) — the file's content becomes the
+  // post-resume message, appended after the standard resume notice (rather than replacing it),
+  // so the "restart happened, history was reconstructed, here's what didn't survive" context
+  // is never silently dropped just because the operator also supplied fresh instructions.
+  if (resumeResult) {
+    instructionText = `${buildResumeNotice(resumeResult)}\n\n${instructionText}`;
+  }
 
-  const runtime = deps.createRuntime(config, systemPrompt, "none");
+  const runtime = deps.createRuntime(
+    config,
+    systemPrompt,
+    "none",
+    resumeResult
+      ? {
+          messages: resumeResult.messages,
+          fromSessionId: resumeResult.resumedFromSessionId,
+          model: resumeResult.model,
+        }
+      : undefined,
+  );
 
   // DH-0011: the standalone `--instructions`/`--job` path is exactly the unattended
   // dark-factory scenario a container's SIGTERM/SIGINT can interrupt mid-run — best-effort

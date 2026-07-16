@@ -20,6 +20,7 @@ export { pruneLogDirectories, type PruneResult } from "./log-retention.ts";
 export {
   buildAgentLogTree,
   formatSessionLogTree,
+  readAgentLogLines,
   readSessionLogSummaries,
   type AgentLogSummary,
   type AgentLogTreeNode,

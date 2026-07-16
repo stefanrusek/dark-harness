@@ -13,6 +13,28 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentStatus, LogEvent, LogLine } from "../contracts/index.ts";
 
+/** DH-0038: generalizes the same tolerant JSONL parsing `summarizeFile` below uses so
+ * Core's `src/agent/resume.ts` (which needs full per-line event replay, not just a
+ * status/cost/duration summary) can reuse it instead of duplicating the "skip
+ * corrupt/truncated lines, don't fail the whole file" logic. Mirrors `SessionLogger.
+ * filePathFor`'s percent-encoding (`../logger.ts`) so this reads exactly the file a real
+ * `SessionLogger` for this `sessionDir` would have written for `agentId` — Server owns the
+ * on-disk layout (DH-0038's design doc, D7), so that encoding lives here, not duplicated in
+ * Core. Returns `[]` (not a throw) when the file doesn't exist at all — a missing
+ * individual agent file (e.g. a sub-agent that was spawned but never got a chance to log
+ * anything, or was pruned) is tolerated by every caller of this function, same policy as a
+ * corrupt line within a file that does exist. */
+export function readAgentLogLines(sessionDir: string, agentId: string): LogLine[] {
+  const path = join(sessionDir, `${encodeURIComponent(agentId)}.jsonl`);
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  return parseJsonlContent(content);
+}
+
 export interface AgentLogSummary {
   agentId: string;
   parentAgentId: string | null;
@@ -33,8 +55,7 @@ export interface AgentLogTreeNode extends AgentLogSummary {
   children: AgentLogTreeNode[];
 }
 
-function parseJsonlFile(path: string): LogLine[] {
-  const content = readFileSync(path, "utf8");
+function parseJsonlContent(content: string): LogLine[] {
   const lines: LogLine[] = [];
   for (const raw of content.split("\n")) {
     const trimmed = raw.trim();
@@ -47,6 +68,10 @@ function parseJsonlFile(path: string): LogLine[] {
     }
   }
   return lines;
+}
+
+function parseJsonlFile(path: string): LogLine[] {
+  return parseJsonlContent(readFileSync(path, "utf8"));
 }
 
 function summarizeFile(path: string): AgentLogSummary | undefined {

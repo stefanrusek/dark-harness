@@ -863,3 +863,80 @@ Hedy/E2E if the fleet wants a real-binary smoke test of these three modes specif
 Also had to fast-forward this round's worktree the same way prior rounds noted (branched
 before `claude/coordinator-onboarding-kab9ls` picked up all merged domain work) — same fix,
 same note for whoever hits it next.
+
+### 2026-07-15 — DH-0038 round 2: `--resume <sessionId>` crash-recovery mechanism
+
+Implemented the architect (Fable) design's full `--resume` mechanism (the message-fix half
+of DH-0038 was already merged from a prior round).
+
+- **`src/agent/resume.ts` (new)**: `loadResumeSession(logsRoot, sessionId)` — walks the
+  `resumedFrom` header chain oldest→newest (cycle detection + a 100-hop cap), folds each
+  hop's root-agent JSONL events into `ProviderMessage[]` per the design's D1 fold rules
+  (system-role lines skipped; a tool-call-only assistant turn opens its own message; a
+  dangling `tool_use` with no matching `tool_result` gets a synthesized `isError: true`
+  result — crash-mid-tool case), and returns the resolved model alias + non-terminal
+  sub-agent summaries (`lostAgents`, via Server's `readSessionLogSummaries`) for the resume
+  notice. Throws `ResumeError` for every D6 failure mode (missing directory, headerless/
+  corrupt-header root log, unsupported header version, sessionId mismatch, broken/cyclic
+  chain) — `src/cli.ts` catches it and routes through the standard `fail()` path.
+- **Server boundary crossing (flagging for Radia's review)**: per the design's D7 ("Server
+  support only: export a reusable raw-log reader"), I added `readAgentLogLines(sessionDir,
+  agentId): LogLine[]` to `src/server/log-analysis.ts` myself (generalizing the existing
+  private `parseJsonlFile` into a `parseJsonlContent`/`parseJsonlFile` split, reused by both
+  the new export and the existing `summarizeFile`) and exported it from `src/server/
+  index.ts`, since no Server-domain round for this existed yet to unblock Core's work on.
+  Mechanical, spec-matching, and covered at 100% by new tests in `log-analysis.test.ts` —
+  but it's still a cross-boundary edit into Radia's directory, worth her eyeballing.
+- **`src/contracts/log.ts`**: added `LogHeader.resumedFrom?: { sessionId: string }` —
+  additive/optional, architect-signed by the design doc itself, no header version bump.
+- **`src/agent/loop.ts`**: `AgentLoopParams.resume?: { messages, fromSessionId }`. When
+  present, `messages` seeds from the replayed history instead of starting empty, and the
+  wake-up `params.instruction` is applied via a trailing-role merge (appended into the last
+  message if it's already `role: "user"`, else pushed as a new message) — this is the same
+  code path whether or not `resume` is set, so the non-resume case is provably unchanged
+  (empty history always takes the "push new message" branch). Header gets `resumedFrom`
+  when resuming.
+- **`src/agent/runtime.ts`**: `AgentRuntimeOptions.resume?: { messages, fromSessionId,
+  model }`. `runRoot()`'s model resolution is `modelName ?? this.resume?.model ?? config.
+  options.defaultModel` — an explicit argument always wins, otherwise a resumed session
+  defaults to the *original* alias rather than the config default, so a resume can never
+  silently switch models. Sub-agents (`spawnAgent()`) never receive `resume` — v1 scope is
+  root-only per the design.
+- **`src/cli.ts`**: `--resume <sessionId>` flag; rejected under `--connect` (no wire command
+  exists, logs live on the server's own filesystem); loaded once up front via injectable
+  `deps.loadResumeSession` and validated against the *current* config's models (unresolvable
+  alias is a clean `fail()`, never a silent fallback — judgment call matched exactly to the
+  design's explicit instruction). Composes with both paths: `--instructions` + `--resume`
+  prepends the resume notice to the file's content as the standalone runtime's seeded
+  instruction; `--resume` alone (interactive local/server mode) auto-kicks the resumed root
+  immediately after the server starts by calling `agentLoop.sendMessage(ROOT_AGENT_ID,
+  noticeText)` — reusing the exact same lazy-start path a real operator's first message
+  would take, rather than adding a new wake-up mechanism. `buildResumeNotice()` names the
+  prior session, lists non-terminal sub-agents/tasks that didn't survive, and always
+  mentions dangling-tool-call/`[REDACTED:...]` caveats per D3/D5.
+- **New session, new directory (D4)**: unchanged from the design — a resumed run always
+  gets a fresh `sessionId`/`.dh-logs/<newId>/` via the existing `createStandaloneRuntime`/
+  interactive-mode session creation paths; I only added `resume` as an extra thing those
+  paths thread through, never touched `SessionLogger` itself.
+
+**Judgment calls flagged, not escalated** (none seemed to cross an actual invariant/ADR
+line, but noting for the record): (1) the interactive-mode auto-kick via `sendMessage()`
+right after `server.start()` — the design doesn't spell out exactly how a resumed
+interactive root should start without an operator's first message, so I picked the option
+that reuses existing machinery instead of inventing a new one; (2) `readAgentLogLines`
+living in Server's directory rather than duplicated in Core, per D7's explicit assignment,
+even though no Radia round did it first.
+
+**Gates:** typecheck/lint clean. `bun run test:coverage`: 1245 pass, 0 fail; every new/
+changed file (`src/agent/resume.ts`, `src/server/log-analysis.ts`, `src/cli.ts`, `src/agent/
+loop.ts`, `src/agent/runtime.ts`) at 100% lines (the usual pre-existing inline-arrow-func
+bun-coverage quirk accounts for the non-100 `% Funcs` figures, not a real gap — same
+footnote every prior round has made). `bun run e2e`: 27 pass, 5 fail — confirmed via `git
+stash -u`/re-run that all 5 are pre-existing and identical with this round's changes
+stashed out (headless Chromium missing at `/opt/pw-browsers/chromium`, TUI/tmux PTY
+timeouts in this sandbox). Did not add new e2e coverage for `--resume` itself (per the
+design's own sequencing, that's Hedy/E2E's follow-up, after a real crash-kill-resume cycle
+against the mock provider) — flagging as the natural next step.
+
+Also had to fast-forward this round's worktree again, same symptom/fix as every prior round
+has noted (worktree branched before the coordinator branch's current tip existed).

@@ -43,6 +43,14 @@ export interface LogHeader {
    * one) and for any sub-agent spawned without it — readers must tolerate its absence exactly
    * like any other optional header field. */
   description?: string;
+  /** DH-0038 (tracking/DH-0038-no-crash-recovery-or-session-resume.md), architect-signed
+   * additive header field: present iff this agent's conversation was reconstructed via
+   * `--resume <sessionId>` — names the session directory it continued from. Only ever set
+   * on a root agent's header (resume is root-only in v1 — see `src/agent/resume.ts`'s doc
+   * comment); absent on every sub-agent header, every non-resumed root, and every header
+   * written before this field existed. Additive/optional — readers tolerate absence exactly
+   * like `description`, no header version bump. */
+  resumedFrom?: { sessionId: string };
 }
 
 export interface LogEventBase {
