@@ -147,7 +147,6 @@ function wrapLineByWords(line: string, width: number): string[] {
       curWidth += tokenWidth;
       continue;
     }
-    justWrapped = false;
     if (tokenWidth > width) {
       // Token alone exceeds a full row: flush what's pending, then hard-break just this token.
       if (cur.length > 0) flush();
@@ -155,11 +154,25 @@ function wrapLineByWords(line: string, width: number): string[] {
       for (let i = 0; i < broken.length - 1; i++) rows.push(broken[i] as string);
       cur = broken[broken.length - 1] ?? "";
       curWidth = stringWidth(cur);
+      // Any `flush()` call above unconditionally sets `justWrapped = true`, but a non-space
+      // token always leaves real content on the current row afterward (`cur` here is the
+      // hard-broken token's non-empty tail) — only a bare "just wrapped to an empty row"
+      // state should suppress the *next* token's leading whitespace. Resetting this only at
+      // the top of the non-space branch (the original approach) doesn't survive a `flush()`
+      // called later in the same iteration; setting it last, after content is placed, does
+      // (DH-0065 bug: without this, a token right after a hard-broken word silently lost its
+      // following space — "hi abcdef ghi" at width 5 glued "f" to "ghi" into "fghi").
+      justWrapped = false;
       continue;
     }
     if (curWidth + tokenWidth > width) flush();
     cur += token;
     curWidth += tokenWidth;
+    // See the comment in the `tokenWidth > width` branch above — same fix, same reason:
+    // this token just added real content, so any stale `justWrapped` from `flush()` above
+    // must not suppress a following space (DH-0065 bug: "aaa bbb cc" at width 5 glued
+    // "bbb" and "cc" into "bbbcc").
+    justWrapped = false;
   }
   if (cur.length > 0 || rows.length === 0) rows.push(cur.replace(/\s+$/, ""));
   return rows;

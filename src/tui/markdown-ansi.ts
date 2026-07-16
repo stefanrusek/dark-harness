@@ -166,7 +166,6 @@ function wrapSegments(line: Segment[], cols: number): string[] {
       rowWidth += tokenWidth;
       continue;
     }
-    justWrapped = false;
     if (tokenWidth > width) {
       // Token alone exceeds a full row: flush what's pending, then hard-break just this token.
       if (rowParts.length > 0) flushRow();
@@ -185,11 +184,23 @@ function wrapSegments(line: Segment[], cols: number): string[] {
       }
       pushPart(cur, token.codes);
       rowWidth = curWidth;
+      // Any `flushRow()` call above unconditionally sets `justWrapped = true`, but a
+      // non-space token always leaves real content on the current row afterward (`cur` here
+      // is the hard-broken token's non-empty tail) — only a bare "just wrapped to an empty
+      // row" state should suppress the *next* token's leading whitespace. Resetting this
+      // only at the top of the non-space branch (the original approach) doesn't survive a
+      // `flushRow()` called later in the same iteration; setting it last, after content is
+      // placed, does (DH-0065 bug: without this, a token right after a hard-broken word
+      // silently lost its following space, e.g. "...aaa\nexerciseword wrapping" instead of
+      // "exercise word").
+      justWrapped = false;
       continue;
     }
     if (rowWidth + tokenWidth > width) flushRow();
     pushPart(token.text, token.codes);
     rowWidth += tokenWidth;
+    // See the comment in the `tokenWidth > width` branch above — same fix, same reason.
+    justWrapped = false;
   }
   trimTrailingWhitespace(rowParts);
   rows.push(serializeRow(rowParts));
@@ -232,7 +243,13 @@ function renderBlock(block: BlockNode, cols: number): string[] {
     case "paragraph":
       return renderInlineBlock(block.children, [], cols);
     case "heading": {
-      const codes: readonly string[] = block.level === 1 ? [SGR.bold, SGR.underline] : [SGR.bold];
+      // DH-0065: h2+ used to be byte-identical to inline bold body text ([SGR.bold] only),
+      // which the review flagged directly ("captured h2 'What changed' is byte-identical
+      // styling to bold body text"). h1 keeps its existing bold+underline treatment; h2+ now
+      // additionally carries cyan — already an allowlisted color (used for inline code) — so
+      // any heading is visually distinguishable from bold prose at a glance.
+      const codes: readonly string[] =
+        block.level === 1 ? [SGR.bold, SGR.underline] : [SGR.bold, SGR.cyan];
       return renderInlineBlock(block.children, codes, cols);
     }
     case "codeBlock": {

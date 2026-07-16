@@ -6,7 +6,7 @@ import type { AgentStatus } from "../contracts/index.ts";
 import { parseMarkdown, sanitizeText } from "../markdown/index.ts";
 import { renderMarkdownRows } from "./markdown-ansi.ts";
 import { flattenTree } from "./tree.ts";
-import type { AgentInfo, TuiState, Turn } from "./types.ts";
+import type { AgentInfo, ConnectionStatus, TuiState, Turn } from "./types.ts";
 import { wrapText } from "./width.ts";
 
 export { wrapText } from "./width.ts";
@@ -37,6 +37,38 @@ export function colorizeStatus(status: AgentStatus, text: string): string {
   return `${STATUS_COLOR[status]}${text}${RESET}`;
 }
 
+// DH-0065: chrome styling — header/footer/heading had "zero deliberate styling choices"
+// per the review. Kept deliberately minimal (bold app name, colored connection pill, dim
+// secondary info) rather than decorative; every code used here (1 bold, 2 dim, 32/33/31/90
+// colors) is already emitted elsewhere in this file/module, so no new SGR class is
+// introduced.
+const BOLD = "\x1b[1m";
+const DIM = "\x1b[2m";
+const CONNECTION_COLOR: Record<ConnectionStatus, string> = {
+  open: "\x1b[32m",
+  connecting: "\x1b[33m",
+  error: "\x1b[31m",
+  closed: "\x1b[90m",
+};
+
+function dim(text: string): string {
+  return `${DIM}${text}${RESET}`;
+}
+
+// DH-0065 liveness: a braille spinner shown in the header whenever the root agent's own
+// status is "running" — distinct from `rootActive` (which, once true, never resets; see
+// its doc comment in types.ts) and from the tree/agent view's elapsed counter, neither of
+// which give any "still alive" signal on the always-visible root view during a long turn.
+// Advances off `state.now`, which only moves via the reducer's `tick` action, so this stays
+// a pure function of state (no wall-clock reads inside the render layer).
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_FRAME_MS = 120;
+
+function spinnerFrame(now: number): string {
+  const index = Math.floor(now / SPINNER_FRAME_MS) % SPINNER_FRAMES.length;
+  return SPINNER_FRAMES[index] as string;
+}
+
 /** Format a non-negative millisecond duration as a short human-readable elapsed string
  * (`"0s"`, `"12s"`, `"1m05s"`, `"2h03m"`) — the liveness indicator shown per agent in the
  * tree/agent views (Round 5, docs/handoffs/tui.md). Negative input (a clock that hasn't
@@ -62,7 +94,6 @@ export function formatElapsed(ms: number): string {
 // allowlist constraint.
 const USER_ROLE_SGR = "\x1b[1;33m"; // bold yellow — matches the input box's own "> " marker
 const AGENT_ROLE_SGR = "\x1b[36m"; // cyan — pairs with the tree view's "●" status-glyph language
-const DIM = "\x1b[2m"; // dim — DH-0056 D3 allowlist code 2, kept visually subordinate to text
 const TRANSCRIPT_GUTTER_COLS = 2; // "> ", "● ", and "⚙ " are all exactly 2 visual columns
 const TRANSCRIPT_CONT_GUTTER = "  "; // continuation rows: aligned blank indent, no marker
 
@@ -144,9 +175,19 @@ function headerRows(state: TuiState, cols: number): string[] {
   // tree/agent view when it fires.
   const reconnectSuffix = state.reconnectNotice ? `  ⚠ ${state.reconnectNotice}` : "";
   const totals = sessionTokenTotals(state);
-  const totalsSuffix = `  —  ${formatTokenCost(totals.inputTokens, totals.outputTokens, totals.costUsd)}`;
-  const title = `Dark Harness — ${viewLabel(state)} — ${state.connection}${totalsSuffix}${sessionSuffix}${reconnectSuffix}`;
-  const separator = "─".repeat(Math.max(1, cols));
+  const totalsSuffix = dim(
+    `  —  ${formatTokenCost(totals.inputTokens, totals.outputTokens, totals.costUsd)}`,
+  );
+  const appName = `${BOLD}Dark Harness${RESET}`;
+  const connection = `${CONNECTION_COLOR[state.connection]}${state.connection}${RESET}`;
+  // DH-0065 liveness: a spinner next to the connection pill whenever the root agent is
+  // actively "running" — the root view otherwise gives no live sign the agent is thinking
+  // during a long turn (only the tree/agent view's elapsed counter did).
+  const rootAgentInfo = state.rootAgentId ? (state.agents.get(state.rootAgentId) ?? null) : null;
+  const spinnerSuffix =
+    rootAgentInfo?.status === "running" ? `  ${spinnerFrame(state.now)} working…` : "";
+  const title = `${appName} — ${viewLabel(state)} — ${connection}${spinnerSuffix}${totalsSuffix}${sessionSuffix}${reconnectSuffix}`;
+  const separator = dim("─".repeat(Math.max(1, cols)));
   return [title, separator];
 }
 
@@ -195,7 +236,7 @@ function renderRoot(
   const content = agent
     ? tailLines(renderTranscript(agent.transcript, cols), contentRows)
     : tailLines(["Waiting for root agent to start…"], contentRows);
-  const hint = state.statusMessage ?? "[Enter] send   [←] agent tree   [Ctrl+C] quit";
+  const hint = state.statusMessage ?? dim("[Enter] send   [←] agent tree   [Ctrl+C] quit");
   // Cursor marker renders at `inputCursor`, not always at the end (DH-0026 added in-text
   // cursor movement). Embedded newlines from a bracketed-paste (DH-0026) are shown as a
   // visible "⏎" glyph on this one-line display only — the underlying `state.input` keeps the
@@ -216,28 +257,37 @@ function renderTree(
   if (flat.length === 0) {
     return {
       content: padRows(["No agents yet."], contentRows),
-      footer: [state.statusMessage ?? "[↑/↓] navigate   [Enter] open   [Esc] back"],
+      footer: [state.statusMessage ?? dim("[↑/↓] navigate   [Enter] open   [Esc] back")],
     };
   }
   const entryTexts = flat.map((entry, index) => {
     const marker = index === selectedIndex ? "> " : "  ";
-    const indent = "  ".repeat(entry.depth);
     const glyph = colorizeStatus(entry.node.status, "●");
+    // DH-0065: the status glyph is never the only cue — color-blind operators can't rely on
+    // it, so the status word itself is always shown too (same color as the glyph, but legible
+    // regardless of color perception).
+    const statusWord = colorizeStatus(entry.node.status, entry.node.status);
     // DH-0069: prefer the Agent tool's `description` — a human-readable label ("Fix flaky
     // retry test") instead of a raw agentId/UUID — falling back to the old `agentId (model)`
     // format only when it's absent (the root agent, which never has one, or a pre-DH-0069
     // session logged before description became required).
     const label = entry.node.description ?? `${entry.node.agentId} (${entry.node.model})`;
     const trackedAgent = state.agents.get(entry.node.agentId);
+    // DH-0065: elapsed is only meaningful — and only shown — while the agent is still
+    // active (running/waiting): "time in current status", using `statusSince` rather than
+    // `lastEventAt`. For a terminal agent (done/failed/stopped) this counter used to keep
+    // ticking up forever alongside every render tick, which reads as "stuck"; terminal rows
+    // simply omit it now rather than show a static-but-still-wrong number.
+    const isActive = entry.node.status === "running" || entry.node.status === "waiting";
     const elapsed =
-      trackedAgent === undefined
+      trackedAgent === undefined || !isActive
         ? ""
-        : `  [${formatElapsed(state.now - trackedAgent.lastEventAt)}]`;
+        : `  [${formatElapsed(state.now - trackedAgent.statusSince)}]`;
     const tokens =
       trackedAgent === undefined
         ? ""
         : `  ${formatTokenCost(trackedAgent.inputTokens, trackedAgent.outputTokens, trackedAgent.costUsd)}`;
-    return `${marker}${indent}${glyph} ${label}${elapsed}${tokens}`;
+    return `${marker}${entry.prefix}${glyph} ${statusWord}  ${label}${elapsed}${tokens}`;
   });
   // Wrap each entry independently (rather than the old approach of wrapping the whole
   // joined string) so the start line of every entry is known — needed to compute a
@@ -279,7 +329,7 @@ function renderAgent(
       `   Last event: ${formatElapsed(state.now - agent.lastEventAt)} ago` +
       `   ${formatTokenCost(agent.inputTokens, agent.outputTokens, agent.costUsd)}`
     : "Model: (unknown)";
-  const hint = state.statusMessage ?? `${meta}   —   [Esc] back to root (read-only)`;
+  const hint = state.statusMessage ?? `${meta}   —   ${dim("[Esc] back to root (read-only)")}`;
   return { content: padRows(content, contentRows), footer: [hint] };
 }
 
