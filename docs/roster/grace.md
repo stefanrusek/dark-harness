@@ -1087,3 +1087,59 @@ refused paths outside it), same workaround prior rounds documented.
 - Gates: typecheck/lint clean; `bun test src --coverage`: 1390 pass, 0 fail, 100% on
   `runtime.ts`. `bun run e2e`: 30 pass, 2 fail — same pre-existing headless-Chromium-
   unavailable-in-sandbox failures prior rounds have footnoted, unrelated to this change.
+
+### 2026-07-16 — DH-0077 (Agent worktree isolation) + DH-0078 (SendMessage/Monitor name addressing), both closed
+
+Hit the exact stale-worktree-plus-shared-checkout-race hazard documented in the last two
+entries, twice over in this one session: `.claude/worktrees/agent-a05fb2b89e9fed638`
+(assigned to me) was branched before `src/` even existed — same recurring bug. Went straight
+to the shared checkout (`/Users/stefanrusek/Code/dark-harness` on
+`claude/coordinator-onboarding-kab9ls`) via `Bash` (Edit/Write refuse paths outside the
+broken worktree). Lost a full round of uncommitted edits (agent.ts/types.ts/runtime.ts/
+worktree.ts) to a concurrent agent's merge once already, then lost a second round of
+uncommitted *test* edits (agent.test.ts/send-message.test.ts/monitor.test.ts/
+runtime.test.ts/resolve-task.ts) to another concurrent merge a few minutes later — a `git
+merge` landing mid-edit silently overwrites uncommitted changes to any file the merge also
+touches, no conflict, no warning. Redid both losses from scratch and committed immediately
+after each (implementation first, tests in an immediate follow-up commit) rather than trying
+to batch everything into one giant edit — the tighter the write-verify-commit loop, the
+smaller the window a concurrent merge can land in. Worth escalating again: this is now (at
+least) the fourth documented occurrence of the stale-worktree-provisioning bug across
+DH-0069/DH-0070/DH-0077/DH-0078 rounds, plus a second confirmed instance of the
+uncommitted-changes-clobbered-by-concurrent-merge race — both feel like they deserve their
+own tracked tickets rather than living only in roster prose if they haven't already been
+filed.
+
+- **DH-0077**: `Agent` tool (`src/agent/tools/agent.ts`) gains an `isolation: "worktree"`
+  param. `src/agent/worktree.ts` (new) wraps `git worktree add`/`status --porcelain`/`rev-
+  parse HEAD`/`worktree remove`/`branch -D` synchronously (`execFileSync`) — deliberately
+  synchronous so `runtime.ts`'s `spawnAgent()` didn't have to become async just for this one
+  mode (would have forced every existing sync call site/test — `expect(() =>
+  runtime.spawnAgent(...)).toThrow()` — to change shape). `AgentRuntime` tracks
+  `agentWorktree`/`liveWorktreeCount` alongside the existing `agentCwd`/`liveAgentCount`
+  maps; worktree creation is validated and performed synchronously inside `spawnAgent()`
+  itself (refuses — explicit `Error`, not silent no-op — when the parent's cwd isn't a git
+  repo, or when the worktree budget, tied to `options.maxConcurrentAgents` with a built-in
+  default of 4 when that's unset, is exceeded), so a bad request fails exactly like the
+  existing `maxAgentDepth`/`maxConcurrentAgents` checks rather than only failing once the
+  sub-agent's task starts running. Cleanup/hand-off happens in the task's `run` `finally`
+  block: a clean worktree is removed automatically; a dirty one is left in place with its
+  path/branch appended to the sub-agent's own output (so Monitor/TaskOutput/the Agent tool's
+  blocking result all surface it to the dispatching agent). Deliberately did **not** add a
+  new `dh.json` field for the worktree budget — reused the existing `maxConcurrentAgents`
+  knob per the ticket's own suggestion, keeping this entirely a Core-internal change with no
+  `src/contracts/` edit needed.
+- **DH-0078**: `src/agent/tools/resolve-task.ts` (new) is the shared name-or-id resolution
+  used by both `SendMessage` (mutually-exclusive `task_id`/`name` params) and `Monitor`
+  (`task_ids`/`names` arrays, resolved independently so a bad name in one entry doesn't fail
+  the whole call). Chose **hard error on ambiguity** (lists every matching task id, tells the
+  caller to use `task_id` instead) over "most recent wins" — matches the read-before-write
+  "error rather than guess" precedent already used elsewhere in this codebase (Edit's
+  read-guard). Name resolution is scoped to the calling agent's own spawned tasks
+  (`parentAgentId === ctx.agentId`), not a global namespace, per the ticket's own Assumptions.
+- Gates: typecheck/lint clean; `bun test src --coverage`: 1456 pass, 0 fail, 100% on every
+  changed/new file (`runtime.ts`, `worktree.ts`, `tools/agent.ts`, `tools/types.ts`,
+  `tools/monitor.ts`, `tools/send-message.ts`, `tools/resolve-task.ts` all 100/100). `bun run
+  e2e`: 30 pass, 2 fail — same pre-existing headless-Chromium-unavailable-in-sandbox failures
+  prior rounds have footnoted, unrelated to this change. Both tickets closed via
+  `spile-ops`/`transition.py` (`resolution: done`).

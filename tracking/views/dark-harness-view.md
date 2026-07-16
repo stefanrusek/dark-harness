@@ -76,8 +76,6 @@ source: tracking/
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | feature | stefan |
-| [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | feature | stefan |
-| [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | feature | stefan |
 
 ### implementing
 
@@ -109,9 +107,9 @@ source: tracking/
 | [DH-0081](../DH-0081-read-tool-has-no-pdf-support-at-all-needs-text-extraction-added-then-pagination.md) | Read tool has no PDF support at all — needs text extraction added, then pagination | done |
 | [DH-0080](../DH-0080-bash-output-capping-shape-diverges-from-real-claude-code-tail-cut-inline-notice-vs-head-preview-plus-saved-file.md) | Bash output-capping shape diverges from real Claude Code: tail-cut inline notice vs head-preview-plus-saved-file | done |
 | [DH-0079](../DH-0079-read-tool-s-truncation-model-diverges-from-real-claude-code-line-cap-notice-vs-byte-cap-hard-error.md) | Read tool's truncation model diverges from real Claude Code: line-cap+notice vs byte-cap+hard-error | done |
+| [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | done |
+| [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | done |
 | [DH-0073](../DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness-and-there-is-no-notebookedit-equivalent.md) | Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent | done |
 | [DH-0072](../DH-0072-grep-tool-likely-missing-context-line-flags-multiline-mode-and-file-type-filter-that-real-claude-code-s-grep-supports.md) | Grep tool likely missing context-line flags, multiline mode, and file-type filter that real Claude Code's Grep supports | done |
 | [DH-0070](../DH-0070-bash-tool-s-fresh-shell-per-call-semantics-diverge-from-claude-code-s-persistent-cwd-behavior.md) | Agents don't have their own separate working-directory state | done |
 | [DH-0069](../DH-0069-agent-tool-s-description-should-be-required-and-the-tree-ui-should-actually-use-it.md) | Agent tool's description should be required, and the tree UI should actually use it | done |
-| [DH-0067](../DH-0067-server-mode-operator-ux-startup-summary-runtime-activity-feed-cli-output-polish.md) | Server-mode operator UX: startup summary, runtime activity feed, CLI output polish | done |
-| [DH-0064](../DH-0064-e2e-web-test-ts-and-connect-web-test-ts-assert-a-stale-agent-output-selector.md) | e2e/web.test.ts and connect-web.test.ts assert a stale .agent-output selector | done |
