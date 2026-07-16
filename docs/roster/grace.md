@@ -1512,3 +1512,63 @@ now five distinct lines, each a complete, readable thought, no more single-wall-
 Committed in two small, single-purpose commits (fix; ticket close) rather than one, since the
 close is a tracking-file-only change with no code coupling to the fix commit. Closed DH-0098
 (`transition.py DH-0098 closed --resolution done`).
+
+### 2026-07-16 — Round 15 (dh doctor: live per-model progress on a TTY, DH-0099)
+
+Came online fresh this round, no memory beyond this file's log — read it plus DH-0099's full
+ticket body before touching `runDoctor` in `src/cli.ts`. The ticket itself was precise (three
+visual states — pending/checking/resolved, TTY-gated, sequential-only, non-TTY untouched), so
+this was mostly a faithful-implementation round rather than a design round.
+
+**Design call: extract `formatDoctorRow`/`formatDoctorPendingRow` as shared helpers rather
+than duplicating row-rendering logic between the live TTY path and `formatDoctorReport`'s
+final-summary path.** `formatDoctorReport` used to build its rows via an inline map lambda;
+I pulled that into a named `formatDoctorRow(r, nameWidth, color)` so the live per-row
+`\r\x1b[K` rewrite and the eventual non-TTY dump agree pixel-for-pixel on alignment/coloring
+instead of risking two subtly different renderings of "PASS/FAIL" drifting apart over time.
+`nameWidth` is computed once up front from `config.models` (not from `results`, which grows
+incrementally) so the pending row's padding already matches the final column width before any
+result exists.
+
+**TTY gating placement:** `runDoctor` computes `isTTY = process.stdout.isTTY === true` once
+and branches the whole loop body on it — pending row + in-place rewrite via raw
+`process.stdout.write` when true; completely silent accumulation (identical to pre-ticket
+behavior) when false, with the full report printed once via the existing `io.stdout` path
+only in the non-TTY branch. This means the TTY path bypasses `io.stdout` entirely for
+per-row output (real terminal control codes have no equivalent in the injectable `CliIo`
+abstraction, which is just `console.log`/a line array in tests) — the only thing routed
+through `io` on a TTY run now is `io.exit`. Verified explicitly that `io.stdoutLines` stays
+empty in the TTY-path tests specifically to prove the report isn't doubly printed.
+
+**Testing the TTY path:** no prior test in this file mocked `process.stdout.isTTY`/`.write` —
+added a scoped `describe` block that monkeypatches `isTTY` via
+`Object.defineProperty`+restore and spies on `process.stdout.write` (`beforeEach`/`afterEach`),
+asserting the exact byte sequence (`\r\x1b[K`, pending text present before the provider call
+resolves, final summary line) rather than just "some write happened." The provider's mock
+`complete()` itself asserts the pending row already landed before resolving, which is the
+sharpest way to prove "starts immediately, before the result" rather than just checking final
+write-call ordering after the fact.
+
+**Real-terminal verification (per the ticket's explicit ask, not just a unit-test check):**
+built the real binary, ran `dh init` into a scratch dir to get a real 13-model config
+(the DH-0096 scaffold), filled in a deliberately-invalid `ANTHROPIC_API_KEY` and a
+`LOCAL_AI_PROVIDER=http://localhost:1` (no real AWS creds either), and ran `dh doctor` under
+`script -q` to capture a real PTY session to a file, then inspected the raw bytes with `xxd`.
+Confirmed the exact intended sequence per row: dim `....` + padded name + "checking... (query
+sent)", then literally `0d 1b 5b 4b` (`\r\x1b[K`) immediately followed by the colored
+`FAIL`/verdict + full detail + `\n` — no stray leftover characters, no misaligned padding
+(padding computed from the full model list up front, so pending and resolved rows always
+share one width). Also re-ran the same command piped through `cat` and again with stderr
+piped to `/dev/null` to confirm the non-TTY path is unchanged: plain single-print text, no
+`\r`/ANSI bytes, one line per model plus the summary, same 14-line total as before this round.
+
+**Gates:** `bun run typecheck` and `bun run lint` clean (one `biome check --write` pass needed
+to reformat a multi-line `expect(...)` call in the new test). `bun run test:coverage`: 1699
+pass, 0 fail, every touched line 100% covered — the only `src/cli.ts` shortfall
+(`AgentRuntimeLoopAdapter.listModels`/`switchModel`/`listSkills`, lines 554/558/562) is
+pre-existing and unrelated, confirmed unchanged by diffing coverage output against a
+`git stash` of this round's own diff before assuming it was mine.
+
+Closed DH-0099 (`transition.py DH-0099 closed --resolution done`) after all verification above.
+Committed the code+test change separately from the ticket-close/tracking-view update, same
+convention as Round 14's DH-0098 close.
