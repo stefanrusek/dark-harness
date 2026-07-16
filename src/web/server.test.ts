@@ -52,6 +52,24 @@ describe("serveWebUi", () => {
     }
   });
 
+  describe("DH-0110: bundled asset chunks referenced by the rendered page actually resolve", () => {
+    test("every asset path referenced in the rendered HTML (script src / link href) resolves 200, not 404", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
+      const indexRes = await fetch(handle.url);
+      const body = await indexRes.text();
+      const assetPaths = [...body.matchAll(/(?:src|href)="(\/[^"]+\.(?:js|css))"/g)]
+        .map((m) => m[1])
+        .filter((path): path is string => path !== undefined);
+      expect(assetPaths.length).toBeGreaterThan(0);
+      for (const path of assetPaths) {
+        const res = await fetch(new URL(path, handle.url));
+        expect(res.status).toBe(200);
+        expect(res.headers.get("x-frame-options")).toBe("DENY");
+        expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      }
+    });
+  });
+
   describe("DH-0023: clickjacking headers", () => {
     test("X-Frame-Options and CSP frame-ancestors are present on the served page", async () => {
       handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });

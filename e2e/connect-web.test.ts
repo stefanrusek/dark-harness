@@ -7,20 +7,20 @@
 // mitigation), then a separate `dh --connect <host> --port <n> --web` process pointed at it,
 // driven with the same pre-installed Chromium.
 //
-// NOT RUN IN EVERY SANDBOX: like `e2e/web.test.ts`, this needs a real Chromium binary at
-// `/opt/pw-browsers/chromium` (see that file's header for the playwright-core pinned-revision
-// note). Environments without it (no `PLAYWRIGHT_BROWSERS_PATH`/no Chromium installed) can't
-// run this test — that's a sandbox-tooling gap, not a defect in this test or in `--connect
-// --web` itself.
+// NOT RUN IN EVERY SANDBOX: like `e2e/web.test.ts`, this needs a real Chromium binary,
+// resolved via `resolveChromiumExecutable` (DH-0066: was hardcoded to the CI sandbox's
+// pre-installed `/opt/pw-browsers/chromium` with no fallback; the resolver also checks
+// playwright's own download and the local playwright browser cache). Environments with no
+// Chromium anywhere still can't run this test — that's a sandbox-tooling gap, not a defect
+// in this test or in `--connect --web` itself.
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { resolveChromiumExecutable } from "./spikes/web/support.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
 import { startDhServer } from "./support/port.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
-
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium";
 
 const cleanups = createCleanupRegistry();
 afterEach(() => cleanups.runAll());
@@ -65,7 +65,8 @@ describe("--connect --web: a real web client process against a real remote dh --
     // one — src/cli.ts's connect-mode ready message names the remote target explicitly.
     expect(stdout).toContain(`connected to http://localhost:${port}`);
 
-    const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+    const executablePath = await resolveChromiumExecutable();
+    const browser = await chromium.launch({ executablePath, headless: true });
     cleanups.addProcess(() => browser.close());
     const context = await browser.newContext();
     const page = await context.newPage();

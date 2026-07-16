@@ -1,9 +1,11 @@
 // Headless browser e2e for the web UI (docs/handoffs/e2e.md scope item 4): spawns the real
-// compiled `dh --web` process and drives the served UI with the pre-installed Chromium
-// (PLAYWRIGHT_BROWSERS_PATH points at /opt/pw-browsers; the pinned playwright-core in
-// package.json resolves to chromium revision 1228, while the pre-installed browser is
-// revision 1194, so this launches with an explicit `executablePath` per this session's
-// operating instructions rather than the version-matched default path).
+// compiled `dh --web` process and drives the served UI with a real Chromium resolved via
+// `resolveChromiumExecutable` (DH-0066: was hardcoded to the CI sandbox's pre-installed
+// `/opt/pw-browsers/chromium` with no fallback, so this test could never run in a sandbox
+// without that exact path even when a perfectly usable Chromium was available elsewhere —
+// e.g. a dev machine's own playwright cache). The resolver tries that CI path first, then
+// falls back to playwright's own version-matched download, then any revision present in
+// the local playwright browser cache.
 //
 // FIXED DEFECT (originally found by this real-browser test — see docs/handoffs/web.md's
 // Round 2 status log and docs/handoffs/e2e.md): the web client's composer never rendered
@@ -23,12 +25,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
+import { resolveChromiumExecutable } from "./spikes/web/support.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
-
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium";
 
 const cleanups = createCleanupRegistry();
 afterEach(() => cleanups.runAll());
@@ -47,7 +48,8 @@ describe("web UI (dh --web) in a real headless browser", () => {
     const webUrl = /web UI ready at (\S+)\./.exec(stdout)?.[1];
     if (!webUrl) throw new Error(`could not parse web UI URL from stdout: ${stdout}`);
 
-    const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true });
+    const executablePath = await resolveChromiumExecutable();
+    const browser = await chromium.launch({ executablePath, headless: true });
     cleanups.addProcess(() => browser.close());
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();

@@ -57,49 +57,87 @@ function withSecurityHeaders(response: Response): Response {
   });
 }
 
-// Judgment call (DH-0023): Bun's HTML-bundle rendering (module/asset discovery, hashing,
-// inlining for a compiled binary) only happens through its own route-matching machinery —
-// passing `indexHtml` as a route value is the *only* documented way to get it, and there is
-// no public API to invoke that rendering directly and get back a plain `Response` to attach
-// headers to (confirmed: wrapping it in `new Response(indexHtml)` serializes to the literal
-// string "[object HTMLBundle]", not the page). A throwaway loopback-only inner server exists
-// purely to make Bun do that rendering once; the resulting bytes (with our security headers
-// layered on) are cached and reused for every real request afterward — a one-time cost per
-// process, not per request. Skipped when `development` is on (HMR should reflect live edits,
-// so this renders fresh — and un-cached — every time in that mode).
-// biome-ignore lint/suspicious/noExplicitAny: see the cast note inside render() below
-let cachedIndexResponse: Promise<any> | undefined;
+// Judgment call (DH-0023, revised DH-0110): Bun's HTML-bundle rendering (module/asset
+// discovery, hashing, inlining for a compiled binary) only happens through its own
+// route-matching machinery — passing `indexHtml` as a route value is the *only* documented
+// way to get it, and there is no public API to invoke that rendering directly and get back a
+// plain `Response` to attach headers to (confirmed: wrapping it in `new Response(indexHtml)`
+// serializes to the literal string "[object HTMLBundle]", not the page).
+//
+// DH-0023's original fix span up a throwaway loopback-only inner server *just* to render `/`
+// once, then tore it down — which quietly broke every asset chunk the rendered HTML
+// references (`/chunk-*.js`, `/chunk-*.css`): those only ever existed as routes on that
+// now-dead inner server, so every real request for them hit the outer server's catch-all
+// `fetch()` and 404'd (DH-0110). `.dh-app` never rendered because its own JS never loaded.
+//
+// DH-0110's fix: keep the inner server running for the lifetime of the process (module-level,
+// lazily started, shared across every `serveWebUi()` call — the bundled asset content is
+// process-wide static, not per-instance) and have the *outer* server proxy any unmatched
+// request straight through to it over loopback, layering the same security headers on the
+// proxied response. Content-hashed asset paths (Bun names them `<name>-<hash>.js`) never
+// change during a process's lifetime, so successful asset responses are cached by path after
+// the first hit — same one-time-cost-per-process shape DH-0023 already established for `/`.
+// Skipped entirely in `development` mode (HMR should reflect live edits, so everything is
+// fetched fresh, uncached, every time).
+interface InnerServerHandle {
+  port: number;
+  stop(): void;
+}
+
+let innerServer: InnerServerHandle | undefined;
+
+function getInnerServer(): InnerServerHandle {
+  if (!innerServer) {
+    // `Bun.serve`'s route-value typing differs across this file's two typecheck passes (see
+    // the comment inside proxyToInner() below for the full explanation of the split).
+    innerServer = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      routes: { "/": indexHtml },
+      // biome-ignore lint/suspicious/noExplicitAny: see comment above
+    }) as any as InnerServerHandle;
+  }
+  return innerServer;
+}
+
+// A `Response` cached under one typecheck pass mismatches the other's ambient type — same
+// DOM-vs-DOM-less split as proxyToInner() below.
+// biome-ignore lint/suspicious/noExplicitAny: see comment above
+const assetCache = new Map<string, any>();
+
+async function proxyToInner(path: string, development: boolean): Promise<Response> {
+  if (!development) {
+    const cached = assetCache.get(path);
+    if (cached) return cached.clone();
+  }
+  const inner = getInnerServer();
+  // Cast away the ambient `fetch`/`Response`/`Headers` types here: this file is typechecked
+  // both under its own DOM-enabled program (src/web/tsconfig.json) *and*, transitively (via
+  // whatever root-owned file imports `serveWebUi`, e.g. `src/cli.ts`), under the root
+  // program's DOM-less one — see src/web/tsconfig.json's own comment on this exact split.
+  // `bun-types` itself resolves `Response`/`Headers` differently depending on whether
+  // `lib.dom` is present in that pass, so a value that's valid under one program's types is a
+  // mismatch under the other's; this loopback self-request's actual runtime shape
+  // (status/headers/arrayBuffer) doesn't depend on either program's opinion of it. `any` all
+  // the way through this function is the pragmatic way to satisfy both `tsc` invocations at
+  // once — the surrounding functions still narrow back to the real `Response` type at their
+  // boundaries.
+  // biome-ignore lint/suspicious/noExplicitAny: see comment above
+  const rendered: any = await fetch(`http://127.0.0.1:${inner.port}${path}`);
+  const body = await rendered.arrayBuffer();
+  const headers: Record<string, string> = {};
+  rendered.headers.forEach((value: string, key: string) => {
+    headers[key] = value;
+  });
+  const response = withSecurityHeaders(new Response(body, { status: rendered.status, headers }));
+  if (!development && rendered.status === 200) {
+    assetCache.set(path, response.clone());
+  }
+  return response;
+}
 
 async function renderIndex(development: boolean): Promise<Response> {
-  const render = async () => {
-    const inner = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { "/": indexHtml } });
-    try {
-      // Cast away the ambient `fetch`/`Response`/`Headers` types here: this file is
-      // typechecked both under its own DOM-enabled program (src/web/tsconfig.json) *and*,
-      // transitively (via whatever root-owned file imports `serveWebUi`, e.g. `src/cli.ts`),
-      // under the root program's DOM-less one — see src/web/tsconfig.json's own comment on
-      // this exact split. `bun-types` itself resolves `Response`/`Headers` differently
-      // depending on whether `lib.dom` is present in that pass, so a value that's valid
-      // under one program's types is a mismatch under the other's; this loopback
-      // self-request's actual runtime shape (status/headers/arrayBuffer) doesn't depend on
-      // either program's opinion of it. `any` all the way through this function is the
-      // pragmatic way to satisfy both `tsc` invocations at once — the surrounding functions
-      // still narrow back to the real `Response` type at their boundaries.
-      // biome-ignore lint/suspicious/noExplicitAny: see comment above
-      const rendered: any = await fetch(`http://127.0.0.1:${inner.port}/`);
-      const body = await rendered.arrayBuffer();
-      const headers: Record<string, string> = {};
-      rendered.headers.forEach((value: string, key: string) => {
-        headers[key] = value;
-      });
-      return withSecurityHeaders(new Response(body, { status: rendered.status, headers }));
-    } finally {
-      inner.stop(true);
-    }
-  };
-  if (development) return render();
-  if (!cachedIndexResponse) cachedIndexResponse = render();
-  return (await cachedIndexResponse).clone();
+  return proxyToInner("/", development);
 }
 
 export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
@@ -116,8 +154,14 @@ export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
       "/": () => renderIndex(development),
       [WEB_CONFIG_PATH]: () => withSecurityHeaders(Response.json(config)),
     },
-    fetch() {
-      return withSecurityHeaders(new Response("Not Found", { status: 404 }));
+    // DH-0110: everything Bun's HTML-bundler generated for `/` (asset chunks, source maps,
+    // etc.) but didn't register as an explicit outer route lands here — proxy it to the inner
+    // server (see `proxyToInner` above) instead of a flat 404. A genuinely unknown path still
+    // ends up 404 because the inner server's own catch-all returns 404 for it too; the
+    // security headers still land either way since `proxyToInner` always applies them.
+    fetch(req) {
+      const url = new URL(req.url);
+      return proxyToInner(url.pathname, development);
     },
   });
 
