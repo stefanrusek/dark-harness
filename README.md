@@ -187,10 +187,11 @@ This is exactly what `dh init` scaffolds:
   covering `git`, `gh`, `pnpm`, `tilt`, `kubectl`, `jq`, `doppler`, `npx`/`playwright`, and
   `curl` — no config needed for that one.
 - **`mcpServers`** — a Claude Code-style map of MCP server definitions (stdio and HTTP), each
-  with an optional `timeoutMs` overriding the connect/call timeout defaults. See
-  [MCP server configuration examples](docs/mcp-servers.md). Tool discovery against
-  configured servers is still a work in progress today — see
-  [Known gaps](#known-gaps) below.
+  with an optional `timeoutMs` overriding the connect/call timeout defaults. `dh` connects to
+  every configured server at startup and folds its real tools into `ToolSearch`'s corpus
+  (`select:Name1,Name2` exact selection/activation, `+term` filtering, keyword ranking,
+  `max_results`) — an unreachable server degrades gracefully rather than failing startup. See
+  [MCP server configuration examples](docs/mcp-servers.md).
 - **`systemPrompt`** — optional path to a file whose contents replace the built-in
   working-discipline preamble. The `TASK_FAILED`/logging contract the harness's own
   exit-code behavior depends on is always appended after it regardless.
@@ -395,18 +396,14 @@ than showing raw Markdown syntax or passing through raw escape sequences.
 
 ## Known gaps
 
-`dh` is under active development; a couple of things worth knowing about before you rely on
-them:
+`dh` is under active development; one thing worth knowing about before you rely on it:
 
-- **MCP tool discovery is a stub today.** `mcpServers` config is accepted and `ToolSearch`
-  runs, but it doesn't yet discover and expose real, callable tools from a configured server
-  — see `tracking/DH-0002-full-mcp-client-support.md`.
 - **Model output is not streamed token-by-token.** A long assistant turn appears all at once
   in the TUI/web UI when the turn completes, rather than incrementally — see
   `tracking/DH-0044-no-streaming-partial-output.md`.
 
-Neither affects correctness of a run — both are UX/latency gaps, not missing functionality
-in the sense of "the tool call doesn't happen."
+This is a UX/latency gap, not missing functionality in the sense of "the tool call doesn't
+happen."
 
 ## Further documentation
 
