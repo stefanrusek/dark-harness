@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["deferred (2026-07-15): no observed sustained-outage incident, same as DH-0049"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -39,3 +39,7 @@ automatic recourse beyond whatever retry behavior DH-0009 adds — there's no wa
 > Source: Competitive-differentiation sweep finding #4. Complements **DH-0009**'s retry/backoff
 > work — retry handles transient failures on the same model; this ticket handles sustained
 > unavailability by falling back to a different one.
+
+> [!NOTE]
+> Deferred (2026-07-15) — same category as DH-0049: no observed sustained-outage incident,
+> DH-0009's retry covers transient failures. Revisit if a real outage stalls a run.
