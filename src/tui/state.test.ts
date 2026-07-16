@@ -304,6 +304,119 @@ describe("reducer: sse_event token_usage", () => {
     });
     expect(state.agents.get("root")?.costUsd).toBeNull();
   });
+
+  test("DH-0028: accumulates (sums) across multiple events, rather than replacing", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: tokenUsage({ inputTokens: 5, outputTokens: 7, costUsd: 0.5 }),
+    }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: tokenUsage({ inputTokens: 3, outputTokens: 2, costUsd: 0.25 }),
+    }));
+    const agent = state.agents.get("root");
+    expect(agent?.inputTokens).toBe(8);
+    expect(agent?.outputTokens).toBe(9);
+    expect(agent?.costUsd).toBeCloseTo(0.75);
+  });
+
+  test("cost stays null across accumulation when no event ever reports a cost", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: tokenUsage({ inputTokens: 5, outputTokens: 7 }),
+    }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: tokenUsage({ inputTokens: 3, outputTokens: 2 }),
+    }));
+    const agent = state.agents.get("root");
+    expect(agent?.inputTokens).toBe(8);
+    expect(agent?.costUsd).toBeNull();
+  });
+
+  test("cost becomes known once any event reports it, even if a later event omits it", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: tokenUsage({ inputTokens: 5, outputTokens: 7, costUsd: 0.5 }),
+    }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: tokenUsage({ inputTokens: 3, outputTokens: 2 }),
+    }));
+    expect(state.agents.get("root")?.costUsd).toBeCloseTo(0.5);
+  });
+});
+
+describe("reducer: DH-0012 completed-agent eviction", () => {
+  function statusAgent(
+    agentId: string,
+    status: "running" | "done" | "failed" | "stopped" | "waiting",
+  ) {
+    return statusEvent({ agentId, status });
+  }
+
+  test("terminal agents beyond the retention cap are evicted, oldest first", () => {
+    let state = initialState(size());
+    // Spawn and complete 60 agents; only the most-recent 50 terminal entries should survive.
+    for (let i = 0; i < 60; i++) {
+      const agentId = `agent-${i}`;
+      ({ state } = reducer(state, {
+        type: "sse_event",
+        event: spawned({ agentId, timestamp: "2026-07-15T00:00:00.000Z" }),
+      }));
+      ({ state } = reducer(state, { type: "sse_event", event: statusAgent(agentId, "done") }));
+    }
+    expect(state.agents.size).toBe(50);
+    expect(state.agents.has("agent-0")).toBe(false);
+    expect(state.agents.has("agent-9")).toBe(false);
+    expect(state.agents.has("agent-10")).toBe(true);
+    expect(state.agents.has("agent-59")).toBe(true);
+    expect(state.agentOrder).toHaveLength(50);
+  });
+
+  test("active (non-terminal) agents are never evicted regardless of count", () => {
+    let state = initialState(size());
+    for (let i = 0; i < 60; i++) {
+      const agentId = `agent-${i}`;
+      ({ state } = reducer(state, {
+        type: "sse_event",
+        event: spawned({ agentId, timestamp: "2026-07-15T00:00:00.000Z" }),
+      }));
+      // Leave every agent "running" (non-terminal) — none should ever be evicted.
+      ({ state } = reducer(state, { type: "sse_event", event: statusAgent(agentId, "running") }));
+    }
+    expect(state.agents.size).toBe(60);
+  });
+
+  test("failed and stopped both count as terminal for eviction purposes", () => {
+    let state = initialState(size());
+    for (let i = 0; i < 55; i++) {
+      const agentId = `agent-${i}`;
+      ({ state } = reducer(state, {
+        type: "sse_event",
+        event: spawned({ agentId, timestamp: "2026-07-15T00:00:00.000Z" }),
+      }));
+      const status = i % 2 === 0 ? "failed" : "stopped";
+      ({ state } = reducer(state, { type: "sse_event", event: statusAgent(agentId, status) }));
+    }
+    expect(state.agents.size).toBe(50);
+  });
+
+  test("under the retention cap, nothing is evicted", () => {
+    let state = initialState(size());
+    for (let i = 0; i < 10; i++) {
+      const agentId = `agent-${i}`;
+      ({ state } = reducer(state, {
+        type: "sse_event",
+        event: spawned({ agentId, timestamp: "2026-07-15T00:00:00.000Z" }),
+      }));
+      ({ state } = reducer(state, { type: "sse_event", event: statusAgent(agentId, "done") }));
+    }
+    expect(state.agents.size).toBe(10);
+  });
 });
 
 describe("reducer: sse_event session_ended", () => {

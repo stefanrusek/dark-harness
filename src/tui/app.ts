@@ -61,6 +61,12 @@ function defaultIO(): TuiIO {
  * `running` agent visibly keeps counting up even with no new SSE events arriving. */
 const TICK_INTERVAL_MS = 1000;
 
+/** Debounce window for terminal resize events (DH-0025): a rapid drag-resize can fire many
+ * `resize` events in quick succession, and redrawing a full frame on every single one causes
+ * visible flicker. Coalescing to the last event in this window keeps the frame in sync with
+ * the final terminal size without a full-clear-and-rewrite per intermediate size. */
+const RESIZE_DEBOUNCE_MS = 50;
+
 /**
  * Start the console TUI against the server at `baseUrl`. Resolves once the user quits
  * (Ctrl+C).
@@ -93,8 +99,18 @@ export async function startTui(
   return new Promise<void>((resolve) => {
     const abortController = new AbortController();
 
+    // DH-0025: skip the write entirely when the rendered frame hasn't actually changed since
+    // the last draw — the once-per-second liveness tick previously forced a full clear-and-
+    // rewrite unconditionally, which is wasteful and can flicker over a high-latency
+    // connection even though nothing visible changed (elapsed-time labels round to whole
+    // seconds, so most ticks produce byte-identical frames).
+    let lastFrame: string | null = null;
+
     function draw(): void {
-      stdout.write(frameToAnsi(renderFrame(state)));
+      const frame = frameToAnsi(renderFrame(state));
+      if (frame === lastFrame) return;
+      lastFrame = frame;
+      stdout.write(frame);
     }
 
     function dispatch(action: Action): void {
@@ -139,6 +155,7 @@ export async function startTui(
 
     function cleanup(): void {
       clearInterval(tickTimer);
+      if (resizeDebounceTimer !== undefined) clearTimeout(resizeDebounceTimer);
       abortController.abort();
       stdout.write(BRACKETED_PASTE_DISABLE + SHOW_CURSOR + ALT_SCREEN_EXIT);
       stdin.setRawMode?.(false);
@@ -158,12 +175,17 @@ export async function startTui(
       }
     });
 
+    let resizeDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     stdout.on?.("resize", () => {
-      dispatch({
-        type: "resize",
-        rows: stdout.rows ?? state.size.rows,
-        cols: stdout.columns ?? state.size.cols,
-      });
+      if (resizeDebounceTimer !== undefined) clearTimeout(resizeDebounceTimer);
+      resizeDebounceTimer = setTimeout(() => {
+        resizeDebounceTimer = undefined;
+        dispatch({
+          type: "resize",
+          rows: stdout.rows ?? state.size.rows,
+          cols: stdout.columns ?? state.size.cols,
+        });
+      }, RESIZE_DEBOUNCE_MS);
     });
 
     // initialState() already reflects "connecting"; runSseClient reports its own

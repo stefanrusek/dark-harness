@@ -460,7 +460,9 @@ describe("startTui", () => {
     const writesBefore = stdout.writes.length;
 
     stdout.triggerResize(40, 120);
-    await flush();
+    // DH-0025: resize events are debounced (RESIZE_DEBOUNCE_MS), so the redraw doesn't fire
+    // on the same tick as the event — wait past the debounce window with real timers.
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(stdout.writes.length).toBeGreaterThan(writesBefore);
 
@@ -472,14 +474,38 @@ describe("startTui", () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
     const server = makeFakeServer();
+    server.commandResponses.push({
+      ok: true,
+      tree: [
+        { agentId: "root", parentAgentId: null, model: "sonnet", status: "running", children: [] },
+      ],
+    });
 
     const done = startTui("http://x", undefined, { stdin, stdout, fetchImpl: server.fetchImpl });
     await flush();
+
+    // DH-0028/DH-0025: the tick only redraws when the rendered frame actually changes
+    // (otherwise it's skipped, per DH-0025's "don't full-clear-and-rewrite when nothing
+    // changed"). The root view's own content doesn't depend on `now`, so spawn an agent and
+    // switch to the tree view, whose per-entry "last event" elapsed label does advance every
+    // real second — that's what the liveness tick is meant to keep current.
+    enqueueSse(server, {
+      version: 1,
+      id: "1",
+      timestamp: new Date().toISOString(),
+      type: "agent_spawned",
+      agentId: "root",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    await flush();
+    stdin.type("\x1b[D"); // left: open tree view
+    await flush();
     const writesBefore = stdout.writes.length;
 
-    // No key was pressed and no SSE event arrived — any further redraw must come from the
-    // app's own periodic tick timer, not from an externally triggered dispatch.
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    // No key was pressed and no further SSE event arrived — any further redraw must come
+    // from the app's own periodic tick timer, not from an externally triggered dispatch.
+    await new Promise((resolve) => setTimeout(resolve, 2100));
 
     expect(stdout.writes.length).toBeGreaterThan(writesBefore);
 

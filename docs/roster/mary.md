@@ -323,3 +323,79 @@ worth keeping here:
 Open thread for a future round: DH-0024 needs a revisit once DH-0019's server-side gap event
 lands — swap the current best-effort "any reconnect after a failure" notice for one gated on
 an actual detected gap or session restart. Not blocking anything else.
+
+### 2026-07-15 — Round: DH-0056/DH-0025/DH-0012/DH-0028
+
+Big round, three tickets landed together since DH-0025's remaining wrapping bugs and
+DH-0056's Markdown rendering both touch the same wrap/measure code paths (per Fable's design
+note).
+
+- **New shared `src/markdown/index.ts`** (governed contracts-style per Fable's D2/D7 — grammar
+  changes need architect sign-off going forward). Exports `InlineNode`, `BlockNode`,
+  `sanitizeText(raw): string`, `parseInline(text): InlineNode[]`, `parseMarkdown(raw):
+  BlockNode[]`. Zero deps, no Bun/DOM globals, typechecks under both the root tsconfig and
+  `src/web/tsconfig.json`. `sanitizeText` runs unconditionally as parseMarkdown's step zero.
+  Susan: this is the AST to build `src/web/client/markdown-dom.ts` against — sign off on the
+  shape before building, per the ticket's D7 sequencing.
+  - Judgment call: emphasis-delimiter scanning skips over any `*`/`_` that's actually one end
+    of a doubled `**`/`__` run, otherwise `*em **bold** more*` closes the outer emphasis at
+    the wrong `*`. Simple heuristic (not full CommonMark delimiter-run matching), documented
+    inline where it's applied.
+  - Tables/setext/reference-links/autolinks are unrecognized on purpose — they degrade to
+    literal text because nothing in the grammar recognizes them, not via a special-cased
+    fallback path.
+
+- **`src/tui/width.ts`** (new, DH-0025): codepoint/visual-width-aware `wrapText`,
+  `sliceCodePoints`, `charWidth`, `stringWidth`, `codePointLength`. Replaces the old UTF-16-
+  code-unit-based `wrapText` that lived in `render.ts` (re-exported from there now for
+  backward compat with existing imports). `state.ts`'s `trimTranscript` now trims via
+  `sliceCodePoints` instead of `.slice()`, fixing the surrogate-split corruption bug.
+
+- **`src/tui/markdown-ansi.ts`** (new, DH-0056 D3): `BlockNode[] -> ANSI rows`, SGR allowlist
+  exactly {0,1,2,3,4,7,9,30-37,90-97,39} kept as one `SGR` constant table. Works in a styled-
+  segment domain (`{text, style}[]` per logical line) so `wrapSegments` never measures ANSI
+  bytes; every row is reset-terminated. `renderTranscript` in `render.ts` now routes assistant
+  turns through `parseMarkdown` + `renderMarkdownRows`; user turns stay `sanitizeText` + plain
+  `wrapText` (they're echoed input, not Markdown).
+  - Had to extract `renderListBlock` out of the `list` switch-case into its own top-level
+    function to get true 100% line coverage — bun's coverage instrumentation flagged the
+    case-block's own closing brace as an uncovered statement when the case had trailing logic
+    in a braced block ending in `return`; moving it to a named function some indirection away
+    resolved it. Noting this as a coverage-tool quirk worth remembering if another case block
+    ever shows a stray 1-line gap that no test seems able to close.
+
+- **DH-0025 remainder**: resize events now debounced 50ms in `app.ts` before dispatching
+  (`RESIZE_DEBOUNCE_MS`); the periodic liveness tick (and every `draw()` call) now skips the
+  actual `stdout.write` when the rendered frame is byte-identical to the last one written,
+  rather than unconditionally full-clearing every second. Two existing `app.test.ts` tests
+  had to change to match: the resize test now waits past the debounce window, and the "tick
+  redraws on its own" test now spawns an agent and opens the tree view first (root view's own
+  content never depended on `now`, so the old test's assumption that *any* tick always
+  redraws no longer holds — that's the whole point of the "skip if unchanged" fix).
+
+- **DH-0012 (TUI's slice)**: `state.ts`'s `agents` map now evicts the oldest *terminal*
+  (done/failed/stopped) entries beyond `DEFAULT_COMPLETED_RETENTION = 50`; active/running
+  agents are never evicted regardless of count. No `dh.json` wiring yet on the TUI side —
+  no sibling domain (Core/Server/Web) had landed the `limits.completedRetention` knob when I
+  checked, so this is a TUI-local default for now, same shape as the Round-2 token-param
+  precedent: documented in the constant's doc comment, ready to become a parameter if/when
+  Core threads the config value into `startTui`.
+
+- **DH-0028**: `token_usage` handler now accumulates (sums) `inputTokens`/`outputTokens`/
+  `costUsd` into running per-agent totals instead of replacing them — confirmed the wire
+  semantics are a per-turn delta (matches Web's existing correct behavior) and added a
+  one-line doc-comment clarification to `TokenUsageEvent` in `src/contracts/events.ts` (no
+  architect sign-off needed, per the ticket — comment only, not a shape change). Added
+  `formatTokenCost`/`sessionTokenTotals` to `render.ts`; session totals show in the header,
+  per-agent totals show in the tree view's per-entry line and the agent view's meta line.
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all clean. 100% line
+coverage on every new/changed file (`src/markdown/index.ts`, `src/tui/width.ts`,
+`src/tui/markdown-ansi.ts`, and all touched existing TUI files); the one pre-existing gap
+(`src/tui/app.ts` at 93.33% *function* coverage, 100% lines) predates this round and isn't
+something I introduced.
+
+Open thread for a future round: once Core/Server/Web land their own
+`limits.completedRetention` config wiring, thread the same value into `startTui` (same
+pattern as the Round-2 `token` parameter) instead of the local `DEFAULT_COMPLETED_RETENTION`
+constant.

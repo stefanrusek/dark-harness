@@ -6,6 +6,7 @@ import type { ServerSentEvent } from "../contracts/index.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";
 import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.ts";
+import { codePointLength, sliceCodePoints } from "./width.ts";
 
 /** Bound per-agent transcript buffer (total chars across all turns) so a very long session
  * doesn't grow memory unboundedly. Documented, intentional cap — not a silent truncation of
@@ -13,21 +14,54 @@ import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.t
  * in full. */
 export const MAX_OUTPUT_CHARS = 200_000;
 
+/** DH-0012: cap the `agents` map at this many *terminal* (done/failed/stopped) entries,
+ * oldest evicted first — active (non-terminal) agents are never evicted regardless of count.
+ * Matches the owner's fixed-count-cap decision applied consistently across Core/Server/TUI/
+ * Web; `Server`/`Core` wire the same default through a `dh.json` `limits.completedRetention`
+ * knob (see tracking/DH-0012) — the TUI doesn't yet read `dh.json` directly (that's Core's
+ * `src/cli.ts`/`startTui` wiring boundary), so this is the TUI's own default until a config
+ * value is threaded through the same way `token` was (see docs/roster/mary.md Round 2). */
+export const DEFAULT_COMPLETED_RETENTION = 50;
+
+const TERMINAL_STATUSES = new Set(["done", "failed", "stopped"]);
+
+/** Evict the oldest terminal (done/failed/stopped) agents from `state.agents`/`agentOrder`
+ * beyond `retention` most-recent terminal entries. Active agents (running/waiting) are never
+ * evicted, so `retention` bounds only the "how much history sticks around" question, never
+ * "how many agents can be in flight" — an unbounded number of live agents is still tracked,
+ * matching the ticket's "active entries never evicted regardless of count" requirement. */
+function evictCompletedAgents(state: TuiState, retention: number): TuiState {
+  const terminalIds = state.agentOrder.filter((id) => {
+    const agent = state.agents.get(id);
+    return agent !== undefined && TERMINAL_STATUSES.has(agent.status);
+  });
+  if (terminalIds.length <= retention) return state;
+  const toEvict = new Set(terminalIds.slice(0, terminalIds.length - retention));
+  if (toEvict.size === 0) return state;
+  const agents = new Map(state.agents);
+  for (const id of toEvict) agents.delete(id);
+  const agentOrder = state.agentOrder.filter((id) => !toEvict.has(id));
+  return { ...state, agents, agentOrder };
+}
+
 /** Drop oldest turns (and, if needed, trim the oldest remaining turn's text) until the total
- * character count across `transcript` is at or under `max`. */
+ * character count across `transcript` is at or under `max`. Trims by codepoint, not UTF-16
+ * code unit (`width.ts`'s `sliceCodePoints`), so a trim boundary never splits a surrogate
+ * pair into a corrupted lone surrogate (DH-0025). */
 function trimTranscript(transcript: Turn[], max: number): Turn[] {
-  let total = transcript.reduce((sum, turn) => sum + turn.text.length, 0);
+  let total = transcript.reduce((sum, turn) => sum + codePointLength(turn.text), 0);
   if (total <= max) return transcript;
   const out = [...transcript];
   while (out.length > 0 && total > max) {
     const oldest = out[0];
     if (!oldest) break;
+    const oldestLength = codePointLength(oldest.text);
     const excess = total - max;
-    if (oldest.text.length <= excess) {
-      total -= oldest.text.length;
+    if (oldestLength <= excess) {
+      total -= oldestLength;
       out.shift();
     } else {
-      out[0] = { ...oldest, text: oldest.text.slice(excess) };
+      out[0] = { ...oldest, text: sliceCodePoints(oldest.text, oldestLength - excess, true) };
       total -= excess;
     }
   }
@@ -183,16 +217,27 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
     }
     case "agent_output":
       return noEffects(appendOutput(state, event.agentId, at, event.chunk));
-    case "agent_status":
-      return noEffects(withAgent(state, event.agentId, at, { status: event.status }));
-    case "token_usage":
+    case "agent_status": {
+      const next = withAgent(state, event.agentId, at, { status: event.status });
+      return noEffects(evictCompletedAgents(next, DEFAULT_COMPLETED_RETENTION));
+    }
+    case "token_usage": {
+      // DH-0028: `token_usage` carries a per-turn *delta* (confirmed from
+      // src/agent/loop.ts/providers — one event per provider completion call, sourced
+      // directly from that call's own `usage` field, never a conversation-wide running
+      // total), so the handler must accumulate into the running per-agent totals, not
+      // replace them. Web's client.ts already does this correctly; this was the TUI bug.
+      const existing = state.agents.get(event.agentId);
+      const priorCost = existing?.costUsd ?? null;
+      const nextCost = event.costUsd === undefined ? priorCost : (priorCost ?? 0) + event.costUsd;
       return noEffects(
         withAgent(state, event.agentId, at, {
-          inputTokens: event.inputTokens,
-          outputTokens: event.outputTokens,
-          costUsd: event.costUsd ?? null,
+          inputTokens: (existing?.inputTokens ?? 0) + event.inputTokens,
+          outputTokens: (existing?.outputTokens ?? 0) + event.outputTokens,
+          costUsd: nextCost,
         }),
       );
+    }
     case "session_ended":
       return noEffects({ ...state, sessionEnded: { exitCode: event.exitCode } });
     case "resync":

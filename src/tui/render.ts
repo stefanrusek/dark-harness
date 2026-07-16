@@ -3,8 +3,13 @@
 // app.ts is the only place that actually writes to a terminal.
 
 import type { AgentStatus } from "../contracts/index.ts";
+import { parseMarkdown, sanitizeText } from "../markdown/index.ts";
+import { renderMarkdownRows } from "./markdown-ansi.ts";
 import { flattenTree } from "./tree.ts";
 import type { AgentInfo, TuiState, Turn } from "./types.ts";
+import { wrapText } from "./width.ts";
+
+export { wrapText } from "./width.ts";
 
 const HEADER_ROWS = 2;
 
@@ -48,35 +53,27 @@ export function formatElapsed(ms: number): string {
   return `${hours}h${String(minutes).padStart(2, "0")}m`;
 }
 
-/** Greedily wrap text to `cols`-wide lines, honoring existing newlines. */
-export function wrapText(text: string, cols: number): string[] {
-  const width = Math.max(1, cols);
-  const out: string[] = [];
-  const sourceLines = text.split("\n");
-  for (const sourceLine of sourceLines) {
-    if (sourceLine.length === 0) {
-      out.push("");
-      continue;
-    }
-    for (let i = 0; i < sourceLine.length; i += width) {
-      out.push(sourceLine.slice(i, i + width));
-    }
-  }
-  return out;
-}
-
 /** Render a conversation transcript with real turn separation: each turn wrapped to `cols`,
  * a blank line between consecutive turns, and a role label (`"> "`, matching the input
- * prompt's own marker, so a user turn visually echoes what was typed) on user turns only —
- * assistant turns render as plain text, same as real Claude Code's CLI. Without this, turns
- * read as one unbroken wall of concatenated text with no visual boundary and no sign the
- * user ever said anything (Round 6, docs/handoffs/tui.md). */
+ * prompt's own marker, so a user turn visually echoes what was typed) on user turns only.
+ * Without this, turns read as one unbroken wall of concatenated text with no visual boundary
+ * and no sign the user ever said anything (Round 6, docs/handoffs/tui.md).
+ *
+ * Assistant turns are rendered as Markdown (DH-0056): parsed via `parseMarkdown` (which
+ * applies the defensive `sanitizeText` escape-stripping unconditionally as its own step
+ * zero) and turned into styled, reset-terminated ANSI rows by `markdown-ansi.ts`'s safe SGR
+ * allowlist — never a raw passthrough of model-authored bytes. User turns are the operator's
+ * own echoed input, not Markdown, so they're only run through `sanitizeText` and wrapped as
+ * plain text. */
 export function renderTranscript(transcript: Turn[], cols: number): string[] {
   const lines: string[] = [];
   transcript.forEach((turn, index) => {
     if (index > 0) lines.push("");
-    const text = turn.role === "user" ? `> ${turn.text}` : turn.text;
-    lines.push(...wrapText(text, cols));
+    if (turn.role === "user") {
+      lines.push(...wrapText(`> ${sanitizeText(turn.text)}`, cols));
+    } else {
+      lines.push(...renderMarkdownRows(parseMarkdown(turn.text), cols));
+    }
   });
   return lines;
 }
@@ -112,13 +109,47 @@ function headerRows(state: TuiState, cols: number): string[] {
   // reconnect notice (DH-0024) can't be missed just because the operator is deep in the
   // tree/agent view when it fires.
   const reconnectSuffix = state.reconnectNotice ? `  ⚠ ${state.reconnectNotice}` : "";
-  const title = `Dark Harness — ${viewLabel(state)} — ${state.connection}${sessionSuffix}${reconnectSuffix}`;
+  const totals = sessionTokenTotals(state);
+  const totalsSuffix = `  —  ${formatTokenCost(totals.inputTokens, totals.outputTokens, totals.costUsd)}`;
+  const title = `Dark Harness — ${viewLabel(state)} — ${state.connection}${totalsSuffix}${sessionSuffix}${reconnectSuffix}`;
   const separator = "─".repeat(Math.max(1, cols));
   return [title, separator];
 }
 
 function rootAgent(state: TuiState): AgentInfo | null {
   return state.rootAgentId ? (state.agents.get(state.rootAgentId) ?? null) : null;
+}
+
+/** Format a token/cost figure as `"12,345 tok"` (no cost known) or `"12,345 tok / $0.0456"`
+ * (DH-0028) — shared by the per-agent and session-total displays so both read consistently. */
+export function formatTokenCost(
+  inputTokens: number,
+  outputTokens: number,
+  costUsd: number | null,
+): string {
+  const totalTokens = inputTokens + outputTokens;
+  const tokenPart = `${totalTokens.toLocaleString("en-US")} tok`;
+  return costUsd === null ? tokenPart : `${tokenPart} / $${costUsd.toFixed(4)}`;
+}
+
+/** Session-wide token/cost totals summed across every currently-tracked agent (DH-0028) —
+ * the operator's console-equivalent of Web's `sessionTotals`. `null` cost only if *no*
+ * tracked agent has ever reported a cost figure (matching each agent's own "cost unknown"
+ * semantics), otherwise sums whatever cost figures are known. */
+export function sessionTokenTotals(state: TuiState): {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+} {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd: number | null = null;
+  for (const agent of state.agents.values()) {
+    inputTokens += agent.inputTokens;
+    outputTokens += agent.outputTokens;
+    if (agent.costUsd !== null) costUsd = (costUsd ?? 0) + agent.costUsd;
+  }
+  return { inputTokens, outputTokens, costUsd };
 }
 
 function renderRoot(
@@ -159,10 +190,16 @@ function renderTree(
     const indent = "  ".repeat(entry.depth);
     const glyph = colorizeStatus(entry.node.status, "●");
     const label = `${entry.node.agentId} (${entry.node.model})`;
-    const lastEventAt = state.agents.get(entry.node.agentId)?.lastEventAt;
+    const trackedAgent = state.agents.get(entry.node.agentId);
     const elapsed =
-      lastEventAt === undefined ? "" : `  [${formatElapsed(state.now - lastEventAt)}]`;
-    return `${marker}${indent}${glyph} ${label}${elapsed}`;
+      trackedAgent === undefined
+        ? ""
+        : `  [${formatElapsed(state.now - trackedAgent.lastEventAt)}]`;
+    const tokens =
+      trackedAgent === undefined
+        ? ""
+        : `  ${formatTokenCost(trackedAgent.inputTokens, trackedAgent.outputTokens, trackedAgent.costUsd)}`;
+    return `${marker}${indent}${glyph} ${label}${elapsed}${tokens}`;
   });
   // Wrap each entry independently (rather than the old approach of wrapping the whole
   // joined string) so the start line of every entry is known — needed to compute a
@@ -201,7 +238,8 @@ function renderAgent(
   const meta = agent
     ? `Model: ${agent.model}   Status: ${colorizeStatus(agent.status, agent.status)}` +
       ` (${formatElapsed(state.now - agent.statusSince)})` +
-      `   Last event: ${formatElapsed(state.now - agent.lastEventAt)} ago`
+      `   Last event: ${formatElapsed(state.now - agent.lastEventAt)} ago` +
+      `   ${formatTokenCost(agent.inputTokens, agent.outputTokens, agent.costUsd)}`
     : "Model: (unknown)";
   const hint = state.statusMessage ?? `${meta}   —   [Esc] back to root (read-only)`;
   return { content: padRows(content, contentRows), footer: [hint] };
