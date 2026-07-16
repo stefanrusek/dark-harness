@@ -305,7 +305,16 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
   test("Agent tool spawns a real sub-agent: SSE events and getAgentTree() show real nesting", async () => {
     const rootProvider = startMockAnthropicProvider([
       {
-        toolCalls: [{ name: "Agent", input: { prompt: "Say hi as a sub-agent.", model: "sub" } }],
+        toolCalls: [
+          {
+            name: "Agent",
+            input: {
+              prompt: "Say hi as a sub-agent.",
+              description: "Say hi as sub-agent",
+              model: "sub",
+            },
+          },
+        ],
         stopReason: "tool_use",
       },
       successTurn("Root heard back from the sub-agent."),
@@ -419,6 +428,9 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
             agentId: childAgentId,
             parentAgentId: "agent-root",
             model: "sub",
+            // DH-0069: description is now required for any spawned sub-agent (this mock turn
+            // supplies "Say hi as sub-agent" — see the Agent tool_use input above).
+            description: "Say hi as sub-agent",
             status: "done",
             children: [],
           },

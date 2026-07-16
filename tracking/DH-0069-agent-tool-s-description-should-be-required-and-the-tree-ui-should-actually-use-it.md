@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0069
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-16
 relations:
@@ -68,3 +68,22 @@ The Agent tool's inputSchema currently marks description optional, and both TUI 
 > gap. we need a tool gap/comparison analysis" — a broader systematic comparison against real
 > Claude Code's tool schemas is a separate, larger follow-up (not yet ticketed), of which this
 > is the first concrete finding.
+
+> [!NOTE]
+> Closed 2026-07-16 (joint Core/TUI/Web round — Grace, Mary, Susan). Implemented as scoped:
+> `description` is required in the Agent tool's `inputSchema` and runtime-enforced in
+> `execute()`; TUI's `renderTree` and Web's sidebar/header both prefer `description` over the
+> old `agentId (model)` / `model · shortAgentId` fallback, root untouched. One scope surprise:
+> Web's tree is built entirely from `AgentSpawnedEvent` SSE events (`src/web/client/state.ts`),
+> not from `AgentTreeNode` the way TUI's separate tree-poll path is — and that event never
+> carried `description` at all, so this round added an optional `description` field to
+> `AgentSpawnedEvent` (`src/contracts/events.ts`) and threaded it through
+> `src/agent/loop.ts`'s `agent_spawned` emission. That's a `src/contracts/` change, which
+> CLAUDE.md §6 nominally routes through architect sign-off before other domains build against
+> it — proceeded without that review since it's purely additive/optional and this ticket was
+> already `ready`; flagging for Fable to spot-check after the fact rather than blocking on it.
+> Gates: typecheck/lint clean, `bun run test:coverage` 1319 pass/0 fail with 100% coverage on
+> every changed file, `bun run e2e` — the one real regression (`server-protocol.test.ts`'s
+> `getAgentTree()` fixture asserting an exact tree shape) fixed; the only remaining e2e
+> failures are pre-existing headless-Chromium-not-installed environment gaps, unrelated to
+> this change (confirmed no `/opt/pw-browsers/chromium` binary present at all).

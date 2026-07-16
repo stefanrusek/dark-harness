@@ -311,6 +311,10 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     agentId: params.agentId,
     parentAgentId: params.parentAgentId,
     model: params.model,
+    // DH-0069: threads through to the Web client's AgentNode so its sidebar/tree row can
+    // show the same human-readable label the TUI already reads off AgentTreeNode.description
+    // via its separate tree-poll path.
+    ...(params.description !== undefined ? { description: params.description } : {}),
   });
   emitLog(params, {
     type: "header",

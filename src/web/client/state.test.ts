@@ -28,6 +28,7 @@ function spawned(
   agentId: string,
   parentAgentId: string | null,
   model = "sonnet",
+  description?: string,
 ): AgentSpawnedEvent {
   return {
     version: 1,
@@ -37,6 +38,7 @@ function spawned(
     agentId,
     parentAgentId,
     model,
+    ...(description !== undefined ? { description } : {}),
   };
 }
 
@@ -118,6 +120,16 @@ describe("state reducer", () => {
     const node = state.agents.get("root-1");
     expect(node?.model).toBe("sonnet");
     expect(node?.parentAgentId).toBeNull();
+  });
+
+  // DH-0069: description (from the Agent tool's now-required parameter) lands on the
+  // AgentNode so the render layer can use it as the sidebar/tree row's primary label.
+  test("agent_spawned's description is recorded on the node when present", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "sonnet"));
+    state = applyEvent(state, spawned("child-1", "root-1", "sonnet", "Fix flaky retry test"));
+    expect(state.agents.get("child-1")?.description).toBe("Fix flaky retry test");
+    expect(state.agents.get("root-1")?.description).toBeUndefined();
   });
 
   test("a second root-level spawn does not override the first root", () => {

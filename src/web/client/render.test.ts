@@ -79,6 +79,32 @@ function stateWithRootAndChild(): WebState {
   return state;
 }
 
+/** Same shape as `stateWithRootAndChild`, but the child carries a `description` — the
+ * DH-0069 case: the primary label should be that description, not `model · shortAgentId`. */
+function stateWithDescribedChild(): WebState {
+  let state = createInitialState();
+  state = applyEvent(state, {
+    version: 1,
+    id: "e1",
+    timestamp: "2026-01-01T00:00:00Z",
+    type: "agent_spawned",
+    agentId: "root-1",
+    parentAgentId: null,
+    model: "sonnet",
+  });
+  state = applyEvent(state, {
+    version: 1,
+    id: "e2",
+    timestamp: "2026-01-01T00:00:01Z",
+    type: "agent_spawned",
+    agentId: "child-1",
+    parentAgentId: "root-1",
+    model: "haiku",
+    description: "Fix flaky retry test",
+  });
+  return state;
+}
+
 describe("buildShell", () => {
   test("builds the full static shell exactly once, replacing prior root content", () => {
     const { document, root } = createTestDom();
@@ -191,6 +217,21 @@ describe("renderSidebar", () => {
     expect(dot?.getAttribute("aria-hidden")).toBe("true");
     expect(rows[0]?.getAttribute("aria-label")).toContain("status:");
   });
+
+  // DH-0069: a sub-agent's `description` (from the Agent tool's now-required parameter) is
+  // the primary label — `model · shortAgentId` is only the fallback for entries without one
+  // (the root row, which always keeps its "root" label regardless).
+  test("prefers a child agent's description over 'model · shortAgentId' when present", () => {
+    const { document, root } = createTestDom();
+    renderSidebar(document, root, stateWithDescribedChild(), () => {});
+
+    const rows = root.querySelectorAll(".agent-row");
+    const childLabel = rows[1]?.querySelector(".agent-label")?.textContent;
+    expect(childLabel).toBe("Fix flaky retry test");
+    expect(rows[1]?.getAttribute("aria-label")).toContain("Fix flaky retry test");
+    // Root keeps its "root" label even though it never has a description.
+    expect(rows[0]?.querySelector(".agent-label")?.textContent).toBe("root");
+  });
 });
 
 describe("renderConnectionStatus", () => {
@@ -278,6 +319,15 @@ describe("renderAgentHeader", () => {
     state = { ...state, selectedAgentId: "child-1" };
     renderAgentHeader(document, root, state, noopCallbacks());
     expect(root.querySelector(".agent-header-name")?.textContent).toContain("haiku");
+  });
+
+  // DH-0069: a described sub-agent's header name is that description, not `model (id)`.
+  test("shows a described sub-agent's description instead of 'model (id)'", () => {
+    const { document, root } = createTestDom();
+    let state = stateWithDescribedChild();
+    state = { ...state, selectedAgentId: "child-1" };
+    renderAgentHeader(document, root, state, noopCallbacks());
+    expect(root.querySelector(".agent-header-name")?.textContent).toBe("Fix flaky retry test");
   });
 
   test("shows a Stop button for running/waiting agents but not for done/failed", () => {

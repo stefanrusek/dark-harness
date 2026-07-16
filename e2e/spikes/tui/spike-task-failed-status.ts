@@ -29,7 +29,12 @@ import { expectContains, expectTrue, reportAndExit } from "./spike-support.ts";
 
 const rootProvider = startMockAnthropicProvider([
   {
-    toolCalls: [{ name: "Agent", input: { prompt: "Do the impossible.", model: "sub" } }],
+    toolCalls: [
+      {
+        name: "Agent",
+        input: { prompt: "Do the impossible.", description: "Do the impossible", model: "sub" },
+      },
+    ],
     stopReason: "tool_use",
   },
   successTurn("Root heard the helper couldn't finish."),
@@ -82,7 +87,7 @@ try {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const raw = session.captureRaw();
-    if (raw.includes(FAILED_GLYPH_PREFIX) && raw.includes("(sub)")) {
+    if (raw.includes(FAILED_GLYPH_PREFIX) && raw.includes("Do the impossible")) {
       sawFailedGlyph = true;
       break;
     }
@@ -96,7 +101,9 @@ try {
     expectTrue(
       sawFailedGlyph,
       "sub-agent tree entry shows the red 'failed' status glyph after self-reporting TASK_FAILED",
-      sawFailedGlyph ? undefined : "red \\x1b[31m● glyph never appeared next to the (sub) entry",
+      sawFailedGlyph
+        ? undefined
+        : "red \\x1b[31m● glyph never appeared next to the sub-agent entry",
     ),
   ];
 } finally {

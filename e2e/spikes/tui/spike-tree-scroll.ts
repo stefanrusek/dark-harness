@@ -27,7 +27,7 @@ const rootProvider = startMockAnthropicProvider([
   {
     toolCalls: Array.from({ length: CHILD_COUNT }, (_, i) => ({
       name: "Agent",
-      input: { prompt: `Helper #${i}, say hi.`, model: "sub" },
+      input: { prompt: `Helper #${i}, say hi.`, description: `Helper ${i} say hi`, model: "sub" },
     })),
     stopReason: "tool_use",
   },

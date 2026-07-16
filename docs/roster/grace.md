@@ -940,3 +940,22 @@ against the mock provider) — flagging as the natural next step.
 
 Also had to fast-forward this round's worktree again, same symptom/fix as every prior round
 has noted (worktree branched before the coordinator branch's current tip existed).
+
+### 2026-07-16 — DH-0069: Agent tool `description` now required
+Joint round with Mary (TUI) and Susan (Web). Made `description` required in `Agent` tool's
+`inputSchema.required` and added a matching runtime check in `execute()` (schema `required`
+is only advisory to the model; the runtime check gives a model that ignores it a clear tool
+error instead of silently spawning an unlabeled sub-agent). Updated `agent.test.ts` and every
+other fixture across `src/agent/runtime.test.ts` and the e2e spikes that call the Agent tool
+without a description.
+
+One thing that turned out bigger than the ticket's Core-only framing suggested: the Web
+client's sidebar/tree is built entirely from SSE events (`AgentNode` in
+`src/web/client/state.ts`), never from `AgentTreeNode`/tree polling the way TUI does — and
+`AgentSpawnedEvent` (src/contracts/events.ts) never carried `description` at all. Had to add
+an optional `description` field to `AgentSpawnedEvent` and thread it through
+`src/agent/loop.ts`'s `agent_spawned` emission. This is a `src/contracts/` change, which
+CLAUDE.md §6.2 says needs architect sign-off before other domains build against it — I made
+the call to proceed anyway since it's purely additive/optional (no existing consumer
+breaks) and the ticket was already scoped "ready." Flagging here in case Fable wants to
+review after the fact.

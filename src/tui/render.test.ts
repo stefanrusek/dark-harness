@@ -202,6 +202,18 @@ describe("renderFrame", () => {
     expect(rows.some((row) => row.includes("> ") && row.includes("b (sonnet)"))).toBe(true);
   });
 
+  // DH-0069: a sub-agent's `description` (from the Agent tool's now-required parameter) is
+  // the primary label — a raw `agentId (model)` is only the fallback for entries that never
+  // got one (the root agent, or a pre-DH-0069 logged session).
+  test("tree view prefers an agent's description over agentId (model) when present", () => {
+    const tree = [treeNode("a", { description: "Fix flaky retry test" })];
+    const state = baseState({ view: { kind: "tree", selectedIndex: 0 }, tree });
+    const rows = renderFrame(state);
+    const joined = rows.join("\n");
+    expect(joined).toContain("Fix flaky retry test");
+    expect(joined).not.toContain("a (sonnet)");
+  });
+
   test("tree view nests children with indentation", () => {
     const tree = [treeNode("a", { children: [treeNode("a1")] })];
     const state = baseState({ view: { kind: "tree", selectedIndex: 0 }, tree });

@@ -324,3 +324,11 @@ not a real gap.
 every file touched this round. Did not run `bun run e2e` this round (out of scope for this
 task per the coordinator's brief — Hedy's DH-0056 E2E piece per the ticket's D7 table is
 separate follow-on work).
+
+### 2026-07-16 — DH-0069: sidebar/header use description
+Sidebar row label, its aria-label, and the agent-header name (src/web/client/render.ts) now
+prefer `agent.description` over `model · shortAgentId` / `model (id)`, falling back only
+when absent (root always keeps "root"/"Root agent"). This required a `src/contracts/` +
+`src/web/client/state.ts` change too, since Web's tree is built from `AgentSpawnedEvent` SSE
+events, not the `AgentTreeNode` tree-poll path TUI uses — see Grace's roster note on the
+`AgentSpawnedEvent.description` addition. Added coverage in state.test.ts and render.test.ts.

@@ -25,7 +25,16 @@ import { expectContains, expectTrue, reportAndExit } from "./spike-support.ts";
 
 const rootProvider = startMockAnthropicProvider([
   {
-    toolCalls: [{ name: "Agent", input: { prompt: "Say hi as a sub-agent.", model: "sub" } }],
+    toolCalls: [
+      {
+        name: "Agent",
+        input: {
+          prompt: "Say hi as a sub-agent.",
+          description: "Say hi as sub-agent",
+          model: "sub",
+        },
+      },
+    ],
     stopReason: "tool_use",
   },
   successTurn("Root heard back from the sub-agent."),
@@ -76,7 +85,7 @@ try {
 
   const lines = pane.split("\n");
   const rootLine = lines.find((l) => l.includes("agent-root"));
-  const childLine = lines.find((l) => l.includes("(sub)"));
+  const childLine = lines.find((l) => l.includes("Say hi as sub-agent"));
   const rootIndent = rootLine ? (rootLine.match(/^\s*/)?.[0].length ?? 0) : -1;
   const childIndent = childLine ? (childLine.match(/^\s*/)?.[0].length ?? 0) : -1;
 
@@ -87,7 +96,7 @@ try {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const raw = session.captureRaw();
-    if (raw.includes(DONE_GLYPH_PREFIX) && raw.includes("(sub)")) {
+    if (raw.includes(DONE_GLYPH_PREFIX) && raw.includes("Say hi as sub-agent")) {
       sawDoneGlyph = true;
       break;
     }
@@ -111,7 +120,9 @@ try {
     expectTrue(
       sawDoneGlyph,
       "sub-agent tree entry shows the green 'done' status glyph after completing successfully",
-      sawDoneGlyph ? undefined : "green \\x1b[32m● glyph never appeared next to the (sub) entry",
+      sawDoneGlyph
+        ? undefined
+        : "green \\x1b[32m● glyph never appeared next to the sub-agent entry",
     ),
   ];
 } finally {

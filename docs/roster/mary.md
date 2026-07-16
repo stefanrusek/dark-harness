@@ -399,3 +399,10 @@ Open thread for a future round: once Core/Server/Web land their own
 `limits.completedRetention` config wiring, thread the same value into `startTui` (same
 pattern as the Round-2 `token` parameter) instead of the local `DEFAULT_COMPLETED_RETENTION`
 constant.
+
+### 2026-07-16 — DH-0069: tree label uses description
+`renderTree` (src/tui/render.ts) now prefers `entry.node.description` (from
+`AgentTreeNode.description`, already plumbed) as the label, falling back to the old
+`agentId (model)` format only when absent (root, or a pre-DH-0069 session). Added a
+render.test.ts case and updated e2e spikes whose raw-pane assertions checked for the old
+`(sub)` model-suffix text.
