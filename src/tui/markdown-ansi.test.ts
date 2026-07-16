@@ -188,6 +188,62 @@ describe("renderMarkdownRows — wrapping", () => {
   });
 });
 
+describe("renderMarkdownRows — style-bleed regression (DH-0065)", () => {
+  test("a styled segment followed by plain text on the same line contains a reset between them, not only at end of row", () => {
+    const rows = renderMarkdownRows(parseMarkdown("**bold** then plain"), 80);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as string;
+    // "bold" is styled, then " then plain" must not inherit that styling: there must be a
+    // RESET emitted before " then plain" begins, not only the trailing end-of-row reset.
+    const plainStart = row.indexOf(" then plain");
+    expect(plainStart).toBeGreaterThan(-1);
+    expect(row.slice(0, plainStart)).toContain(RESET);
+    // And the plain tail itself must render with no active SGR state at all: strip every
+    // SGR sequence and confirm the raw text before "then plain" is exactly what's expected,
+    // i.e. nothing from "bold"'s style bled past its own closing reset.
+    const resetBeforePlain = row.lastIndexOf(RESET, plainStart);
+    expect(resetBeforePlain).toBeGreaterThan(-1);
+    // No other SGR-opening sequence appears between that reset and the plain text start.
+    const between = row.slice(resetBeforePlain + RESET.length, plainStart);
+    expect(between).toBe("");
+  });
+
+  test("bold, then plain, then italic each get their own explicit reset — no cumulative bleed", () => {
+    const rows = renderMarkdownRows(parseMarkdown("**bold** plain *em*"), 80);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as string;
+    const plain = stripAnsi(row);
+    expect(plain).toBe("bold plain em");
+    // A RESET must appear between the end of the styled "bold" text and the start of the
+    // plain "plain" text — not only at the very end of the row.
+    const boldEnd = row.indexOf("bold") + "bold".length;
+    const plainIdx = row.indexOf("plain");
+    expect(row.slice(boldEnd, plainIdx)).toContain(RESET);
+  });
+
+  test("a link's underline+blue styling does not bleed into the trailing paragraph text", () => {
+    const rows = renderMarkdownRows(
+      parseMarkdown("see [grafana](https://x.example) for details"),
+      80,
+    );
+    const row = rows.join("\n");
+    const linkEnd = row.indexOf("grafana") + "grafana".length;
+    const forIdx = row.indexOf(" for details");
+    expect(forIdx).toBeGreaterThan(-1);
+    // Between the end of the styled link text ("grafana") and the trailing plain text
+    // (" for details") there must be a reset — the underline/blue link style must not carry
+    // through to it, whether via the link's own trailing "` (url)`" segment reset or one
+    // emitted just before the plain tail.
+    expect(row.slice(linkEnd, forIdx)).toContain(RESET);
+  });
+
+  test("plain text followed by a styled segment still opens style cleanly with no leaked reset text", () => {
+    const rows = renderMarkdownRows(parseMarkdown("plain then **bold**"), 80);
+    const plain = stripAnsi(rows.join("\n"));
+    expect(plain).toBe("plain then bold");
+  });
+});
+
 describe("renderBlocks (exported alias used internally for nested rendering)", () => {
   test("matches renderMarkdownRows for the same input", () => {
     const blocks = parseMarkdown("hello **world**");

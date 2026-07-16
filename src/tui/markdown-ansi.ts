@@ -140,7 +140,22 @@ function wrapSegments(line: Segment[], cols: number): string[] {
 function serializeRow(parts: { text: string; codes: readonly string[] }[]): string {
   if (parts.length === 0) return "";
   const hasStyle = parts.some((p) => p.codes.length > 0);
-  const body = parts.map((p) => `${sgrPrefix(p.codes)}${p.text}`).join("");
+  // Every style transition must be explicit (DH-0065): a segment that follows a *styled*
+  // segment always gets an explicit RESET before its own (possibly empty) SGR prefix, so an
+  // unstyled — or differently-styled — segment can never inherit the previous segment's SGR
+  // state. Without this, a segment with an empty code set emitted no prefix at all and the
+  // terminal simply kept whatever bold/italic/color state the prior segment left active,
+  // bleeding it into the rest of the row (and, via re-opened continuation segments, into
+  // wrapped rows too). The very first segment of a row never needs a leading reset — every
+  // row this module produces starts from clean terminal state by construction (each row is
+  // reset-terminated, per the module header comment).
+  const body = parts
+    .map((p, i) => {
+      const prevStyled = i > 0 && (parts[i - 1] as { codes: readonly string[] }).codes.length > 0;
+      const prefix = prevStyled ? `${RESET}${sgrPrefix(p.codes)}` : sgrPrefix(p.codes);
+      return `${prefix}${p.text}`;
+    })
+    .join("");
   return hasStyle ? `${body}${RESET}` : body;
 }
 

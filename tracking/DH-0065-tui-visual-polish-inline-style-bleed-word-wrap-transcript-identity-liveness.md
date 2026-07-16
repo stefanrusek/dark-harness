@@ -181,6 +181,44 @@ Raw captures show zero SGR anywhere in the header (`Dark Harness — Root Agent 
 - Should user-turn text be echoed in a distinct color, or only the `>` marker? (Claude
   Code's own convention — dim/quoted user echo — is a reasonable reference point.)
 
+## Status Log
+
+### 2026-07-16 — Mary (TUI): style-bleed defect fixed and verified
+
+Fixed the first, highest-priority item only (inline style bleed) per dispatch scope — the
+other three items (word wrap, transcript identity, header/footer styling, liveness) are
+untouched and remain open design/taste calls for the owner.
+
+- Root cause confirmed exactly as filed: `serializeRow` in `src/tui/markdown-ansi.ts` only
+  emitted `sgrPrefix(p.codes)` per segment, which is empty for an unstyled segment, so the
+  previous segment's SGR state (bold/italic/color/underline) simply stayed active in the
+  terminal and bled into everything after it on the row, including re-opened wrapped
+  continuation segments.
+- Fix: `serializeRow` now emits an explicit `RESET` before any segment that follows a
+  *styled* segment (i.e. whenever `parts[i-1].codes.length > 0`), before that segment's own
+  (possibly empty) SGR prefix. The first segment of a row is exempt — every row already
+  starts from clean terminal state by construction. Still row-local, still allowlist-only
+  (SGR 0 was already an allowed code); no change to the SGR allowlist itself.
+- Added segment-boundary regression tests in `src/tui/markdown-ansi.test.ts`
+  (`renderMarkdownRows — style-bleed regression (DH-0065)`): bold-then-plain, bold-then-
+  plain-then-italic, link-then-trailing-text, and plain-then-bold, each asserting a RESET
+  appears *between* segments, not only at end-of-row — this is exactly the class of test
+  the ticket noted was missing (existing tests passed while the bug was visibly present).
+- Visual verification: the ticket's `e2e/spikes/tui/explore-design-review.ts` spike is not
+  actually present in this checkout despite being referenced as committed evidence, so I
+  reproduced the ticket's own example directly (`renderMarkdownRows` + raw-ANSI dump) —
+  confirmed `**api-gateway v2.3.1**`, `*complete*`, `` `healthz` ``, and the `[grafana](url)`
+  link each now close with an explicit `\x1b[0m` immediately after their own span, with no
+  bleed into subsequent plain text.
+- Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all clean.
+  `src/tui/markdown-ansi.ts` and `src/tui/markdown-ansi.test.ts` are the only files changed;
+  `markdown-ansi.ts` is at 100%/100% (line/function) coverage. Full suite: 1263 pass, 0 fail.
+
+Leaving this ticket in `draft` — still open in this ticket: word-boundary wrapping,
+transcript user/agent visual identity (and the consecutive-same-role-turn boundary
+question), agent tree readability (short ids/connectors/status-aware elapsed/status
+labels), tool-call visibility in the transcript, and header/footer/heading chrome styling.
+
 ## Notes
 
 > [!NOTE]
