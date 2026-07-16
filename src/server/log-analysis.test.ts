@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LogHeader, LogLine } from "../contracts/index.ts";
 import {
   buildAgentLogTree,
+  formatSessionList,
   formatSessionLogTree,
+  listSessionDirectories,
   readAgentLogLines,
   readSessionLogSummaries,
 } from "./log-analysis.ts";
@@ -176,6 +178,87 @@ describe("readSessionLogSummaries / formatSessionLogTree", () => {
     expect(output).toContain("[failed]");
     expect(output).toContain("1ms");
     expect(output.split("\n").length).toBe(3);
+  });
+
+  // DH-0067: the literal string "cost=$?" read as an unexpanded shell variable, not a
+  // deliberate "unknown" marker.
+  test("an agent with no costUsd renders 'cost=—', never the literal 'cost=$?'", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-analysis-"));
+    writeJsonl(join(dir, "root.jsonl"), [header({ agentId: "root" })]);
+    const output = formatSessionLogTree(dir);
+    expect(output).toContain("cost=—");
+    expect(output).not.toContain("$?");
+  });
+
+  // DH-0067: `dh logs` reads static JSONL files after the fact — it can't confirm a
+  // "running" agent is actually still alive (a crashed/killed session leaves no terminal
+  // status line behind). The tool qualifies that specific status rather than asserting a
+  // fact it can't verify.
+  test("qualifies a 'running' status as unconfirmed (no terminal event) — other statuses unqualified", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-analysis-"));
+    writeJsonl(join(dir, "root.jsonl"), [header({ agentId: "root" })]);
+    const output = formatSessionLogTree(dir);
+    expect(output).toContain("[running (no terminal event seen)]");
+  });
+
+  test("color: true wraps the status word in ANSI codes; color: false (default) stays plain", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-analysis-"));
+    writeJsonl(join(dir, "root.jsonl"), [
+      header({ agentId: "root" }),
+      { version: 1, timestamp: "2026-07-15T00:00:01.000Z", type: "completed", success: true },
+    ]);
+    const plain = formatSessionLogTree(dir);
+    expect(plain).not.toContain("\x1b[");
+    const colored = formatSessionLogTree(dir, { color: true });
+    expect(colored).toContain("\x1b[32mdone\x1b[0m");
+  });
+});
+
+describe("listSessionDirectories / formatSessionList (DH-0067)", () => {
+  test("throws a clear error when the logs root itself can't be listed", () => {
+    expect(() => listSessionDirectories(join(tmpdir(), "dh-logs-root-nope-xyz"))).toThrow(
+      /cannot read logs directory/,
+    );
+    expect(formatSessionList.bind(null, join(tmpdir(), "dh-logs-root-nope-xyz"))).toThrow(
+      /cannot read logs directory/,
+    );
+  });
+
+  test("reports no sessions found for an empty logs root", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-root-"));
+    expect(formatSessionList(dir)).toBe(`(no sessions found under ${dir})`);
+  });
+
+  test("lists sessions newest-first by earliest header spawnedAt, agentCount from valid files, ignores non-directories", () => {
+    dir = mkdtempSync(join(tmpdir(), "dh-logs-root-"));
+    writeFileSync(join(dir, "not-a-dir.txt"), "ignore me"); // must be skipped, not listed as a session
+
+    mkdirSync(join(dir, "older-session"));
+    writeJsonl(join(dir, "older-session", "root.jsonl"), [
+      header({ agentId: "root", spawnedAt: "2026-01-01T00:00:00.000Z" }),
+    ]);
+
+    mkdirSync(join(dir, "newer-session"));
+    writeJsonl(join(dir, "newer-session", "root.jsonl"), [
+      header({ agentId: "root", spawnedAt: "2026-06-01T00:00:00.000Z" }),
+    ]);
+    writeJsonl(join(dir, "newer-session", "child.jsonl"), [
+      header({ agentId: "child", parentAgentId: "root", spawnedAt: "2026-06-01T00:00:05.000Z" }),
+    ]);
+
+    mkdirSync(join(dir, "empty-session")); // no valid agent log files — startedAt undefined
+
+    const sessions = listSessionDirectories(dir);
+    expect(sessions).toEqual([
+      { sessionId: "newer-session", startedAt: "2026-06-01T00:00:00.000Z", agentCount: 2 },
+      { sessionId: "older-session", startedAt: "2026-01-01T00:00:00.000Z", agentCount: 1 },
+      { sessionId: "empty-session", agentCount: 0 },
+    ]);
+
+    const listing = formatSessionList(dir);
+    const lines = listing.split("\n");
+    expect(lines[0]).toBe("newer-session  started=2026-06-01T00:00:00.000Z  agents=2");
+    expect(lines[2]).toBe("empty-session  started=?  agents=0");
   });
 });
 

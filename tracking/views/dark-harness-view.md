@@ -41,7 +41,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 | [DH-0065](../DH-0065-tui-visual-polish-inline-style-bleed-word-wrap-transcript-identity-liveness.md) | TUI visual polish: inline style bleed, word wrap, transcript identity, liveness | feature | stefan |
-| [DH-0067](../DH-0067-server-mode-operator-ux-startup-summary-runtime-activity-feed-cli-output-polish.md) | Server-mode operator UX: startup summary, runtime activity feed, CLI output polish | feature | stefan |
 | [DH-0068](../DH-0068-readme-hero-compelling-promo-screenshot-and-visual-identity-for-the-landing-page.md) | README hero: compelling promo screenshot and visual identity for the landing page | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut 🔒 | feature | stefan |
@@ -114,5 +113,5 @@ source: tracking/
 | [DH-0072](../DH-0072-grep-tool-likely-missing-context-line-flags-multiline-mode-and-file-type-filter-that-real-claude-code-s-grep-supports.md) | Grep tool likely missing context-line flags, multiline mode, and file-type filter that real Claude Code's Grep supports | done |
 | [DH-0070](../DH-0070-bash-tool-s-fresh-shell-per-call-semantics-diverge-from-claude-code-s-persistent-cwd-behavior.md) | Agents don't have their own separate working-directory state | done |
 | [DH-0069](../DH-0069-agent-tool-s-description-should-be-required-and-the-tree-ui-should-actually-use-it.md) | Agent tool's description should be required, and the tree UI should actually use it | done |
+| [DH-0067](../DH-0067-server-mode-operator-ux-startup-summary-runtime-activity-feed-cli-output-polish.md) | Server-mode operator UX: startup summary, runtime activity feed, CLI output polish | done |
 | [DH-0064](../DH-0064-e2e-web-test-ts-and-connect-web-test-ts-assert-a-stale-agent-output-selector.md) | e2e/web.test.ts and connect-web.test.ts assert a stale .agent-output selector | done |
-| [DH-0063](../DH-0063-spile-ops-skill-id-based-ticket-resolution-rename-on-retitle-tool.md) | spile-ops skill: ID-based ticket resolution + rename-on-retitle tool | done |

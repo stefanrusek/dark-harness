@@ -162,31 +162,138 @@ function formatDuration(ms: number | undefined): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** DH-0067 fix: this used to return the literal string `$?` for an unpriced/unknown cost —
+ * indistinguishable from an unexpanded shell variable in a paste of `dh logs` output ("cost
+ * =$?" read as a shell-expansion bug, not a deliberate "unknown" marker). `—` (em dash) is
+ * unambiguous prose for "no value available" and can't be mistaken for shell syntax. */
 function formatCost(costUsd: number | undefined): string {
-  return costUsd === undefined ? "$?" : `$${costUsd.toFixed(4)}`;
+  return costUsd === undefined ? "—" : `$${costUsd.toFixed(4)}`;
 }
 
-function formatNode(node: AgentLogTreeNode, prefix: string, isLast: boolean): string[] {
+/** DH-0067: `dh logs` reads static JSONL files after the fact — it has no way to confirm a
+ * process reporting "running" is actually still alive (crashed/killed sessions leave no
+ * terminal status line behind, since nothing was left running to write one). Qualifying
+ * every "running" status this tool prints (rather than trying to detect liveness, which
+ * would need something outside the log files themselves) keeps the tool honest about that
+ * limitation instead of asserting a fact it can't verify. */
+function formatStatusLabel(status: AgentLogTreeNode["status"]): string {
+  return status === "running" ? "running (no terminal event seen)" : status;
+}
+
+const STATUS_COLOR: Record<AgentLogTreeNode["status"], string> = {
+  running: "\x1b[33m",
+  waiting: "\x1b[36m",
+  done: "\x1b[32m",
+  failed: "\x1b[31m",
+  stopped: "\x1b[90m",
+};
+const RESET = "\x1b[0m";
+
+function colorizeStatusLabel(status: AgentLogTreeNode["status"], color: boolean): string {
+  const label = formatStatusLabel(status);
+  return color ? `${STATUS_COLOR[status]}${label}${RESET}` : label;
+}
+
+function formatNode(
+  node: AgentLogTreeNode,
+  prefix: string,
+  isLast: boolean,
+  color: boolean,
+): string[] {
   const connector = prefix === "" ? "" : isLast ? "└─ " : "├─ ";
   const label =
     `${node.agentId}${node.description ? ` (${node.description})` : ""} ` +
-    `[${node.status}] cost=${formatCost(node.costUsd)} duration=${formatDuration(node.durationMs)} model=${node.model}`;
+    `[${colorizeStatusLabel(node.status, color)}] cost=${formatCost(node.costUsd)} duration=${formatDuration(node.durationMs)} model=${node.model}`;
   const lines = [`${prefix}${connector}${label}`];
   const childPrefix = prefix === "" ? "" : `${prefix}${isLast ? "   " : "│  "}`;
   node.children.forEach((child, i) => {
-    lines.push(...formatNode(child, childPrefix, i === node.children.length - 1));
+    lines.push(...formatNode(child, childPrefix, i === node.children.length - 1, color));
   });
   return lines;
+}
+
+export interface FormatSessionLogTreeOptions {
+  /** DH-0067: colorize status words (same palette as the TUI's `colorizeStatus`) — the
+   * caller (cli.ts) decides this from `process.stdout.isTTY` so a piped/redirected `dh logs`
+   * stays plain-text (standard isatty gate; matches `dh doctor`'s PASS/FAIL colorization). */
+  color?: boolean;
 }
 
 /** Prints the agent tree for a session directory — the `dh logs <sessionDir>` output
  * (DH-0037). Each line shows the agent id, optional description, status, cumulative cost,
  * duration, and model. */
-export function formatSessionLogTree(sessionDir: string): string {
+export function formatSessionLogTree(
+  sessionDir: string,
+  options: FormatSessionLogTreeOptions = {},
+): string {
   const summaries = readSessionLogSummaries(sessionDir);
   if (summaries.length === 0) {
     return `(no agent log files found in ${sessionDir})`;
   }
+  const color = options.color ?? false;
   const roots = buildAgentLogTree(summaries);
-  return roots.flatMap((root, i) => formatNode(root, "", i === roots.length - 1)).join("\n");
+  return roots.flatMap((root, i) => formatNode(root, "", i === roots.length - 1, color)).join("\n");
+}
+
+export interface SessionListEntry {
+  sessionId: string;
+  /** Earliest header `spawnedAt` across the session's agent files (the root agent's, in
+   * practice) — undefined if no agent file in the directory parsed as a valid header. */
+  startedAt?: string;
+  agentCount: number;
+}
+
+/** DH-0067: `dh logs` with no argument used to just error, forcing the operator to `ls
+ * .dh-logs` and copy a UUID by hand. Lists every session subdirectory under `logsRootDir`
+ * (typically `./.dh-logs`), each with its earliest recorded start time and agent-file count,
+ * newest-first — enough for an operator to pick the session they meant without leaving the
+ * tool. Throws only if `logsRootDir` itself can't be listed; an individual session directory
+ * that fails to summarize is skipped (agentCount 0), not fatal to the listing. */
+export function listSessionDirectories(logsRootDir: string): SessionListEntry[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(logsRootDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch (err) {
+    throw new Error(`cannot read logs directory "${logsRootDir}": ${(err as Error).message}`);
+  }
+
+  const sessions: SessionListEntry[] = entries.map((sessionId) => {
+    // `entries` was already filtered to directories by the `readdirSync` above, so this
+    // only throws in a real race (the directory disappearing between listing and reading) —
+    // not worth a defensive catch that would only ever hide that same rare race.
+    const summaries = readSessionLogSummaries(join(logsRootDir, sessionId));
+    const startedAt = summaries
+      .map((s) => s.spawnedAt)
+      .sort()
+      .at(0);
+    return {
+      sessionId,
+      ...(startedAt !== undefined ? { startedAt } : {}),
+      agentCount: summaries.length,
+    };
+  });
+
+  // Newest-first: undefined startedAt (unreadable/empty directory) sorts last.
+  sessions.sort((a, b) => {
+    if (a.startedAt === undefined && b.startedAt === undefined) return 0;
+    if (a.startedAt === undefined) return 1;
+    if (b.startedAt === undefined) return -1;
+    return b.startedAt.localeCompare(a.startedAt);
+  });
+  return sessions;
+}
+
+/** Formats `listSessionDirectories`' result as the `dh logs` (no-argument) output — one line
+ * per session: id, start time (or `?`), agent count. */
+export function formatSessionList(logsRootDir: string): string {
+  const sessions = listSessionDirectories(logsRootDir);
+  if (sessions.length === 0) {
+    return `(no sessions found under ${logsRootDir})`;
+  }
+  const lines = sessions.map(
+    (s) => `${s.sessionId}  started=${s.startedAt ?? "?"}  agents=${s.agentCount}`,
+  );
+  return lines.join("\n");
 }

@@ -8,6 +8,7 @@
 // Never serves the web UI's static assets (ADR 0003) — API/event protocol only.
 
 import { readFileSync } from "node:fs";
+import { BUILD_INFO } from "../config/build-info.ts";
 import type { ClientCommand, SecurityConfig, ServerSentEvent } from "../contracts/index.ts";
 import type { AgentLoopHandle } from "./agent-loop.ts";
 import { isAuthorized } from "./auth.ts";
@@ -78,6 +79,14 @@ export interface DhServerOptions {
    * `collectConfigSecrets(config)` at the call site (Core's `cli.ts`).
    */
   knownSecrets?: readonly string[];
+  /** DH-0067: fired once per SSE connection established (after auth), passed the remote
+   * address Bun reports for it (`"unknown"` if `server.requestIP` can't determine one — e.g.
+   * a unix socket or a test harness fake). Lets the CLI print an operator-facing "client
+   * connected" line; purely observational, no effect on the connection itself. */
+  onClientConnect?: (remoteAddress: string) => void;
+  /** DH-0067: fired once per SSE connection torn down (either side), same remote-address
+   * argument as `onClientConnect`. */
+  onClientDisconnect?: (remoteAddress: string) => void;
 }
 
 export class DhServer {
@@ -88,6 +97,8 @@ export class DhServer {
   private readonly security: SecurityConfig | undefined;
   private readonly requestedPort: number;
   private readonly heartbeatIntervalMs: number;
+  private readonly onClientConnect: ((remoteAddress: string) => void) | undefined;
+  private readonly onClientDisconnect: ((remoteAddress: string) => void) | undefined;
   private bunServer: ReturnType<typeof Bun.serve> | undefined;
   private unsubscribeEvent: (() => void) | undefined;
   private unsubscribeLog: (() => void) | undefined;
@@ -101,6 +112,8 @@ export class DhServer {
     this.security = options.security;
     this.requestedPort = options.port ?? DEFAULT_PORT;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    this.onClientConnect = options.onClientConnect;
+    this.onClientDisconnect = options.onClientDisconnect;
   }
 
   /** Starts listening and returns the bound port (useful when `port: 0` is requested). */
@@ -166,6 +179,20 @@ export class DhServer {
       return this.handleCommandRequest(req);
     }
 
+    // DH-0067: `GET /` (curl, a load balancer health probe, a confused browser hitting the
+    // bare API port) used to be a plain 404 — no clue this is a dh server at all, let alone
+    // that the web UI is client-served and needs a separate `dh --connect ... --web`. One
+    // cheap identifying line saves that trip to the README. Deliberately plain text, not
+    // JSON (README.md's own framing: humans hit this more than machines). Same bearer-token
+    // gate as every other route (the `isAuthorized` check above already ran) — a
+    // token-protected server doesn't leak even this one line to an unauthenticated probe.
+    if (url.pathname === "/" && req.method === "GET") {
+      return new Response(
+        `dh server ${BUILD_INFO.version}; API at ${EVENTS_PATH} / ${COMMANDS_PATH}; the web UI is client-served — run: dh --connect <host> --web\n`,
+        { status: 200, headers: { ...CORS_HEADERS, "content-type": "text/plain; charset=utf-8" } },
+      );
+    }
+
     return new Response(null, { status: 404, headers: CORS_HEADERS });
   }
 
@@ -181,6 +208,14 @@ export class DhServer {
     // `server.timeout(req, 0)` disables Bun's idle timeout for this one request/connection;
     // our own heartbeat interval remains the sole keep-alive mechanism for it.
     server.timeout(req, 0);
+    // DH-0067: "is my TUI even connected?" — until now neither side had any confirmation an
+    // SSE stream actually opened/closed; `server.requestIP` is Bun's per-request accessor for
+    // the remote socket address (`"unknown"` covers the cases it can't determine one, e.g. a
+    // fake `server` injected by a unit test). Purely observational — never affects the
+    // connection itself, and firing more than once (or not at all, if no callback was
+    // supplied) is harmless by construction.
+    const remoteAddress = server.requestIP(req)?.address ?? "unknown";
+    this.onClientConnect?.(remoteAddress);
     const lastEventId = req.headers.get("Last-Event-ID");
     const { events: replay, gap } = this.eventBuffer.getEventsAfter(lastEventId);
     const encoder = new TextEncoder();
@@ -197,6 +232,7 @@ export class DhServer {
       closed = true;
       unsubscribe?.();
       clearInterval(heartbeat);
+      this.onClientDisconnect?.(remoteAddress);
     };
 
     const stream = new ReadableStream<Uint8Array>({

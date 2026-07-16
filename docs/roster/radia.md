@@ -248,3 +248,67 @@ TUI PTY timeout already tracked separately (DH-0058) — none touch `src/server/
 `src/cli.ts`, or `src/contracts/config.ts`, the only files this round changed.
 
 No new open threads.
+
+### 2026-07-16 — DH-0067: server operator UX (startup summary, activity feed, CLI polish)
+
+Architect (Fable) design review of the headless/operational surface. Built the full ticket
+across `src/server/` and a scoped `src/cli.ts` touch (same precedent as DH-0037's cli.ts
+touch — the ticket's own framing anticipated it):
+
+- **`src/server/log-analysis.ts`**: `formatCost` no longer prints the literal `cost=$?` for
+  an unpriced agent (read as an unexpanded shell variable) — now `cost=—`. A `running`
+  status is qualified (`running (no terminal event seen)`) since `dh logs` reads static
+  JSONL after the fact and has no way to confirm a process claiming to be running is still
+  alive — deliberately did *not* try to build real liveness detection (nothing in the log
+  files themselves could support it), just stopped asserting a fact the tool can't verify.
+  Status words colorize on a TTY (reused the TUI's exact green/cyan/red/gray palette),
+  plain on a pipe — same gate `dh doctor` now uses. New `listSessionDirectories`/
+  `formatSessionList` back `dh logs` with no argument (lists sessions instead of erroring).
+- **`src/server/server.ts`**: `GET /` returns a one-line identifying response instead of a
+  bare 404. `DhServerOptions` gained `onClientConnect`/`onClientDisconnect` hooks (fired
+  once per SSE connection, passed `server.requestIP(req)`) purely so `cli.ts` can print
+  "is my TUI even connected?" lines — no wire/contract change, no effect on the connection.
+- **`src/cli.ts` (Core's file, scoped touch)**: `--server` startup now prints, after the
+  existing byte-stable "listening on port" line: version, an explicit "bound to
+  0.0.0.0:<port>" (worth stating outright since `DhServer` never passes a `hostname` to
+  `Bun.serve()` — this is the fact the posture note depends on), the resolved
+  `.dh-logs/<sessionId>` directory, and a `dh --connect <host> --port <n>` hint. A one-line
+  posture note prints whenever neither a bearer token nor TLS is configured
+  (`buildStartupPostureNote`). Local/`--web` startup gained the log-directory line after its
+  own byte-stable "web UI ready at" line. New `ActivityFeed` class formats one stdout line
+  per agent lifecycle transition (spawn / status change with cumulative token+cost / session
+  end) for `--server` mode, replacing total silence between startup and shutdown; new
+  `--quiet` flag restores the old silence and also suppresses the client connect/disconnect
+  lines. SIGTERM/SIGINT shutdown and the `--job` "starting a new interactive session"
+  transition notice moved from stderr to stdout — both are normal lifecycle events, not
+  failures, and used to render in the same alarming red as a real error in a typical
+  terminal/`docker logs` viewer (the ticket's own risk note: fix the styling, not by
+  inventing an ANSI layer just to force stderr neutral — moving the *stream* was the
+  simpler, equally-correct read of that note, since there's no existing color infra outside
+  `src/tui/`). `dh doctor` output (`formatDoctorReport`) gained TTY colorized PASS/FAIL,
+  column-aligned model names, and a trailing "N models: X pass, Y fail" summary line.
+
+Judgment calls, flagged rather than escalated (none seemed to cross an ADR/contract line
+per CLAUDE.md §6):
+- Scoped the activity feed and client connect/disconnect lines to `--server` mode only, not
+  local/`--web`/`--connect` — those already have a real client (TUI/web UI) providing
+  moment-to-moment feedback, so the "black box" problem the ticket describes is specific to
+  headless mode.
+- `GET /` still goes through the existing bearer-token auth check (same as every other
+  route) rather than being special-cased open — a token-protected server shouldn't leak
+  even one identifying line to an unauthenticated probe.
+- Dropped a rare-race `try/catch` in `listSessionDirectories` (the per-session-directory
+  read) rather than keep defensive code that's both untestable and only ever shields a
+  narrow disappearing-directory race — same call CLAUDE.md's coverage gate nudges toward.
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all pass — 100% line
+coverage on every changed file, 100% function coverage on every new export (`ActivityFeed`,
+`buildStartupPostureNote`, `formatDoctorReport`, `listSessionDirectories`,
+`formatSessionList`). `bun run e2e`: 30 pass / 2 fail — both failures are the pre-existing
+missing-headless-Chromium environment issue (`web.test.ts`/`connect-web.test.ts`), unrelated
+to this change; every `waitForStdout`-based e2e test (which greps the exact startup
+substrings this round extended, never rewrote) passed clean, confirming the byte-stability
+requirement held.
+
+Closed DH-0067 (resolution: done) — confident every user story/functional requirement in
+the ticket is addressed. No new open threads.
