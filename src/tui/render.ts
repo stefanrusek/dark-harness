@@ -44,15 +44,17 @@ const INVERSE = "\x1b[7m";
  * `TuiState -> string[]` rendering architecture, no real cursor-position math needed. Only
  * the root view's input line is editable, so only `renderRoot` uses this. */
 export const CURSOR_MARKER = `${INVERSE} ${RESET}`;
+// DH-0100: canonical status color model (docs/design/style-guide.md §1/§2.3) — running is
+// blue (34), waiting is yellow (33), stopped is magenta (35); cyan (36) is reserved for
+// structural/informational chrome, not a status. done/failed unchanged (already canonical).
 const STATUS_COLOR: Record<AgentStatus, string> = {
-  running: "\x1b[33m",
-  waiting: "\x1b[36m",
+  running: "\x1b[34m",
+  waiting: "\x1b[33m",
   done: "\x1b[32m",
   failed: "\x1b[31m",
-  // Round 13 (docs/handoffs/core.md): distinct from "failed" now that TaskStop reports a
-  // dedicated "stopped" status. Same dimming as "done" (neutral outcome, not a fault) — TUI's
-  // own domain call, revisit if Mary wants a different color.
-  stopped: "\x1b[90m",
+  // DH-0100: stopped is magenta (35), matching the Web's purple stopped hue — never gray,
+  // which reads as unstyled/unknown (DH-0029 regression guard).
+  stopped: "\x1b[35m",
 };
 
 export function colorizeStatus(status: AgentStatus, text: string): string {

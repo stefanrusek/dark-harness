@@ -78,11 +78,11 @@ describe("tailLines", () => {
 
 describe("colorizeStatus", () => {
   test("wraps text in the color for each status", () => {
-    expect(colorizeStatus("running", "x")).toBe("\x1b[33mx\x1b[0m");
-    expect(colorizeStatus("waiting", "x")).toBe("\x1b[36mx\x1b[0m");
+    expect(colorizeStatus("running", "x")).toBe("\x1b[34mx\x1b[0m");
+    expect(colorizeStatus("waiting", "x")).toBe("\x1b[33mx\x1b[0m");
     expect(colorizeStatus("done", "x")).toBe("\x1b[32mx\x1b[0m");
     expect(colorizeStatus("failed", "x")).toBe("\x1b[31mx\x1b[0m");
-    expect(colorizeStatus("stopped", "x")).toBe("\x1b[90mx\x1b[0m");
+    expect(colorizeStatus("stopped", "x")).toBe("\x1b[35mx\x1b[0m");
   });
 });
 

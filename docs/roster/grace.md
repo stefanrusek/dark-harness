@@ -1572,3 +1572,14 @@ pre-existing and unrelated, confirmed unchanged by diffing coverage output again
 Closed DH-0099 (`transition.py DH-0099 closed --resolution done`) after all verification above.
 Committed the code+test change separately from the ticket-close/tracking-view update, same
 convention as Round 14's DH-0098 close.
+
+### 2026-07-16 — DH-0100: canonical status color recolor (CLI logs)
+
+This ticket assigns `src/server/log-analysis.ts`'s `STATUS_COLOR` remap to Grace despite
+that file being Server-owned per CLAUDE.md §3 — an explicit inline exception in the ticket
+text, followed as written. Same remap as TUI's `render.ts` (running→34 blue, waiting→33
+yellow, stopped→35 magenta; done/failed unchanged) so `dh logs` matches the TUI exactly.
+No existing `log-analysis.test.ts` assertions pinned the old color codes, so no test
+updates were needed there. Verified visually via a synthetic session directory piped
+through a pty — colors match the TUI's exactly, word always shown next to the glyph.
+Landed together with Mary's TUI change in one round, per the ticket's risk note.

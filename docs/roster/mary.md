@@ -483,3 +483,17 @@ own prior-round note: the one file measuring column position
 rootIndent`), unaffected by a uniform +1 shift — no spike changes needed this round.
 
 Closed DH-0095 via `transition.py`.
+
+### 2026-07-16 — DH-0100: canonical status color recolor (TUI)
+
+Recolored `STATUS_COLOR` in `src/tui/render.ts` to match `docs/design/style-guide.md` §1:
+`running` yellow(33)→blue(34), `waiting` cyan(36)→yellow(33), `stopped` gray(90)→magenta(35).
+`done`/`failed` untouched (already canonical). Updated the stale in-code comment that
+justified gray for `stopped` (it predated the style guide). Fixed `render.test.ts`'s
+`colorizeStatus` assertions to the new codes; left `CONNECTION_COLOR`'s `closed` (still
+`90`) alone — that's connection-pill chrome, not an agent status, out of scope here.
+Verified live via a synthetic `.dh-logs/` session run through `dh logs` under a pty
+(`script -q /dev/null`) since piped output suppresses color — confirmed blue/yellow/green/
+red/magenta render correctly and the status word always accompanies the glyph. Landed in
+the same round as Grace's `src/server/log-analysis.ts` change per the ticket's explicit
+risk note (don't split the two terminal surfaces across rounds).

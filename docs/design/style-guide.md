@@ -166,6 +166,14 @@ Consistent nouns/verbs across help text, labels, docs, and logs:
 - **session** — one `dh` run; identified by a **session id**; logs live under `.dh-logs/<id>`.
 - **model** — a configured entry in `dh.json`'s `models` (has a `name` + provider + model id).
 - **status** — one of the five in §1. Use those exact words.
+- **status casing (DH-0100 decision):** each surface keeps its current, now-*intentional*
+  casing — lowercase (`running`, `waiting`, `done`, `failed`, `stopped`) in the TUI and CLI
+  (`dh logs`), matching their raw/log character, and Title Case (`Running`, `Waiting`, …)
+  only in the Web badge, a legitimate Web UI idiom. This is a deliberate per-surface style
+  choice, not an inconsistency to fix — the real divergence this ticket closed was *color*,
+  not casing. `dh logs`' `running (no terminal event seen)` qualifier is a real offline-log
+  distinction (the live surfaces can't detect a missing terminal event) and stays as-is; it
+  is not a third status vocabulary.
 - **turn** — one user/assistant exchange unit in a transcript.
 - **short id** — the display form of an agent id (`shortAgentId`, `src/web/client/format.ts`).
   **Never** show a full 36-char UUID in human chrome — use `model · short-id` (DH-0065). This

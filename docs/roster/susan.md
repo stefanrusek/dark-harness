@@ -380,3 +380,14 @@ on every file touched this round, 1397 tests project-wide. `bun run e2e`: 30/32 
 `dist/dh` first, which fixed 1 of the previously-failing tests from a missing binary) — the
 remaining 2 failures are this sandbox's already-documented missing-Chromium-binary gap, not
 a regression; nothing this round touches routes, auth, or the wire protocol.
+
+### 2026-07-16 — DH-0100 verification (no Web changes)
+
+Verified only, no code touched. `src/web/client/styles.css`'s `--status-*` custom
+properties already match `docs/design/style-guide.md` §1 exactly (running `#4f8cff`,
+waiting `#f5a524`, done `#35c469`, failed `#f2545b`, stopped `#9a7bd1`), and `stopped` still
+has explicit `.status-dot.status-stopped` / `.status-badge.status-stopped` rules (the
+DH-0029 regression guard holds — no silent fallback to an unstyled default). No drift
+found, no CSS changes made. Also recorded the DH-0100 casing decision in style-guide.md §4:
+Web keeps Title Case badges, TUI/CLI keep lowercase — intentional per-surface convention,
+not a residual inconsistency.

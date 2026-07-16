@@ -180,12 +180,14 @@ function formatStatusLabel(status: AgentLogTreeNode["status"]): string {
   return status === "running" ? "running (no terminal event seen)" : status;
 }
 
+// DH-0100: canonical status color model (docs/design/style-guide.md §1/§2.3), matching
+// src/tui/render.ts's STATUS_COLOR exactly so `dh logs` and the TUI agree.
 const STATUS_COLOR: Record<AgentLogTreeNode["status"], string> = {
-  running: "\x1b[33m",
-  waiting: "\x1b[36m",
+  running: "\x1b[34m",
+  waiting: "\x1b[33m",
   done: "\x1b[32m",
   failed: "\x1b[31m",
-  stopped: "\x1b[90m",
+  stopped: "\x1b[35m",
 };
 const RESET = "\x1b[0m";
 
