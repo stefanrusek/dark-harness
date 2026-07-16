@@ -51,4 +51,37 @@ describe("serveWebUi", () => {
       second.stop();
     }
   });
+
+  describe("DH-0022: opt-in bind address", () => {
+    test("with hostname unset (default), still reachable on loopback (unchanged behavior)", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
+      const res = await fetch(handle.url);
+      expect(res.status).toBe(200);
+    });
+
+    test("with hostname set to 127.0.0.1, Bun.serve actually receives that hostname option", async () => {
+      const originalServe = Bun.serve;
+      let capturedHostname: unknown;
+      // Spying on the actual Bun.serve options passed is the reliable way to pin this: a
+      // real cross-interface reachability check is unreliable/sandbox-dependent in CI, and
+      // this module doesn't expose the underlying Bun server object for introspection.
+      // biome-ignore lint/suspicious/noExplicitAny: matching Bun.serve's overloaded signature
+      (Bun as any).serve = (options: any) => {
+        capturedHostname = options.hostname;
+        return originalServe(options);
+      };
+      try {
+        handle = serveWebUi({
+          port: 0,
+          targetBaseUrl: "http://localhost:4000",
+          hostname: "127.0.0.1",
+        });
+      } finally {
+        Bun.serve = originalServe;
+      }
+      expect(capturedHostname).toBe("127.0.0.1");
+      const res = await fetch(handle.url);
+      expect(res.status).toBe(200);
+    });
+  });
 });

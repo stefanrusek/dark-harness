@@ -109,6 +109,42 @@ describe("DhServer", () => {
     expect(server.protocol).toBe("http");
   });
 
+  test("DH-0022: with security.hostname unset (default), still reachable on loopback (unchanged behavior)", async () => {
+    server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+    const port = server.start();
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    expect(res.status).toBe(200);
+  });
+
+  test("DH-0022: with security.hostname set to 127.0.0.1, Bun.serve actually receives that hostname option", async () => {
+    const originalServe = Bun.serve;
+    let capturedHostname: unknown;
+    // Spying on the actual Bun.serve options passed is the reliable way to pin this: a real
+    // cross-interface reachability check is unreliable/sandbox-dependent in CI.
+    // biome-ignore lint/suspicious/noExplicitAny: matching Bun.serve's overloaded signature
+    (Bun as any).serve = (options: any) => {
+      capturedHostname = options.hostname;
+      return originalServe(options);
+    };
+    server = new DhServer({
+      agentLoop: loop,
+      sessionId: "s1",
+      logDir: dir,
+      port: 0,
+      security: { hostname: "127.0.0.1" },
+    });
+    let port: number;
+    try {
+      port = server.start();
+    } finally {
+      Bun.serve = originalServe;
+    }
+    expect(capturedHostname).toBe("127.0.0.1");
+    // Still reachable via loopback, confirming the server is otherwise fully functional.
+    const res = await fetch(`http://127.0.0.1:${port}/`);
+    expect(res.status).toBe(200);
+  });
+
   test("404s on unknown routes", async () => {
     server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
     const port = server.start();

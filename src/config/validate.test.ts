@@ -276,6 +276,27 @@ describe("validateConfig — rejections", () => {
     );
   });
 
+  test("DH-0022: rejects a non-string/non-null security.hostname", () => {
+    expect(() => validateConfig(baseConfig({ security: { hostname: 42 } }))).toThrow(
+      /security.hostname/,
+    );
+  });
+
+  test("DH-0022: accepts and passes through a valid security.hostname", () => {
+    const config = validateConfig(baseConfig({ security: { hostname: "127.0.0.1" } }));
+    expect(config.security?.hostname).toBe("127.0.0.1");
+  });
+
+  test("DH-0022: security.hostname omitted (unset) means no hostname field in the result — default bind behavior unchanged", () => {
+    const config = validateConfig(baseConfig({ security: { token: "t" } }));
+    expect(config.security?.hostname).toBeUndefined();
+  });
+
+  test("DH-0022: security.hostname: null normalizes to omitted, same as token/tls", () => {
+    const config = validateConfig(baseConfig({ security: { hostname: null } }));
+    expect(config.security?.hostname).toBeUndefined();
+  });
+
   test("rejects a non-integer options.maxTurns", () => {
     expect(() =>
       validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxTurns: 1.5 } })),

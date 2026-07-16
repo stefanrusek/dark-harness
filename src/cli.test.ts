@@ -858,6 +858,58 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(sawSecurityKey).toBe(false);
   });
 
+  test("DH-0022: security.hostname is passed through to serveWebUi (local --web) when set, omitted when unset", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown = "unset-sentinel";
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("127.0.0.1");
+
+    let sawHostnameKey = true;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        sawHostnameKey = "hostname" in options;
+        return fakeWebUi();
+      },
+    });
+    expect(sawHostnameKey).toBe(false);
+  });
+
+  test("DH-0022: security.hostname is passed through to serveWebUi (--connect --web) when set", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown;
+    await main(["--connect", "example.com", "--web"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("127.0.0.1");
+  });
+
+  test("DH-0022: config.security (including hostname) is passed through to createServer when set, same as token/tls", async () => {
+    const io = fakeIo();
+    let receivedSecurity: unknown;
+    await main([], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "127.0.0.1" });
+  });
+
   test("a startup failure (e.g. the requested port is already in use) maps to HarnessError, local mode", async () => {
     const io = fakeIo();
     const code = await main([], {
@@ -3126,6 +3178,18 @@ describe("main — --server startup block (DH-0067)", () => {
     );
     expect(io.stdoutLines[2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
     expect(io.stdoutLines[3]).toBe("dh: plaintext HTTP, no auth — see README security posture.");
+  });
+
+  test("DH-0022: a configured security.hostname is reflected in the startup 'bound to' line", async () => {
+    const io = fakeIo();
+    const code = await main(["--server"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines[1]).toMatch(
+      /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 127\.0\.0\.1:\d+ — logs: .*\.dh-logs/,
+    );
   });
 
   test("a configured bearer token suppresses the posture note", async () => {

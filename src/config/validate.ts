@@ -486,7 +486,19 @@ export function validateConfig(raw: unknown): DhConfig {
       const key = requireString(raw.security.tls.key, "security.tls.key");
       tls = { cert, key };
     }
-    security = { ...(token !== undefined ? { token } : {}), ...(tls !== undefined ? { tls } : {}) };
+    // DH-0022: opt-in bind address, same null-means-unset normalization as token/tls above.
+    let hostname: string | undefined;
+    if (raw.security.hostname !== undefined && raw.security.hostname !== null) {
+      if (typeof raw.security.hostname !== "string") {
+        throw new ConfigError("security.hostname must be a string or null");
+      }
+      hostname = raw.security.hostname;
+    }
+    security = {
+      ...(token !== undefined ? { token } : {}),
+      ...(tls !== undefined ? { tls } : {}),
+      ...(hostname !== undefined ? { hostname } : {}),
+    };
   }
 
   const limits = validateLimits(raw.limits);

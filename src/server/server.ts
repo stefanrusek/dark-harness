@@ -137,6 +137,9 @@ export class DhServer {
     const tls = this.buildTlsOption();
     this.bunServer = Bun.serve({
       port: this.requestedPort,
+      // DH-0022: opt-in bind address. Omitted `security.hostname` means unchanged default
+      // behavior — Bun's own default (all interfaces), same as before this field existed.
+      ...(this.security?.hostname ? { hostname: this.security.hostname } : {}),
       ...(tls ? { tls } : {}),
       fetch: (req, server) => this.handleFetch(req, server),
     });

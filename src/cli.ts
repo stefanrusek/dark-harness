@@ -435,10 +435,12 @@ function cliBold(text: string, tty: boolean): string {
   return cliColorize(text, CLI_BOLD, tty);
 }
 
-/** DH-0067: `dh --server` binds every interface (no `hostname` option is ever threaded to
- * `Bun.serve` — see DhServer.start()), so a plaintext, unauthenticated bind is reachable
- * from anywhere on the network, not just localhost. ADR 0003's stance is "air-gapping is
- * the primary posture, `security.token`/`security.tls` are opt-in" — this is the one moment
+/** DH-0067: `dh --server` binds every interface by default (DH-0022 added an opt-in
+ * `security.hostname` config field to restrict this — see DhServer.start() — but it's unset
+ * unless an operator sets it), so a plaintext, unauthenticated bind is reachable from
+ * anywhere on the network, not just localhost, in the common case. ADR 0003's stance is
+ * "air-gapping is the primary posture, `security.token`/`security.tls` are opt-in" — this is
+ * the one moment
  * an operator is actually looking at the terminal, so it says so once at startup rather than
  * leaving it to a README they may never open. Returns undefined once either a bearer token
  * or TLS is configured (either narrows the exposure this note exists to flag).
@@ -886,6 +888,8 @@ export interface CliDeps {
     port: number;
     targetBaseUrl: string;
     token?: string;
+    /** DH-0022: opt-in bind address, sourced from `dh.json`'s `security.hostname`. */
+    hostname?: string;
   }) => WebUiHandleLike;
   io: CliIo;
   /**
@@ -1067,6 +1071,7 @@ async function runInteractiveMode(
           port: 0,
           targetBaseUrl,
           ...(config.security?.token ? { token: config.security.token } : {}),
+          ...(config.security?.hostname ? { hostname: config.security.hostname } : {}),
         });
         // DH-0101: glyph wraps around the grepped "web UI ready at <url>" substring, never
         // rewrites it — the color/glyph sit before "web" and the reset lands before the URL
@@ -1199,11 +1204,13 @@ async function runInteractiveMode(
       io.stdout(
         `dh: ${cliSuccessGlyph(panelTty)}headless server listening on port ${boundPort} (session ${sessionId}).`,
       );
-      // DH-0067: `DhServer` never passes a `hostname` to `Bun.serve()` (see server.ts), so
-      // this is always bound to every interface, not just loopback — worth spelling out
-      // explicitly since that's exactly the fact the posture note below depends on.
+      // DH-0067: `DhServer` only passes a `hostname` to `Bun.serve()` when the opt-in
+      // `security.hostname` config field (DH-0022) is set — unset (the common case) is
+      // still every interface, not just loopback — worth spelling out explicitly since
+      // that's exactly the fact the posture note below depends on.
+      const boundHost = config.security?.hostname ?? "0.0.0.0";
       io.stdout(
-        `dh: ${cliBold(formatVersionString(BUILD_INFO), panelTty)} — bound to 0.0.0.0:${boundPort} — logs: ${logDir}`,
+        `dh: ${cliBold(formatVersionString(BUILD_INFO), panelTty)} — bound to ${boundHost}:${boundPort} — logs: ${logDir}`,
       );
       io.stdout(`dh: connect with: dh --connect <host> --port ${boundPort}`);
       const posture = buildStartupPostureNote(config.security);
@@ -1220,6 +1227,7 @@ async function runInteractiveMode(
         port: 0,
         targetBaseUrl: baseUrl,
         ...(config.security?.token ? { token: config.security.token } : {}),
+        ...(config.security?.hostname ? { hostname: config.security.hostname } : {}),
       });
       // DH-0067/DH-0101: this exact "web UI ready at <url>." line is grepped by e2e
       // (web.test.ts, connect-web.test.ts, several spikes) — stays byte-stable; styling only

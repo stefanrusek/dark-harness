@@ -60,6 +60,12 @@ export interface SecurityConfig {
   /** Bearer token required on every request when set. Never logged. */
   token?: string;
   tls?: SecurityTlsConfig;
+  /** DH-0022: opt-in bind address for `Bun.serve` (e.g. "127.0.0.1" for loopback-only).
+   * Omitted means unchanged default behavior — Bun's own default (all interfaces). Applies
+   * to both the `--server` process (src/server/server.ts) and the web UI's static server
+   * (src/web/server.ts) when either is started. Config-only by owner decision (DH-0022),
+   * not a CLI flag. */
+  hostname?: string;
 }
 
 export interface McpServerConfig {

@@ -22,6 +22,10 @@ export interface ServeWebUiOptions {
   token?: string;
   /** Enables Bun's hot-reload dev mode. Defaults to false. */
   development?: boolean;
+  /** DH-0022: opt-in bind address for this static web UI's own `Bun.serve` (e.g.
+   * "127.0.0.1" for loopback-only). Omitted means unchanged default behavior — Bun's own
+   * default (all interfaces). Sourced from `dh.json`'s `security.hostname`. */
+  hostname?: string;
 }
 
 export interface WebUiHandle {
@@ -37,6 +41,7 @@ export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
 
   const server = Bun.serve({
     port: options.port,
+    ...(options.hostname ? { hostname: options.hostname } : {}),
     development: options.development ?? false,
     routes: {
       "/": indexHtml,
