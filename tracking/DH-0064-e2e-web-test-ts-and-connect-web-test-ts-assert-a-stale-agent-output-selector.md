@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0064
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -36,3 +36,18 @@ Found while completing DH-0061's Web verification spike suite: e2e/web.test.ts a
 > Same failure-mode shape as DH-0062 (stale assertions silently hidden behind the
 > missing-Chromium sandbox gap) — the new spikes (`e2e/spikes/web/*`) already use the
 > current selector, so this only affects the two pre-existing gated `.test.ts` files.
+
+## Resolution
+
+Fixed both call sites: `e2e/web.test.ts` and `e2e/connect-web.test.ts` now
+`waitForFunction` against `document.querySelector('.agent-transcript .turn-assistant
+.turn-text')?.textContent`, matching `e2e/spikes/web/spike-liveness.ts` and confirmed
+against `src/web/client/render.ts`'s `buildTurnElement` (`div.turn.turn-{role}` wrapping
+`div.turn-text`).
+
+Verification: `bun run typecheck`/`bun run lint` clean, `bun run test:coverage`
+1259/1259 pass (100% coverage, no `src/` touched). Full `bun run e2e`: 30 pass / 2 fail —
+both failures are the pre-existing missing-Chromium-binary sandbox gap
+(`/opt/pw-browsers/chromium` absent here) on exactly these two files, not a new
+regression. Could not verify a real green run in this sandbox; correctness confirmed by
+reading the actual DOM-building source instead of running headless Chromium.

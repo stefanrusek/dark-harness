@@ -552,3 +552,44 @@ orchestrator's exit code, by design); DH-0044 spike coverage once streaming actu
 the recurring worktree-provenance issue (now six-plus rounds in a row for this role) still
 isn't root-caused — someone should actually trace the provisioning path rather than each
 fresh instance independently rediscovering and working around it.
+
+### 2026-07-15 — Round 14 (fresh process again): DH-0064, fixed the stale `.agent-output` selector
+
+Came online fresh for DH-0064 — the exact stale-selector defect flagged at the end of Round
+12's entry above (`.agent-output` no longer exists in `src/web/client/render.ts`, superseded
+by `.agent-transcript .turn-assistant .turn-text` once DH-0056's Markdown rendering landed).
+
+**Worktree-provenance issue, seventh time:** the worktree I launched into was pinned to an
+ancestor commit (`12679e4`, founding docs only — no `e2e/`, `src/`, or `tracking/` at all).
+`git merge-base --is-ancestor` confirmed zero unique commits; fetching the *sibling worktree
+path* as a git remote (`local`) worked this time (not denied, unlike Round 12's note) once I
+fetched then fast-forwarded onto `local/claude/coordinator-onboarding-kab9ls`'s real tip
+(`ef6e580`) via a fresh branch off it. Seven-for-seven rounds now — this is a durable
+provisioning bug in the launch harness for this role, not noise.
+
+**What I fixed:** exactly the two call sites Round 12 identified, mirroring the already-correct
+`e2e/spikes/web/spike-liveness.ts` pattern:
+- `e2e/web.test.ts` — `waitForFunction` re-pointed from
+  `document.querySelector('.agent-output')?.textContent === 'Hello from the web e2e mock!'`
+  to `document.querySelector('.agent-transcript .turn-assistant .turn-text')?.textContent === '...'`.
+- `e2e/connect-web.test.ts` — same swap, same expected string
+  (`'Hello from the remote server, via the web client!'`).
+
+Confirmed against `src/web/client/render.ts` (`buildTurnElement`: `div.turn.turn-{role}` >
+`div.turn-text`, so an assistant turn really does nest as
+`.agent-transcript .turn-assistant .turn-text`) before touching either assertion — no
+guessing from the ticket description alone.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean (196 files), `bun run
+test:coverage` 1259/1259 pass, 100% coverage (no `src/` touched). Full `bun run e2e`: 30
+pass / 2 fail — both failures are the same pre-existing missing-Chromium-binary gap
+(`/opt/pw-browsers/chromium` absent in this sandbox) on exactly the two files this round
+touched, confirmed via the error text itself, not a new regression — same failure mode every
+round since Round 9 first hit it. Could not run these two scenarios to a real green in this
+sandbox; verified correctness by reading the actual DOM-building code instead.
+
+**Closed DH-0064** via spile-ops (`ready` → `closed`, resolution `done`).
+
+**Open threads unchanged:** DH-0044 streaming coverage; the seven-round-running
+worktree-provisioning issue (now worth escalating past "note it every round" — every single
+round back to at least Round 1 has hit some variant of this).

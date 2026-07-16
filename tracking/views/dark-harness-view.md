@@ -43,6 +43,7 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0001](../DH-0001-task-failed-marker-reliability.md) | `TASK_FAILED` marker is not reliably emitted despite being taught | bug | stefan |
+| [DH-0002](../DH-0002-full-mcp-client-support.md) | Full MCP client support (transport discovery) | feature | stefan |
 | [DH-0003](../DH-0003-sendmessage-resume-finished-conversation.md) | `SendMessage` should resume a finished agent's conversation, not just error cleanly | feature | stefan |
 | [DH-0004](../DH-0004-npm-packaging-single-platform.md) | npm package only ships a single-platform binary | feature | stefan |
 | [DH-0005](../DH-0005-npm-token-secret.md) | `NPM_TOKEN` repository secret not yet set | feature | stefan |
@@ -61,13 +62,11 @@ source: tracking/
 | [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
-| [DH-0064](../DH-0064-e2e-web-test-ts-and-connect-web-test-ts-assert-a-stale-agent-output-selector.md) | e2e/web.test.ts and connect-web.test.ts assert a stale .agent-output selector | bug | stefan |
 
 ### implementing
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
-| [DH-0002](../DH-0002-full-mcp-client-support.md) | Full MCP client support (transport discovery) | feature | stefan |
 | [DH-0035](../DH-0035-first-run-friction-no-init-doctor-dry-run.md) | No `dh init`/`dh doctor`/`--dry-run`, and cold error messages give a first-time operator no path forward | feature | stefan |
 | [DH-0037](../DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md) | No log rotation/disk-growth caps, no structured final run-summary artifact, and no log-analysis tooling | feature | stefan |
 | [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
@@ -83,6 +82,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0064](../DH-0064-e2e-web-test-ts-and-connect-web-test-ts-assert-a-stale-agent-output-selector.md) | e2e/web.test.ts and connect-web.test.ts assert a stale .agent-output selector | done |
 | [DH-0063](../DH-0063-spile-ops-skill-id-based-ticket-resolution-rename-on-retitle-tool.md) | spile-ops skill: ID-based ticket resolution + rename-on-retitle tool | done |
 | [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | done |
 | [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | done |
@@ -97,4 +97,3 @@ source: tracking/
 | [DH-0032](../DH-0032-release-binaries-untested-on-real-target-os.md) | Windows and macOS release binaries are cross-compiled but never actually executed anywhere, and the e2e-tested binary isn't the same artifact as what ships | done |
 | [DH-0030](../DH-0030-ci-coverage-gate-text-parsing-fragility.md) | CI's coverage/completeness/e2e gates rely on fragile text-parsing and a fail-open conditional, not structured checks | done |
 | [DH-0029](../DH-0029-web-accessibility-and-error-surfacing-gaps.md) | Web UI has no keyboard-reachable agent list, no ARIA live regions, a missing "stopped" status color, and both clients drop errors after a few seconds with no history | done |
-| [DH-0027](../DH-0027-tui-tree-view-scroll-follows-selection-bug.md) | TUI's agent tree view doesn't scroll to follow selection — the highlighted entry can scroll off-screen with no way to see it | done |

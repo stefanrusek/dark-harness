@@ -91,7 +91,8 @@ describe("web UI (dh --web) in a real headless browser", () => {
 
     // Main pane: live output, header status badge, token/cost stats.
     await page.waitForFunction(
-      "document.querySelector('.agent-output')?.textContent === 'Hello from the web e2e mock!'",
+      "document.querySelector('.agent-transcript .turn-assistant .turn-text')?.textContent === " +
+        "'Hello from the web e2e mock!'",
     );
     expect(await page.locator(".agent-header-title .status-badge").textContent()).toBe("Waiting");
     const headerStats = await page.locator(".agent-header-stats").textContent();

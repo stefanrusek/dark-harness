@@ -89,7 +89,7 @@ describe("--connect --web: a real web client process against a real remote dh --
     // not a local in-process agent loop, since the web client process here holds no model
     // config that could actually run the turn itself.
     await page.waitForFunction(
-      "document.querySelector('.agent-output')?.textContent === " +
+      "document.querySelector('.agent-transcript .turn-assistant .turn-text')?.textContent === " +
         "'Hello from the remote server, via the web client!'",
       undefined,
       { timeout: 15_000 },
