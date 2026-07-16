@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0040
 type: bug
-status: draft
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: []
 created: 2026-07-15
 relations:
   depends_on: []
@@ -42,15 +42,32 @@ JSONL log.
 
 ### As a maintainer, I want provider error messages to be redacted defensively before reaching logs/context
 
-- Given any provider SDK error, when it's wrapped into `ProviderError`, then a redaction pass strips
-  common secret-shaped substrings (e.g. `sk-ant-...`) as defense-in-depth, regardless of whether the
-  current SDK is confirmed to leak them.
+**Deferred (owner decision, 2026-07-15) — do not implement as part of this ticket.** No SDK
+error leaking real secret material has ever actually been observed; this was a speculative
+defense-in-depth measure against an unconfirmed risk. Given the amount of hands-on testing
+this project is doing, the owner's call: watch for it empirically rather than build
+preemptive hardening now. **If a real leak is ever actually observed** (a provider error
+message containing what looks like key/token material), that becomes its own new ticket with
+real evidence behind it, not a revival of this story.
+
+## Functional Requirements
+
+- (Applies only to the documentation story above — the redaction story has no requirements
+  while deferred.)
 
 ## Notes
 
 > [!NOTE]
-> Source: Security audit findings #12, #13, #18 (this is documentation + defensive redaction, not
-> a design change to the permission model — the permission model itself is a locked ADR and is not
-> being relitigated here). Overlaps with Server sweep finding #8 (logger has no redaction
-> awareness) tracked in **DH-0020** — this ticket covers the Bash/provider-error-message side of the
-> same secrets-hygiene theme, and the README/ADR documentation gap specifically.
+> Source: Security audit findings #12, #13, #18 (this is documentation + defensive redaction,
+> not a design change to the permission model — the permission model itself is a locked ADR
+> and is not being relitigated here). Overlaps with Server sweep finding #8 (logger has no
+> redaction awareness) tracked in **DH-0020** — this ticket covers the Bash/provider-error-
+> message side of the same secrets-hygiene theme, and the README/ADR documentation gap
+> specifically.
+
+> [!NOTE]
+> Owner decision (2026-07-15): Bash's full-environment inheritance stays as-is — matches real
+> Claude Code's own Bash tool behavior, this is intentional parity, not a gap. Only the
+> documentation story is in scope for this ticket now; ready to implement (state the
+> exfiltration risk plainly in the security posture docs). The redaction story is deferred,
+> per the note above — don't implement it as part of closing this ticket.
