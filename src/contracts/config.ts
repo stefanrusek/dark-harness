@@ -70,6 +70,10 @@ export interface McpServerConfig {
   /** HTTP server */
   url?: string;
   headers?: Record<string, string>;
+  /** DH-0002: overrides both the connect timeout (default 10s) and the per-call tool
+   * invocation timeout (default 60s) for this server. Optional; omitted means "use the
+   * McpManager/connection defaults." */
+  timeoutMs?: number;
 }
 
 export interface DhOptions {

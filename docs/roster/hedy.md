@@ -471,3 +471,84 @@ screenshot (headers is browserless by design, correctly has none).
 **Open threads for whoever picks this up next:** the `.agent-output` stale-selector defect
 in `e2e/web.test.ts`/`e2e/connect-web.test.ts` (noted above); DH-0044 streaming coverage,
 once that ships; the recurring worktree-provisioning issue (now six rounds running).
+
+### 2026-07-16 — Round 13 (fresh process again): DH-0060 round 2, remaining Test Plan coverage + orchestrator
+
+Came online fresh for the implementer half of DH-0060, following Fable's architect spike
+pass (4 spikes, proven mechanics writeup, prompt template). Same worktree-provenance issue
+as every prior round: landed on the pre-domain-landing ancestor `12679e4` (founding docs
+only, zero unique commits), confirmed via `git merge-base --is-ancestor` before
+`git reset --hard` onto `local/claude/coordinator-onboarding-kab9ls`'s real tip (`8c4f89b`,
+itself an ancestor of a later `d7acdb4` seen elsewhere — same repo, just fetched at a
+different moment). Salvaged the 6 new spike files I'd already drafted against the stale tree
+into `/tmp` first, reset, then found they'd survived as untracked files (git reset --hard
+never touches untracked paths) — worth remembering as a recovery trick if this recurs.
+
+**What I built:** six new spike scripts closing out every remaining Test Plan item (agent
+tree parent/child hierarchy + done/green status, TASK_FAILED status marker via a spawned
+sub-agent, DH-0027 tree-scroll-follows-selection, log/export download, DH-0025
+wide-character rendering, DH-0024 SSE reconnect), their stamped prompts added to the ticket,
+and `e2e/spikes/tui/run-all.ts` — the owner-requested orchestrator that runs every scripted
+spike as a subprocess, drives two Mode B scenarios itself (liveness/heartbeat, DH-0025
+resize/flicker), and writes `e2e/spikes/tui/REPORT.md`, one standalone Markdown report
+enumerating all 19 Test Plan items with verdict + real captured-pane evidence. Full detail,
+including the exact stamped prompts and orchestrator design, is in the ticket itself
+(tracking/DH-0060-*.md) rather than duplicated here.
+
+**Real discoveries, found by actually running things, not guessing:**
+- The tree entry's model label is the `dh.json` model *config name* (`(sub)`), not the
+  provider's model id (`(mock-model)`) — my first drafts of the hierarchy/scroll spikes
+  guessed wrong and hung on a `waitFor` timeout; fixed by reading the real captured pane.
+- The root agent can **never** reach a "failed" status while interactive (every TUI/server
+  root is `interactive: true`, and `loop.ts`'s Round-5 convention pauses at "waiting" on
+  every non-tool-use turn regardless of content, never even checking `TASK_FAILED`). Only a
+  spawned sub-agent (always `interactive: false`, per the runtime's own by-design comment)
+  can demonstrate the "TASK_FAILED reflected in final status" Test Plan item through the
+  actual TUI — rewrote the spike around a sub-agent instead of the root after confirming
+  this by reading `src/agent/loop.ts` and `src/agent/runtime.ts` directly, not assuming the
+  literal Test Plan wording ("self-report... final status marker") meant the root.
+- The liveness-heartbeat elapsed counter only advances once per 1s tick and rounds down, so
+  an initial 1.8s poll gap sometimes landed within the same rounded second depending on tick
+  phase (verified interactively before committing) — widened to 6s delay / 3.5s gap.
+- tmux `capture-pane -p` always appends exactly one trailing newline; naively counting
+  `split("\n").length` off-by-one'd every row-count assertion (wide-char spike) — fixed with
+  a dedicated `countPaneRows` helper that strips only that one artifact, not any real
+  trailing blank frame rows (`padRows` legitimately pads with real blank rows that must still
+  count).
+
+**Judgment calls:**
+- Log download/export has no TUI keybinding at all today (only the web client exposes one) —
+  rather than fabricate a key sequence that doesn't exist, drove it directly over real
+  HTTP/SSE against a real `dh --server`, documented why in the spike's own header comment.
+- DH-0025's "no visible full-redraw flicker on the idle tick" is genuinely a temporal visual
+  judgment call a text capture can't fully settle — built a best-effort mechanical proxy
+  (repeated captures through an idle tick, checking stable regions never go blank/garbled)
+  but labeled it `HEURISTIC-PASS`/`HEURISTIC-FAIL` in the report, explicitly not a substitute
+  for a human looking at the evidence, rather than dressing it up as a real PASS/FAIL. Split
+  the resize-corruption half (fully mechanical) from the flicker half (heuristic) within one
+  combined scenario since they're one Test Plan bullet but genuinely different in kind.
+- Added `MockTurn.delayMs` and `TmuxSession.resize()` as small, narrowly-scoped support
+  additions (both fully within `e2e/`, both documented in place) rather than working around
+  their absence — a genuinely slow scripted turn and a real `SIGWINCH` aren't reproducible
+  any other way with the existing primitives.
+- Left the ticket at `status: implementing`, not closed — per this round's own task order,
+  flagged it may still want a final coordinator/owner review of the report format and the
+  heuristic-vs-mechanical judgment calls.
+
+**Gates:** `bun run typecheck`/`bun run lint` clean (had to run `biome check --write` on the
+new files a few times for formatting, no logic changes). `bun run test:coverage`: 1259/1259
+pass, 100% coverage (baseline — no `src/` touched this round, only `e2e/`). Confirmed
+`bun test e2e --list` and a full `bun run e2e` run: exactly the same 32 tests across 9 files
+as before this round (0 new CI-gate surface from the `.ts`-not-`.test.ts` spike/orchestrator
+files) — 30 pass / 2 fail, both the same long-standing missing-Chromium-binary sandbox gap
+every round has hit, no regressions. Ran every new spike individually twice consecutively
+(27/27 checks green both times) and the full orchestrator twice consecutively (19/19 items,
+17 PASS / 1 HEURISTIC-PASS / 2 OUT-OF-SCOPE / 0 FAIL both times, exit code 0, `tmux ls`
+confirmed no orphaned sessions after either run) before committing.
+
+**Open threads for whoever picks this up next:** a final review of whether
+HEURISTIC-PASS/OUT-OF-SCOPE should ever gate anything (currently they never fail the
+orchestrator's exit code, by design); DH-0044 spike coverage once streaming actually ships;
+the recurring worktree-provenance issue (now six-plus rounds in a row for this role) still
+isn't root-caused — someone should actually trace the provisioning path rather than each
+fresh instance independently rediscovering and working around it.
