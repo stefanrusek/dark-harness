@@ -15,11 +15,18 @@ implementation:
   - repo: dark-harness
 ---
 
-# DH-0070: Bash tool's fresh-shell-per-call semantics diverge from Claude Code's persistent-cwd behavior
+# DH-0070: Bash tool should give each agent its own persistent cwd, inherited from its parent at spawn
 
 ## Summary
 
-dh's Bash tool documents each call as a fresh shell invocation with no cd persistence across calls, but real Claude Code's Bash tool persists the working directory across calls within a session (only shell state/env does not persist). This is a behavioral-semantics mismatch from the mirroring requirement in HANDOFF.md, found via a schema/behavior comparison against real Claude Code's Bash tool (the same comparison exercise that produced DH-0069).
+dh's Bash tool runs every call as a fresh shell at a single, process-wide `cwd` shared by the
+root agent and every sub-agent — `cd` never persists across calls, and there's no per-agent
+cwd concept at all. Originally filed as a Claude-Code-mirroring mismatch; an empirical test
+(see Notes) showed real Claude Code's own Bash tool does NOT actually persist `cd` across
+calls either, so this is now a deliberate dh-specific product improvement the owner wants on
+its own merits, not a conformance fix: each agent should get its own cwd, inherited from its
+parent's cwd at spawn time, and a `cd` within one agent's Bash calls should persist for that
+agent (and its future sub-agents) going forward, without affecting siblings or the parent.
 
 ## User Stories
 
@@ -84,7 +91,24 @@ dh's Bash tool documents each call as a fresh shell invocation with no cd persis
 > original framing: "this feels like a gap. we need a tool gap/comparison analysis").
 
 > [!NOTE]
-> Owner decision (2026-07-16): confirmed and queued as written. Clarification on scope: a
+> Empirical test (2026-07-16, owner-directed): actually tested real Claude Code's own Bash
+> tool live — a parent agent ran `pwd`, spawned a child agent that ran `cd /tmp && pwd`, and
+> the parent ran `pwd` again after the child finished (unchanged, confirming child cds never
+> affect a parent — supports per-agent isolation). Separately, the parent ran `cd /var && pwd`
+> in one Bash call, then a fresh `pwd`-only Bash call immediately after (reverted to the
+> original directory, NOT `/var`). **Conclusion: real Claude Code's Bash tool does not
+> actually persist `cd` across calls even within the same agent's own session** — this
+> ticket's original premise ("real Claude Code's Bash tool persists the working directory
+> across calls") was incorrect, likely inferred from the tool's description text rather than
+> verified behavior. The per-agent-isolation half of this ticket (a child's cd never affects
+> its parent) IS confirmed real Claude Code behavior. The cross-call persistence half is a
+> **deliberate dh-specific product decision** the owner is making anyway (see below), not a
+> Claude-Code-mirroring requirement — HANDOFF.md's mirroring goal doesn't apply to this part.
+
+> [!NOTE]
+> Owner decision (2026-07-16): confirmed and queued as written, despite the above finding that
+> real Claude Code doesn't actually do this — the owner wants dh's Bash to behave this way on
+> its own merits, not because of the mirroring requirement. Clarification on scope: a
 > prior round (docs/handoffs/core.md Round 13, "per Fable's adopted recommendation")
 > deliberately chose fresh-shell/no-cd-persistence — that was a real recommendation, not
 > invented, but it only addressed *whether* `cd` persists at all, never *how it should be
