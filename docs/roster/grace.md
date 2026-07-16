@@ -1583,3 +1583,80 @@ No existing `log-analysis.test.ts` assertions pinned the old color codes, so no 
 updates were needed there. Verified visually via a synthetic session directory piped
 through a pty — colors match the TUI's exactly, word always shown next to the glyph.
 Landed together with Mary's TUI change in one round, per the ticket's risk note.
+
+### 2026-07-16 — DH-0101: CLI visual system for init/server-startup/activity-feed/dry-run/version
+
+Generalized DH-0099's doctor styling to the four remaining `src/cli.ts` surfaces. Added a
+small shared CLI-styling block (`CLI_GREEN`/`CLI_RED`/`CLI_YELLOW`/`CLI_DIM`/`CLI_BOLD`/
+`CLI_RESET`, `CLI_STATUS_COLOR`, `cliColorize`/`cliSuccessGlyph`/`cliCautionGlyph`/
+`cliStatusDot`/`cliDim`/`cliBold`) right after `formatVersionString` — doctor's own
+`DOCTOR_PASS_COLOR` etc. now alias these constants instead of duplicating the literals, per
+the ticket's explicit ask.
+
+**Judgment call (documented inline too):** the ticket's §5 text ("verdict glyphs (TTY-gated,
+color per §1)") reads ambiguously about whether the TTY gate covers just color or the glyph
+too. I gated both together — off-TTY, every helper returns `""` (no glyph, no SGR) — matching
+doctor's existing non-TTY convention (plain PASS/FAIL words, no unicode) and erring toward the
+ticket's own stated log-aggregator-safety risk. If a later ticket wants glyphs to survive
+off-TTY (unicode isn't ANSI, so it's a defensible alternate reading), that's a one-line change
+to each `cli*Glyph` helper's off-TTY branch — flagging here so a future instance doesn't have
+to re-derive the ambiguity.
+
+**Four surfaces:**
+- `dh init`: `✓` headline, two dim indented caveat lines, single next-step callout line
+  (`dh: Next: run "dh doctor" to probe credentials, then "dh" to start.` — tightened per the
+  ticket's own "keep terse" recommendation; dropped the standalone `--check` mention since
+  the next-step line already names the doctor path).
+- `--server` startup panel: `✓` on the byte-stable "headless server listening on port…" line,
+  bold on the version/bind/logs line, `⚠` yellow on the plaintext-posture caution. Also
+  applied the same `✓` wrap to the two other "web UI ready at…" print sites (local `--web` and
+  `--connect --web`) since the ticket named that substring alongside the server one even
+  though it lives in a different `mode.kind` branch — same wrap-never-rewrite treatment,
+  verified the captured URL group itself carries no embedded ANSI (what e2e's own regex feeds
+  straight into `fetch()`).
+- `ActivityFeed`: added an explicit `tty` parameter to `onEvent()` (default `false`, so every
+  existing non-TTY test/call site is unaffected) rather than reading `process.stdout.isTTY`
+  inside the class itself — keeps the class pure/testable, caller (`runInteractiveMode`)
+  reads the TTY gate once and threads it through. Reused `shortAgentId` from
+  `src/web/client/format.ts` directly (a plain, DOM-free pure function; only a type-only
+  import of `ConnectionStatus` inside that file) rather than forking it — Web's client bundle
+  is already part of this binary's dependency graph via `serveWebUiClient`, so this added no
+  new runtime surface. `CLI_STATUS_COLOR` is its own independent literal copy of the same
+  five-entry map, matching the existing DH-0100 pattern where server/TUI each already keep
+  their own copy rather than importing a shared one.
+- `--dry-run`/`--version`: `✓` glyph on dry-run success; `--version` bolds only the leading
+  "dh" token at the print site (`formatVersionString` itself stays a pure, un-styled
+  formatter — other call sites and its own describe block depend on that).
+
+**Testing:** added TTY-gated describe blocks (monkeypatching `process.stdout.isTTY` via
+`Object.defineProperty`, same pattern as DH-0099's tests) for all four surfaces plus
+`ActivityFeed`'s new `tty` parameter. Hit `lint/suspicious/noControlCharactersInRegex` using
+raw `\x1b` inside regex literals in assertions — switched those to `toStartWith`/`toContain`/
+substring-slicing instead of regex where the ANSI byte was involved. `bun run test:coverage`:
+1708 pass, 0 fail; `src/cli.ts` line coverage 99.50% (same 3-line pre-existing gap as prior
+rounds — `AgentRuntimeLoopAdapter.listModels`/`switchModel`/`listSkills`, now at lines
+631/635/639 after this round's insertions shifted them down from 554/558/562; confirmed via
+`git stash` diff of the baseline before assuming it was mine, same discipline as the DH-0099
+round).
+
+**e2e substring verification:** found `e2e/web.test.ts`/`connect-web.test.ts` grep
+`/web UI ready at (\S+)/` and several support files (`port.ts`, `dh-process.ts`) grep
+`/listening on port/`. Ran `e2e/server-protocol.test.ts` (uses `startDhServer`'s
+"listening on port" wait) — 7/7 pass. Ran `e2e/web.test.ts` and `e2e/connect-web.test.ts` —
+both got past their `waitForStdout`/URL-parse/`toContain("connected to…")` assertions cleanly
+before failing at browser launch (`chromium` binary not installed in this sandbox — a
+pre-existing environment limitation, not something this round touched); connect-web's failure
+point (browser launch) is strictly after the substring parsing this round needed to protect.
+
+**Live verification:** built the real binary, ran `dh init`/`--dry-run`/`--version`/`--server`
+under `script -q` (real PTY) and inspected raw bytes via `xxd`/Python `b"\x1b" in data`.
+Confirmed: init's ✓/dim/next-step render correctly and byte-match the design; dry-run's ✓;
+version's bold "dh"; server panel's ✓/bold/⚠ exactly as designed on the byte-stable lines;
+triggered a real activity-feed line via a raw `POST /api/commands` (`send_message` to
+`agent-root`) against a `--server` process with a deliberately-broken Bedrock target — saw a
+real dim-timestamped `agent-root spawned (gemma4)` then a red `●` `agent-root failed` line
+live. Confirmed zero `0x1b` bytes in piped (non-TTY) output for `dh init` and `--server`
+startup via `b"\x1b" in open(...).read()` — clean plaintext, same information, both surfaces.
+
+Closed DH-0101 (`transition.py DH-0101 closed --resolution done`) after all verification
+above.
