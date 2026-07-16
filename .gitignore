@@ -1,6 +1,8 @@
 node_modules/
 dist/
 coverage/
+# DH-0061 overnight-verification spike evidence (screenshots) — run output, never committed.
+e2e/spikes/web/artifacts/
 *.log
 .DS_Store
 .dh-logs/

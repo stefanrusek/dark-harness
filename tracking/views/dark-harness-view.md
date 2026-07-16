@@ -21,7 +21,6 @@ source: tracking/
 | [DH-0052](../DH-0052-windows-console-support-unverified.md) | Windows console/TUI support is unverified — no Windows-specific console-mode handling found, and no Windows execution anywhere in CI | deferred, revisit soon (2026-07-15) |
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | deferred (2026-07-15): no observed sustained-outage incident, same as DH-0049 |
 | [DH-0060](../DH-0060-tui-overnight-behavioral-test-agent-tmux-text-screenshot-verification-suite.md) | TUI overnight behavioral test agent: tmux text-screenshot verification suite | architect design pass in progress (spikes) |
-| [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | architect design pass in progress (spikes) |
 
 ## Board
 
@@ -43,7 +42,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0060](../DH-0060-tui-overnight-behavioral-test-agent-tmux-text-screenshot-verification-suite.md) | TUI overnight behavioral test agent: tmux text-screenshot verification suite 🔒 | feature | stefan |
-| [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite 🔒 | feature | stefan |
 
 ### ready
 
@@ -69,6 +67,8 @@ source: tracking/
 | [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
+| [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | feature | stefan |
+| [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | bug | stefan |
 
 ### implementing
 
