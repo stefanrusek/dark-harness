@@ -62,7 +62,6 @@ source: tracking/
 | [DH-0044](../DH-0044-no-streaming-partial-output.md) | No streaming of partial model output — `agent_output` events only fire once per completed turn | feature | stefan |
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | feature | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
-| [DH-0110](../DH-0110-urgent-web-ui-completely-broken-dh-0023-s-security-header-workaround-lost-bun-s-chunk-asset-routing.md) | URGENT: Web UI completely broken -- DH-0023's security-header workaround lost Bun's chunk-asset routing | bug | stefan |
 
 ### implementing
 
@@ -82,6 +81,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0110](../DH-0110-urgent-web-ui-completely-broken-dh-0023-s-security-header-workaround-lost-bun-s-chunk-asset-routing.md) | URGENT: Web UI completely broken -- DH-0023's security-header workaround lost Bun's chunk-asset routing | done |
 | [DH-0108](../DH-0108-comprehensive-markdown-rendering-test-suite-tui-web.md) | Comprehensive Markdown rendering test suite (TUI+Web) | done |
 | [DH-0106](../DH-0106-gemma4-bedrock-default-model-hallucinates-tool-calls-instead-of-making-them.md) | dh init's scaffolded "gemma4" is actually Gemma 3 (wrong model), and hallucinates tool calls | done |
 | [DH-0105](../DH-0105-unify-connection-state-and-status-vocabulary-across-tui-and-web.md) | Unify connection-state and status vocabulary across TUI and Web | done |
@@ -96,4 +96,3 @@ source: tracking/
 | [DH-0096](../DH-0096-dh-init-s-scaffolded-config-should-be-a-richer-real-model-catalog-all-claude-tiers-bedrock-oss-models-local-url-env-var.md) | dh init's scaffolded config should be a richer, real model catalog (all Claude tiers, Bedrock OSS models, local URL env var) | done |
 | [DH-0095](../DH-0095-tui-chrome-padding-looks-unchanged-despite-dh-0065-closing-as-fully-done.md) | TUI chrome/padding looks unchanged despite DH-0065 closing as fully done | done |
 | [DH-0094](../DH-0094-agent-has-no-self-awareness-of-its-own-dh-build-current-model-or-other-available-models.md) | Agent has no self-awareness of its own dh build, current model, or other available models | done |
-| [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | done |

@@ -8,6 +8,59 @@
 
 ## Memory
 
+### 2026-07-16 — DH-0110: URGENT, Web UI completely broken (out-of-scope directory: src/web/server.ts)
+
+Called in on `src/web/server.ts` specifically (Susan's directory) because the ticket scoped
+the fix to that one file and the whole product surface was down — root cause and repro were
+already confirmed in the ticket by the time I picked it up.
+
+- Root cause confirmed: DH-0023's `renderIndex` rendered `/` via a throwaway inner
+  `Bun.serve` (the only way to force Bun's HTML-bundler to actually render an `HTMLBundle`
+  and get bytes to attach security headers to) and tore that inner server down right after —
+  which silently orphaned the asset-chunk routes (`/chunk-*.js`, `/chunk-*.css`) Bun
+  auto-generates alongside `/`. The *outer* (real) server never had those routes, so every
+  real asset request hit the catch-all `fetch()` and 404'd. `.dh-app` never rendered because
+  its own JS never loaded — confirmed live with a real headless Chromium (`page.on(
+  "requestfailed")`, empty `#root`).
+- Fix: stopped tearing the inner server down — it's now a module-level singleton kept alive
+  for the process's lifetime — and had the outer server's catch-all `fetch()` proxy any
+  unmatched request straight to it over loopback, layering the same `withSecurityHeaders` on
+  the proxied response. Successful (200) asset responses are cached by path (Bun's asset
+  filenames are content-hashed, so they're immutable for the process's life); both the cache
+  and the persistent inner server are bypassed in `development` mode so HMR still reflects
+  live edits. Chose "keep inner server running + proxy" over "discover and re-register each
+  chunk path on the outer server" because it needs zero knowledge of Bun's asset-naming
+  scheme (currently `/chunk-<hash>.js`/`.css` in dev, but I don't want this coupled to that
+  string shape) — anything the inner server's own route table would have served, the outer
+  server now transparently forwards.
+- Also fixed the two e2e tests' hardcoded `/opt/pw-browsers/chromium` executable path (was
+  blocking my own live verification) — that fix (via `resolveChromiumExecutable()`) already
+  existed uncommitted in the tree from a concurrent round; I only had to fix its import
+  ordering to pass lint, so it rode along in the same commit.
+- Added `src/web/server.test.ts`'s new DH-0110 describe block: parses every `src=`/`href=`
+  asset path out of the actually-rendered index HTML and asserts each one resolves 200 with
+  the security headers present — this is the "real e2e/integration-shaped" check Constitution
+  §9 wants (a header-only test on `/` alone is exactly what let this regression through
+  DH-0023's own gates).
+- Live-verified against the compiled binary with a real headless browser on both `dh --web`
+  and `dh --connect --web`: zero failed requests, `.dh-app` renders, connection pill reads
+  "Live" on the local path. On `--connect --web` the pill read "Connecting…" instead of
+  "Live" — traced that to an unrelated, pre-existing `cli.ts` bug in how the `--connect` host
+  argument gets combined with `--port` (produced a URL like
+  `http://http://localhost:18240:18241`), not anything in `src/web/server.ts`; asset loading
+  itself was equally clean on that path (zero failed requests). Left it alone — out of scope
+  for this ticket and in a domain (`src/cli.ts`) mid-flight with other uncommitted work at
+  the time.
+- Gates: `bun run typecheck`, and lint/coverage scoped to my actual changed files
+  (`bunx biome check` on the four touched files; `bun test src/web --coverage` — 100%
+  line/function on `src/web/server.ts`) — the repo-wide `bun run lint`/`bun run
+  test:coverage` had pre-existing failures in files I didn't touch (`src/agent/runtime.ts`,
+  `src/cli.ts`, etc.), left over from another domain's concurrent uncommitted work; confirmed
+  those failures pre-date and are unrelated to this change before treating them as out of
+  scope.
+
+Closed DH-0110 (resolution: done).
+
 ### 2026-07-15 — first round
 
 Built the HTTP+SSE server, bearer-token/TLS security, JSONL-per-agent logging, log
