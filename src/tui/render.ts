@@ -189,7 +189,11 @@ function renderTree(
     const marker = index === selectedIndex ? "> " : "  ";
     const indent = "  ".repeat(entry.depth);
     const glyph = colorizeStatus(entry.node.status, "●");
-    const label = `${entry.node.agentId} (${entry.node.model})`;
+    // DH-0069: prefer the Agent tool's `description` — a human-readable label ("Fix flaky
+    // retry test") instead of a raw agentId/UUID — falling back to the old `agentId (model)`
+    // format only when it's absent (the root agent, which never has one, or a pre-DH-0069
+    // session logged before description became required).
+    const label = entry.node.description ?? `${entry.node.agentId} (${entry.node.model})`;
     const trackedAgent = state.agents.get(entry.node.agentId);
     const elapsed =
       trackedAgent === undefined
