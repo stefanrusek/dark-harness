@@ -143,6 +143,54 @@ export interface LogRetentionConfig {
   maxTotalBytes?: number;
 }
 
+/**
+ * DH-0074 (tracking/DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md):
+ * architect design (Fable, 2026-07-16). Presence of `web.fetch` registers the WebFetch tool,
+ * presence of `web.search` registers the WebSearch tool — absence means the tool does not
+ * exist at all, not registered-but-erroring. Both default off, consistent with the
+ * air-gapped-by-default posture (ADR 0003, Constitution §4.3).
+ */
+export interface WebFetchConfig {
+  /** Whole-request wall-clock timeout via `AbortSignal.timeout`. Default 30000. */
+  timeoutMs?: number;
+  /** Hard cap on bytes read from the response body — streamed and aborted past this limit
+   * (Bun has no built-in response-size cap). Default 4 MiB (4194304). */
+  maxResponseBytes?: number;
+  /** Cap on the text returned to the model after HTML-to-text conversion, with an explicit
+   * truncation notice (no silent truncation — Constitution §8). Default 50000. */
+  maxOutputChars?: number;
+  /** Default `false`. `true` disables the SSRF private-address check, for operators
+   * deliberately pointing WebFetch at internal docs servers. */
+  allowPrivateNetwork?: boolean;
+  /** When set, only these hosts (exact or dot-suffix match, e.g. `example.com` matches
+   * `docs.example.com`) are fetchable. Unset means any public host. */
+  allowedHosts?: string[];
+  /** A `ModelConfig.name` used to answer the tool call's `prompt` against fetched content in
+   * one non-streaming provider call, instead of returning raw extracted content. Its token
+   * usage feeds session accounting (DH-0013 budgets). */
+  extractionModel?: string;
+}
+
+export type WebSearchProvider = "brave";
+
+export interface WebSearchConfig {
+  /** Discriminated string so a self-hosted backend (e.g. `"searxng"`) can be added later
+   * without restructuring. v1 supports only `"brave"`. */
+  provider: WebSearchProvider;
+  /** Brave Search API key. `$(VAR)` interpolation applies. Joins DH-0020's redaction set —
+   * never logged. */
+  apiKey: string;
+  /** Default 10000. */
+  timeoutMs?: number;
+  /** Default 10, hard cap 20. */
+  maxResults?: number;
+}
+
+export interface WebConfig {
+  fetch?: WebFetchConfig;
+  search?: WebSearchConfig;
+}
+
 export interface DhConfig {
   options: DhOptions;
   models: ModelConfig[];
@@ -158,4 +206,7 @@ export interface DhConfig {
   /** DH-0037: `.dh-logs/` rotation/prune policy. Omitted means no pruning (today's
    * behavior, unchanged). */
   logRetention?: LogRetentionConfig;
+  /** DH-0074: opt-in outbound web access (WebFetch/WebSearch). Omitted means neither tool is
+   * registered — the harness stays fully air-gapped by default. */
+  web?: WebConfig;
 }
