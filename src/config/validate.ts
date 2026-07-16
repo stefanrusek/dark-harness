@@ -38,9 +38,14 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   "systemPrompt",
   "security",
   "limits",
+  "logRetention",
 ]);
 
 const KNOWN_LIMITS_KEYS = new Set(["completedRetention"]);
+
+// DH-0037: `.dh-logs/` rotation/prune policy — see src/contracts/config.ts's
+// `LogRetentionConfig` doc comment.
+const KNOWN_LOG_RETENTION_KEYS = new Set(["maxAgeMs", "maxTotalBytes"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -185,6 +190,33 @@ function validateLimits(raw: unknown): DhConfig["limits"] {
   return completedRetention !== undefined ? { completedRetention } : {};
 }
 
+/** DH-0037: validates the optional `logRetention` block controlling `.dh-logs/` rotation.
+ * Both fields are optional positive numbers; omitting both (or the whole block) means no
+ * pruning, matching `validateLimits`'s own default-off pattern above. */
+function validateLogRetention(raw: unknown): DhConfig["logRetention"] {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) {
+    throw new ConfigError("logRetention must be an object");
+  }
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_LOG_RETENTION_KEYS.has(key)) {
+      throw new ConfigError(
+        `logRetention has unknown key "${key}"; known keys: ${[...KNOWN_LOG_RETENTION_KEYS].join(", ")}`,
+      );
+    }
+  }
+  const maxAgeMs = validatePositiveNumber(raw.maxAgeMs, "logRetention.maxAgeMs", true);
+  const maxTotalBytes = validatePositiveNumber(
+    raw.maxTotalBytes,
+    "logRetention.maxTotalBytes",
+    true,
+  );
+  return {
+    ...(maxAgeMs !== undefined ? { maxAgeMs } : {}),
+    ...(maxTotalBytes !== undefined ? { maxTotalBytes } : {}),
+  };
+}
+
 function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | undefined {
   if (raw === undefined) return undefined;
   if (!isRecord(raw)) {
@@ -327,6 +359,7 @@ export function validateConfig(raw: unknown): DhConfig {
   }
 
   const limits = validateLimits(raw.limits);
+  const logRetention = validateLogRetention(raw.logRetention);
 
   const config: DhConfig = {
     options: {
@@ -346,6 +379,7 @@ export function validateConfig(raw: unknown): DhConfig {
     ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     ...(security !== undefined ? { security } : {}),
     ...(limits !== undefined ? { limits } : {}),
+    ...(logRetention !== undefined ? { logRetention } : {}),
   };
   return config;
 }

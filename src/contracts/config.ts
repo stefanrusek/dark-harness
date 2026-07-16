@@ -119,6 +119,26 @@ export interface LimitsConfig {
   completedRetention?: number;
 }
 
+/**
+ * DH-0037 (tracking/DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md): prunes
+ * old `.dh-logs/<sessionId>/` directories so a long-lived host running many jobs (or one
+ * very long/verbose session) doesn't accumulate disk usage indefinitely. Both caps are
+ * optional and independent; omitting both — the default, and the value when `dh.json` has
+ * no `logRetention` key at all — preserves today's behavior of never pruning anything,
+ * matching this project's general pattern of new knobs defaulting off (see LimitsConfig's
+ * own doc comment for the same call on its caps).
+ */
+export interface LogRetentionConfig {
+  /** Delete a session directory outright once its most recently written file is older than
+   * this many milliseconds. */
+  maxAgeMs?: number;
+  /** After age-pruning (if configured), if total `.dh-logs` size still exceeds this many
+   * bytes, delete the oldest-by-last-write remaining session directories one at a time
+   * until under the cap. The session directory currently being written by this process is
+   * never pruned by either cap. */
+  maxTotalBytes?: number;
+}
+
 export interface DhConfig {
   options: DhOptions;
   models: ModelConfig[];
@@ -131,4 +151,7 @@ export interface DhConfig {
   security?: SecurityConfig;
   /** DH-0012: caps on in-memory structures that would otherwise grow unboundedly. */
   limits?: LimitsConfig;
+  /** DH-0037: `.dh-logs/` rotation/prune policy. Omitted means no pruning (today's
+   * behavior, unchanged). */
+  logRetention?: LogRetentionConfig;
 }
