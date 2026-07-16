@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0010
 type: feature
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: ["architect design pass in progress"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -40,6 +40,13 @@ on every turn — one of the largest cost levers for an agentic loop is unused.
 - Given a system prompt + tool definitions that don't change turn to turn, when a request is sent,
   then cache breakpoints are marked so the provider can serve cached tokens at a reduced rate.
 
+### As an operator, I want to explicitly enable or disable context-window compaction via config
+
+- Given `dh.json`, when a `compaction: { enabled: boolean }`-shaped setting (implementer's call on
+  exact field name/shape, consistent with existing config conventions) is set, then compaction only
+  runs if explicitly enabled — the owner wants this as an explicit on/off switch, not an
+  always-on background behavior with no opt-out.
+
 ## Functional Requirements
 
 - Given any provider that supports cache control, when caching is enabled, then usage/cost
@@ -63,3 +70,12 @@ on every turn — one of the largest cost levers for an agentic loop is unused.
 > Source: Core domain sweep finding #2 (no compaction) and Competitive-differentiation sweep
 > findings #1 (compaction) and #2 (prompt caching) — independently identified by both sweeps as one
 > of the highest-impact gaps for the primary "hours-long unattended" use case and its cost profile.
+
+> [!NOTE]
+> Owner decision (2026-07-15): queue both compaction and caching now. **DH-0043 closed as
+> superseded by this ticket** (it was a strict subset — prompt caching only — filed
+> independently by a different sweep pass). Compaction specifically is a lossy,
+> behavior-changing design decision (per this ticket's own Risks section) — routed to
+> architect (Fable) for a design pass before implementation, per CLAUDE.md §6.1. Caching
+> (cache_control/cache points) is a pure win with no behavior change and could ship
+> independently/sooner if the architect's design separates the two cleanly.

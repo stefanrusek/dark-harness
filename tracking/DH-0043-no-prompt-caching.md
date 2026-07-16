@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0043
 type: feature
-status: draft
+status: closed
 owner: stefan
-resolution:
+resolution: superseded
 blocked_by: []
 created: 2026-07-15
 relations:
