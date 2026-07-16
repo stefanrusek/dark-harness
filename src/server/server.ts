@@ -61,12 +61,23 @@ export interface DhServerOptions {
   security?: SecurityConfig;
   /** SSE resume retention window in event count. Default 1000 — see EventBuffer's doc. */
   eventBufferSize?: number;
+  /** SSE resume retention window in total serialized bytes (DH-0012). Default 10MB — see
+   * EventBuffer's doc. */
+  eventBufferMaxBytes?: number;
   /**
    * Interval, in ms, between `: ping` keep-alive comments sent on every open SSE
    * connection. Default `DEFAULT_HEARTBEAT_INTERVAL_MS` (20s). Test-only knob — production
    * callers should not need to override this.
    */
   heartbeatIntervalMs?: number;
+  /**
+   * DH-0020: known real secret values (config `security.token`, provider `apiKey`s, MCP
+   * header values) redacted verbatim from every JSONL log line, in addition to the
+   * pattern-based redaction `SessionLogger`/`redactSecrets` always applies. Threaded
+   * straight to `SessionLogger`'s constructor. Typically built via
+   * `collectConfigSecrets(config)` at the call site (Core's `cli.ts`).
+   */
+  knownSecrets?: readonly string[];
 }
 
 export class DhServer {
@@ -85,8 +96,8 @@ export class DhServer {
   constructor(options: DhServerOptions) {
     this.agentLoop = options.agentLoop;
     this.sessionId = options.sessionId;
-    this.logger = new SessionLogger(options.logDir);
-    this.eventBuffer = new EventBuffer(options.eventBufferSize ?? 1000);
+    this.logger = new SessionLogger(options.logDir, options.knownSecrets);
+    this.eventBuffer = new EventBuffer(options.eventBufferSize, options.eventBufferMaxBytes);
     this.security = options.security;
     this.requestedPort = options.port ?? DEFAULT_PORT;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
