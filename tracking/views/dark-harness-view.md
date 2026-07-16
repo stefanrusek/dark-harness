@@ -68,7 +68,6 @@ source: tracking/
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
 | [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | feature | stefan |
-| [DH-0098](../DH-0098-dh-init-output-is-one-giant-unwrapped-line-unreadable-in-a-terminal.md) | dh init output is one giant unwrapped line, unreadable in a terminal | bug | stefan |
 
 ### implementing
 
@@ -91,6 +90,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0098](../DH-0098-dh-init-output-is-one-giant-unwrapped-line-unreadable-in-a-terminal.md) | dh init output is one giant unwrapped line, unreadable in a terminal | done |
 | [DH-0097](../DH-0097-cli-ts-never-wires-in-the-real-built-in-system-prompt-from-src-prompt-ships-a-placeholder-instead.md) | cli.ts never wires in the real built-in system prompt from src/prompt -- ships a placeholder instead | done |
 | [DH-0096](../DH-0096-dh-init-s-scaffolded-config-should-be-a-richer-real-model-catalog-all-claude-tiers-bedrock-oss-models-local-url-env-var.md) | dh init's scaffolded config should be a richer, real model catalog (all Claude tiers, Bedrock OSS models, local URL env var) | done |
 | [DH-0095](../DH-0095-tui-chrome-padding-looks-unchanged-despite-dh-0065-closing-as-fully-done.md) | TUI chrome/padding looks unchanged despite DH-0065 closing as fully done | done |
@@ -105,4 +105,3 @@ source: tracking/
 | [DH-0083](../DH-0083-create-github-issue-to-gauge-demand-for-a-metrics-telemetry-endpoint.md) | Create GitHub issue to gauge demand for a /metrics telemetry endpoint | done |
 | [DH-0082](../DH-0082-create-github-issue-to-gauge-demand-for-checkpoint-rewind-of-file-edits.md) | Create GitHub issue to gauge demand for checkpoint/rewind of file edits | done |
 | [DH-0081](../DH-0081-read-tool-has-no-pdf-support-at-all-needs-text-extraction-added-then-pagination.md) | Read tool has no PDF support at all — needs text extraction added, then pagination | done |
-| [DH-0080](../DH-0080-bash-output-capping-shape-diverges-from-real-claude-code-tail-cut-inline-notice-vs-head-preview-plus-saved-file.md) | Bash output-capping shape diverges from real Claude Code: tail-cut inline notice vs head-preview-plus-saved-file | done |
