@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0056
 type: feature
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["architect design pass in progress"]
 created: 2026-07-15
 relations:
   depends_on: []

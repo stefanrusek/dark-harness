@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0020
 type: bug
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: ["architect design pass in progress"]
 created: 2026-07-15
 relations:
   depends_on: []
