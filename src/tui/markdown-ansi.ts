@@ -26,7 +26,7 @@
 // rows.
 
 import type { BlockNode, InlineNode } from "../markdown/index.ts";
-import { charWidth, codePoints } from "./width.ts";
+import { charWidth, codePoints, stringWidth } from "./width.ts";
 
 const RESET = "\x1b[0m";
 
@@ -102,37 +102,96 @@ function appendLines(lines: Segment[][], more: Segment[][]): void {
   for (const line of rest) lines.push(line);
 }
 
-/** Wrap one logical line of styled segments to `cols` visual columns, measuring by codepoint
- * width only (never counting the segment's own style bytes) and re-opening each segment's
- * style at the start of every wrapped row. */
+interface Token {
+  text: string;
+  codes: readonly string[];
+  isSpace: boolean;
+}
+
+/** Flatten one logical line's styled segments into whitespace/non-whitespace tokens, keeping
+ * each token's originating segment's style codes — the styled-segment counterpart of
+ * `width.ts`'s `tokenizeWords`. */
+function tokenizeSegments(line: Segment[]): Token[] {
+  const tokens: Token[] = [];
+  for (const seg of line) {
+    for (const part of seg.text.match(/\s+|\S+/g) ?? []) {
+      tokens.push({ text: part, codes: seg.codes, isSpace: /^\s+$/.test(part) });
+    }
+  }
+  return tokens;
+}
+
+/** Drop any trailing whitespace-only tokens (a wrapped/final row should never end with a
+ * dangling space, matching `width.ts`'s plain-text trim). */
+function trimTrailingWhitespace(parts: { text: string; codes: readonly string[] }[]): void {
+  while (parts.length > 0 && /^\s+$/.test((parts[parts.length - 1] as { text: string }).text)) {
+    parts.pop();
+  }
+}
+
+/** Wrap one logical line of styled segments to `cols` visual columns (DH-0065: word-boundary
+ * aware — prefers breaking at the last whitespace token before the limit, falling back to a
+ * codepoint/display-width hard break only for a single token wider than a whole row), measuring
+ * by codepoint width only (never counting the segment's own style bytes) and re-opening each
+ * segment's style at the start of every wrapped row. */
 function wrapSegments(line: Segment[], cols: number): string[] {
   const width = Math.max(1, cols);
+  const tokens = tokenizeSegments(line);
   const rows: string[] = [];
   let rowParts: { text: string; codes: readonly string[] }[] = [];
   let rowWidth = 0;
+  let justWrapped = false;
+
+  const pushPart = (text: string, codes: readonly string[]): void => {
+    if (text !== "") rowParts.push({ text, codes });
+  };
 
   const flushRow = (): void => {
+    trimTrailingWhitespace(rowParts);
     rows.push(serializeRow(rowParts));
     rowParts = [];
     rowWidth = 0;
+    justWrapped = true;
   };
 
-  for (const seg of line) {
-    let curText = "";
-    for (const cp of codePoints(seg.text)) {
-      const w = charWidth(cp);
-      if (rowWidth + w > width && (rowWidth > 0 || curText.length > 0)) {
-        if (curText) {
-          rowParts.push({ text: curText, codes: seg.codes });
-          curText = "";
-        }
+  for (const token of tokens) {
+    const tokenWidth = stringWidth(token.text);
+    if (token.isSpace) {
+      if (justWrapped) continue; // never start a wrapped continuation row with whitespace
+      if (rowWidth + tokenWidth > width) {
         flushRow();
+        continue;
       }
-      curText += cp;
-      rowWidth += w;
+      pushPart(token.text, token.codes);
+      rowWidth += tokenWidth;
+      continue;
     }
-    if (curText) rowParts.push({ text: curText, codes: seg.codes });
+    justWrapped = false;
+    if (tokenWidth > width) {
+      // Token alone exceeds a full row: flush what's pending, then hard-break just this token.
+      if (rowParts.length > 0) flushRow();
+      let cur = "";
+      let curWidth = 0;
+      for (const cp of codePoints(token.text)) {
+        const w = charWidth(cp);
+        if (curWidth + w > width && cur.length > 0) {
+          pushPart(cur, token.codes);
+          flushRow();
+          cur = "";
+          curWidth = 0;
+        }
+        cur += cp;
+        curWidth += w;
+      }
+      pushPart(cur, token.codes);
+      rowWidth = curWidth;
+      continue;
+    }
+    if (rowWidth + tokenWidth > width) flushRow();
+    pushPart(token.text, token.codes);
+    rowWidth += tokenWidth;
   }
+  trimTrailingWhitespace(rowParts);
   rows.push(serializeRow(rowParts));
   return rows;
 }

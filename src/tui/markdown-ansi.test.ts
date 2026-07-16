@@ -186,6 +186,28 @@ describe("renderMarkdownRows — wrapping", () => {
       expect([...stripAnsi(row)].length).toBeLessThanOrEqual(5);
     }
   });
+
+  test("wraps prose at word boundaries, not mid-word (DH-0065)", () => {
+    const rows = renderMarkdownRows(parseMarkdown("hello world foo"), 7);
+    expect(rows.map(stripAnsi)).toEqual(["hello", "world", "foo"]);
+  });
+
+  test("a trailing space that would overflow the row breaks before the next word", () => {
+    // "abc" exactly fills width 3; the following space alone would overflow to 4, so the
+    // break happens before it rather than emitting a dangling trailing space.
+    const rows = renderMarkdownRows(parseMarkdown("abc def"), 3);
+    expect(rows.map(stripAnsi)).toEqual(["abc", "def"]);
+  });
+
+  test("word-boundary wrapping still hard-breaks a single word wider than the row", () => {
+    const rows = renderMarkdownRows(parseMarkdown("supercalifragilistic"), 6);
+    expect(rows.map(stripAnsi)).toEqual(["superc", "alifra", "gilist", "ic"]);
+  });
+
+  test("word-boundary wrapping applies within a styled (bold) span too", () => {
+    const rows = renderMarkdownRows(parseMarkdown("**hello world foo**"), 7);
+    expect(rows.map(stripAnsi)).toEqual(["hello", "world", "foo"]);
+  });
 });
 
 describe("renderMarkdownRows — style-bleed regression (DH-0065)", () => {
