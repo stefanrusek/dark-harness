@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0070
 type: bug
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
@@ -70,10 +70,11 @@ dh's Bash tool documents each call as a fresh shell invocation with no cd persis
 
 ## Open Questions
 
-- Should cwd persistence be scoped per-agent or per-session? (Recommend per-agent, per
-  Assumptions above, but confirm against real Claude Code's exact scoping if discoverable.)
+- ~~Should cwd persistence be scoped per-agent or per-session?~~ **Resolved: per-agent**,
+  inherited from the parent's cwd at spawn time (see owner decision below).
 - Does this need a `dh.json` opt-out for harness operators who rely on the current
-  fresh-shell isolation as a feature (e.g. sandboxing intent)?
+  fresh-shell isolation as a feature (e.g. sandboxing intent)? Still open — implementer's
+  call, default to no opt-out unless a real need surfaces.
 
 ## Notes
 
@@ -81,3 +82,17 @@ dh's Bash tool documents each call as a fresh shell invocation with no cd persis
 > Found 2026-07-16 during the systematic tool-schema/behavior comparison against real
 > Claude Code requested by the owner following DH-0069 (see that ticket's Notes for the
 > original framing: "this feels like a gap. we need a tool gap/comparison analysis").
+
+> [!NOTE]
+> Owner decision (2026-07-16): confirmed and queued as written. Clarification on scope: a
+> prior round (docs/handoffs/core.md Round 13, "per Fable's adopted recommendation")
+> deliberately chose fresh-shell/no-cd-persistence — that was a real recommendation, not
+> invented, but it only addressed *whether* `cd` persists at all, never *how it should be
+> scoped if it did*. The current single shared `AgentRuntime.cwd` field (one value for the
+> whole process, root and every sub-agent alike — confirmed in code: `spawnAgent()` never
+> gives a sub-agent its own cwd) is simply how the code happened to be written, not a
+> separate deliberate decision. The owner is explicitly overriding Round 13's choice:
+> **`cd` should persist, and each agent should have its own cwd, inherited from its parent's
+> cwd at the moment it's spawned** — a Bash call's `cd` changes the cwd for the agent that
+> issued it (and that agent's future sub-agents, via inheritance-at-spawn), not for its
+> parent or siblings. Ready for implementation as specified in Functional Requirements.
