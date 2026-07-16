@@ -4,14 +4,22 @@ import type { ServerTarget } from "../protocol.ts";
 import {
   CommandError,
   buildDownloadLogsCommand,
+  buildInvokeSkillCommand,
+  buildListModelsCommand,
+  buildListSkillsCommand,
   buildRequestAgentTreeCommand,
   buildSendMessageCommand,
   buildStopAgentCommand,
+  buildSwitchModelCommand,
+  invokeSkill,
+  listModels,
+  listSkills,
   requestAgentTree,
   requestLogDownload,
   sendCommand,
   sendMessage,
   stopAgent,
+  switchModel,
 } from "./commands.ts";
 
 const target: ServerTarget = { baseUrl: "http://localhost:4000" };
@@ -40,6 +48,40 @@ describe("command builders", () => {
 
   test("buildStopAgentCommand", () => {
     expect(buildStopAgentCommand("a1")).toEqual({ type: "stop_agent", agentId: "a1" });
+  });
+
+  // DH-0093: slash-command backend builders.
+  test("buildListModelsCommand", () => {
+    expect(buildListModelsCommand()).toEqual({ type: "list_models" });
+  });
+
+  test("buildSwitchModelCommand", () => {
+    expect(buildSwitchModelCommand("root-1", "sonnet")).toEqual({
+      type: "switch_model",
+      agentId: "root-1",
+      model: "sonnet",
+    });
+  });
+
+  test("buildListSkillsCommand", () => {
+    expect(buildListSkillsCommand()).toEqual({ type: "list_skills" });
+  });
+
+  test("buildInvokeSkillCommand with args", () => {
+    expect(buildInvokeSkillCommand("root-1", "sm", "write a doc")).toEqual({
+      type: "invoke_skill",
+      agentId: "root-1",
+      skill: "sm",
+      args: "write a doc",
+    });
+  });
+
+  test("buildInvokeSkillCommand without args", () => {
+    expect(buildInvokeSkillCommand("root-1", "sm")).toEqual({
+      type: "invoke_skill",
+      agentId: "root-1",
+      skill: "sm",
+    });
   });
 });
 
@@ -175,6 +217,51 @@ describe("sendMessage / requestAgentTree / stopAgent", () => {
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       type: "stop_agent",
       agentId: "a1",
+    });
+  });
+});
+
+describe("listModels / switchModel / listSkills / invokeSkill (DH-0093)", () => {
+  test("listModels returns the models response", async () => {
+    const response = { ok: true, models: [] };
+    const { fetch: fetchImpl } = fakeFetch(200, response);
+    expect(await listModels(target, fetchImpl)).toEqual(response);
+  });
+
+  test("switchModel posts a switch_model command", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await switchModel(target, "root-1", "sonnet", fetchImpl);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "switch_model",
+      agentId: "root-1",
+      model: "sonnet",
+    });
+  });
+
+  test("listSkills returns the skills response", async () => {
+    const response = { ok: true, skills: [{ name: "sm", description: "Sugar Maple" }] };
+    const { fetch: fetchImpl } = fakeFetch(200, response);
+    expect(await listSkills(target, fetchImpl)).toEqual(response);
+  });
+
+  test("invokeSkill posts an invoke_skill command with args", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await invokeSkill(target, "root-1", "sm", "write a doc", fetchImpl);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "invoke_skill",
+      agentId: "root-1",
+      skill: "sm",
+      args: "write a doc",
+    });
+  });
+
+  test("invokeSkill posts without args when omitted", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await invokeSkill(target, "root-1", "sm", undefined, fetchImpl);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "invoke_skill",
+      agentId: "root-1",
+      skill: "sm",
     });
   });
 });

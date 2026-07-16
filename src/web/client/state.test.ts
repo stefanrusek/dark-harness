@@ -11,9 +11,12 @@ import type {
   ToolResultEvent,
 } from "../../contracts/index.ts";
 import {
+  addSystemTurn,
   addUserTurn,
   agentDepth,
   applyEvent,
+  clearAllTranscripts,
+  closeModelPicker,
   createInitialState,
   dismissPossibleGap,
   documentTitle,
@@ -26,6 +29,8 @@ import {
   selectedAgent,
   sessionTotals,
   setConnectionStatus,
+  setModelsAndOpenPicker,
+  setSkills,
 } from "./state.ts";
 
 function spawned(
@@ -672,5 +677,86 @@ describe("DH-0012: completed-agent retention cap", () => {
       state = applyEvent(state, statusEvent(`a${i}`, "done"));
     }
     expect(state.agents.size).toBe(3);
+  });
+});
+
+describe("DH-0093: slash-command state helpers", () => {
+  test("addSystemTurn appends a role: system entry and never opens/merges with assistant turns", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "sonnet"));
+    state = applyEvent(state, output("root-1", "hi"));
+    state = addSystemTurn(state, "root-1", "help text", "2026-01-01T00:00:05Z");
+    const transcript = state.agents.get("root-1")?.transcript ?? [];
+    expect(transcript.at(-1)).toEqual({
+      role: "system",
+      text: "help text",
+      timestamp: "2026-01-01T00:00:05Z",
+    });
+    expect(state.agents.get("root-1")?.turnOpen).toBe(false);
+  });
+
+  test("clearAllTranscripts empties every tracked agent's transcript, not just the root's", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "sonnet"));
+    state = applyEvent(state, spawned("child-1", "root-1", "haiku"));
+    state = applyEvent(state, output("root-1", "hi"));
+    state = applyEvent(state, output("child-1", "yo"));
+    state = clearAllTranscripts(state);
+    expect(state.agents.get("root-1")?.transcript).toEqual([]);
+    expect(state.agents.get("child-1")?.transcript).toEqual([]);
+  });
+
+  test("setSkills caches the skill list", () => {
+    const state = setSkills(createInitialState(), [{ name: "sm", description: "Sugar Maple" }]);
+    expect(state.skills).toEqual([{ name: "sm", description: "Sugar Maple" }]);
+  });
+
+  test("setModelsAndOpenPicker caches models and opens the picker", () => {
+    const models = [
+      {
+        name: "sonnet",
+        provider: "anthropic",
+        model: "claude-sonnet",
+        isDefault: true,
+        isActive: true,
+      },
+    ];
+    const state = setModelsAndOpenPicker(createInitialState(), models);
+    expect(state.models).toEqual(models);
+    expect(state.modelPickerOpen).toBe(true);
+  });
+
+  test("closeModelPicker closes it", () => {
+    const opened = setModelsAndOpenPicker(createInitialState(), []);
+    const closed = closeModelPicker(opened);
+    expect(closed.modelPickerOpen).toBe(false);
+  });
+
+  test("model_switched updates the switched agent's displayed model", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "haiku"));
+    state = applyEvent(state, {
+      version: 1,
+      id: "evt-switch",
+      timestamp: new Date().toISOString(),
+      type: "model_switched",
+      agentId: "root-1",
+      from: "haiku",
+      to: "sonnet",
+    });
+    expect(state.agents.get("root-1")?.model).toBe("sonnet");
+  });
+
+  test("model_switched for a not-yet-tracked agent creates it with the new model", () => {
+    const state = applyEvent(createInitialState(), {
+      version: 1,
+      id: "evt-switch2",
+      timestamp: new Date().toISOString(),
+      type: "model_switched",
+      agentId: "mystery",
+      from: "haiku",
+      to: "sonnet",
+    });
+    expect(state.agents.get("mystery")?.model).toBe("sonnet");
   });
 });

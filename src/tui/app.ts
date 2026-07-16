@@ -184,6 +184,10 @@ export async function startTui(
         });
         if (effect.command.type === "request_agent_tree" && "tree" in response) {
           dispatch({ type: "tree_response", tree: response.tree });
+        } else if (effect.command.type === "list_models" && "models" in response) {
+          dispatch({ type: "models_response", models: response.models });
+        } else if (effect.command.type === "list_skills" && "skills" in response) {
+          dispatch({ type: "skills_response", skills: response.skills });
         } else if (!response.ok) {
           dispatch({ type: "command_error", error: response.error ?? "command failed" });
         }
@@ -257,6 +261,10 @@ export async function startTui(
     // as every other command, so a failure here surfaces as an ordinary status message
     // rather than crashing startup.
     void runEffect({ type: "send_command", command: { type: "request_agent_tree" } });
+
+    // DH-0093: fetch the skill list once at startup, alongside the tree bootstrap above, so
+    // `/help` and `/<skillname>` resolve locally with zero per-keystroke round-trips.
+    void runEffect({ type: "send_command", command: { type: "list_skills" } });
 
     draw();
   });

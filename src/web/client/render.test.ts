@@ -9,6 +9,7 @@ import {
   renderComposer,
   renderConnectionStatus,
   renderErrorLog,
+  renderModelPicker,
   renderSessionSummary,
   renderSidebar,
   renderTranscript,
@@ -673,5 +674,198 @@ describe("renderErrorLog (DH-0029 #34)", () => {
     expect(entries).toHaveLength(2);
     expect(entries[0]?.textContent).toContain("second error");
     expect(entries[1]?.textContent).toContain("first error");
+  });
+});
+
+// DH-0093: header always shows the active model badge, so a mid-session `/model` switch is
+// visibly reflected somewhere.
+describe("renderAgentHeader: model badge (DH-0093)", () => {
+  test("shows the agent's model in a badge", () => {
+    const { document, root } = createTestDom();
+    renderAgentHeader(document, root, stateWithRootAndChild(), noopCallbacks());
+    expect(root.querySelector(".agent-header-model")?.textContent).toBe("sonnet");
+  });
+
+  test("falls back to a placeholder when no model is known", () => {
+    const { document, root } = createTestDom();
+    let state = createInitialState();
+    state = applyEvent(state, {
+      version: 1,
+      id: "e1",
+      timestamp: "2026-01-01T00:00:00Z",
+      type: "token_usage",
+      agentId: "mystery",
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    state = { ...state, selectedAgentId: "mystery" };
+    renderAgentHeader(document, root, state, noopCallbacks());
+    expect(root.querySelector(".agent-header-model")?.textContent).toBe("(unknown model)");
+  });
+});
+
+describe("renderTranscript: system turns (DH-0093 /help)", () => {
+  test("renders a system turn as plain text with its own role label", () => {
+    const { document, root } = createTestDom();
+    const agent = fakeAgentNode({ transcript: [turn("system", "Available commands:\n  /help")] });
+    renderTranscript(document, root, agent);
+    const systemTurn = root.querySelector(".turn-system");
+    expect(systemTurn).not.toBeNull();
+    expect(systemTurn?.querySelector(".turn-role")?.textContent).toBe("System");
+    expect(systemTurn?.querySelector(".turn-text")?.textContent).toBe(
+      "Available commands:\n  /help",
+    );
+  });
+});
+
+describe("renderModelPicker (DH-0093)", () => {
+  function pickerState(overrides: Partial<WebState> = {}): WebState {
+    return { ...createInitialState(), ...overrides };
+  }
+
+  test("hides the overlay and clears content when the picker is closed", () => {
+    const { document, root } = createTestDom();
+    root.classList.remove("hidden");
+    root.textContent = "stale";
+    renderModelPicker(
+      document,
+      root,
+      pickerState({ modelPickerOpen: false }),
+      () => {},
+      () => {},
+    );
+    expect(root.classList.contains("hidden")).toBe(true);
+    expect(root.textContent).toBe("");
+  });
+
+  test("shows a placeholder when no models are configured", () => {
+    const { document, root } = createTestDom();
+    renderModelPicker(
+      document,
+      root,
+      pickerState({ modelPickerOpen: true, models: [] }),
+      () => {},
+      () => {},
+    );
+    expect(root.classList.contains("hidden")).toBe(false);
+    expect(root.textContent).toContain("No models configured.");
+  });
+
+  test("lists every model with name/provider/model-id and active/default tags", () => {
+    const { document, root } = createTestDom();
+    renderModelPicker(
+      document,
+      root,
+      pickerState({
+        modelPickerOpen: true,
+        models: [
+          {
+            name: "haiku",
+            provider: "anthropic",
+            model: "claude-haiku",
+            isDefault: false,
+            isActive: false,
+          },
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "claude-sonnet",
+            isDefault: true,
+            isActive: true,
+          },
+        ],
+      }),
+      () => {},
+      () => {},
+    );
+    const rows = root.querySelectorAll(".model-picker-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.querySelector(".model-picker-name")?.textContent).toBe("haiku");
+    expect(rows[0]?.querySelector(".model-picker-detail")?.textContent).toBe(
+      "(anthropic/claude-haiku)",
+    );
+    expect(rows[1]?.querySelector(".model-picker-tags")?.textContent).toBe("[active, default]");
+    expect(rows[1]?.classList.contains("active")).toBe(true);
+  });
+
+  test("clicking a row calls onSelect with that model's name", () => {
+    const { document, root, dispatch } = createTestDom();
+    const selected: string[] = [];
+    renderModelPicker(
+      document,
+      root,
+      pickerState({
+        modelPickerOpen: true,
+        models: [
+          {
+            name: "haiku",
+            provider: "anthropic",
+            model: "claude-haiku",
+            isDefault: false,
+            isActive: false,
+          },
+        ],
+      }),
+      (name) => selected.push(name),
+      () => {},
+    );
+    const row = root.querySelector(".model-picker-row") as HTMLElement;
+    dispatch(row, "click");
+    expect(selected).toEqual(["haiku"]);
+  });
+
+  test("the Cancel button calls onClose", () => {
+    const { document, root, dispatch } = createTestDom();
+    let closed = false;
+    renderModelPicker(
+      document,
+      root,
+      pickerState({ modelPickerOpen: true, models: [] }),
+      () => {},
+      () => {
+        closed = true;
+      },
+    );
+    const buttons = [...root.querySelectorAll("button")];
+    const cancelBtn = buttons.find((b) => b.textContent === "Cancel");
+    expect(cancelBtn).toBeDefined();
+    if (cancelBtn) dispatch(cancelBtn, "click");
+    expect(closed).toBe(true);
+  });
+
+  test("clicking the backdrop (not a row) calls onClose", () => {
+    const { document, root, dispatch } = createTestDom();
+    let closed = false;
+    renderModelPicker(
+      document,
+      root,
+      pickerState({ modelPickerOpen: true, models: [] }),
+      () => {},
+      () => {
+        closed = true;
+      },
+    );
+    dispatch(root, "click");
+    expect(closed).toBe(true);
+  });
+
+  test("re-rendering closed then open doesn't stack backdrop-close handlers", () => {
+    const { document, root, dispatch } = createTestDom();
+    let closeCount = 0;
+    const onClose = () => {
+      closeCount++;
+    };
+    for (let i = 0; i < 3; i++) {
+      renderModelPicker(document, root, pickerState({ modelPickerOpen: false }), () => {}, onClose);
+      renderModelPicker(
+        document,
+        root,
+        pickerState({ modelPickerOpen: true, models: [] }),
+        () => {},
+        onClose,
+      );
+    }
+    dispatch(root, "click");
+    expect(closeCount).toBe(1);
   });
 });

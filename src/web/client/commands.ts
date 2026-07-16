@@ -7,9 +7,15 @@ import type {
   ClientCommand,
   CommandAck,
   DownloadLogsCommand,
+  InvokeSkillCommand,
+  ListModelsCommand,
+  ListModelsResponse,
+  ListSkillsCommand,
+  ListSkillsResponse,
   RequestAgentTreeCommand,
   SendMessageCommand,
   StopAgentCommand,
+  SwitchModelCommand,
 } from "../../contracts/index.ts";
 import { type ServerTarget, commandUrl } from "../protocol.ts";
 
@@ -27,6 +33,31 @@ export function buildDownloadLogsCommand(agentId?: string): DownloadLogsCommand 
 
 export function buildStopAgentCommand(agentId: string): StopAgentCommand {
   return { type: "stop_agent", agentId };
+}
+
+// DH-0093: slash-command backend commands (model switching, skill invocation) — see
+// src/contracts/commands.ts for the wire shapes (architect-signed, backend round already
+// merged). Builders follow the same shape as every command above.
+export function buildListModelsCommand(): ListModelsCommand {
+  return { type: "list_models" };
+}
+
+export function buildSwitchModelCommand(agentId: string, model: string): SwitchModelCommand {
+  return { type: "switch_model", agentId, model };
+}
+
+export function buildListSkillsCommand(): ListSkillsCommand {
+  return { type: "list_skills" };
+}
+
+export function buildInvokeSkillCommand(
+  agentId: string,
+  skill: string,
+  args?: string,
+): InvokeSkillCommand {
+  return args === undefined
+    ? { type: "invoke_skill", agentId, skill }
+    : { type: "invoke_skill", agentId, skill, args };
 }
 
 export type FetchLike = typeof fetch;
@@ -130,6 +161,43 @@ export function stopAgent(
   options?: SendCommandOptions,
 ): Promise<CommandAck> {
   return sendCommand(target, buildStopAgentCommand(agentId), fetchImpl, options);
+}
+
+export function listModels(
+  target: ServerTarget,
+  fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
+): Promise<ListModelsResponse> {
+  return sendCommand<ListModelsResponse>(target, buildListModelsCommand(), fetchImpl, options);
+}
+
+export function switchModel(
+  target: ServerTarget,
+  agentId: string,
+  model: string,
+  fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
+): Promise<CommandAck> {
+  return sendCommand(target, buildSwitchModelCommand(agentId, model), fetchImpl, options);
+}
+
+export function listSkills(
+  target: ServerTarget,
+  fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
+): Promise<ListSkillsResponse> {
+  return sendCommand<ListSkillsResponse>(target, buildListSkillsCommand(), fetchImpl, options);
+}
+
+export function invokeSkill(
+  target: ServerTarget,
+  agentId: string,
+  skill: string,
+  args?: string,
+  fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
+): Promise<CommandAck> {
+  return sendCommand(target, buildInvokeSkillCommand(agentId, skill, args), fetchImpl, options);
 }
 
 /**

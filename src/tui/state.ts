@@ -2,7 +2,8 @@
 // here — side effects (HTTP commands, process exit) are described as data and executed by
 // app.ts. This is what makes the TUI's core logic fully unit-testable without a terminal.
 
-import type { ServerSentEvent } from "../contracts/index.ts";
+import type { ModelInfo, ServerSentEvent, SkillInfo } from "../contracts/index.ts";
+import { parseSlashCommand } from "./commands.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";
 import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.ts";
@@ -95,6 +96,7 @@ export function initialState(
     ownsServer: opts.ownsServer ?? false,
     shutdownRequested: false,
     rootActive: false,
+    skills: null,
   };
 }
 
@@ -234,6 +236,23 @@ export function reducer(state: TuiState, action: Action): ReducerResult {
       return handleKey(state, action.key);
     case "tick":
       return noEffects({ ...state, now: action.now });
+    case "models_response":
+      // DH-0093: `/model` (no-arg) sent `list_models` and is now transitioning root -> picker.
+      // Select the currently-active model by default so Enter with no navigation re-confirms
+      // the status quo rather than landing on an arbitrary row.
+      return noEffects({
+        ...state,
+        view: {
+          kind: "picker",
+          options: action.models,
+          selectedIndex: Math.max(
+            0,
+            action.models.findIndex((m) => m.isActive),
+          ),
+        },
+      });
+    case "skills_response":
+      return noEffects({ ...state, skills: action.skills });
   }
 }
 
@@ -293,6 +312,18 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
         ...state,
         reconnectNotice: "Reconnected — history may be incomplete.",
       });
+    // DH-0093: the real client-side consumption of `model_switched` (the backend round only
+    // added a no-op exhaustiveness case) — update the switched agent's displayed model and,
+    // for the root agent, surface a status message so the operator sees confirmation even if
+    // they weren't the one who triggered it (e.g. a future non-interactive trigger).
+    case "model_switched": {
+      const next = withAgent(state, event.agentId, at, { model: event.to });
+      return noEffects(
+        event.agentId === state.rootAgentId
+          ? { ...next, statusMessage: `model switched to ${event.to}` }
+          : next,
+      );
+    }
     // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
     // DH-0089) not yet consumed here — that's a separate TUI round (D5). Not in
     // sse-parser.ts's KNOWN_TYPES yet either, so these never actually reach this reducer at
@@ -381,6 +412,8 @@ function handleKey(state: TuiState, key: KeyEvent): ReducerResult {
       return noEffects(handleTreeKey(state, state.view, key));
     case "agent":
       return noEffects(handleAgentKey(state, key));
+    case "picker":
+      return handlePickerKey(state, state.view, key);
   }
 }
 
@@ -442,6 +475,15 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
   }
   if (key.kind === "enter") {
     if (state.input.trim() === "") return noEffects(state);
+    // DH-0093: a recognized slash command never becomes a chat message — intercepted here,
+    // the one place a `send_message` effect is built from `state.input` (design §1). The raw
+    // (untrimmed) input is tested: a leading space before the slash, or a bare "/" alone,
+    // deliberately fails to match and falls through to ordinary chat, per the grammar's own
+    // rules (see commands.ts).
+    const parsed = parseSlashCommand(state.input);
+    if (parsed) {
+      return handleSlashCommand(state, parsed.name, parsed.args);
+    }
     if (state.rootAgentId === null) {
       return noEffects({ ...state, statusMessage: "No root agent yet — please wait." });
     }
@@ -468,6 +510,146 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
   }
   // "tab" is intentionally a no-op here — reserved for a possible future completion feature,
   // not a dead/unhandled key (DH-0026 flagged it as unclear; this makes the intent explicit).
+  return noEffects(state);
+}
+
+/** Local, never-sent transcript entry text for `/help` (DH-0093 design §3) — lists the
+ * built-ins plus every cached skill command, and is explicit that `/clear` only affects the
+ * local view (honest labeling instead of a silent semantic lie about resetting context). */
+function helpText(state: TuiState): string {
+  const lines = [
+    "Available commands:",
+    "  /model [name]   show/switch the active model (no arg opens a picker)",
+    "  /help           show this message",
+    "  /clear          clear the local transcript view (does NOT reset the agent's context)",
+  ];
+  const skills = state.skills ?? [];
+  if (skills.length > 0) {
+    lines.push("");
+    lines.push("Skill commands:");
+    for (const skill of skills) {
+      lines.push(`  /${skill.name}   ${skill.description}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/** Dispatch a parsed slash command (DH-0093 design §1-4). Never produces a `send_message`
+ * effect — that's the whole point of interception. `/model`/skill invocation need a root
+ * agent id (mirroring the existing chat-message guard); `/help`/`/clear` are fully local and
+ * work even before one exists. */
+function handleSlashCommand(state: TuiState, name: string, args: string): ReducerResult {
+  const cleared: TuiState = { ...state, input: "", inputCursor: 0 };
+
+  if (name === "help") {
+    if (state.rootAgentId === null) {
+      return noEffects({ ...cleared, statusMessage: helpText(state) });
+    }
+    return noEffects(appendToolMarker(cleared, state.rootAgentId, state.now, helpText(state)));
+  }
+
+  if (name === "clear") {
+    // DH-0093 design §3: clears the local transcript view only — every tracked agent's
+    // display resets, but no wire command is sent and the agent's own in-memory context is
+    // deliberately unaffected in v1 (see helpText's explicit disclosure of this).
+    const agents = new Map(cleared.agents);
+    for (const [id, agent] of agents) agents.set(id, { ...agent, transcript: [] });
+    return noEffects({ ...cleared, agents, statusMessage: null });
+  }
+
+  if (state.rootAgentId === null) {
+    return noEffects({ ...cleared, statusMessage: "No root agent yet — please wait." });
+  }
+  const rootAgentId = state.rootAgentId;
+
+  if (name === "model") {
+    const trimmedArgs = args.trim();
+    if (trimmedArgs === "") {
+      // No-arg form: fetch the list; `models_response` transitions into the picker.
+      return {
+        state: cleared,
+        effects: [{ type: "send_command", command: { type: "list_models" } }],
+      };
+    }
+    // Argument form: switch directly, skipping the picker (design §2).
+    return {
+      state: { ...cleared, statusMessage: `switching model to ${trimmedArgs}…` },
+      effects: [
+        {
+          type: "send_command",
+          command: { type: "switch_model", agentId: rootAgentId, model: trimmedArgs },
+        },
+      ],
+    };
+  }
+
+  // Not a built-in — try a skill command (BUILTIN_COMMAND_NAMES shadow same-named skills,
+  // per design §4; isBuiltinCommandName above already exhausted the three built-ins, so
+  // reaching here means `name` is not one of them).
+  const skill = (state.skills ?? []).find((s) => s.name === name);
+  if (skill) {
+    // Local echo of the raw "/name args" the operator typed (design §4) — the expanded
+    // skill content is never shown here, only visible in the JSONL log as the real user
+    // message the server composes and delivers via the ordinary sendMessage path.
+    const echo = args.trim() === "" ? `/${name}` : `/${name} ${args}`;
+    const withEcho = appendUserTurn(cleared, rootAgentId, state.now, echo);
+    return {
+      state: { ...withEcho, rootActive: true },
+      effects: [
+        {
+          type: "send_command",
+          command: { type: "invoke_skill", agentId: rootAgentId, skill: name, args },
+        },
+      ],
+    };
+  }
+
+  return noEffects({ ...cleared, statusMessage: `Unknown command: /${name}` });
+}
+
+/** Navigation for the `/model` picker (design §2): up/down move, enter selects (sends
+ * `switch_model` and returns to the root view), escape cancels back to root with no command
+ * sent — the exact same shape as `handleTreeKey`. */
+function handlePickerKey(
+  state: TuiState,
+  view: { kind: "picker"; options: ModelInfo[]; selectedIndex: number },
+  key: KeyEvent,
+): ReducerResult {
+  if (key.kind === "up") {
+    return noEffects({
+      ...state,
+      view: { ...view, selectedIndex: Math.max(0, view.selectedIndex - 1) },
+    });
+  }
+  if (key.kind === "down") {
+    const max = Math.max(0, view.options.length - 1);
+    return noEffects({
+      ...state,
+      view: { ...view, selectedIndex: Math.min(max, view.selectedIndex + 1) },
+    });
+  }
+  if (key.kind === "enter") {
+    const selected = view.options[view.selectedIndex];
+    if (!selected || state.rootAgentId === null) {
+      return noEffects({ ...state, view: { kind: "root" } });
+    }
+    return {
+      state: {
+        ...state,
+        view: { kind: "root" },
+        statusMessage: `switching model to ${selected.name}…`,
+      },
+      effects: [
+        {
+          type: "send_command",
+          command: { type: "switch_model", agentId: state.rootAgentId, model: selected.name },
+        },
+      ],
+    };
+  }
+  if (key.kind === "escape" || key.kind === "left") {
+    return noEffects({ ...state, view: { kind: "root" } });
+  }
   return noEffects(state);
 }
 

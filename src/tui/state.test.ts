@@ -1024,3 +1024,279 @@ describe("reducer: key handling — agent view", () => {
     expect(next.view).toEqual({ kind: "agent", agentId: "child" });
   });
 });
+
+describe("reducer: slash commands (DH-0093)", () => {
+  function rootedState(input: string): TuiState {
+    let state = initialState(size());
+    ({ state } = reducer(state, { type: "tree_response", tree: [treeNode("root")] }));
+    return { ...state, input };
+  }
+
+  test("/help before a root agent exists shows help via statusMessage, not a transcript entry", () => {
+    const { state: next, effects } = reducer(
+      { ...initialState(size()), input: "/help" },
+      { type: "key", key: { kind: "enter" } },
+    );
+    expect(effects).toEqual([]);
+    expect(next.statusMessage).toContain("/model [name]");
+    expect(next.statusMessage).toContain("does NOT reset");
+  });
+
+  test("/help with a root agent renders a local tool-marker transcript entry and sends nothing", () => {
+    const { state: next, effects } = reducer(rootedState("/help"), {
+      type: "key",
+      key: { kind: "enter" },
+    });
+    expect(effects).toEqual([]);
+    const transcript = next.agents.get("root")?.transcript ?? [];
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.role).toBe("tool");
+    expect(transcript[0]?.text).toContain("/clear");
+    expect(next.input).toBe("");
+  });
+
+  test("/help lists cached skill commands", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "skills_response",
+      skills: [{ name: "sm", description: "Sugar Maple filestore" }],
+    }));
+    state = { ...state, input: "/help" };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "enter" } });
+    const transcript = next.agents.get("root")?.transcript ?? [];
+    expect(transcript[0]?.text).toContain("/sm   Sugar Maple filestore");
+  });
+
+  test("/clear empties every tracked agent's transcript and sends nothing", () => {
+    let state = rootedState("hi");
+    ({ state } = reducer(state, { type: "key", key: { kind: "enter" } }));
+    expect(state.agents.get("root")?.transcript.length).toBeGreaterThan(0);
+    state = { ...state, input: "/clear" };
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(effects).toEqual([]);
+    expect(next.agents.get("root")?.transcript).toEqual([]);
+  });
+
+  test("/model with no root agent yet reports the standard 'please wait' message", () => {
+    const { state: next, effects } = reducer(
+      { ...initialState(size()), input: "/model" },
+      { type: "key", key: { kind: "enter" } },
+    );
+    expect(effects).toEqual([]);
+    expect(next.statusMessage).toBe("No root agent yet — please wait.");
+  });
+
+  test("/model with no args sends list_models", () => {
+    const { state: next, effects } = reducer(rootedState("/model"), {
+      type: "key",
+      key: { kind: "enter" },
+    });
+    expect(effects).toEqual([{ type: "send_command", command: { type: "list_models" } }]);
+    expect(next.input).toBe("");
+  });
+
+  test("/model <name> switches directly, skipping the picker", () => {
+    const { state: next, effects } = reducer(rootedState("/model sonnet"), {
+      type: "key",
+      key: { kind: "enter" },
+    });
+    expect(effects).toEqual([
+      {
+        type: "send_command",
+        command: { type: "switch_model", agentId: "root", model: "sonnet" },
+      },
+    ]);
+    expect(next.view).toEqual({ kind: "root" });
+    expect(next.statusMessage).toContain("switching model to sonnet");
+  });
+
+  test("models_response transitions into the picker view, selecting the active model", () => {
+    const { state: next } = reducer(rootedState(""), {
+      type: "models_response",
+      models: [
+        {
+          name: "haiku",
+          provider: "anthropic",
+          model: "claude-haiku",
+          isDefault: false,
+          isActive: false,
+        },
+        {
+          name: "sonnet",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          isDefault: true,
+          isActive: true,
+        },
+      ],
+    });
+    expect(next.view).toEqual({
+      kind: "picker",
+      options: [
+        {
+          name: "haiku",
+          provider: "anthropic",
+          model: "claude-haiku",
+          isDefault: false,
+          isActive: false,
+        },
+        {
+          name: "sonnet",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          isDefault: true,
+          isActive: true,
+        },
+      ],
+      selectedIndex: 1,
+    });
+  });
+
+  test("picker: up/down move selection, clamped to bounds", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "models_response",
+      models: [
+        { name: "a", provider: "p", model: "m", isDefault: false, isActive: true },
+        { name: "b", provider: "p", model: "m", isDefault: false, isActive: false },
+      ],
+    }));
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    expect(state.view).toMatchObject({ selectedIndex: 1 });
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    expect(state.view).toMatchObject({ selectedIndex: 1 });
+    ({ state } = reducer(state, { type: "key", key: { kind: "up" } }));
+    ({ state } = reducer(state, { type: "key", key: { kind: "up" } }));
+    expect(state.view).toMatchObject({ selectedIndex: 0 });
+  });
+
+  test("picker: enter sends switch_model for the selected row and returns to root", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "models_response",
+      models: [
+        { name: "a", provider: "p", model: "m", isDefault: false, isActive: true },
+        { name: "b", provider: "p", model: "m", isDefault: false, isActive: false },
+      ],
+    }));
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.view).toEqual({ kind: "root" });
+    expect(effects).toEqual([
+      { type: "send_command", command: { type: "switch_model", agentId: "root", model: "b" } },
+    ]);
+  });
+
+  test("picker: escape/left cancel back to root with no command sent", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "models_response",
+      models: [{ name: "a", provider: "p", model: "m", isDefault: false, isActive: true }],
+    }));
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "escape" } });
+    expect(next.view).toEqual({ kind: "root" });
+    expect(effects).toEqual([]);
+  });
+
+  test("picker: an unrelated key is a no-op", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "models_response",
+      models: [{ name: "a", provider: "p", model: "m", isDefault: false, isActive: true }],
+    }));
+    const before = state.view;
+    ({ state } = reducer(state, { type: "key", key: { kind: "char", value: "x" } }));
+    expect(state.view).toEqual(before);
+  });
+
+  test("a skill-command name invokes the skill: local echo + invoke_skill effect", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "skills_response",
+      skills: [{ name: "sm", description: "Sugar Maple filestore" }],
+    }));
+    state = { ...state, input: "/sm write a doc" };
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(effects).toEqual([
+      {
+        type: "send_command",
+        command: { type: "invoke_skill", agentId: "root", skill: "sm", args: "write a doc" },
+      },
+    ]);
+    const transcript = next.agents.get("root")?.transcript ?? [];
+    expect(transcript[transcript.length - 1]).toEqual({ role: "user", text: "/sm write a doc" });
+    expect(next.rootActive).toBe(true);
+  });
+
+  test("a skill command with no args echoes just the bare '/name'", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "skills_response",
+      skills: [{ name: "sm", description: "Sugar Maple filestore" }],
+    }));
+    state = { ...state, input: "/sm" };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "enter" } });
+    const transcript = next.agents.get("root")?.transcript ?? [];
+    expect(transcript[transcript.length - 1]?.text).toBe("/sm");
+  });
+
+  test("an unknown command reports a local error, sending nothing", () => {
+    const { state: next, effects } = reducer(rootedState("/nope"), {
+      type: "key",
+      key: { kind: "enter" },
+    });
+    expect(effects).toEqual([]);
+    expect(next.statusMessage).toBe("Unknown command: /nope");
+  });
+
+  test("a built-in name shadows a same-named skill", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, {
+      type: "skills_response",
+      skills: [{ name: "help", description: "a skill that happens to be named help" }],
+    }));
+    state = { ...state, input: "/help" };
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    // Built-in /help wins: renders the local help transcript entry, no invoke_skill effect.
+    expect(effects).toEqual([]);
+    const transcript = next.agents.get("root")?.transcript ?? [];
+    expect(transcript[transcript.length - 1]?.role).toBe("tool");
+  });
+
+  test("model_switched updates the agent's displayed model and, for root, the status message", () => {
+    const state = rootedState("");
+    const { state: next } = reducer(state, {
+      type: "sse_event",
+      event: {
+        version: 1,
+        id: "e10",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        type: "model_switched",
+        agentId: "root",
+        from: "haiku",
+        to: "sonnet",
+      },
+    });
+    expect(next.agents.get("root")?.model).toBe("sonnet");
+    expect(next.statusMessage).toBe("model switched to sonnet");
+  });
+
+  test("model_switched for a non-root agent updates its model without touching statusMessage", () => {
+    let state = rootedState("");
+    state = { ...state, statusMessage: "unrelated" };
+    const { state: next } = reducer(state, {
+      type: "sse_event",
+      event: {
+        version: 1,
+        id: "e11",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        type: "model_switched",
+        agentId: "sub-agent",
+        from: "haiku",
+        to: "sonnet",
+      },
+    });
+    expect(next.agents.get("sub-agent")?.model).toBe("sonnet");
+    expect(next.statusMessage).toBe("unrelated");
+  });
+});

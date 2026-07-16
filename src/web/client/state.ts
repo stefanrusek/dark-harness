@@ -2,7 +2,13 @@
 // `ServerSentEvent`s (src/contracts/events.ts) plus a few UI-only fields (selection,
 // connection status). Kept framework-free and fully unit-testable.
 
-import type { AgentStatus, AgentTreeNode, ServerSentEvent } from "../../contracts/index.ts";
+import type {
+  AgentStatus,
+  AgentTreeNode,
+  ModelInfo,
+  ServerSentEvent,
+  SkillInfo,
+} from "../../contracts/index.ts";
 
 /** Compile-time-only exhaustiveness helper — see its call site in `applyEvent` below. */
 function assertNever(_value: never): void {}
@@ -21,7 +27,9 @@ function assertNever(_value: never): void {}
  * each time, since a single model response can stream in many small pieces.
  */
 export interface Turn {
-  role: "user" | "assistant";
+  // DH-0093: "system" is a local, never-sent transcript entry (`/help` output) — distinct
+  // from "user" (an actual sent/echoed message) and "assistant" (streamed model output).
+  role: "user" | "assistant" | "system";
   text: string;
   /** ISO timestamp of the turn's first chunk (assistant) or the moment it was sent (user). */
   timestamp: string;
@@ -116,6 +124,15 @@ export interface WebState {
    * `MAX_ERROR_LOG_ENTRIES` so a long session can't grow this unboundedly.
    */
   errorLog: ErrorLogEntry[];
+  /** DH-0093: cached `list_skills` result, fetched once at startup (app.ts, alongside the
+   * existing `request_agent_tree` bootstrap) so `/help` and `/<skillname>` resolve locally
+   * with no per-keystroke round-trip. Empty until the first response arrives. */
+  skills: SkillInfo[];
+  /** DH-0093: cached `list_models` result — populated by a `/model` (no-arg) response and
+   * shown in the picker modal (`modelPickerOpen`). */
+  models: ModelInfo[];
+  /** DH-0093: whether the `/model` picker modal is currently shown. */
+  modelPickerOpen: boolean;
 }
 
 export interface ErrorLogEntry {
@@ -194,6 +211,9 @@ export function createInitialState(): WebState {
     lastEventId: null,
     possibleGap: false,
     errorLog: [],
+    skills: [],
+    models: [],
+    modelPickerOpen: false,
   };
 }
 
@@ -264,6 +284,51 @@ export function addUserTurn(
   node.turnOpen = false;
   next.agents.set(agentId, node);
   return next;
+}
+
+/**
+ * DH-0093: adds a local, never-sent `/help` transcript entry (mirrors `addUserTurn`'s
+ * shape/lifecycle — always opens a fresh entry, ends any open assistant turn — but tagged
+ * `role: "system"` so the render layer can style it distinctly and never mistakes it for a
+ * real sent message).
+ */
+export function addSystemTurn(
+  state: WebState,
+  agentId: string,
+  text: string,
+  timestamp: string = new Date().toISOString(),
+): WebState {
+  const next: WebState = { ...state, agents: new Map(state.agents) };
+  const node = { ...ensureAgent(next, agentId, timestamp) };
+  node.transcript = trimTranscript(
+    [...node.transcript, { role: "system", text, timestamp }],
+    MAX_TRANSCRIPT_CHARS,
+  );
+  node.turnOpen = false;
+  next.agents.set(agentId, node);
+  return next;
+}
+
+/** DH-0093 `/clear`: clears every tracked agent's transcript view only — no wire command,
+ * and the agent's own in-memory context is deliberately unaffected in v1 (see the `/help`
+ * text this state feeds, which discloses this explicitly). */
+export function clearAllTranscripts(state: WebState): WebState {
+  const agents = new Map(state.agents);
+  for (const [id, agent] of agents) agents.set(id, { ...agent, transcript: [], turnOpen: false });
+  return { ...state, agents };
+}
+
+export function setSkills(state: WebState, skills: SkillInfo[]): WebState {
+  return { ...state, skills };
+}
+
+/** DH-0093: `/model` (no-arg) response — caches the list and opens the picker modal. */
+export function setModelsAndOpenPicker(state: WebState, models: ModelInfo[]): WebState {
+  return { ...state, models, modelPickerOpen: true };
+}
+
+export function closeModelPicker(state: WebState): WebState {
+  return { ...state, modelPickerOpen: false };
 }
 
 /** Applies one SSE event to state, returning a new `WebState` (state is not mutated). */
@@ -344,13 +409,17 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     case "tool_call":
     case "tool_result":
       return next;
-    // DH-0093: `model_switched` is a new additive SSE event (Core/Server's backend piece of
-    // DH-0093) not yet consumed here — the `/model` picker + model_switched handling is a
-    // separate TUI/Web round per the ticket's domain assignment. Handled explicitly (not
-    // folded into the exhaustiveness-check default below) for the same reason tool_call/
-    // tool_result are: this is a deliberately-deferred variant, not a truly unhandled one.
-    case "model_switched":
+    // DH-0093: this round's real consumption of `model_switched` — updates the switched
+    // agent's displayed model (the backend round only added the no-op exhaustiveness case
+    // above's predecessor comment). No dedicated UI element shows "model" today beyond the
+    // agent header/sidebar's `agent.model` field where relevant; updating that field here is
+    // what makes a subsequent render actually reflect the switch.
+    case "model_switched": {
+      const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
+      node.model = event.to;
+      next.agents.set(event.agentId, node);
       return next;
+    }
     default:
       // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added to
       // src/contracts/ without a case here (assertNever's parameter type is `never`, which

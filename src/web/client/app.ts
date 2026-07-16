@@ -9,9 +9,13 @@ import {
   CommandError,
   type FetchLike,
   type SendCommandOptions,
+  invokeSkill,
+  listModels,
+  listSkills,
   requestAgentTree,
   sendMessage,
   stopAgent,
+  switchModel,
 } from "./commands.ts";
 import { type DownloadEnv, downloadLogs } from "./download.ts";
 import {
@@ -26,18 +30,23 @@ import {
   renderComposer,
   renderConnectionStatus,
   renderErrorLog,
+  renderModelPicker,
   renderSessionSummary,
   renderSidebar,
   renderTranscript,
   showError,
   showGapBanner,
 } from "./render.ts";
+import { parseSlashCommand } from "./slash-commands.ts";
 import { type SseConnection, connectEvents } from "./sse.ts";
 import {
   type ConnectionStatus,
   type WebState,
+  addSystemTurn,
   addUserTurn,
   applyEvent,
+  clearAllTranscripts,
+  closeModelPicker,
   createInitialState,
   dismissPossibleGap,
   documentTitle,
@@ -47,6 +56,8 @@ import {
   selectAgent,
   selectedAgent,
   setConnectionStatus,
+  setModelsAndOpenPicker,
+  setSkills,
 } from "./state.ts";
 
 const NEAR_BOTTOM_THRESHOLD_PX = 48;
@@ -88,6 +99,15 @@ export class AppView {
       this.renderAll();
     },
     onSendMessage: (message) => {
+      // DH-0093 design §1: a recognized slash command never becomes a chat message —
+      // intercepted here, the one place a `send_message` call is built from the composer's
+      // submitted text. A leading space before the slash, or a bare "/" alone, deliberately
+      // fails to match and falls through to ordinary chat (see slash-commands.ts).
+      const parsed = parseSlashCommand(message);
+      if (parsed) {
+        this.handleSlashCommand(parsed.name, parsed.args);
+        return;
+      }
       const agent = selectedAgent(this.state);
       if (!agent) return;
       // Local echo, same as any real chat UI: the operator's own turn appears immediately,
@@ -129,6 +149,13 @@ export class AppView {
     this.shell = buildShell(deps.doc, root);
     this.shell.jumpToLatest.addEventListener("click", () => this.scrollToBottom());
     this.shell.scrollRegion.addEventListener("scroll", () => this.handleScroll());
+    // DH-0093: Escape closes the /model picker — scoped to the document since it isn't tied
+    // to any one row (the per-row Enter/Space handling lives in render.ts's picker rows).
+    deps.doc.addEventListener("keydown", (evt: KeyboardEvent) => {
+      if (evt.key === "Escape" && this.state.modelPickerOpen) {
+        this.closeModelPicker();
+      }
+    });
     this.renderAll();
   }
 
@@ -148,6 +175,7 @@ export class AppView {
       },
     );
     this.bootstrapAgentTree();
+    this.bootstrapSkills();
     this.startLivenessTicker();
   }
 
@@ -191,6 +219,125 @@ export class AppView {
         this.renderAll();
       })
       .catch((err) => this.reportError(err));
+  }
+
+  /** DH-0093: fetches the skill list once at startup, alongside the tree bootstrap above, so
+   *  `/help` and `/<skillname>` resolve locally with zero per-keystroke round-trips. */
+  private bootstrapSkills(): void {
+    listSkills(this.deps.target, this.deps.fetchImpl, this.commandOptions())
+      .then((res) => {
+        this.state = setSkills(this.state, res.skills);
+      })
+      .catch((err) => this.reportError(err));
+  }
+
+  /** Local, never-sent transcript entry text for `/help` (DH-0093 design §3) — mirrors the
+   *  TUI's `helpText` content exactly (see src/tui/state.ts) so the two clients don't drift
+   *  on the disclosed built-in set or the "does NOT reset context" honesty note. */
+  private helpText(): string {
+    const lines = [
+      "Available commands:",
+      "  /model [name]   show/switch the active model (no arg opens a picker)",
+      "  /help           show this message",
+      "  /clear          clear the local transcript view (does NOT reset the agent's context)",
+    ];
+    if (this.state.skills.length > 0) {
+      lines.push("");
+      lines.push("Skill commands:");
+      for (const skill of this.state.skills) {
+        lines.push(`  /${skill.name}   ${skill.description}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  /** Dispatch a parsed slash command (DH-0093 design §1-4) — never produces a `sendMessage`
+   *  call, which is the whole point of interception in `onSendMessage` above. */
+  private handleSlashCommand(name: string, args: string): void {
+    const nowFn = this.deps.nowFn ?? Date.now;
+    const now = () => new Date(nowFn()).toISOString();
+
+    if (name === "help") {
+      const agent = selectedAgent(this.state);
+      if (agent) {
+        this.state = addSystemTurn(this.state, agent.agentId, this.helpText(), now());
+      }
+      this.renderAll();
+      return;
+    }
+
+    if (name === "clear") {
+      this.state = clearAllTranscripts(this.state);
+      this.renderedTranscript = { turnCount: 0, lastTurnTextLength: 0 };
+      this.renderedTranscriptForAgentId = null;
+      this.renderAll();
+      return;
+    }
+
+    const agent = selectedAgent(this.state);
+    if (!agent) return;
+
+    if (name === "model") {
+      const trimmedArgs = args.trim();
+      if (trimmedArgs === "") {
+        listModels(this.deps.target, this.deps.fetchImpl, this.commandOptions())
+          .then((res) => {
+            this.state = setModelsAndOpenPicker(this.state, res.models);
+            this.renderAll();
+          })
+          .catch((err) => this.reportError(err));
+        return;
+      }
+      switchModel(
+        this.deps.target,
+        agent.agentId,
+        trimmedArgs,
+        this.deps.fetchImpl,
+        this.commandOptions(),
+      ).catch((err) => this.reportError(err));
+      return;
+    }
+
+    // Not a built-in — try a skill command. Built-in names shadow same-named skills (design
+    // §4); reaching here already means `name` isn't one of the three built-ins.
+    const skill = this.state.skills.find((s) => s.name === name);
+    if (skill) {
+      const echo = args.trim() === "" ? `/${name}` : `/${name} ${args}`;
+      this.state = addUserTurn(this.state, agent.agentId, echo, now());
+      this.renderAll();
+      invokeSkill(
+        this.deps.target,
+        agent.agentId,
+        name,
+        args,
+        this.deps.fetchImpl,
+        this.commandOptions(),
+      ).catch((err) => this.reportError(err));
+      return;
+    }
+
+    this.state = addSystemTurn(this.state, agent.agentId, `Unknown command: /${name}`, now());
+    this.renderAll();
+  }
+
+  /** `/model` picker: Enter/click on a row. */
+  private selectModel(name: string): void {
+    const agent = selectedAgent(this.state);
+    this.state = closeModelPicker(this.state);
+    this.renderAll();
+    if (!agent) return;
+    switchModel(
+      this.deps.target,
+      agent.agentId,
+      name,
+      this.deps.fetchImpl,
+      this.commandOptions(),
+    ).catch((err) => this.reportError(err));
+  }
+
+  private closeModelPicker(): void {
+    this.state = closeModelPicker(this.state);
+    this.renderAll();
   }
 
   stop(): void {
@@ -259,6 +406,13 @@ export class AppView {
       hideGapBanner(this.shell.gapBanner);
     }
     renderErrorLog(doc, this.shell.errorLogPanel, this.state);
+    renderModelPicker(
+      doc,
+      this.shell.modelPicker,
+      this.state,
+      (name) => this.selectModel(name),
+      () => this.closeModelPicker(),
+    );
     // DH-0066: keep the browser tab itself informative (running/ended/idle) — see
     // `documentTitle`'s doc comment for why this matters with the tab backgrounded.
     doc.title = documentTitle(this.state);

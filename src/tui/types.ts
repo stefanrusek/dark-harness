@@ -6,7 +6,9 @@ import type {
   AgentStatus,
   AgentTreeNode,
   ClientCommand,
+  ModelInfo,
   ServerSentEvent,
+  SkillInfo,
 } from "../contracts/index.ts";
 import type { KeyEvent } from "./keys.ts";
 
@@ -23,10 +25,13 @@ import type { KeyEvent } from "./keys.ts";
 // explicit `close()`.
 export type ConnectionStatus = "connecting" | "live" | "reconnecting" | "disconnected";
 
+// DH-0093: `/model` (no arg) picker view — navigated exactly like the tree view
+// (up/down move, enter selects, escape cancels back to root).
 export type ViewState =
   | { kind: "root" }
   | { kind: "tree"; selectedIndex: number }
-  | { kind: "agent"; agentId: string };
+  | { kind: "agent"; agentId: string }
+  | { kind: "picker"; options: ModelInfo[]; selectedIndex: number };
 
 /** One turn of a conversation transcript. `"user"` turns are added client-side, immediately,
  * the moment the operator hits Enter — the server never echoes the operator's own messages
@@ -119,6 +124,10 @@ export interface TuiState {
    * sends `stop_agent` when this is true; `stop_agent` on a never-started root is a no-op
    * and `session_ended` would never arrive, so Ctrl+C quits immediately instead. */
   rootActive: boolean;
+  /** DH-0093: cached `list_skills` result, fetched once at startup (app.ts, alongside
+   * `request_agent_tree`) so `/help` and `/<skillname>` resolve locally with no per-keystroke
+   * round-trip. `null` until the first response arrives. */
+  skills: SkillInfo[] | null;
 }
 
 export type Action =
@@ -129,7 +138,11 @@ export type Action =
   | { type: "resize"; rows: number; cols: number }
   | { type: "connection"; status: ConnectionStatus }
   | { type: "reconnected" }
-  | { type: "tick"; now: number };
+  | { type: "tick"; now: number }
+  // DH-0093: response actions for the two new list_* commands. `models_response` also drives
+  // the `/model` (no-arg) transition into the picker view.
+  | { type: "models_response"; models: ModelInfo[] }
+  | { type: "skills_response"; skills: SkillInfo[] };
 
 export type Effect =
   | { type: "send_command"; command: ClientCommand }

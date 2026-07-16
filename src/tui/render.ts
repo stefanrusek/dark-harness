@@ -205,6 +205,8 @@ function viewLabel(state: TuiState): string {
       return "Agent Tree";
     case "agent":
       return `Agent ${state.view.agentId}`;
+    case "picker":
+      return "Select Model";
   }
 }
 
@@ -392,6 +394,38 @@ function renderAgent(
   return { content: padRows(content, contentRows), footer: [hint] };
 }
 
+/** DH-0093: `/model` picker view — navigated exactly like the agent tree (§ style guide's
+ * "Focus & selection are always visible" — the selected row is marked, not color-only).
+ * Rows show `name  (provider/model)` with active/default markers, matching the design's
+ * exact content spec (Web's markers must match this). */
+function renderPicker(
+  state: TuiState,
+  contentRows: number,
+  cols: number,
+): { content: string[]; footer: string[] } {
+  if (state.view.kind !== "picker") return { content: padRows([], contentRows), footer: [""] };
+  const { options, selectedIndex } = state.view;
+  if (options.length === 0) {
+    return {
+      content: padRows(["No models configured."], contentRows),
+      footer: [dim("[Esc] back")],
+    };
+  }
+  const rows = options.map((model, index) => {
+    const marker = index === selectedIndex ? "> " : "  ";
+    const tags = [model.isActive ? "active" : null, model.isDefault ? "default" : null]
+      .filter((t): t is string => t !== null)
+      .join(", ");
+    const tagSuffix = tags ? `  [${tags}]` : "";
+    return `${marker}${model.name}  (${model.provider}/${model.model})${tagSuffix}`;
+  });
+  const wrapped = rows.flatMap((row) => wrapText(row, cols));
+  return {
+    content: padRows(wrapped, contentRows),
+    footer: [dim("[↑/↓] navigate   [Enter] switch   [Esc] cancel")],
+  };
+}
+
 /** Render the full frame as an exact-height array of plain rows (no leading/trailing ANSI). */
 export function renderFrame(state: TuiState): string[] {
   const { rows, cols } = state.size;
@@ -408,7 +442,9 @@ export function renderFrame(state: TuiState): string[] {
       ? renderRoot(state, contentRows, innerCols)
       : state.view.kind === "tree"
         ? renderTree(state, contentRows, innerCols)
-        : renderAgent(state, contentRows, innerCols);
+        : state.view.kind === "picker"
+          ? renderPicker(state, contentRows, innerCols)
+          : renderAgent(state, contentRows, innerCols);
 
   const frame = [...header, ...content, ...footer].map(applyMargin);
   return padRows(frame, rows);

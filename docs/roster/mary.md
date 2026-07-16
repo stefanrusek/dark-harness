@@ -578,3 +578,70 @@ exact fixture/output) rather than driving the interactive TUI directly this roun
 render-test suite's assertions (updated above) are the direct proof for the TUI's own
 tree/detail rendering, since `renderFrame` is a pure function I can and did assert against
 byte-for-byte.
+
+### 2026-07-16 — DH-0093: client-side slash commands (TUI half, joint round with Susan)
+
+Backend (Contracts/Server/Core) had already landed `list_models`/`switch_model`/
+`list_skills`/`invoke_skill` plus the `model_switched` SSE event. This round built the
+client half per the architect design's exact grammar/UX contract.
+
+- **New `src/tui/commands.ts`**: `parseSlashCommand(input): {name, args} | null`, regex
+  `^/(\S+)(?:\s+([\s\S]*))?$` — a bare `/` or `/ text` deliberately fails to match (ordinary
+  chat), matching the design's empirically-grounded-against-real-Claude-Code rule.
+  `BUILTIN_COMMAND_NAMES`/`isBuiltinCommandName` exported for the shadowing rule (built-ins
+  win over same-named skills) even though `state.ts`'s dispatcher ended up checking the three
+  names directly rather than importing the helper — kept the exports anyway since they're the
+  documented public contract of "what's a built-in," and Web's `slash-commands.ts` uses the
+  identical shape.
+- **Interception lives in `handleRootKey`'s `enter` branch** (`state.ts`) — the one place a
+  `send_message` effect was ever built from `state.input`. A recognized command clears input
+  and returns without a `send_message` effect; unrecognized `/xyz` sets `statusMessage`
+  (`Unknown command: /xyz`) instead.
+- **New `"picker"` view kind** (`types.ts`) — navigated exactly like the tree view (up/down,
+  enter, escape/left). `/model` (no arg) sends `list_models`; the response (`models_response`
+  action) transitions root → picker, pre-selecting the currently-active model. `/model <name>`
+  skips the picker entirely and sends `switch_model` directly — both forms per the design's
+  explicit dual-UX spec.
+- **`/help`** renders a local `"tool"`-role transcript marker (not a new turn role — the TUI
+  already had this marker kind from DH-0065's sub-agent-spawn annotations, and re-using it
+  kept the change smaller than inventing a fourth role) listing the three built-ins plus every
+  cached skill, explicitly stating `/clear` does NOT reset agent context.
+- **`/clear`** clears every tracked agent's transcript array (not just root's) — "local
+  transcript view" reads as the whole session's displayed history, and sub-agent views are
+  observation-only extensions of the same view, not a separate concept.
+- **`model_switched` SSE handling**: updates the switched agent's `model` field via the
+  existing `withAgent` helper, and for the root agent also sets `statusMessage` to
+  `model switched to <name>` — this is the *real* consumption the backend round's exhaustive-
+  ness-only case predated.
+- **Startup `list_skills` fetch** added in `app.ts` right after the existing
+  `request_agent_tree` bootstrap — same "runs through `runEffect`, failure surfaces as an
+  ordinary status message" pattern as the tree fetch.
+- **Judgment call**: `/model`'s picker pre-selects the active model (`models.findIndex(m =>
+  m.isActive)`) rather than always index 0 — the design doesn't say explicitly, but "Enter with
+  no navigation re-confirms the status quo" felt like the least-surprising default, and it's
+  what the TUI's tree-view selection-highlight convention already implies (selection should
+  track "what's true now," not an arbitrary start).
+
+Live-verified against a real compiled binary + real Anthropic credentials (`secrets.env`) via
+a tmux PTY session (this repo's established pattern — `e2e/support/tmux-pty.ts`, driven
+manually here rather than through a new e2e test since E2E is a separate follow-up round):
+`/help` listed the built-ins plus the real `cli-tools` skill; `/model` opened the picker
+showing both configured models with `[active, default]` tags; selecting `sonnet` showed
+`switching model to sonnet…`; a subsequent real chat turn actually replied (confirming the
+switch took effect), and the session's JSONL header recorded `"model":"sonnet"` (the
+root-not-yet-started pending-switch path, per the backend design — no `model_switched` event
+is expected here since the switch landed before the loop's first turn); `/clear` emptied the
+visible transcript. `/model <name>` direct-switch form and the picker's up/down/escape paths
+are also covered by unit tests (not re-driven live, since the picker-open path above already
+exercises the identical `switch_model` wire call).
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all green;
+`src/tui/commands.ts`/`render.ts`/`state.ts`/`app.ts` all 100% lines (state.ts's two
+pre-existing 0-coverage lines are the DH-0089 `default:` exhaustiveness stub, unrelated to
+this round). Had to update two pre-existing `app.test.ts` command-header-count assertions
+(now 2 startup commands instead of 1).
+
+Open thread for a future round: E2E (Hedy) still needs to land the PTY-driven
+`/model`→mock-provider-sees-new-model-id assertion per the ticket's own sequencing — this
+round's live verification used a real provider instead of the mock, which proves the same
+thing but isn't a repeatable CI-gate test.

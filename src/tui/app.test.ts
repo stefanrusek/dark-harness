@@ -3,6 +3,8 @@ import type {
   AgentTreeResponse,
   ClientCommand,
   CommandAck,
+  ListModelsResponse,
+  ListSkillsResponse,
   ServerSentEvent,
 } from "../contracts/index.ts";
 import { startTui } from "./app.ts";
@@ -93,7 +95,7 @@ class FakeStdout implements StdoutLike {
 
 interface FakeServer {
   commands: ClientCommand[];
-  commandResponses: Array<CommandAck | AgentTreeResponse>;
+  commandResponses: Array<CommandAck | AgentTreeResponse | ListModelsResponse | ListSkillsResponse>;
   nextCommandThrows: boolean;
   fetchImpl: typeof fetch;
   sseController: ReadableStreamDefaultController<Uint8Array> | null;
@@ -122,7 +124,8 @@ function makeFakeServer(): FakeServer {
       const command = JSON.parse(String(init?.body)) as ClientCommand;
       server.commands.push(command);
       const canned = server.commandResponses.shift();
-      const body: CommandAck | AgentTreeResponse = canned ?? { ok: true };
+      const body: CommandAck | AgentTreeResponse | ListModelsResponse | ListSkillsResponse =
+        canned ?? { ok: true };
       return new Response(JSON.stringify(body), {
         status: "ok" in body && body.ok === false ? 400 : 200,
         headers: { "content-type": "application/json" },
@@ -301,19 +304,21 @@ describe("startTui", () => {
     });
     await flush();
 
-    // The SSE connection and the automatic startup request_agent_tree command (Round 3's
-    // deadlock fix) both fire as soon as the TUI starts — both must carry the header.
+    // The SSE connection and the two automatic startup commands (Round 3's request_agent_tree
+    // deadlock fix, plus DH-0093's list_skills bootstrap) all fire as soon as the TUI starts —
+    // all must carry the header.
     expect(server.sseHeaders).toHaveLength(1);
     expect(server.sseHeaders[0]?.get("Authorization")).toBe("Bearer s3cret");
-    expect(server.commandHeaders).toHaveLength(1);
+    expect(server.commandHeaders).toHaveLength(2);
     expect(server.commandHeaders[0]?.get("Authorization")).toBe("Bearer s3cret");
+    expect(server.commandHeaders[1]?.get("Authorization")).toBe("Bearer s3cret");
 
     // A later, operator-triggered command (left-arrow -> another request_agent_tree)
-    // carries it too, not just the startup one.
+    // carries it too, not just the startup ones.
     stdin.type("\x1b[D");
     await flush();
-    expect(server.commandHeaders).toHaveLength(2);
-    expect(server.commandHeaders[1]?.get("Authorization")).toBe("Bearer s3cret");
+    expect(server.commandHeaders).toHaveLength(3);
+    expect(server.commandHeaders[2]?.get("Authorization")).toBe("Bearer s3cret");
 
     stdin.type("\x03");
     await done;
@@ -329,13 +334,14 @@ describe("startTui", () => {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
     await flush();
-    // Index 0 is the automatic startup request_agent_tree command.
+    // Index 0/1 are the two automatic startup commands (request_agent_tree, list_skills).
     expect(server.sseHeaders[0]?.has("Authorization")).toBe(false);
     expect(server.commandHeaders[0]?.has("Authorization")).toBe(false);
+    expect(server.commandHeaders[1]?.has("Authorization")).toBe(false);
 
     stdin.type("\x1b[D");
     await flush();
-    expect(server.commandHeaders[1]?.has("Authorization")).toBe(false);
+    expect(server.commandHeaders[2]?.has("Authorization")).toBe(false);
 
     stdin.type("\x03");
     await done;
@@ -710,5 +716,71 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
 
     await done;
     expect(stdout.allWrites()).toContain(ALT_SCREEN_EXIT);
+  });
+});
+
+describe("startTui: DH-0093 slash-command wiring", () => {
+  test("fetches list_skills automatically on startup, alongside request_agent_tree", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+
+    expect(server.commands).toContainEqual({ type: "request_agent_tree" });
+    expect(server.commands).toContainEqual({ type: "list_skills" });
+
+    stdin.type("\x03");
+    await done;
+  });
+
+  test("/model opens the picker once list_models responds", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    server.commandResponses.push({
+      ok: true,
+      tree: [
+        { agentId: "root", parentAgentId: null, model: "sonnet", status: "running", children: [] },
+      ],
+    });
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+
+    server.commandResponses.push({
+      ok: true,
+      models: [
+        {
+          name: "sonnet",
+          provider: "anthropic",
+          model: "claude-sonnet",
+          isDefault: true,
+          isActive: true,
+        },
+        {
+          name: "haiku",
+          provider: "anthropic",
+          model: "claude-haiku",
+          isDefault: false,
+          isActive: false,
+        },
+      ],
+    });
+    stdin.type("/model");
+    stdin.type("\r");
+    await flush();
+
+    expect(server.commands).toContainEqual({ type: "list_models" });
+    expect(stdout.allWrites()).toContain("Select Model");
+    expect(stdout.allWrites()).toContain("haiku");
+
+    stdin.type("\x03");
+    await done;
   });
 });

@@ -63,6 +63,7 @@ function harness(
   overrides: {
     commandResponse?: (body: unknown) => Response;
     treeResponse?: (body: unknown) => Response;
+    skillsResponse?: (body: unknown) => Response;
     now?: number;
   } = {},
 ) {
@@ -91,6 +92,15 @@ function harness(
     // bootstrap and throw an unrelated error banner into every such test.
     if (body?.type === "request_agent_tree") {
       return overrides.treeResponse ? overrides.treeResponse(body) : defaultTreeResponse();
+    }
+    // DH-0093: the list_skills startup bootstrap is likewise a separate concern from
+    // whatever a given test's `commandResponse` override exercises — special-cased the same
+    // way request_agent_tree already is above, so existing tests don't spuriously pick up an
+    // extra failed-command error banner from a bootstrap call they aren't testing.
+    if (body?.type === "list_skills") {
+      return overrides.skillsResponse
+        ? overrides.skillsResponse(body)
+        : new Response(JSON.stringify({ ok: true, skills: [] }), { status: 200 });
     }
     if (overrides.commandResponse) return overrides.commandResponse(body);
     if (body?.type === "download_logs") return new Response("bytes", { status: 200 });
@@ -198,6 +208,7 @@ describe("AppView interactive bootstrap (Round 2 — fresh-session deadlock fix)
 
     expect(h.commandBodies).toEqual([
       { type: "request_agent_tree" },
+      { type: "list_skills" },
       { type: "send_message", agentId: "root-1", message: "first message ever" },
     ]);
   });
@@ -214,6 +225,7 @@ describe("AppView interactive bootstrap (Round 2 — fresh-session deadlock fix)
 
     expect(h.commandBodies).toEqual([
       { type: "request_agent_tree" },
+      { type: "list_skills" },
       { type: "send_message", agentId: "root-1", message: "enter to send" },
     ]);
   });
@@ -390,6 +402,7 @@ describe("AppView commands", () => {
     await flush();
     expect(h.commandBodies).toEqual([
       { type: "request_agent_tree" },
+      { type: "list_skills" },
       { type: "send_message", agentId: "root-1", message: "do the thing" },
     ]);
   });
@@ -426,6 +439,7 @@ describe("AppView commands", () => {
     expect(h.downloadCalls).toHaveLength(1);
     expect(h.commandBodies).toEqual([
       { type: "request_agent_tree" },
+      { type: "list_skills" },
       { type: "download_logs", agentId: "root-1" },
     ]);
   });
@@ -441,7 +455,11 @@ describe("AppView commands", () => {
 
     await flush();
     expect(h.downloadCalls).toHaveLength(1);
-    expect(h.commandBodies).toEqual([{ type: "request_agent_tree" }, { type: "download_logs" }]);
+    expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
+      { type: "list_skills" },
+      { type: "download_logs" },
+    ]);
   });
 
   test("stop button sends a stop_agent command for the selected agent", async () => {
@@ -457,6 +475,7 @@ describe("AppView commands", () => {
     await flush();
     expect(h.commandBodies).toEqual([
       { type: "request_agent_tree" },
+      { type: "list_skills" },
       { type: "stop_agent", agentId: "root-1" },
     ]);
   });
@@ -493,12 +512,14 @@ describe("AppView commands", () => {
     h.dispatch(form, "submit", { cancelable: true });
     await flush();
 
-    // 3 scheduled timers by this point: the tree-bootstrap command's timeout (DH-0029 #37 —
-    // cleared once its fetch resolves, but this harness's clearTimeoutImpl is a no-op so it
-    // stays recorded), this send_message's own command timeout (same reason), and finally
-    // the error banner's auto-hide timer, which is the one this test cares about.
-    expect(h.timeoutCalls).toHaveLength(3);
-    h.timeoutCalls[2]?.();
+    // 4 scheduled timers by this point: the tree-bootstrap command's timeout and the
+    // list_skills bootstrap's own timeout (DH-0029 #37 — both cleared once their fetch
+    // resolves, but this harness's clearTimeoutImpl is a no-op so they stay recorded, and
+    // both are special-cased to succeed regardless of `commandResponse` — see the harness's
+    // fetchImpl), this send_message's own command timeout (same reason), and finally the
+    // error banner's auto-hide timer, which is the one this test cares about.
+    expect(h.timeoutCalls).toHaveLength(4);
+    h.timeoutCalls[3]?.();
     const banner = h.root.querySelector(".error-banner");
     expect(banner?.classList.contains("hidden")).toBe(true);
   });
@@ -541,10 +562,11 @@ describe("AppView commands", () => {
     h.dispatch(form, "submit", { cancelable: true });
     await flush();
 
-    // 5 scheduled timers: tree bootstrap's command timeout, then a (command timeout, error
-    // banner hide) pair per submit — see the comment in the test above for why the no-op
-    // clearTimeoutImpl leaves cleared timers in this array too.
-    expect(h.timeoutCalls.length).toBe(5);
+    // 5 scheduled timers: tree bootstrap's command timeout, the list_skills bootstrap's own
+    // timeout, then a (command timeout, error banner hide) pair per submit — see the comment
+    // in the test above for why the no-op clearTimeoutImpl leaves cleared timers in this
+    // array too.
+    expect(h.timeoutCalls.length).toBe(6);
     const banner = h.root.querySelector(".error-banner");
     expect(banner?.classList.contains("hidden")).toBe(false);
   });
@@ -640,5 +662,274 @@ describe("AppView scroll behavior", () => {
 
     const scrollRegion = h.root.querySelector(".output-scroll") as HTMLElement;
     expect(() => h.dispatch(scrollRegion, "scroll")).not.toThrow();
+  });
+});
+
+describe("AppView: slash commands (DH-0093)", () => {
+  function submit(h: ReturnType<typeof harness>, text: string): void {
+    const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
+    const form = h.root.querySelector("form") as HTMLFormElement;
+    textarea.value = text;
+    h.dispatch(form, "submit", { cancelable: true });
+  }
+
+  test("/help renders a local system transcript entry and sends nothing beyond bootstrap", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+    const bodiesBefore = h.commandBodies.length;
+
+    submit(h, "/help");
+    await flush();
+
+    expect(h.commandBodies).toHaveLength(bodiesBefore);
+    const systemTurn = h.root.querySelector(".turn-system");
+    expect(systemTurn).not.toBeNull();
+    expect(systemTurn?.textContent).toContain("/model [name]");
+    expect(systemTurn?.textContent).toContain("does NOT reset the agent's context");
+  });
+
+  test("/help lists cached skill commands", async () => {
+    const h = harness({
+      skillsResponse: () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            skills: [{ name: "sm", description: "Sugar Maple filestore" }],
+          }),
+          { status: 200 },
+        ),
+    });
+    h.app.start();
+    await spawnRoot(h);
+
+    submit(h, "/help");
+    await flush();
+
+    const systemTurn = h.root.querySelector(".turn-system");
+    expect(systemTurn?.textContent).toContain("/sm   Sugar Maple filestore");
+  });
+
+  test("/clear empties the rendered transcript and sends nothing", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+    h.stream.push({
+      version: 1,
+      id: "e2",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "agent_output",
+      agentId: "root-1",
+      chunk: "hello",
+    });
+    await flush();
+    expect(h.root.querySelectorAll(".turn-assistant")).toHaveLength(1);
+    const bodiesBefore = h.commandBodies.length;
+
+    submit(h, "/clear");
+    await flush();
+
+    expect(h.commandBodies).toHaveLength(bodiesBefore);
+    expect(h.root.querySelectorAll(".turn-assistant, .turn-user, .turn-system")).toHaveLength(0);
+  });
+
+  test("/model with no args fetches list_models and opens the picker", async () => {
+    const h = harness({
+      commandResponse: (body) => {
+        const b = body as { type?: string };
+        if (b.type === "list_models") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              models: [
+                {
+                  name: "sonnet",
+                  provider: "anthropic",
+                  model: "claude-sonnet",
+                  isDefault: true,
+                  isActive: true,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    h.app.start();
+    await spawnRoot(h);
+
+    submit(h, "/model");
+    await flush();
+
+    expect(h.commandBodies).toContainEqual({ type: "list_models" });
+    expect(h.app.getState().modelPickerOpen).toBe(true);
+    expect(h.root.querySelector(".model-picker-overlay.hidden")).toBeNull();
+    expect(h.root.querySelector(".model-picker-name")?.textContent).toBe("sonnet");
+  });
+
+  test("/model <name> switches directly, without opening the picker", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+
+    submit(h, "/model haiku");
+    await flush();
+
+    expect(h.commandBodies).toContainEqual({
+      type: "switch_model",
+      agentId: "root-1",
+      model: "haiku",
+    });
+    expect(h.app.getState().modelPickerOpen).toBe(false);
+  });
+
+  test("picker: selecting a row switches the model and closes the picker", async () => {
+    const h = harness({
+      commandResponse: (body) => {
+        const b = body as { type?: string };
+        if (b.type === "list_models") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              models: [
+                {
+                  name: "haiku",
+                  provider: "anthropic",
+                  model: "claude-haiku",
+                  isDefault: false,
+                  isActive: false,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    h.app.start();
+    await spawnRoot(h);
+    submit(h, "/model");
+    await flush();
+
+    const row = h.root.querySelector(".model-picker-row") as HTMLElement;
+    h.dispatch(row, "click");
+    await flush();
+
+    expect(h.app.getState().modelPickerOpen).toBe(false);
+    expect(h.commandBodies).toContainEqual({
+      type: "switch_model",
+      agentId: "root-1",
+      model: "haiku",
+    });
+  });
+
+  test("picker: Escape closes it without sending a command", async () => {
+    const h = harness({
+      commandResponse: (body) => {
+        const b = body as { type?: string };
+        if (b.type === "list_models") {
+          return new Response(JSON.stringify({ ok: true, models: [] }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    h.app.start();
+    await spawnRoot(h);
+    submit(h, "/model");
+    await flush();
+    expect(h.app.getState().modelPickerOpen).toBe(true);
+
+    h.dispatchKey(h.document, "keydown", { key: "Escape" });
+    expect(h.app.getState().modelPickerOpen).toBe(false);
+  });
+
+  test("model_switched updates the visible model badge", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+
+    h.stream.push({
+      version: 1,
+      id: "e2",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "model_switched",
+      agentId: "root-1",
+      from: "sonnet",
+      to: "opus",
+    });
+    await flush();
+
+    expect(h.root.querySelector(".agent-header-model")?.textContent).toBe("opus");
+  });
+
+  test("a skill-command name invokes the skill: local echo + invoke_skill, nothing else", async () => {
+    const h = harness({
+      skillsResponse: () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            skills: [{ name: "sm", description: "Sugar Maple filestore" }],
+          }),
+          { status: 200 },
+        ),
+    });
+    h.app.start();
+    await spawnRoot(h);
+
+    submit(h, "/sm write a doc");
+    await flush();
+
+    expect(h.commandBodies).toContainEqual({
+      type: "invoke_skill",
+      agentId: "root-1",
+      skill: "sm",
+      args: "write a doc",
+    });
+    const userTurns = h.root.querySelectorAll(".turn-user");
+    expect(userTurns[userTurns.length - 1]?.querySelector(".turn-text")?.textContent).toBe(
+      "/sm write a doc",
+    );
+  });
+
+  test("an unknown command shows a local system error entry and sends nothing", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+    const bodiesBefore = h.commandBodies.length;
+
+    submit(h, "/nope");
+    await flush();
+
+    expect(h.commandBodies).toHaveLength(bodiesBefore);
+    expect(h.root.querySelector(".turn-system .turn-text")?.textContent).toBe(
+      "Unknown command: /nope",
+    );
+  });
+
+  test("a built-in name shadows a same-named skill", async () => {
+    const h = harness({
+      skillsResponse: () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            skills: [{ name: "help", description: "a skill that happens to be named help" }],
+          }),
+          { status: 200 },
+        ),
+    });
+    h.app.start();
+    await spawnRoot(h);
+
+    submit(h, "/help");
+    await flush();
+
+    // Built-in /help wins: renders the canned help text, not an invoke_skill call.
+    expect(h.commandBodies.some((b) => (b as { type?: string }).type === "invoke_skill")).toBe(
+      false,
+    );
+    expect(h.root.querySelector(".turn-system")?.textContent).toContain("/model [name]");
   });
 });

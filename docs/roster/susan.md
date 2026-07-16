@@ -478,3 +478,78 @@ pre-existing gap unrelated to this diff, unchanged by it). `e2e/web.test.ts`/
 (documented in my and Mary's prior-round entries) — not exercised live this round for that
 reason; Web's formatting call sites are proven via `render.test.ts`/`format.test.ts`'s direct
 assertions instead.
+
+### 2026-07-16 — DH-0093: client-side slash commands (Web half, joint round with Mary)
+
+Backend already landed; this round is the Web client's half of the design.
+
+- **New `src/web/client/slash-commands.ts`** — a byte-for-byte parser mirror of
+  `src/tui/commands.ts` (same regex, same grammar): `parseSlashCommand`,
+  `BUILTIN_COMMAND_NAMES`/`isBuiltinCommandName`. Kept it a separate module rather than
+  literally sharing one file with TUI — CLAUDE.md §3's ownership map has each client own its
+  own directory tree, and the parse rule is explicitly *not* wire truth (the design doc says
+  so), so it doesn't belong in `src/contracts/` either. Verified against the identical
+  test-vector table as `src/tui/commands.test.ts` (`slash-commands.test.ts` here) so the two
+  can't silently drift — the acceptable fallback the design doc names when a literal shared
+  module is awkward across a domain boundary.
+- **Interception in `AppView`'s `onSendMessage` callback** (`app.ts`) — the one place a
+  composer submission became a `sendMessage` call. A recognized command short-circuits into
+  `handleSlashCommand` and never reaches the chat-send path.
+- **New wire command builders/senders** in `commands.ts`: `buildListModelsCommand`/
+  `listModels`, `buildSwitchModelCommand`/`switchModel`, `buildListSkillsCommand`/
+  `listSkills`, `buildInvokeSkillCommand`/`invokeSkill` — same builder+sender pairing
+  convention as every existing command in that file.
+- **`/model` picker is a centered modal**, not a composer-anchored dropdown — the design left
+  exact widget styling to me, and a dropdown anchored to the composer doesn't generalize well
+  since the composer only renders for the root agent while the picker needs to work regardless
+  of which agent is currently selected. Built as a new `ShellRefs.modelPicker` overlay element
+  (`renderModelPicker` in `render.ts`), styled per the style guide's "focus/selection always
+  visible" rule (§6): the active-model row gets both a border highlight and an explicit
+  `[active, default]` text tag, never color-only. Full keyboard support (Tab between rows,
+  Enter/Space selects) plus click-to-select, a Cancel button, and backdrop-click-to-close;
+  Escape is wired at the `AppView` level (a `keydown` listener added once in the constructor)
+  since it isn't scoped to any one row.
+- **New `Turn` role `"system"`** (`state.ts`) — `/help`'s local, never-sent entry needed a
+  role distinct from both `"user"` (a real sent/echoed message) and `"assistant"` (real model
+  output); reused the existing plain-text (non-Markdown) rendering path `"user"` already had,
+  since `/help`'s text is client-composed, not model output. Styled distinctly in CSS
+  (centered, dim, monospace) so it visually reads as "the harness talking," not the agent.
+- **The root agent's header previously showed no model at all** (`renderAgentHeader` always
+  rendered the literal "Root agent" name with nothing else identifying/model). Since `/model`
+  can now change it mid-session, I added an always-shown `.agent-header-model` badge (every
+  agent, not just non-root) so a switch is actually visible somewhere — judgment call, not
+  spelled out in the design beyond "update displayed model."
+- **`model_switched` SSE handling** (`state.ts`'s `applyEvent`) now actually updates
+  `node.model` (the backend round's case was a no-op compile-fix only).
+- **Startup `list_skills` fetch** added in `AppView.start()`, alongside the existing
+  `bootstrapAgentTree()` call, same "runs independently, failure surfaces via the normal error
+  banner" pattern.
+- **`/clear`** clears every tracked agent's transcript (`clearAllTranscripts`), and also
+  resets `AppView`'s own `renderedTranscript`/`renderedTranscriptForAgentId` cache — without
+  that second reset, the DOM-diffing fast path (`appendTranscript`) would think nothing
+  changed and never actually re-render the now-empty pane.
+
+Existing `app.test.ts` tests needed updating for the new startup command: several
+`commandBodies` assertions gained a `{ type: "list_skills" }` entry, and two timeout-count
+assertions shifted by the extra scheduled command timeout (plus, in the harness's
+`commandResponse`-override tests, an extra error-banner-hide timer since the harness's
+generic override was originally applying to *every* non-tree command including the new
+bootstrap — special-cased `list_skills` in the harness's fetch mock the same way
+`request_agent_tree` already was, then fixed the counts to match).
+
+Live verification: real browser access wasn't reliably reachable from this sandbox (prior
+sessions' notes, and Mary independently hit the same missing-headless-Chromium gap for
+`e2e/web.test.ts` this round) — per the task's own guidance, didn't fight it. Verified
+code-level instead: `render.test.ts`/`app.test.ts`/`state.test.ts`/`commands.test.ts` cover
+every new path (parser, picker open/select/close/backdrop/Escape, `/help`/`/clear`/`/model`/
+skill-invocation dispatch, `model_switched` badge update, builtin-shadows-skill) end to end
+through `AppView` with a fake DOM + fake fetch, which is this codebase's established
+substitute for a real browser per `docs/handoffs/web.md`.
+
+Gates: typecheck/lint/test:coverage all green. `state.ts` 100%/100%, `slash-commands.ts`
+100%/100%, `render.ts` 99.12% lines (one pre-existing small gap, `717-720`, unrelated to this
+round), `app.ts` 100% lines, `commands.ts` 100%/100%.
+
+Open thread for a future round: same as Mary's — E2E (Hedy) still needs the real-browser
+`/model` picker + skill-invocation assertions once headless Chromium is available in this
+sandbox (or CI).

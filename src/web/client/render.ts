@@ -26,6 +26,12 @@ import {
   sessionTotals,
 } from "./state.ts";
 
+// DH-0093: `/model` picker modal — a dropdown/modal over the composer per the design's
+// Web UX contract. Exact widget styling is Susan's call (per the ticket); implemented as a
+// simple centered modal following the style guide's "focus/selection always visible" rule
+// (§6) rather than a dropdown anchored to the composer, since the composer only exists for
+// the root agent and the picker needs to work regardless of which agent is selected.
+
 /** Indent step per tree depth (DH-0066: the sidebar was a flat list with no hierarchy at
  *  all — a fixed per-level indent is the minimal change that makes parent/child legible). */
 const SIDEBAR_INDENT_PX = 16;
@@ -52,6 +58,8 @@ export interface ShellRefs {
   gapBanner: HTMLElement;
   /** DH-0029: persistent, reviewable log of past errors (the banner above auto-hides). */
   errorLogPanel: HTMLElement;
+  /** DH-0093: `/model` picker modal overlay. */
+  modelPicker: HTMLElement;
 }
 
 /**
@@ -133,6 +141,14 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
   root.appendChild(sidebarPane);
   root.appendChild(main);
 
+  // DH-0093: appended at the root level (not inside `main`) so it overlays the whole app,
+  // matching a real modal rather than being clipped to the main pane.
+  const modelPicker = el(doc, "div", "model-picker-overlay hidden");
+  modelPicker.setAttribute("role", "dialog");
+  modelPicker.setAttribute("aria-modal", "true");
+  modelPicker.setAttribute("aria-label", "Select model");
+  root.appendChild(modelPicker);
+
   return {
     sidebar,
     connectionPill,
@@ -145,6 +161,7 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
     errorBanner,
     gapBanner,
     errorLogPanel,
+    modelPicker,
   };
 }
 
@@ -356,6 +373,15 @@ export function renderAgentHeader(
     ? "Root agent"
     : (agent.description ?? `${agent.model || "agent"} (${shortAgentId(agent.agentId)})`);
   title.appendChild(name);
+  // DH-0093: the root agent's own display previously never showed *which* model it was
+  // running (only non-root rows fell back to `model (shortId)` when no description was
+  // given) — with `/model` able to switch it mid-session, the header needs to show the
+  // current model regardless of role so a switch is actually visible somewhere, not just a
+  // silent internal field update. Always shown (not just for root) for consistency.
+  const modelBadge = el(doc, "span", "agent-header-model");
+  modelBadge.textContent = agent.model || "(unknown model)";
+  modelBadge.title = "Active model — /model to switch";
+  title.appendChild(modelBadge);
   const badge = el(doc, "span", `status-badge status-${style.token}`);
   badge.textContent = style.label;
   title.appendChild(badge);
@@ -417,18 +443,21 @@ const EMPTY_TRANSCRIPT_RENDER_STATE: TranscriptRenderState = {
 };
 
 function turnRoleLabel(role: Turn["role"]): string {
-  return role === "user" ? "You" : "Agent";
+  if (role === "user") return "You";
+  if (role === "system") return "System";
+  return "Agent";
 }
 
 /**
- * Renders a turn's text into `container` (its existing content is fully replaced). User
- * turns are the operator's own echoed input, not Markdown, so they stay plain `textContent`
- * (DH-0056 D3/D4 parity with the TUI: only assistant output is parsed as Markdown). Assistant
- * turns go through the shared parser (`src/markdown/index.ts`) and the DOM-only renderer
+ * Renders a turn's text into `container` (its existing content is fully replaced). User and
+ * system turns are plain text, not Markdown (DH-0056 D3/D4 parity with the TUI: only
+ * assistant output is parsed as Markdown; DH-0093's `system` role — local `/help` entries —
+ * follows the same rule, it's composed client-side text, not model output). Assistant turns
+ * go through the shared parser (`src/markdown/index.ts`) and the DOM-only renderer
  * (`markdown-dom.ts`) — never `innerHTML`.
  */
 function renderTurnText(doc: Document, container: HTMLElement, turn: Turn): void {
-  if (turn.role === "user") {
+  if (turn.role === "user" || turn.role === "system") {
     container.textContent = turn.text;
     return;
   }
@@ -612,4 +641,98 @@ export function renderComposer(
   });
 
   container.appendChild(form);
+}
+
+/**
+ * DH-0093: renders the `/model` picker modal. Content/markers match the TUI picker's spec
+ * (design §2: `name  (provider/model)` with active/default tags) — full keyboard support
+ * (Tab between rows, Enter/Space selects, Escape closes — Escape is wired at the app level
+ * since it isn't scoped to any one row) plus a click-to-select row and a backdrop-click /
+ * Cancel-button close, per "full keyboard support (arrows + enter, escape closes)."
+ */
+export function renderModelPicker(
+  doc: Document,
+  container: HTMLElement,
+  state: WebState,
+  onSelect: (name: string) => void,
+  onClose: () => void,
+): void {
+  if (!state.modelPickerOpen) {
+    container.classList.add("hidden");
+    container.textContent = "";
+    container.onclick = null;
+    return;
+  }
+  container.classList.remove("hidden");
+  container.textContent = "";
+  // Assigning `.onclick` (rather than `addEventListener`) is intentionally idempotent across
+  // repeated renders — this function fully rebuilds `container`'s children every call, and an
+  // accumulating `addEventListener` here (the container itself is never rebuilt, only its
+  // content) would stack a new backdrop-close handler on every open/close cycle.
+  container.onclick = (evt) => {
+    if (evt.target === container) onClose();
+  };
+
+  const panel = el(doc, "div", "model-picker-panel");
+  const heading = el(doc, "div", "model-picker-heading");
+  heading.textContent = "Select model";
+  panel.appendChild(heading);
+
+  if (state.models.length === 0) {
+    const empty = el(doc, "div", "empty-state");
+    empty.textContent = "No models configured.";
+    panel.appendChild(empty);
+  } else {
+    const list = el(doc, "ul", "model-picker-list");
+    list.setAttribute("role", "listbox");
+    for (const model of state.models) {
+      const item = el(doc, "li", "model-picker-row");
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(model.isActive));
+      item.tabIndex = 0;
+      if (model.isActive) item.classList.add("active");
+
+      const name = el(doc, "span", "model-picker-name");
+      name.textContent = model.name;
+      item.appendChild(name);
+
+      const detail = el(doc, "span", "model-picker-detail");
+      detail.textContent = `(${model.provider}/${model.model})`;
+      item.appendChild(detail);
+
+      const tags = [model.isActive ? "active" : null, model.isDefault ? "default" : null].filter(
+        (t): t is string => t !== null,
+      );
+      if (tags.length > 0) {
+        const tagEl = el(doc, "span", "model-picker-tags");
+        tagEl.textContent = `[${tags.join(", ")}]`;
+        item.appendChild(tagEl);
+      }
+
+      const select = () => onSelect(model.name);
+      item.addEventListener("click", (evt) => {
+        evt.stopPropagation();
+        select();
+      });
+      item.addEventListener("keydown", (evt: KeyboardEvent) => {
+        if (evt.key === "Enter" || evt.key === " ") {
+          evt.preventDefault();
+          select();
+        }
+      });
+      list.appendChild(item);
+    }
+    panel.appendChild(list);
+  }
+
+  const closeBtn = el(doc, "button", "btn btn-secondary model-picker-close");
+  closeBtn.type = "button";
+  closeBtn.textContent = "Cancel";
+  closeBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
+    onClose();
+  });
+  panel.appendChild(closeBtn);
+
+  container.appendChild(panel);
 }

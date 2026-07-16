@@ -613,3 +613,71 @@ describe("formatTokenCost", () => {
     expect(formatTokenCost(100, 50, null, "full")).toBe("150 tok / —");
   });
 });
+
+// DH-0093: the /model picker view.
+describe("renderFrame: picker view", () => {
+  function baseState(overrides: Partial<TuiState> = {}): TuiState {
+    return { ...initialState({ rows: 10, cols: 60 }), ...overrides };
+  }
+
+  test("header shows the picker's view label", () => {
+    const state = baseState({
+      view: { kind: "picker", selectedIndex: 0, options: [] },
+    });
+    const rows = renderFrame(state);
+    expect(rows[0]).toContain("Select Model");
+  });
+
+  test("empty options shows a placeholder line", () => {
+    const state = baseState({
+      view: { kind: "picker", selectedIndex: 0, options: [] },
+    });
+    const rows = renderFrame(state).join("\n");
+    expect(rows).toContain("No models configured.");
+  });
+
+  test("lists every model with name/provider/model-id, tagging active and default rows", () => {
+    const state = baseState({
+      view: {
+        kind: "picker",
+        selectedIndex: 1,
+        options: [
+          {
+            name: "haiku",
+            provider: "anthropic",
+            model: "claude-haiku",
+            isDefault: false,
+            isActive: false,
+          },
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "claude-sonnet",
+            isDefault: true,
+            isActive: true,
+          },
+        ],
+      },
+    });
+    const text = renderFrame(state).join("\n");
+    expect(text).toContain("haiku  (anthropic/claude-haiku)");
+    expect(text).toContain("sonnet  (anthropic/claude-sonnet)");
+    expect(text).toContain("[active, default]");
+    // The selected row (index 1, "sonnet") is marked with "> ", the non-selected with "  ".
+    expect(text).toMatch(/>\s*sonnet/);
+  });
+
+  test("footer hints at picker navigation keys", () => {
+    const state = baseState({
+      view: {
+        kind: "picker",
+        selectedIndex: 0,
+        options: [{ name: "a", provider: "p", model: "m", isDefault: false, isActive: true }],
+      },
+    });
+    const text = renderFrame(state).join("\n");
+    expect(text).toContain("navigate");
+    expect(text).toContain("switch");
+    expect(text).toContain("cancel");
+  });
+});

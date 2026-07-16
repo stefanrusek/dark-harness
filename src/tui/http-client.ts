@@ -2,7 +2,13 @@
 // against the Server domain's actual route (src/server/server.ts, POST /api/commands) —
 // see docs/handoffs/tui.md status log.
 
-import type { AgentTreeResponse, ClientCommand, CommandAck } from "../contracts/index.ts";
+import type {
+  AgentTreeResponse,
+  ClientCommand,
+  CommandAck,
+  ListModelsResponse,
+  ListSkillsResponse,
+} from "../contracts/index.ts";
 
 export interface SendCommandOptions {
   fetchImpl?: typeof fetch;
@@ -21,7 +27,7 @@ export async function sendCommand(
   baseUrl: string,
   command: ClientCommand,
   options: SendCommandOptions = {},
-): Promise<CommandAck | AgentTreeResponse> {
+): Promise<CommandAck | AgentTreeResponse | ListModelsResponse | ListSkillsResponse> {
   const fetchImpl = options.fetchImpl ?? fetch;
   let response: Response;
   try {

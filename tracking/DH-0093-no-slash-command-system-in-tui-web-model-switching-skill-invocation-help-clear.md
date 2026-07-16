@@ -265,6 +265,78 @@ zero provider calls; `/skillname [args]` → mock provider sees the expanded
 `<command-name>`/`<command-args>` content. None of this backend round's own tests
 substitute for real-binary E2E coverage of the client-side interception/rendering layer.
 
+### 2026-07-16 — TUI/Web round: client-side slash commands implemented (Mary + Susan)
+
+Both clients' halves of the design are implemented and merged, per the domain-assignment
+table above.
+
+**TUI** (`src/tui/`): new `commands.ts` (`parseSlashCommand`, exact grammar from this
+ticket's design §1: `^/(\S+)(?:\s+([\s\S]*))?$`, bare `/` or `/ text` fall through to
+ordinary chat). Interception lives in `state.ts`'s `handleRootKey` `enter` branch — a
+recognized command never builds a `send_message` effect. New `"picker"` view kind
+(`types.ts`) navigated exactly like the tree view; `/model` (no arg) sends `list_models`, the
+response transitions into the picker pre-selecting the active model; `/model <name>` switches
+directly, skipping the picker. `/help` renders a local `"tool"`-role transcript marker listing
+built-ins + cached skills, explicitly stating `/clear` doesn't reset agent context. `/clear`
+empties every tracked agent's transcript. `model_switched` now really updates the switched
+agent's `model` field (plus a root-specific status message), replacing the backend round's
+no-op exhaustiveness case. Startup `list_skills` fetch added alongside the existing
+`request_agent_tree` bootstrap in `app.ts`.
+
+**Web** (`src/web/client/`): new `slash-commands.ts`, an independent parser module verified
+against the same test-vector table as the TUI's (the design's named fallback when a literal
+shared module is awkward across the TUI/Web ownership boundary — CLAUDE.md §3). Interception
+in `AppView`'s `onSendMessage` callback. `/model` picker is a centered modal (`renderModelPicker`
+in `render.ts`, a new `ShellRefs.modelPicker` overlay) rather than a composer-anchored
+dropdown, since the picker needs to work regardless of which agent is selected (the composer
+only renders for root) — full keyboard support (Tab/Enter/Space on rows, Escape wired at the
+`AppView` level, backdrop-click and a Cancel button). New `Turn` role `"system"` for `/help`'s
+local entry (styled distinctly — centered, dim, monospace). The root agent's header
+previously showed no model at all; added an always-shown `.agent-header-model` badge so a
+`/model` switch is visibly reflected (judgment call — the design said "update displayed
+model" without specifying where). `model_switched` now updates `node.model` for real. Startup
+`list_skills` fetch added in `AppView.start()`.
+
+**Shared style-guide compliance**: the picker's active/default markers follow §6's
+"focus/selection never color-only" rule on both surfaces (TUI: `>` marker + `[active,
+default]` text; Web: border highlight + the same text tags). No bespoke pending/loading
+vocabulary was introduced for the model-switch flow — TUI shows a plain status message
+("switching model to X…") since the switch is not itself a blocking I/O wait from the
+operator's perspective (the picker closes immediately; confirmation arrives via
+`model_switched`), so §1.1's spinner+ellipsis convention wasn't judged applicable here.
+
+**Judgment calls** (documented inline in code comments, and in each of Mary's/Susan's roster
+entries): TUI's `/model` picker pre-selects the currently-active model rather than index 0;
+Web's model badge is shown for every agent (not just non-root) so root also displays its
+model; Web's `/clear` also resets `AppView`'s internal transcript-diff cache, not just
+`WebState`, since otherwise the DOM fast-path wouldn't notice the transcript went empty.
+
+**Gates**: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all green. Every
+new/changed file in both domains is at (or effectively at, modulo small pre-existing gaps
+confirmed unrelated) 100% line coverage. `bun run e2e`: 30/32, the same 2 pre-existing
+missing-headless-Chromium failures documented in the backend round and multiple prior
+tickets — confirmed unrelated by `git stash`-ing this round's diff and re-running.
+
+**Live verification**: TUI driven via a real compiled binary (`bun run build`) under a real
+`tmux` PTY session against real Anthropic credentials (`secrets.env`) — `/help` listed the
+built-ins plus the real `cli-tools` skill; `/model` opened the picker with both configured
+models tagged `[active, default]`; selecting `sonnet` showed the switch confirmation, and a
+subsequent real chat turn replied correctly, with the session's JSONL header recording
+`"model":"sonnet"` (the root-not-yet-started pending-switch path — no `model_switched` event
+expected here per the backend design, since the switch landed before the loop's first turn);
+`/clear` emptied the visible transcript. Web verification stayed at the test level (render/
+state/app tests driving a fake DOM + fake fetch) — a real browser wasn't reliably reachable
+from this sandbox (same gap as the missing-Chromium e2e failures above), per this round's own
+guidance not to fight that.
+
+**Remaining for the E2E round** (Hedy, follow-up, unchanged from the backend round's note):
+PTY-driven `/model` picker → next mock-provider request carries the new provider-side model
+id (this round's live verification used a real provider instead of the mock — proves the same
+thing but isn't a repeatable CI-gate assertion); `/help` renders locally with zero provider
+calls; `/skillname [args]` → mock provider sees the expanded `<command-name>`/`<command-args>`
+content; and now also a real-browser run of the Web picker/skill-invocation flow once headless
+Chromium is available in this sandbox or CI.
+
 ## Notes
 
 > [!NOTE]
