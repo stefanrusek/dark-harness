@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0070
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-16
 relations:
@@ -84,3 +84,15 @@ file, conversation history).
 > feature entirely, since it isn't a conformance requirement (per the empirical test above)
 > and isn't something the owner asked for on its own merits either — just fix the isolation
 > gap. Ready for implementation as scoped above.
+
+> [!NOTE]
+> Implemented 2026-07-16 (Grace, Core domain lead): added a per-agent `agentCwd` map to
+> `AgentRuntime` (`src/agent/runtime.ts`) — root's entry seeded in the constructor from
+> `this.cwd`, each sub-agent's entry set in `spawnAgent()` from its own parent's entry at
+> spawn time. `buildToolContext()` now reads `this.agentCwd.get(agentId)` instead of the old
+> single shared `this.cwd` field. No cross-call `cd` persistence added, per this ticket's own
+> scope. New test in `src/agent/runtime.test.ts` proves two concurrently-spawned sub-agents
+> (from two runtimes with distinct cwds) each see only their own agent's cwd. Gates:
+> typecheck/lint clean, `bun test src --coverage` 1390 pass/0 fail with 100% coverage on
+> `runtime.ts`, `bun run e2e` 30 pass/2 fail (both pre-existing headless-Chromium-unavailable-
+> in-sandbox failures noted by prior rounds, unrelated to this change).
