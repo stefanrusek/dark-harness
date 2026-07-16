@@ -406,3 +406,41 @@ constant.
 `agentId (model)` format only when absent (root, or a pre-DH-0069 session). Added a
 render.test.ts case and updated e2e spikes whose raw-pane assertions checked for the old
 `(sub)` model-suffix text.
+
+### 2026-07-16 — DH-0065 round 2: closed all five remaining items
+
+Picked up from the prior round (which had fixed only the inline style-bleed defect) and
+closed out the rest: word-boundary wrapping, transcript user/agent visual identity,
+tool-call visibility (partial — see below), agent tree readability, header/footer/heading
+chrome, and a liveness spinner. Full detail is in the ticket's status log; durable notes
+worth carrying forward for whoever resumes this role:
+
+- **Trust the spike over unit tests for anything visual.** My first word-wrap
+  implementation passed 100% coverage and every unit test I wrote, but had a real bug
+  (`justWrapped` leaking `true` past a `flush()` call that had already placed real content
+  back on the row) that glued adjacent words together with no space. Only running
+  `explore-design-review.ts` and reading the raw captures caught it — my own tests happened
+  to avoid the exact shape that triggered it. The ticket's instruction to rerun that spike
+  before closing wasn't a formality; do it, and actually read the output, every time
+  wrapping/rendering logic changes.
+- **Tool-call visibility is contracts-gated, and I only did the part that isn't.** The live
+  `ServerSentEvent` union (`src/contracts/events.ts`) has no `tool_call` event — only the
+  offline JSONL log schema does. I surfaced sub-agent spawns (inferrable client-side from
+  the existing `agent_spawned` event's `parentAgentId`) as a synthetic `"tool"`-role
+  transcript turn, but generic tool calls (Bash, Read, Edit, ...) need a new SSE event type,
+  which is architect-sign-off territory (CLAUDE.md §6.2). Don't invent a wire shape for this
+  unilaterally if picking it back up — check whether Contracts/the architect has weighed in
+  first.
+- **The consecutive-same-role-turn-boundary question (from the ticket's item 2) is still
+  open** — reproduces on Web too per the original review, so it reads as a shared loop/
+  event-semantics gap (does the wire ever signal "this is a new turn, not a continuation"?)
+  rather than a TUI render bug. Coordinate with Web/DH-0066 rather than guessing at a
+  client-side heuristic.
+- **e2e/spikes/tui/*.ts string assertions are brittle against exactly the kind of change
+  this ticket makes** — connector/label/status-word changes broke three separate spikes
+  (`spike-agent-tree-hierarchy.ts`, `spike-ctrlc-exit-code.ts`, and a pre-existing DH-0069
+  break in `spike-tree-scroll.ts` that a prior round's spike sweep apparently missed). When
+  changing anything about the tree-row or transcript-row string shape, grep
+  `e2e/spikes/tui/*.ts` for literal substrings/regexes against that shape before calling it
+  done — `bun run e2e` (the `bun:test` suite) doesn't run these standalone scripts, so a
+  clean gate run doesn't prove they still pass.
