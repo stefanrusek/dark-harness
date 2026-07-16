@@ -23,8 +23,11 @@ import type {
   BuildInfo,
   DhConfig,
   ExitCode as ExitCodeType,
+  JobResultLine,
   ModelInfo,
+  OutcomeReportedBy,
   ProviderConfig,
+  ReportedOutcome,
   SecurityConfig,
   ServerSentEvent,
   SessionClientKind,
@@ -73,6 +76,9 @@ export interface CliOptions {
   port: number | null;
   instructions: string | null;
   job: boolean;
+  /** DH-0050: `--job --json` — NDJSON progress stream on stdout, closed by a terminal
+   * `job_result` line (`JobResultLine`, src/contracts/outcome.ts). Invalid without --job. */
+  json: boolean;
   config: string;
   env: string | null;
   /** DH-0035: `--check` (or the `dh doctor` subcommand, an alias set by main()) — runs one
@@ -219,6 +225,12 @@ const HELP_FLAG_ITEMS: HelpItem[] = [
   {
     name: "--job",
     desc: "Exit when the root agent finishes: 0 success, 1 self-reported failure, 2+ harness error.",
+  },
+  {
+    name: "--json",
+    desc:
+      "With --job: stream NDJSON progress events to stdout as the run happens, closed by a " +
+      "final job_result line. Requires --job.",
   },
   { name: "--config <path>", desc: "Path to dh.json (default: ./dh.json)." },
   {
@@ -515,6 +527,7 @@ export function parseArgs(argv: string[]): CliOptions {
     port: null,
     instructions: null,
     job: false,
+    json: false,
     config: DEFAULT_CONFIG_PATH,
     env: null,
     check: false,
@@ -535,6 +548,10 @@ export function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--job") {
       options.job = true;
+      continue;
+    }
+    if (arg === "--json") {
+      options.json = true;
       continue;
     }
     if (arg === "--quiet") {
@@ -570,6 +587,13 @@ export function parseArgs(argv: string[]): CliOptions {
       continue;
     }
     throw new CliUsageError(`unknown flag: ${arg}`);
+  }
+
+  // DH-0050: --json is only meaningful alongside --job (the NDJSON stream's terminal
+  // job_result line is exactly the --job exit-code decision, expressed as data) — a usage
+  // error here, not a silent no-op, so an operator's misconfigured invocation fails loudly.
+  if (options.json && !options.job) {
+    throw new CliUsageError("--json requires --job");
   }
 
   return options;
@@ -864,6 +888,10 @@ export interface CliDeps {
     systemPrompt: string,
     client: SessionClientKind,
     resume?: AgentRuntimeOptions["resume"],
+    /** DH-0050 (`--job --json`): forwarded straight into `AgentRuntimeOptions.onEvent` so the
+     * NDJSON stream can write every `ServerSentEvent` as it happens; omitted (as before this
+     * ticket) on every non-`--json` standalone run. */
+    onEvent?: (event: ServerSentEvent) => void,
   ) => Pick<AgentRuntime, "runRoot" | "stopRoot"> & { close?: () => Promise<void> };
   /** Used by every interactive mode (server/local/connect). `resume` (DH-0038): same shape
    * and purpose as `createRuntime`'s. DH-0002: the returned handle's optional `close()` —
@@ -922,6 +950,7 @@ function createStandaloneRuntime(
   config: DhConfig,
   systemPrompt: string,
   resume?: AgentRuntimeOptions["resume"],
+  onEvent?: (event: ServerSentEvent) => void,
 ): AgentRuntime {
   const sessionId = randomUUID();
   const logsRoot = join(process.cwd(), ".dh-logs");
@@ -939,6 +968,7 @@ function createStandaloneRuntime(
     // TUI/Web/server client attached — "none" per SessionClientKind's own doc comment.
     client: "none",
     ...(resume ? { resume } : {}),
+    ...(onEvent ? { onEvent } : {}),
     onLogLine: (agentId, line) => logger.append(agentId, line),
   });
 }
@@ -959,8 +989,8 @@ function defaultDeps(): CliDeps {
     // The standalone path's own runtime is always constructed with client: "none" directly
     // inside createStandaloneRuntime() (it's not one of the four interactive modes this
     // `client` param maps from), so the value passed here is intentionally unused.
-    createRuntime: (config, systemPrompt, _client, resume) =>
-      createStandaloneRuntime(config, systemPrompt, resume),
+    createRuntime: (config, systemPrompt, _client, resume, onEvent) =>
+      createStandaloneRuntime(config, systemPrompt, resume, onEvent),
     createAgentLoop: (config, systemPrompt, client, resume) =>
       new AgentRuntimeLoopAdapter({ config, systemPrompt, client, ...(resume ? { resume } : {}) }),
     createServer: (options) => new DhServer(options),
@@ -1775,6 +1805,15 @@ export async function main(
     instructionText = `${buildResumeNotice(resumeResult)}\n\n${instructionText}`;
   }
 
+  // DH-0050 (`--job --json`): every ServerSentEvent the root runtime emits is written to
+  // stdout as one NDJSON line, as-is — no separate incremental schema, the existing
+  // versioned event union (src/contracts/events.ts) is reused verbatim. `undefined` in
+  // every other mode, so createRuntime()/createStandaloneRuntime() behave exactly as before
+  // this ticket (no `onEvent` at all) when `--json` wasn't given.
+  const onJsonEvent = options.json
+    ? (event: ServerSentEvent) => io.stdout(JSON.stringify(event))
+    : undefined;
+
   const runtime = deps.createRuntime(
     config,
     systemPrompt,
@@ -1786,6 +1825,7 @@ export async function main(
           model: resumeResult.model,
         }
       : undefined,
+    onJsonEvent,
   );
 
   // DH-0011: the standalone `--instructions`/`--job` path is exactly the unattended
@@ -1803,7 +1843,13 @@ export async function main(
     runtime.stopRoot();
   });
 
-  let result: { success: boolean; finalOutput: string };
+  let result: {
+    success: boolean;
+    finalOutput: string;
+    turns: number;
+    outcome?: ReportedOutcome;
+    reportedBy?: OutcomeReportedBy;
+  };
   try {
     result = await runtime.runRoot(instructionText);
   } catch (err) {
@@ -1812,14 +1858,40 @@ export async function main(
     return fail(io, `root agent crashed: ${(err as Error).message}`);
   }
   uninstallSignals();
+
+  // DH-0050: in --json mode, human-readable finalOutput text never hits stdout on its own —
+  // the terminal job_result NDJSON line (below) is the one place it's carried, so a
+  // downstream parser reading stdout line-by-line as NDJSON never has to skip a stray
+  // non-JSON line mixed in. Judgment call: `JobResultLine.exitCode` is typed `0 | 1` per the
+  // architect design (mirroring the model self-report outcome, not the full harness-error
+  // exit-code space) — an operator-interrupted (SIGTERM/SIGINT) or crashed run has no
+  // self-report outcome to describe at all, so neither emits a job_result line; a downstream
+  // parser reading the NDJSON stream sees it end with no terminal line, same signal a piped
+  // process getting killed already gives any NDJSON consumer.
+  const emitJobResult = () => {
+    if (!onJsonEvent) return;
+    const line: JobResultLine = {
+      version: 1,
+      type: "job_result",
+      timestamp: new Date().toISOString(),
+      success: result.success,
+      exitCode: result.success ? ExitCode.Success : ExitCode.TaskFailure,
+      reportedBy: result.reportedBy ?? (result.success ? "clean-end" : "text-marker"),
+      turns: result.turns,
+      finalOutput: result.finalOutput,
+      ...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
+    };
+    io.stdout(JSON.stringify(line));
+  };
+
   if (interrupted) {
-    io.stdout(result.finalOutput);
+    if (!options.json) io.stdout(result.finalOutput);
     await runtime.close?.()?.catch(() => {});
     io.exit(ExitCode.HarnessError);
     return ExitCode.HarnessError;
   }
 
-  io.stdout(result.finalOutput);
+  if (!options.json) io.stdout(result.finalOutput);
   // DH-0002: best-effort — closes the shared McpManager (terminating stdio MCP child
   // processes) now that this standalone run has finished; the `--job` branch below starts a
   // brand-new AgentRuntime/session, so this one's MCP connections have no further use.
@@ -1846,6 +1918,7 @@ export async function main(
     return runInteractiveMode(mode, config, systemPrompt, deps, undefined, options.quiet);
   }
 
+  emitJobResult();
   const code = result.success ? ExitCode.Success : ExitCode.TaskFailure;
   io.exit(code);
   return code;

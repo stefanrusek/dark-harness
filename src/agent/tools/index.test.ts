@@ -89,4 +89,18 @@ describe("composeTools (DH-0074)", () => {
     expect(tools.some((t) => t.name === "WebSearch")).toBe(true);
     expect(tools).toHaveLength(ALL_TOOLS.length + 2);
   });
+
+  // DH-0050: ReportOutcome is deliberately excluded from ALL_TOOLS/composeTools() — it's
+  // added to the toolMap by AgentRuntime's constructor only for non-interactive runtimes
+  // (see runtime.ts), never uniformly like every other built-in tool.
+  test("ReportOutcome is never present — it isn't part of the uniform root/sub-agent tool set", () => {
+    expect(ALL_TOOLS.some((t) => t.name === "ReportOutcome")).toBe(false);
+    expect(composeTools(BASE_CONFIG).some((t) => t.name === "ReportOutcome")).toBe(false);
+    expect(
+      composeTools({
+        ...BASE_CONFIG,
+        web: { fetch: {}, search: { provider: "brave", apiKey: "key" } },
+      }).some((t) => t.name === "ReportOutcome"),
+    ).toBe(false);
+  });
 });

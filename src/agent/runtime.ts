@@ -13,6 +13,8 @@ import {
   type LogLine,
   type ModelConfig,
   type ModelInfo,
+  type OutcomeReportedBy,
+  type ReportedOutcome,
   type ServerSentEvent,
   type SessionClientKind,
   type SkillInfo,
@@ -20,7 +22,7 @@ import {
 import { composeSkillInvocation } from "../prompt/index.ts";
 import { type Skill, discoverSkills } from "../prompt/skills.ts";
 import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
-import { type ModelBinding, computeCostUsd, runAgentLoop } from "./loop.ts";
+import { type AgentLoopResult, type ModelBinding, computeCostUsd, runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { loadProjectMcpServers } from "./mcp/project-config.ts";
 import { buildMcpTools } from "./mcp/tools.ts";
@@ -29,7 +31,7 @@ import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
 import { BUILTIN_CLI_TOOLS_SKILL, loadSkillFromPaths } from "./skills.ts";
 import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { TodoStore } from "./todos.ts";
-import { buildToolMap, composeTools } from "./tools/index.ts";
+import { buildToolMap, composeTools, reportOutcomeTool } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 import {
@@ -281,9 +283,22 @@ export class AgentRuntime {
     // transitively from here via the same map, never from `this.cwd` directly.
     this.agentCwd.set(ROOT_AGENT_ID, this.cwd);
     this.sessionId = options.sessionId ?? randomUUID();
+    // DH-0050: set ahead of toolMap construction (moved up from its original position further
+    // down this constructor) so the conditional ReportOutcome registration just below can read
+    // it — every other use of `this.interactive` elsewhere in this class is unaffected by the
+    // reordering, it's a plain readonly field assigned once.
+    this.interactive = options.interactive ?? false;
     // DH-0074: composeTools() adds WebFetch/WebSearch on top of ALL_TOOLS only when the
     // matching `dh.json` `web.fetch`/`web.search` block is present — see its own doc comment.
     this.toolMap = buildToolMap(options.tools ?? composeTools(this.config));
+    // DH-0050: ReportOutcome is registered only for non-interactive runtimes (the standalone
+    // `--instructions`/`--job` dark-factory path) — see tools/index.ts's own doc comment for
+    // why it's deliberately excluded from composeTools()/ALL_TOOLS itself. A caller supplying
+    // an explicit `options.tools` list (tests) opts out of this automatic addition, same as it
+    // already opts out of composeTools() above.
+    if (!this.interactive && !options.tools) {
+      this.toolMap.set(reportOutcomeTool.name, reportOutcomeTool);
+    }
     // DH-0002: constructed and connected here, not lazily on first ToolSearch call — eager
     // connection keeps ToolSearch fast and surfaces misconfigured servers in the startup
     // logs. connectAll() never throws/rejects (every per-server failure is caught inside
@@ -310,7 +325,6 @@ export class AgentRuntime {
     });
     this.onEvent = options.onEvent;
     this.onLogLine = options.onLogLine;
-    this.interactive = options.interactive ?? false;
     this.client = options.client;
     this.resume = options.resume;
     // DH-0012: wired to handleTaskSettled() so every *background* Bash/Agent task's
@@ -819,7 +833,18 @@ export class AgentRuntime {
   async runRoot(
     instruction: string,
     modelName?: string,
-  ): Promise<{ success: boolean; finalOutput: string }> {
+  ): Promise<{
+    success: boolean;
+    finalOutput: string;
+    /** DH-0050: threaded straight through from `AgentLoopResult` — total turns consumed,
+     * for `--job --json`'s terminal `job_result` line. */
+    turns: number;
+    /** DH-0050: threaded straight through from `AgentLoopResult` — present iff the model
+     * self-reported via `ReportOutcome`. */
+    outcome?: ReportedOutcome;
+    /** DH-0050: which of the detection precedence tiers actually produced `success` above. */
+    reportedBy?: OutcomeReportedBy;
+  }> {
     // DH-0038: an explicit modelName argument always wins; otherwise a resumed session
     // defaults to the original root header's model alias (D3) rather than
     // config.options.defaultModel, so a resume never silently switches models.
@@ -856,7 +881,7 @@ export class AgentRuntime {
       }
     }
 
-    let result: { success: boolean; finalOutput: string };
+    let result: AgentLoopResult;
     try {
       result = await runAgentLoop({
         sessionId: this.sessionId,
@@ -943,7 +968,13 @@ export class AgentRuntime {
       type: "session_ended",
       exitCode: result.success ? ExitCode.Success : ExitCode.TaskFailure,
     });
-    return { success: result.success, finalOutput: result.finalOutput };
+    return {
+      success: result.success,
+      finalOutput: result.finalOutput,
+      turns: result.turns,
+      ...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
+      ...(result.reportedBy !== undefined ? { reportedBy: result.reportedBy } : {}),
+    };
   }
 
   /** True once runRoot() has been called at least once (even if it has since finished) —

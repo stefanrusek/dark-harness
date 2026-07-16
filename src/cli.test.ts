@@ -24,7 +24,12 @@ import {
   parseEnvFile,
   renderHelpText,
 } from "./cli.ts";
-import type { DhConfig, ProviderConfig, ServerSentEvent } from "./contracts/index.ts";
+import type {
+  DhConfig,
+  JobResultLine,
+  ProviderConfig,
+  ServerSentEvent,
+} from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
 import { REQUIRED_CONTRACT, buildDefaultSystemPrompt } from "./prompt/system-prompt.ts";
 import { DhServer, waitForExitCode } from "./server/index.ts";
@@ -1094,6 +1099,92 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     });
     expect(code).toBe(ExitCode.TaskFailure);
     expect(io.exitCodes).toEqual([ExitCode.TaskFailure]);
+  });
+
+  // DH-0050: `--job --json` — NDJSON progress stream + terminal job_result line.
+  test("--json without --job is a usage error", () => {
+    expect(() => parseArgs(["--instructions", "plan.md", "--json"])).toThrow(CliUsageError);
+    expect(() => parseArgs(["--instructions", "plan.md", "--json"])).toThrow(
+      /--json requires --job/,
+    );
+  });
+
+  test("--job --json streams every ServerSentEvent as NDJSON then a terminal job_result line, " +
+    "and suppresses the plain-text finalOutput line", async () => {
+    const io = fakeIo();
+    let receivedOnEvent: ((event: ServerSentEvent) => void) | undefined;
+    const code = await main(["--instructions", "plan.md", "--job", "--json"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "do the thing",
+      createRuntime: (_config, _systemPrompt, _client, _resume, onEvent) => {
+        receivedOnEvent = onEvent;
+        return {
+          runRoot: async () => {
+            // Simulate the runtime emitting a couple of real events mid-run, exactly as
+            // AgentRuntime.runRoot() does via its own onEvent callback.
+            receivedOnEvent?.({
+              version: 1,
+              id: "evt-1",
+              timestamp: "2026-07-16T00:00:00.000Z",
+              type: "agent_status",
+              agentId: "agent-root",
+              status: "running",
+            });
+            return {
+              success: true,
+              finalOutput: "the real answer",
+              turns: 3,
+              outcome: { status: "success", summary: "did the thing" },
+              reportedBy: "tool",
+            };
+          },
+          stopRoot: () => {},
+        };
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    // The plain-text finalOutput line is suppressed in --json mode.
+    expect(io.stdoutLines.some((l) => l === "the real answer")).toBe(false);
+    const parsed = io.stdoutLines.map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(parsed[0]).toEqual({
+      version: 1,
+      id: "evt-1",
+      timestamp: "2026-07-16T00:00:00.000Z",
+      type: "agent_status",
+      agentId: "agent-root",
+      status: "running",
+    });
+    const jobResult = parsed[parsed.length - 1] as unknown as JobResultLine;
+    expect(jobResult.type).toBe("job_result");
+    expect(jobResult.success).toBe(true);
+    expect(jobResult.exitCode).toBe(ExitCode.Success);
+    expect(jobResult.reportedBy).toBe("tool");
+    expect(jobResult.turns).toBe(3);
+    expect(jobResult.finalOutput).toBe("the real answer");
+    expect(jobResult.outcome).toEqual({ status: "success", summary: "did the thing" });
+  });
+
+  test("--job --json on a self-reported failure emits a job_result line with exitCode 1", async () => {
+    const io = fakeIo();
+    const code = await main(["--instructions", "plan.md", "--job", "--json"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "do the thing",
+      createRuntime: () => ({
+        runRoot: async () => ({
+          success: false,
+          finalOutput: "nope",
+          turns: 1,
+          reportedBy: "text-marker" as const,
+        }),
+        stopRoot: () => {},
+      }),
+    });
+    expect(code).toBe(ExitCode.TaskFailure);
+    const lastLine = io.stdoutLines[io.stdoutLines.length - 1] ?? "";
+    const jobResult = JSON.parse(lastLine) as JobResultLine;
+    expect(jobResult.success).toBe(false);
+    expect(jobResult.exitCode).toBe(ExitCode.TaskFailure);
+    expect(jobResult.reportedBy).toBe("text-marker");
   });
 
   test("without --job the process doesn't exit and falls through to a real (faked) interactive mode", async () => {

@@ -6,3 +6,4 @@ export * from "./commands.ts";
 export * from "./events.ts";
 export * from "./exit-codes.ts";
 export * from "./log.ts";
+export * from "./outcome.ts";
