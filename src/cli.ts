@@ -1035,9 +1035,15 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
     return fail(io, `failed to write ${targetPath}: ${(err as Error).message}`);
   }
 
+  io.stdout(`dh: wrote a starter config to ${targetPath}.`);
   io.stdout(
-    `dh: wrote a starter config to ${targetPath}. The models list is a menu covering every Claude tier on both anthropic and bedrock, plus a few Bedrock OpenAI and open-weight models — trim it down to the ones you'll actually use before running "dh doctor" or "dh --check", which probe every configured model's credentials. Bedrock model/inference-profile ids are verified for the us-east-1 region; re-verify if you're on a different region. Edit the config to add your API key/model, then run "dh" to start.`,
+    `dh: the models list is a menu covering every Claude tier on both anthropic and bedrock, plus a few Bedrock OpenAI and open-weight models — trim it down to the ones you'll actually use.`,
   );
+  io.stdout(`dh: run "dh doctor" or "dh --check" to probe every configured model's credentials.`);
+  io.stdout(
+    `dh: Bedrock model/inference-profile ids are verified for the us-east-1 region; re-verify if you're on a different region.`,
+  );
+  io.stdout(`dh: edit the config to add your API key/model, then run "dh" to start.`);
   io.exit(ExitCode.Success);
   return ExitCode.Success;
 }
