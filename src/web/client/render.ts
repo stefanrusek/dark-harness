@@ -246,9 +246,13 @@ export function renderSidebar(
     item.appendChild(dot);
 
     const label = el(doc, "span", "agent-label");
+    // DH-0069: prefer the spawning Agent tool call's `description` — a human-readable label
+    // ("Fix flaky retry test") — over the raw `model · shortAgentId` fallback, matching the
+    // TUI's `renderTree` (src/tui/render.ts). Root never has a description (nothing spawned
+    // it via the Agent tool), so it always keeps its "root" label.
     label.textContent = isRoot(state, agent.agentId)
       ? "root"
-      : `${agent.model || "agent"} · ${shortAgentId(agent.agentId)}`;
+      : (agent.description ?? `${agent.model || "agent"} · ${shortAgentId(agent.agentId)}`);
     item.appendChild(label);
 
     const elapsed = el(doc, "span", "agent-elapsed");
@@ -262,7 +266,9 @@ export function renderSidebar(
 
     item.setAttribute(
       "aria-label",
-      `${isRoot(state, agent.agentId) ? "root" : agent.model || "agent"}, status: ${style.label}`,
+      `${
+        isRoot(state, agent.agentId) ? "root" : (agent.description ?? (agent.model || "agent"))
+      }, status: ${style.label}`,
     );
 
     const select = () => onSelect(agent.agentId);
@@ -329,9 +335,10 @@ export function renderAgentHeader(
   const dot = el(doc, "span", `status-dot status-${style.token}`);
   title.appendChild(dot);
   const name = el(doc, "span", "agent-header-name");
+  // DH-0069: same description-first labeling as the sidebar row above.
   name.textContent = isRoot(state, agent.agentId)
     ? "Root agent"
-    : `${agent.model || "agent"} (${shortAgentId(agent.agentId)})`;
+    : (agent.description ?? `${agent.model || "agent"} (${shortAgentId(agent.agentId)})`);
   title.appendChild(name);
   const badge = el(doc, "span", `status-badge status-${style.token}`);
   badge.textContent = style.label;

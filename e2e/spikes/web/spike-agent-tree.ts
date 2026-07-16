@@ -19,7 +19,16 @@ const report = createReport("spike-agent-tree");
 
 const rootProvider = startMockAnthropicProvider([
   {
-    toolCalls: [{ name: "Agent", input: { prompt: "Say hi as a sub-agent.", model: "sub" } }],
+    toolCalls: [
+      {
+        name: "Agent",
+        input: {
+          prompt: "Say hi as a sub-agent.",
+          description: "Say hi as sub-agent",
+          model: "sub",
+        },
+      },
+    ],
     stopReason: "tool_use",
   },
   successTurn("Root heard back from the sub-agent."),

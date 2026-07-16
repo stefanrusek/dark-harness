@@ -40,14 +40,24 @@ const RICH_MARKDOWN = [
 const rootProvider = startMockAnthropicProvider([
   successTurn(RICH_MARKDOWN),
   {
-    toolCalls: [{ name: "Agent", input: { prompt: "Level-2 work.", model: "sub" } }],
+    toolCalls: [
+      {
+        name: "Agent",
+        input: { prompt: "Level-2 work.", description: "Level-2 work", model: "sub" },
+      },
+    ],
     stopReason: "tool_use",
   },
   successTurn("Root coordinated **two levels** of sub-agents."),
 ]);
 const subProvider = startMockAnthropicProvider([
   {
-    toolCalls: [{ name: "Agent", input: { prompt: "Level-3 work.", model: "subsub" } }],
+    toolCalls: [
+      {
+        name: "Agent",
+        input: { prompt: "Level-3 work.", description: "Level-3 work", model: "subsub" },
+      },
+    ],
     stopReason: "tool_use",
   },
   successTurn("Level-2 sub-agent done."),

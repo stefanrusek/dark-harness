@@ -32,6 +32,12 @@ export interface AgentNode {
   parentAgentId: string | null;
   model: string;
   status: AgentStatus;
+  /** DH-0069: human-readable label from the spawning `Agent` tool call's (now-required)
+   * `description` parameter — the sidebar/tree row's primary label, falling back to
+   * `model (shortAgentId)` only when absent (the root agent, which was never spawned via the
+   * Agent tool, or a pre-DH-0069 logged session). See `AgentSpawnedEvent.description`
+   * (src/contracts/events.ts). */
+  description?: string;
   /** Ordered conversation turns for this agent. See `Turn` above. */
   transcript: Turn[];
   /**
@@ -239,6 +245,7 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
       node.parentAgentId = event.parentAgentId;
       node.model = event.model;
+      if (event.description !== undefined) node.description = event.description;
       next.agents.set(event.agentId, node);
       if (event.parentAgentId === null && next.rootAgentId === null) {
         next.rootAgentId = event.agentId;
@@ -341,6 +348,7 @@ export function seedFromTree(
       parentAgentId: node.parentAgentId,
       model: node.model,
       status: node.status,
+      ...(node.description !== undefined ? { description: node.description } : {}),
       transcript: [],
       inputTokens: 0,
       outputTokens: 0,
