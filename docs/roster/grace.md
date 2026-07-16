@@ -814,3 +814,52 @@ before `claude/coordinator-onboarding-kab9ls` picked up all the merged domain wo
 branch's current tip before any of the files referenced in my brief even existed on disk —
 worth a note in case another fresh worktree shows the same symptom (empty-looking repo,
 `origin/main` far behind local `main`/the working branch).
+
+### 2026-07-15 — DH-0035 (dh init / dh doctor / --dry-run / friendlier missing-config error)
+
+Landed all three first-run-friction fixes from the ticket, plus the underlying error-message
+fix, independent of whether an operator ever discovers `dh init` exists.
+
+- **`dh init`**: scaffolds README.md's sample `dh.json` verbatim (kept as an exported
+  `SAMPLE_DH_JSON` const in `src/cli.ts`, byte-for-byte matching the README sample so the two
+  can't silently drift) into the working directory or wherever `--config <path>` points.
+  Refuses to overwrite an existing file (fails loudly via the standard `fail()`/HarnessError
+  path) rather than clobbering a real config.
+- **`dh doctor` / `--check`**: for every configured model, builds the real provider adapter
+  (via a newly-injectable `deps.createProvider`) and makes one 1-token, no-tools `complete()`
+  call, printing `PASS <model> (provider "<name>")` or `FAIL ...: <error message>` per model.
+  Never touches the interactive agent loop. `dh doctor` is a pure alias for `--check` set by
+  `main()` before `parseArgs` runs (subcommands aren't flags, so this is handled the same way
+  `--help`/`--version` are — before/instead of the normal flag parse — while still letting
+  `--config` etc. pass through normally after the "doctor" token is stripped).
+- **`--dry-run`**: validates the instructions file (if `--instructions` was given) and
+  constructs (but never calls) every configured provider's client, then exits 0. Judgment
+  call: reused the exact same `createProvider` construction step doctor uses, just without
+  the `.complete()` call — this is genuinely "everything up to but not including the first
+  real model call" per the ticket's own framing, not a separate mechanism.
+- **Missing-config error message** (`src/config/load.ts`): now names `dh init`, `--config
+  <path>`, and README.md explicitly, instead of the old bare "config file not found: dh.json".
+
+`CliDeps` grew `fileExists`/`writeFile` (real impls: `Bun.file(...).exists()`/`Bun.write`) and
+`createProvider` (real impl: `agent/providers/index.ts`'s own `createProvider`) — all three
+injectable so tests never touch a real filesystem or network.
+
+**Gates:** typecheck/lint clean (had to hand-fix a couple of biome's `useTemplate`/
+`noUnusedTemplateLiteral` complaints after `lint:fix` auto-sorted imports and reformatted —
+biome doesn't like a `` ` `` inside a backtick-delimited template literal, unsurprisingly, so
+collapsed a couple of multi-line concatenated messages into single template literals with
+plain double-quotes instead of literal backticks around "dh doctor"/"dh init"). `bun run
+test:coverage`: 1186 pass, 0 fail; `src/cli.ts` at 100% lines (98.25% funcs is the same
+pre-existing bun-coverage quirk on inline arrow functions prior rounds already flagged — not
+a real gap). `bun run e2e`: 27 pass, 5 fail — confirmed via `git stash`/re-run that all 5 are
+pre-existing and untouched by this round: 2 are the tracked DH-0058 TUI SSE-reconnect hang
+(reproduces identically with my changes stashed out), 3 are headless Chromium missing at
+`/opt/pw-browsers/chromium` in this sandbox (same gap prior rounds flagged). Did not add new
+e2e coverage for `dh init`/`dh doctor`/`--dry-run` themselves — unit-level coverage on
+`src/cli.ts` is 100% lines for all three, and e2e here needs a compiled binary plus a working
+PTY/headless-browser harness this sandbox doesn't have; flagging as a reasonable follow-up for
+Hedy/E2E if the fleet wants a real-binary smoke test of these three modes specifically.
+
+Also had to fast-forward this round's worktree the same way prior rounds noted (branched
+before `claude/coordinator-onboarding-kab9ls` picked up all merged domain work) — same fix,
+same note for whoever hits it next.

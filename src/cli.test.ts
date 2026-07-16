@@ -3,6 +3,7 @@ import { readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { ModelProvider } from "./agent/providers/types.ts";
 import { ROOT_AGENT_ID } from "./agent/runtime.ts";
 import {
   AgentRuntimeLoopAdapter,
@@ -12,6 +13,7 @@ import {
   DEFAULT_PORT,
   DEFAULT_SYSTEM_PROMPT,
   type DhServerLike,
+  SAMPLE_DH_JSON,
   type WebUiHandleLike,
   composeMode,
   formatVersionString,
@@ -19,7 +21,7 @@ import {
   parseArgs,
   parseEnvFile,
 } from "./cli.ts";
-import type { DhConfig, ServerSentEvent } from "./contracts/index.ts";
+import type { DhConfig, ProviderConfig, ServerSentEvent } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
 import { DhServer, waitForExitCode } from "./server/index.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
@@ -110,6 +112,8 @@ describe("parseArgs", () => {
       job: false,
       config: "dh.json",
       env: null,
+      check: false,
+      dryRun: false,
     });
   });
 
@@ -128,6 +132,8 @@ describe("parseArgs", () => {
       "custom.json",
       "--env",
       "secrets.env",
+      "--check",
+      "--dry-run",
     ]);
     expect(options).toEqual({
       web: true,
@@ -138,6 +144,8 @@ describe("parseArgs", () => {
       job: true,
       config: "custom.json",
       env: "secrets.env",
+      check: true,
+      dryRun: true,
     });
   });
 
@@ -1698,6 +1706,290 @@ describe("AgentRuntimeLoopAdapter + DhServer + waitForExitCode (Round 2 DoD: rea
       adapter.stopAgent(ROOT_AGENT_ID);
       dhServer.stop();
       mockProvider.stop(true);
+    }
+  });
+});
+
+function fakeModelProvider(overrides: Partial<ModelProvider> = {}): ModelProvider {
+  return {
+    complete: async () => ({
+      stopReason: "end_turn",
+      content: [{ type: "text", text: "pong" }],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    }),
+    ...overrides,
+  };
+}
+
+describe("main — dh init", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "dh-cli-init-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("writes the sample config to the default path and exits 0", async () => {
+    const io = fakeIo();
+    const target = join(dir, "dh.json");
+    const code = await main(["init", "--config", target], { io });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.exitCodes).toEqual([ExitCode.Success]);
+    const written = await Bun.file(target).text();
+    expect(written).toBe(SAMPLE_DH_JSON);
+    expect(io.stdoutLines[0]).toContain(target);
+  });
+
+  test("refuses to overwrite an existing config file", async () => {
+    const io = fakeIo();
+    const target = join(dir, "dh.json");
+    await Bun.write(target, '{"already":"here"}');
+    const code = await main(["init", "--config", target], { io });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("refusing to overwrite");
+    const stillThere = await Bun.file(target).text();
+    expect(stillThere).toBe('{"already":"here"}');
+  });
+
+  test("the scaffolded config parses and validates cleanly via the real loadConfig", async () => {
+    const io = fakeIo();
+    const target = join(dir, "dh.json");
+    await main(["init", "--config", target], { io });
+    const { loadConfig } = await import("./config/index.ts");
+    const config = await loadConfig(target);
+    expect(config.options.defaultModel).toBe("sonnet");
+  });
+
+  test("--config requires a value", async () => {
+    const io = fakeIo();
+    const code = await main(["init", "--config"], { io });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("--config requires a value");
+  });
+
+  test("rejects an unknown flag", async () => {
+    const io = fakeIo();
+    const code = await main(["init", "--bogus"], { io });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("unknown flag: --bogus");
+  });
+
+  test("surfaces a fileExists failure via fail()", async () => {
+    const io = fakeIo();
+    const code = await main(["init"], {
+      io,
+      fileExists: async () => {
+        throw new Error("boom");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("failed to check dh.json: boom");
+  });
+
+  test("surfaces a writeFile failure via fail()", async () => {
+    const io = fakeIo();
+    const code = await main(["init"], {
+      io,
+      fileExists: async () => false,
+      writeFile: async () => {
+        throw new Error("disk full");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("failed to write dh.json: disk full");
+  });
+});
+
+describe("main — dh doctor / --check", () => {
+  test("reports PASS for every model when every provider call succeeds, exits 0", async () => {
+    const io = fakeIo();
+    const calls: Array<{ model: string; maxTokens: number | undefined; tools: unknown[] }> = [];
+    const code = await main(["--check"], {
+      ...baseOverrides(io),
+      createProvider: (config: ProviderConfig) =>
+        fakeModelProvider({
+          complete: async (request) => {
+            calls.push({
+              model: request.model,
+              maxTokens: request.maxTokens,
+              tools: request.tools,
+            });
+            expect(config.name).toBe("anthropic");
+            return {
+              stopReason: "end_turn",
+              content: [{ type: "text", text: "pong" }],
+              usage: { inputTokens: 1, outputTokens: 1 },
+            };
+          },
+        }),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines).toEqual(['PASS sonnet (provider "anthropic")']);
+    expect(calls).toEqual([{ model: "sonnet-5", maxTokens: 1, tools: [] }]);
+  });
+
+  test("the dh doctor subcommand is an alias for --check", async () => {
+    const io = fakeIo();
+    const code = await main(["doctor"], {
+      ...baseOverrides(io),
+      createProvider: () => fakeModelProvider(),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines).toEqual(['PASS sonnet (provider "anthropic")']);
+  });
+
+  test("dh doctor still honors --config", async () => {
+    const io = fakeIo();
+    const seenPaths: string[] = [];
+    const code = await main(["doctor", "--config", "custom.json"], {
+      ...baseOverrides(io),
+      loadConfig: async (path) => {
+        seenPaths.push(path);
+        return TEST_CONFIG;
+      },
+      createProvider: () => fakeModelProvider(),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(seenPaths).toEqual(["custom.json"]);
+  });
+
+  test("reports FAIL and a non-zero exit code when a provider call throws", async () => {
+    const io = fakeIo();
+    const code = await main(["--check"], {
+      ...baseOverrides(io),
+      createProvider: () =>
+        fakeModelProvider({
+          complete: async () => {
+            throw new Error("401 unauthorized");
+          },
+        }),
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stdoutLines).toEqual(['FAIL sonnet (provider "anthropic"): 401 unauthorized']);
+  });
+
+  test("reports FAIL per model without throwing when a model references an unknown provider", async () => {
+    const io = fakeIo();
+    const code = await main(["--check"], {
+      ...baseOverrides(io),
+      loadConfig: async () => ({
+        options: { defaultModel: "sonnet" },
+        models: [{ name: "sonnet", provider: "ghost", model: "sonnet-5" }],
+        provider: [{ name: "anthropic", type: "anthropic" }],
+      }),
+      createProvider: () => fakeModelProvider(),
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stdoutLines).toEqual(['FAIL sonnet: no provider named "ghost" in config']);
+  });
+
+  test("never enters the interactive agent loop", async () => {
+    const io = fakeIo();
+    let loopStarted = false;
+    await main(["--check"], {
+      ...baseOverrides(io),
+      createProvider: () => fakeModelProvider(),
+      createAgentLoop: () => {
+        loopStarted = true;
+        return fakeAgentLoop();
+      },
+    });
+    expect(loopStarted).toBe(false);
+  });
+});
+
+describe("main — --dry-run", () => {
+  test("validates config and provider construction, exits 0, without calling a model", async () => {
+    const io = fakeIo();
+    let providerConstructed = false;
+    let completeCalled = false;
+    const code = await main(["--dry-run"], {
+      ...baseOverrides(io),
+      createProvider: (config: ProviderConfig) => {
+        providerConstructed = true;
+        expect(config.name).toBe("anthropic");
+        return fakeModelProvider({
+          complete: async () => {
+            completeCalled = true;
+            throw new Error("should never be called by --dry-run");
+          },
+        });
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(providerConstructed).toBe(true);
+    expect(completeCalled).toBe(false);
+    expect(io.stdoutLines[0]).toContain("dry run OK");
+  });
+
+  test("also validates the instructions file when --instructions is given", async () => {
+    const io = fakeIo();
+    const code = await main(["--dry-run", "--instructions", "plan.md"], {
+      ...baseOverrides(io),
+      createProvider: () => fakeModelProvider(),
+      readInstructions: async (path) => {
+        expect(path).toBe("plan.md");
+        return "do the thing";
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  test("fails when the instructions file is missing", async () => {
+    const io = fakeIo();
+    const code = await main(["--dry-run", "--instructions", "missing.md"], {
+      ...baseOverrides(io),
+      createProvider: () => fakeModelProvider(),
+      readInstructions: async () => {
+        throw new Error("instructions file not found: missing.md");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("instructions file not found: missing.md");
+  });
+
+  test("fails when a provider fails to construct", async () => {
+    const io = fakeIo();
+    const code = await main(["--dry-run"], {
+      ...baseOverrides(io),
+      createProvider: () => {
+        throw new Error("missing credentials");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain(
+      'provider "anthropic" failed to construct: missing credentials',
+    );
+  });
+
+  test("never enters the interactive agent loop", async () => {
+    const io = fakeIo();
+    let loopStarted = false;
+    await main(["--dry-run"], {
+      ...baseOverrides(io),
+      createProvider: () => fakeModelProvider(),
+      createAgentLoop: () => {
+        loopStarted = true;
+        return fakeAgentLoop();
+      },
+    });
+    expect(loopStarted).toBe(false);
+  });
+});
+
+describe("loadConfig — DH-0035 missing-file error message", () => {
+  test("points the operator at dh init, --config, and README.md", async () => {
+    const { loadConfig } = await import("./config/index.ts");
+    const dir = await mkdtemp(join(tmpdir(), "dh-cli-missing-config-test-"));
+    try {
+      await expect(loadConfig(join(dir, "dh.json"))).rejects.toThrow(/dh init/);
+      await expect(loadConfig(join(dir, "dh.json"))).rejects.toThrow(/--config/);
+      await expect(loadConfig(join(dir, "dh.json"))).rejects.toThrow(/README\.md/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

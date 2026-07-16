@@ -11,6 +11,8 @@
 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { createProvider } from "./agent/providers/index.ts";
+import type { ModelProvider } from "./agent/providers/types.ts";
 import { AgentRuntime, ROOT_AGENT_ID } from "./agent/runtime.ts";
 import { BUILD_INFO } from "./config/build-info.ts";
 import { ConfigError, DEFAULT_CONFIG_PATH, loadConfig } from "./config/index.ts";
@@ -19,6 +21,7 @@ import type {
   BuildInfo,
   DhConfig,
   ExitCode as ExitCodeType,
+  ProviderConfig,
   SessionClientKind,
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
@@ -59,9 +62,41 @@ export interface CliOptions {
   job: boolean;
   config: string;
   env: string | null;
+  /** DH-0035: `--check` (or the `dh doctor` subcommand, an alias set by main()) — runs one
+   * cheap no-op provider call per configured model and exits, never entering the agent loop. */
+  check: boolean;
+  /** DH-0035: validates config/instructions/provider-client construction and exits 0 without
+   * ever calling a model. */
+  dryRun: boolean;
 }
 
 const FLAGS_WITH_VALUES = new Set(["--connect", "--port", "--instructions", "--config", "--env"]);
+
+/** DH-0035: the minimal, valid `dh.json` scaffolded by `dh init` — kept byte-for-byte in sync
+ * with README.md's own sample config so the two never drift apart. */
+export const SAMPLE_DH_JSON = `{
+  "options": { "defaultModel": "sonnet", "runInBackgroundDefault": true, "maxTurns": 100 },
+  "models": [
+    {
+      "name": "sonnet",
+      "provider": "anthropic",
+      "model": "sonnet-5",
+      "inputPricePerMToken": 3,
+      "outputPricePerMToken": 15
+    },
+    { "name": "gemma4", "provider": "bedrock", "model": "gemma4" }
+  ],
+  "provider": [
+    { "name": "anthropic", "type": "anthropic" },
+    { "name": "bedrock", "type": "bedrock" },
+    { "name": "local", "type": "anthropic", "baseURL": "http://localhost:8080" }
+  ],
+  "skillPaths": ["./skills"],
+  "mcpServers": {},
+  "systemPrompt": null,
+  "security": { "token": null, "tls": null }
+}
+`;
 
 /** Printed by `--help`/`-h`, handled before flag parsing/config loading so it never depends
  * on a working `dh.json` — mirrors the mode matrix and flag list in README.md / HANDOFF.md §2. */
@@ -73,6 +108,8 @@ Usage:
   dh --server                     Headless server only (port 4000, or --port).
   dh --connect <host>              Console client to a remote server.
   dh --connect <host> --web        Web client, locally served, connected to a remote server.
+  dh init                         Scaffold a starter dh.json in the working directory.
+  dh doctor                       Alias for --check.
 
 Flags:
   --web                    Serve the web UI instead of (or alongside --connect) the console TUI.
@@ -84,6 +121,11 @@ Flags:
   --config <path>          Path to dh.json (default: ./dh.json).
   --env <file>             Load dotenv-style environment variables from <file> before dh.json
                            is loaded, so its $(VAR) interpolation can see them.
+  --check                  For each configured model, make one cheap no-op provider call and
+                           report pass/fail, then exit. Never enters the agent loop. Same as
+                           the "dh doctor" subcommand.
+  --dry-run                Validate config parsing, instructions file readability, and
+                           provider client construction, then exit 0. Never calls a model.
   --help, -h               Show this help and exit.
   --version                Show build identity (version, git sha, dirty flag) and exit.
 
@@ -112,6 +154,8 @@ export function parseArgs(argv: string[]): CliOptions {
     job: false,
     config: DEFAULT_CONFIG_PATH,
     env: null,
+    check: false,
+    dryRun: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -126,6 +170,14 @@ export function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--job") {
       options.job = true;
+      continue;
+    }
+    if (arg === "--check") {
+      options.check = true;
+      continue;
+    }
+    if (arg === "--dry-run") {
+      options.dryRun = true;
       continue;
     }
     if (arg !== undefined && FLAGS_WITH_VALUES.has(arg)) {
@@ -395,6 +447,16 @@ export interface CliDeps {
   readEnvFile: (path: string) => Promise<string>;
   applyEnv: (vars: Record<string, string>) => void;
   loadSystemPrompt: (config: DhConfig) => Promise<string>;
+  /** DH-0035 (`dh init`): whether a file already exists at `path` — injectable so tests never
+   * touch the real filesystem. */
+  fileExists: (path: string) => Promise<boolean>;
+  /** DH-0035 (`dh init`): writes `contents` to `path`, creating it. */
+  writeFile: (path: string, contents: string) => Promise<void>;
+  /** DH-0035 (`dh doctor`/`--check`, `--dry-run`): builds the real provider adapter for a
+   * `dh.json` provider entry — injectable so tests can supply a fake that never hits the
+   * network. Construction itself (as opposed to `.complete()`) is synchronous today for both
+   * built-in adapters, but the signature stays sync-or-throw either way. */
+  createProvider: (config: ProviderConfig) => ModelProvider;
   /** Used only by the standalone `--instructions` path (see the module doc comment above
    * for why that path never goes through createAgentLoop/createServer). Exposes `stopRoot`
    * too (DH-0011) so this path's SIGTERM/SIGINT handler has something real to call. */
@@ -465,6 +527,11 @@ function defaultDeps(): CliDeps {
     readEnvFile,
     applyEnv: (vars) => Object.assign(process.env, vars),
     loadSystemPrompt,
+    fileExists: (path) => Bun.file(path).exists(),
+    writeFile: async (path, contents) => {
+      await Bun.write(path, contents);
+    },
+    createProvider,
     // The standalone path's own runtime is always constructed with client: "none" directly
     // inside createStandaloneRuntime() (it's not one of the four interactive modes this
     // `client` param maps from), so the value passed here is intentionally unused.
@@ -624,6 +691,138 @@ async function runInteractiveMode(
   }
 }
 
+/**
+ * `dh init` (DH-0035): scaffolds README.md's sample `dh.json` into the working directory (or
+ * wherever `--config <path>` points). Refuses to overwrite an existing config file — fails
+ * loudly rather than clobbering an operator's real config. Only `--config` is a meaningful
+ * flag here; anything else is a usage error, same as any other unrecognized flag.
+ */
+async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
+  const { io } = deps;
+  let targetPath = DEFAULT_CONFIG_PATH;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--config") {
+      i += 1;
+      const value = argv[i];
+      if (value === undefined) {
+        return fail(io, "--config requires a value");
+      }
+      targetPath = value;
+      continue;
+    }
+    return fail(io, `unknown flag: ${arg}`);
+  }
+
+  let exists: boolean;
+  try {
+    exists = await deps.fileExists(targetPath);
+  } catch (err) {
+    return fail(io, `failed to check ${targetPath}: ${(err as Error).message}`);
+  }
+  if (exists) {
+    return fail(
+      io,
+      `refusing to overwrite existing config file: ${targetPath} (remove it first, or pass --config <path> to scaffold somewhere else)`,
+    );
+  }
+
+  try {
+    await deps.writeFile(targetPath, SAMPLE_DH_JSON);
+  } catch (err) {
+    return fail(io, `failed to write ${targetPath}: ${(err as Error).message}`);
+  }
+
+  io.stdout(
+    `dh: wrote a starter config to ${targetPath}. Edit it to add your API key/model, then run "dh" to start (or "dh doctor" to verify it first).`,
+  );
+  io.exit(ExitCode.Success);
+  return ExitCode.Success;
+}
+
+/**
+ * `dh doctor` / `--check` (DH-0035): for each configured model, makes one cheap no-op provider
+ * call (a 1-token completion, no tools) and reports pass/fail — never enters the real agent
+ * loop, so a broken credential/model-access problem surfaces before an operator commits to a
+ * real (possibly costly, possibly unattended) run.
+ */
+async function runDoctor(config: DhConfig, deps: CliDeps): Promise<ExitCodeType> {
+  const { io } = deps;
+  const providersByName = new Map(config.provider.map((p) => [p.name, p]));
+  let anyFailed = false;
+
+  for (const model of config.models) {
+    const providerConfig = providersByName.get(model.provider);
+    if (!providerConfig) {
+      // Shouldn't happen post-validateConfig (models reference known providers), but a
+      // provider-agnostic guard costs nothing and keeps this loop crash-free either way.
+      io.stdout(`FAIL ${model.name}: no provider named "${model.provider}" in config`);
+      anyFailed = true;
+      continue;
+    }
+    try {
+      const provider = deps.createProvider(providerConfig);
+      await provider.complete({
+        model: model.model,
+        system: "dh doctor: connectivity check.",
+        messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
+        tools: [],
+        maxTokens: 1,
+      });
+      io.stdout(`PASS ${model.name} (provider "${providerConfig.name}")`);
+    } catch (err) {
+      io.stdout(
+        `FAIL ${model.name} (provider "${providerConfig.name}"): ${(err as Error).message}`,
+      );
+      anyFailed = true;
+    }
+  }
+
+  const code = anyFailed ? ExitCode.HarnessError : ExitCode.Success;
+  io.exit(code);
+  return code;
+}
+
+/**
+ * `--dry-run` (DH-0035): validates everything up to but not including the first real model
+ * call — config (already loaded by the time this runs), the instructions file if
+ * `--instructions` was given, and provider client construction for every configured provider
+ * — then exits 0 without spending any tokens.
+ */
+async function runDryRun(
+  options: CliOptions,
+  config: DhConfig,
+  deps: CliDeps,
+): Promise<ExitCodeType> {
+  const { io } = deps;
+
+  if (options.instructions !== null) {
+    try {
+      await deps.readInstructions(options.instructions);
+    } catch (err) {
+      return fail(io, (err as Error).message);
+    }
+  }
+
+  for (const providerConfig of config.provider) {
+    try {
+      deps.createProvider(providerConfig);
+    } catch (err) {
+      return fail(
+        io,
+        `provider "${providerConfig.name}" failed to construct: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  io.stdout(
+    "dh: dry run OK — config, instructions file, and provider client construction all " +
+      "validated. No model was called.",
+  );
+  io.exit(ExitCode.Success);
+  return ExitCode.Success;
+}
+
 /** Runs the CLI end to end. Returns the exit code it either passed to `deps.io.exit` (real
  * process) or would have (tests inject a no-op `exit` and read the return value instead). */
 export async function main(
@@ -645,11 +844,27 @@ export async function main(
     return ExitCode.Success;
   }
 
+  // `dh init` (DH-0035): a subcommand, not a flag — handled before parseArgs (which has no
+  // concept of positional subcommands) and, like --help/--version, never depends on a working
+  // dh.json existing yet.
+  if (argv[0] === "init") {
+    return runInit(argv.slice(1), deps);
+  }
+
+  // `dh doctor` (DH-0035): a documented alias for `--check`, for operators who reach for a
+  // subcommand rather than a flag. Strips "doctor" off the front and folds it into the same
+  // --check flag path below so it gets the exact same handling (including --config support).
+  const isDoctorSubcommand = argv[0] === "doctor";
+  const argvForParsing = isDoctorSubcommand ? argv.slice(1) : argv;
+
   let options: CliOptions;
   try {
-    options = parseArgs(argv);
+    options = parseArgs(argvForParsing);
   } catch (err) {
     return fail(io, (err as Error).message);
+  }
+  if (isDoctorSubcommand) {
+    options.check = true;
   }
 
   const mode = composeMode(options);
@@ -676,6 +891,16 @@ export async function main(
     systemPrompt = await deps.loadSystemPrompt(config);
   } catch (err) {
     return fail(io, (err as Error).message);
+  }
+
+  // DH-0035: both --check/`dh doctor` and --dry-run stop here — config and systemPrompt are
+  // already validated by this point, and neither mode ever enters the interactive/standalone
+  // agent loop below.
+  if (options.check) {
+    return runDoctor(config, deps);
+  }
+  if (options.dryRun) {
+    return runDryRun(options, config, deps);
   }
 
   if (options.instructions === null) {

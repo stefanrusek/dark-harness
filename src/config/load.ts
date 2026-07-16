@@ -21,7 +21,12 @@ export async function loadConfig(
 
   const file = Bun.file(path);
   if (!(await file.exists())) {
-    throw new ConfigError(`config file not found: ${path}`);
+    // DH-0035 fix: the original message ("config file not found: dh.json") gave a first-time
+    // operator no path forward — no pointer to `--config`, no mention of `dh init`, no README
+    // link. This applies regardless of whether the operator ever discovers `dh init` exists.
+    throw new ConfigError(
+      `config file not found: ${path}\n  Run "dh init" to scaffold a starter dh.json in the current directory, or pass --config <path> to point at an existing config file. See README.md for the full schema.`,
+    );
   }
 
   let raw: unknown;
