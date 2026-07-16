@@ -24,11 +24,60 @@ export interface StopAgentCommand {
   agentId: string;
 }
 
+// DH-0093: slash-command backend support (model switching, skill invocation). Additive to
+// ClientCommand — see docs/adr/... escalation trigger rationale in CLAUDE.md §6 item 2; this
+// round's design was already architect-signed (Fable) in the ticket itself.
+export interface ListModelsCommand {
+  type: "list_models";
+}
+
+export interface ModelInfo {
+  name: string;
+  provider: string;
+  model: string; // provider-side id, display only
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+export interface ListModelsResponse extends CommandAck {
+  models: ModelInfo[];
+}
+
+export interface SwitchModelCommand {
+  type: "switch_model";
+  agentId: string; // v1: must be ROOT_AGENT_ID; anything else -> 400 ack
+  model: string;
+}
+
+export interface ListSkillsCommand {
+  type: "list_skills";
+}
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
+
+export interface ListSkillsResponse extends CommandAck {
+  skills: SkillInfo[];
+}
+
+export interface InvokeSkillCommand {
+  type: "invoke_skill";
+  agentId: string;
+  skill: string;
+  args?: string;
+}
+
 export type ClientCommand =
   | SendMessageCommand
   | RequestAgentTreeCommand
   | DownloadLogsCommand
-  | StopAgentCommand;
+  | StopAgentCommand
+  | ListModelsCommand
+  | SwitchModelCommand
+  | ListSkillsCommand
+  | InvokeSkillCommand;
 
 export interface CommandAck {
   ok: boolean;

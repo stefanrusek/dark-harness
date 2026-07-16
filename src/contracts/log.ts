@@ -117,6 +117,17 @@ export interface LogFailedEvent extends LogEventBase {
   reason: string;
 }
 
+/** DH-0093: durable record of a mid-session model switch (`switch_model` command taking
+ * effect) — the JSONL counterpart to the SSE `ModelSwitchedEvent` (src/contracts/events.ts).
+ * The header's own `model` field stays the spawn-time value (headers are immutable, see this
+ * file's own header comment); replaying a session's true model over time means the header
+ * model folded with every `model_switched` line in order. */
+export interface LogModelSwitchedEvent extends LogEventBase {
+  type: "model_switched";
+  from: string;
+  to: string;
+}
+
 export type LogEvent =
   | LogMessageEvent
   | LogToolCallEvent
@@ -124,7 +135,8 @@ export type LogEvent =
   | LogTokenUsageEvent
   | LogStatusChangeEvent
   | LogCompletedEvent
-  | LogFailedEvent;
+  | LogFailedEvent
+  | LogModelSwitchedEvent;
 
 /** The union of every line type that can appear in an agent's JSONL file. */
 export type LogLine = LogHeader | LogEvent;

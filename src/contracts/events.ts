@@ -109,6 +109,19 @@ export interface ResyncEvent extends SseEventBase {
   type: "resync";
 }
 
+/**
+ * DH-0093: emitted when a mid-session model switch (`switch_model` command) actually takes
+ * effect on the loop's next turn — see `src/agent/loop.ts`'s `registerModelSwitch` sink.
+ * `from`/`to` are the friendly `ModelConfig.name` aliases, matching `agent_spawned`'s own
+ * `model` field convention.
+ */
+export interface ModelSwitchedEvent extends SseEventBase {
+  type: "model_switched";
+  agentId: string;
+  from: string;
+  to: string;
+}
+
 export type ServerSentEvent =
   | AgentOutputEvent
   | AgentStatusEvent
@@ -117,4 +130,5 @@ export type ServerSentEvent =
   | ToolCallEvent
   | ToolResultEvent
   | SessionEndedEvent
-  | ResyncEvent;
+  | ResyncEvent
+  | ModelSwitchedEvent;
