@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0062
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -38,3 +38,16 @@ Found while executing DH-0061's spikes against a real Chromium (2026-07-15, Fabl
 ## Open Questions
 
 ## Notes
+
+**Resolution (2026-07-15, Hedy):** Fixed both `e2e/web.test.ts` and `e2e/connect-web.test.ts`
+(same stale-"done" bug found in the latter while auditing the former). Both now wait for
+`data-status`/badge `"waiting"` instead of `"done"`; `web.test.ts` additionally asserts no
+`.session-banner` exists yet, then drives the real "Stop" button (per
+`src/web/client/render.ts`'s `renderAgentHeader`, rendered while `status === "waiting"`) and
+waits for the session-ended banner afterward — exercising the full interactive-stop path
+through the real UI, not just skipping the assertion. `typecheck`/`lint`/`test:coverage`
+clean (1259/1259, no `src/` touched). Full `bun run e2e`: 30 pass / 2 fail, both the
+long-standing missing-Chromium-binary sandbox gap (`/opt/pw-browsers/chromium` absent),
+confirmed by the launch error text itself — not a new regression. Could not run the fixed
+assertions against a real browser in this sandbox; verified by reading `render.ts` closely
+against the new assertions instead.

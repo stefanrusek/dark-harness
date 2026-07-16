@@ -380,3 +380,38 @@ unrelated to this diff and present before it.
 **Closed DH-0059** via spile-ops (`implementing` → `closed`, resolution `done`), added a
 resolution note to the ticket, regenerated the tracker view. No new open threads from this
 round.
+
+### 2026-07-15 — Round 11 (fresh process again): DH-0062, e2e/web.test.ts stale "done"/session-ended assertions
+
+Came online fresh for DH-0062: Fable found while running DH-0061's spikes against real
+Chromium that `e2e/web.test.ts` still asserts `data-status: "done"`, a "Done" badge, and a
+"Session ended — success (exit 0)" banner after a single completed turn — stale against
+Core Round 5's interactive semantics (root agent parks at "waiting" with a Stop button, no
+session-ended banner, until explicitly stopped — same DH-0059 gap this domain already fixed
+in `tui.test.ts`/`security.test.ts`). Same worktree-provenance issue every round: landed on
+a stale branch tip (`12679e4`, founding-docs only, 3 files); `git reset --hard` onto
+`origin/claude/coordinator-onboarding-kab9ls`'s real tip (`1ec3ecb`) before anything else
+was possible. Noting again per Round 10: worth a prompt-layer fix, but not mine to fix here.
+
+**Fix, read `src/web/client/render.ts` to confirm exact DOM state before touching
+assertions (no assertions loosened, just re-pointed at the real semantics):**
+- `e2e/web.test.ts` — wait for `data-status`/`.status-dot` class `waiting` (not `done`) and
+  header badge text `"Waiting"` (not `"Done"`, matches `STATUS_STYLES` in
+  `src/web/client/format.ts`); assert `.session-banner` doesn't exist yet; then click the
+  real "Stop" button (rendered whenever `agent.status === "running" || "waiting"` per
+  `render.ts`'s `renderAgentHeader`) and *then* wait for the session-ended banner — same
+  "drive the real UI to the interesting state, don't skip it" discipline as prior rounds.
+- `e2e/connect-web.test.ts` — same bug, one assertion (`"Done"` → `"Waiting"`, no
+  session-banner assertion in this file to begin with, so nothing else needed touching).
+
+**Gates:** `typecheck`, `lint` clean, no fixes needed. `test:coverage`: 1259/1259, no `src/`
+changes this round (only `e2e/`), coverage table unaffected. Full `bun run e2e`: 30 pass / 2
+fail — both failures are the same long-standing missing-Chromium-binary gap
+(`/opt/pw-browsers/chromium` doesn't exist in this sandbox) in `web.test.ts` and
+`connect-web.test.ts`, confirmed via the error text itself (`Failed to launch chromium
+because executable doesn't exist`), not a new regression from this diff. Could not fully
+verify the fix runs green against a real browser here — read `render.ts` closely instead to
+confirm the DOM structure/status labels/button semantics my new assertions rely on are
+correct.
+
+No new open threads from this round.

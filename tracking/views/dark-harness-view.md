@@ -67,7 +67,6 @@ source: tracking/
 | [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
-| [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | bug | stefan |
 
 ### implementing
 
@@ -82,6 +81,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | done |
 | [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | done |
 | [DH-0054](../DH-0054-no-first-class-grep-glob-tools.md) | No first-class Grep/Glob tools — all search is delegated informally to Bash | done |
 | [DH-0043](../DH-0043-no-prompt-caching.md) | No prompt caching — one of the largest cost levers for an agentic loop is unused | superseded |
@@ -96,4 +96,3 @@ source: tracking/
 | [DH-0029](../DH-0029-web-accessibility-and-error-surfacing-gaps.md) | Web UI has no keyboard-reachable agent list, no ARIA live regions, a missing "stopped" status color, and both clients drop errors after a few seconds with no history | done |
 | [DH-0027](../DH-0027-tui-tree-view-scroll-follows-selection-bug.md) | TUI's agent tree view doesn't scroll to follow selection — the highlighted entry can scroll off-screen with no way to see it | done |
 | [DH-0026](../DH-0026-tui-input-editing-gaps.md) | TUI's input box has no cursor movement, no bracketed-paste support, and two dead keys | done |
-| [DH-0024](../DH-0024-sse-reconnect-lacks-backoff-and-gap-indication.md) | Both TUI and Web SSE clients reconnect on a fixed delay with no backoff, and give no indication of a missed-event gap or session restart | done |

@@ -75,30 +75,38 @@ describe("web UI (dh --web) in a real headless browser", () => {
     await composerInput.fill("hi from playwright");
     await page.getByRole("button", { name: "Send" }).click();
 
-    // Sidebar: one root row, status eventually "done" (status colors, HANDOFF.md §9).
+    // Sidebar: one root row. Per Core Round 5's interactive semantics (DH-0059), a root
+    // agent with no tool call in its turn parks at "waiting" (Stop button, no session-ended
+    // banner) rather than "done" — it never reaches session end on its own.
     const rootRow = page.locator(".agent-row.root");
     await rootRow.waitFor({ state: "visible" });
     await page.waitForFunction(
-      "document.querySelector('.agent-row.root')?.getAttribute('data-status') === 'done'",
+      "document.querySelector('.agent-row.root')?.getAttribute('data-status') === 'waiting'",
       undefined,
       { timeout: 15_000 },
     );
-    expect(await rootRow.getAttribute("data-status")).toBe("done");
+    expect(await rootRow.getAttribute("data-status")).toBe("waiting");
     const dotClass = await rootRow.locator(".status-dot").getAttribute("class");
-    expect(dotClass).toMatch(/status-done/);
+    expect(dotClass).toMatch(/status-waiting/);
 
     // Main pane: live output, header status badge, token/cost stats.
     await page.waitForFunction(
       "document.querySelector('.agent-output')?.textContent === 'Hello from the web e2e mock!'",
     );
-    expect(await page.locator(".agent-header-title .status-badge").textContent()).toBe("Done");
+    expect(await page.locator(".agent-header-title .status-badge").textContent()).toBe("Waiting");
     const headerStats = await page.locator(".agent-header-stats").textContent();
     expect(headerStats).toContain("in /");
     expect(headerStats).toContain("out ·");
 
-    // Session summary strip + end-of-session banner.
+    // Session summary strip: token/cost stats are shown, but there's no end-of-session
+    // banner yet — the root agent is only parked "waiting", not stopped.
     const sessionStats = await page.locator(".session-stats").textContent();
     expect(sessionStats).toContain("in /");
+    expect(await page.locator(".session-banner").count()).toBe(0);
+
+    // Drive an explicit stop (the Stop button rendered for a "waiting" agent per
+    // src/web/client/render.ts) through the real UI to verify session-ended behavior.
+    await page.getByRole("button", { name: "Stop" }).click();
     await page.waitForSelector(".session-banner");
     expect(await page.locator(".session-banner").textContent()).toBe(
       "Session ended — success (exit 0)",
