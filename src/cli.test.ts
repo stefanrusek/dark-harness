@@ -784,6 +784,13 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(code).toBe(ExitCode.Success);
     expect(io.exitCodes).toEqual([]);
     expect(io.stdoutLines[0]).toBe("yay");
+    // DH-0038: the operator gets an explicit message that this is a fresh session, not a
+    // continuation of the job that just ran.
+    expect(
+      io.stderrLines.some((l) =>
+        l.includes("starting a new interactive session (prior context is not preserved)"),
+      ),
+    ).toBe(true);
   });
 
   test("createRuntime is invoked with the loaded config and resolved system prompt", async () => {
