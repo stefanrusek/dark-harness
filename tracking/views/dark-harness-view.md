@@ -69,7 +69,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0037](../DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md) | No log rotation/disk-growth caps, no structured final run-summary artifact, and no log-analysis tooling | feature | stefan |
-| [DH-0066](../DH-0066-web-ui-visual-polish-markdown-surface-styling-sidebar-hierarchy-transcript-details.md) | Web UI visual polish: Markdown surface styling, sidebar hierarchy, transcript details | feature | stefan |
 
 ### verifying
 
