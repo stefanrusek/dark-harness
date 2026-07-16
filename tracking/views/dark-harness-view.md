@@ -50,7 +50,6 @@ source: tracking/
 | [DH-0001](../DH-0001-task-failed-marker-reliability.md) | `TASK_FAILED` marker is not reliably emitted despite being taught | bug | stefan |
 | [DH-0003](../DH-0003-sendmessage-resume-finished-conversation.md) | `SendMessage` should resume a finished agent's conversation, not just error cleanly | feature | stefan |
 | [DH-0004](../DH-0004-npm-packaging-single-platform.md) | npm package only ships a single-platform binary | feature | stefan |
-| [DH-0005](../DH-0005-npm-token-secret.md) | `NPM_TOKEN` repository secret not yet set | feature | stefan |
 | [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) | feature | stefan |
 | [DH-0012](../DH-0012-unbounded-memory-growth-across-harness.md) | Unbounded in-memory growth across the harness for long/wide-fanout runs | bug | stefan |
 | [DH-0020](../DH-0020-jsonl-logger-robustness-and-secrets-redaction.md) | JSONL logger has no write-error handling, no fsync, and no awareness of secrets in tool call I/O | bug | stefan |
@@ -103,9 +102,5 @@ source: tracking/
 | [DH-0079](../DH-0079-read-tool-s-truncation-model-diverges-from-real-claude-code-line-cap-notice-vs-byte-cap-hard-error.md) | Read tool's truncation model diverges from real Claude Code: line-cap+notice vs byte-cap+hard-error | done |
 | [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | done |
 | [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | done |
-<<<<<<< HEAD
 | [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | done |
-=======
 | [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online | done |
->>>>>>> worktree-agent-a083a08146aab4270
-| [DH-0073](../DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness-and-there-is-no-notebookedit-equivalent.md) | Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent | done |

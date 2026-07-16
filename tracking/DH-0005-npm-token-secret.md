@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0005
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -39,3 +39,10 @@ correctly fail.
 > [!NOTE]
 > This is a pure owner-authority action item — no agent can create or set a repository
 > secret. Nothing to delegate; just needs doing before the first real release tag.
+
+> [!NOTE]
+> Done (2026-07-16): owner confirmed the `NPM_TOKEN` repository secret has been added (a
+> 30-day granular npm access token scoped to `dark-harness`, per npm's current
+> granular-token UI). The `dark-harness` package name itself was also separately reserved
+> on npm as a placeholder (`dark-harness@0.0.1`) using a short-lived token, ahead of DH-0004's
+> real multi-platform packaging work.
