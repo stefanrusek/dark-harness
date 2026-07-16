@@ -1935,3 +1935,76 @@ applies — see `src/cli.test.ts`'s "the real loadSystemPrompt dep ..." tests fo
 
 No `src/agent/`, `src/config/`, or `src/cli.ts` source changes made this round — only
 `src/prompt/system-prompt.ts`/`.test.ts` and the two `src/cli.test.ts` test bodies above.
+
+### 2026-07-16 — DH-0044 (Core slice): real streaming for both providers
+
+Joint round with Radia (Server took the two contract edits, D1/D5). My slice: D2-D6 in
+full — `ProviderStreamCallbacks`/`complete()`'s optional third param
+(`src/agent/providers/types.ts`), the Anthropic adapter's switch to raw `messages.create({
+stream: true })` (D3), the Bedrock adapter's switch to `ConverseStreamCommand` (D4),
+`loop.ts`'s coalescing/fallback/mid-turn-partial-log (D5), and `emittedAny`-gated retry in
+both adapters (D6). Full writeup is in `tracking/DH-0044-no-streaming-partial-output.md`'s
+Notes section (I put the durable technical detail there rather than duplicating it here,
+since the ticket itself is the natural home for a design-implementation record other
+domains — Mary/Susan/Hedy, still pending — will read next).
+
+**Landed into an actively-shared checkout, mid-flight, for the first time this vividly.**
+Every prior round's "concurrent agent" note in this file was about *other domains'*
+directories (`src/tui/`, `src/server/`). This round I watched `src/agent/loop.ts`,
+`runtime.ts`, `tasks.ts`, `tools/index.ts`, and `src/cli.ts` — files squarely in my own
+Core ownership — change underneath me mid-edit (a concurrent DH-0050 ReportOutcome-tool
+round, judging by the diff shape). One `Edit` call I made to `loop.ts` landed cleanly
+against content I hadn't `Read` fresh; a formatter/PostToolUse hook and the other agent's
+own edits both fired in between my calls. Lesson for next time this happens: re-`Read`
+immediately before any edit whose `old_string` spans more than a few adjacent lines, don't
+trust an `old_string` built from an earlier `Read` once *any* sibling file in the same
+directory has shown as freshly modified — a stale match either silently no-ops or, worse,
+half-applies against content that's since moved. I never `git add -A`ed and scoped every
+`git add` to only the 9 files I actually own this round (mirroring Round 14's same
+discipline), so none of the concurrent DH-0050 work got swept into my commit.
+
+**Test-writing consequence of the concurrent DH-0050 landing:** the pre-existing
+`loop.test.ts` had ~18 of its ~27 tests already failing before I touched anything (verified
+via `git stash` on just that file) — DH-0050 added a "nudge" turn for any non-tool-use,
+non-`max_tokens` completion that hasn't self-reported yet, which every single-scripted-
+response test in the file assumed wouldn't happen. Not my ticket to fix, and I didn't touch
+that logic — but my own new streaming tests needed to route *around* it deterministically
+rather than accidentally depending on nudge semantics I don't own. Used `stopReason:
+"tool_use"` + `maxTurns: 1` in every isolated coalescing/fallback/ordering test — this
+guarantees exactly one `provider.complete()` call regardless of whatever DH-0050's
+self-report precedence chain ends up doing, since the nudge branch is gated on
+`stopReason !== "tool_use"`. Confirmed via `git stash`-diffing before/after that my new
+tests added zero additional failures to the file (18 fail before, 18 fail after — all
+pre-existing, all outside my scope).
+
+**D6 retry-gating judgment call** (documented inline in both adapters and in the ticket's
+Notes): the design text says "retry only until first delta." I gated on the first *text*
+delta specifically (`callbacks.onTextDelta`'s first invocation), not the first raw stream
+event of any kind (`message_start`, a tool-input delta, etc.) — a stream that got as far as
+`message_start` or a tool-use's `input_json_delta` but produced zero visible text before
+failing has nothing on screen to duplicate, so gating retry on "any event at all" would
+have been a strictly worse retry policy than before this ticket, for no correctness
+benefit. Anthropic's `message_delta`'s `usage` field also turned out to live on the event
+itself, not nested under `event.delta.usage` as I first guessed from the type name — caught
+by `tsc`, not by reasoning about the SDK's shape in the abstract; worth re-checking actual
+`.d.ts` shapes over pattern-matching a field name next time.
+
+**Verification, real Anthropic and real Bedrock, both via SSE not just the log:** the
+`--instructions --job` path only proves the *log* stays turn-granular (one non-partial
+`message` line) — it says nothing about whether the client-visible stream was actually
+incremental, since standalone mode never exposes SSE externally. Had to stand up a real
+`dh --server` and `curl -N` the raw `/api/events` stream to prove the actual point of this
+ticket: 49 incremental `agent_output` events for one long Anthropic turn, 109 for one long
+Bedrock (Claude Haiku 4.5) turn, both reconstructing byte-for-byte to the JSONL log's full
+text. The `--job` log-only check would have passed even if I'd accidentally left the old
+whole-turn emission in place — a useful reminder that "the log looks right" and "the wire
+actually streamed" are genuinely different claims requiring genuinely different checks.
+
+Gates: `bun run typecheck`/`lint` clean on every file this round touched; `bun test` on the
+touched provider/contract files all 100%/100%; `loop.ts` 100% funcs/99.8%+ lines (the small
+remaining gap is pre-existing DH-0038/DH-0050 code, not mine). `bun run e2e` not run this
+round — no `e2e/` file changed, and the design's own E2E work (mock provider SSE streaming
+support) is explicitly sequenced after this round per D10.
+
+Left `tracking/DH-0044-no-streaming-partial-output.md` at `status: ready` (not closed) —
+TUI/Web/E2E rounds still pending per D10's domain table.

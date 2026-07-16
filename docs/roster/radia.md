@@ -402,3 +402,33 @@ environment gap, unrelated to Server). No code changes. Closed the ticket via
 Worth remembering for next time a ticket references "root cause of DH-NNNN" in a code
 comment: that's a strong signal the fix already shipped and only the ticket's status field
 is stale — check `git log -S"DH-NNNN"` before assuming a reported bug is still live.
+
+### 2026-07-16 — DH-0044, my slice only (two pre-approved contract edits + a DH-0012 note)
+
+Joint round with Grace — the design (Fable, 2026-07-15) explicitly pre-approved both
+`src/contracts/` edits as part of the architect sign-off itself, so no separate round-trip
+was needed. My whole slice:
+
+- `AgentOutputEvent`'s doc comment in `src/contracts/events.ts` (D1): states a single
+  assistant turn MAY arrive as many `agent_output` events, clients MUST accumulate. No wire
+  shape change — the `chunk` field already existed, this is purely a semantics clarification
+  for anyone reading the contract fresh.
+- `LogMessageEvent.partial?: true` in `src/contracts/log.ts` (D5): additive/optional, set
+  only on a mid-turn-error/stop's accumulated partial text. Same tolerance contract as every
+  other optional field in that file.
+- A sizing note on `tracking/DH-0012-unbounded-memory-growth-across-harness.md` (D8): once
+  streaming lands, `EventBuffer`'s 1000-event count cap represents far less wall-clock
+  history than before (one turn can now be 50-1000 events instead of 1) — flagged for
+  DH-0012's own implementer to size the count cap accordingly (or lean on the byte cap as
+  primary), not implemented here since DH-0012 is a separate ticket with its own owner.
+
+No handler changes — I confirmed the SSE path (`server.ts`'s `EventBuffer`/broadcast/
+`sanitizeEvent`) is genuinely event-shape-agnostic, exactly as the design predicted; nothing
+in `src/server/` needed to change for an event type that already existed to just arrive more
+often.
+
+Gates: `bun run typecheck`/`lint` clean. No new tests needed — both edits are pure type/doc
+additions with zero runtime behavior change on the Server side; existing `events.ts`/
+`log.ts` consumers (JSON serialization, `EventBuffer`, redaction) already handle unknown/
+optional fields correctly by construction (nothing in `src/server/` pattern-matches on every
+field of every event type).
