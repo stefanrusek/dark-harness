@@ -2161,8 +2161,10 @@ describe("main — dh init", () => {
       const config = await loadConfig(target);
       expect(config.options.defaultModel).toBe("sonnet");
     } finally {
+      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = prevApiKey;
+      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevRegion === undefined) delete process.env.AWS_REGION;
       else process.env.AWS_REGION = prevRegion;
     }
