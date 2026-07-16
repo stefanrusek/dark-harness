@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0076
 type: feature
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["architect design pass in progress"]
 created: 2026-07-16
 relations:
   depends_on: []
@@ -76,3 +76,11 @@ Real Claude Code has a TaskCreate/TaskGet/TaskList/TaskUpdate tool family (a str
 > "file everything real, don't pre-filter for importance" instruction, but flagged here as
 > the lowest-confidence/most speculative finding in the batch -- may turn out to be a
 > judgment call the coordinator declines to pursue.
+
+> [!NOTE]
+> Owner decision (2026-07-16): queue, not speculative — the owner considers this a genuinely
+> useful tool for agents doing real implementation work to track their own progress. Route to
+> the architect to design it matching real Claude Code's TaskCreate/TaskGet/TaskList/
+> TaskUpdate functionality as closely as practical for dh's shape (naming must avoid clashing
+> with dh's existing Task*/task_id vocabulary for sub-agent job supervision, per this
+> ticket's own Open Question).

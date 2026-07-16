@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0074
 type: feature
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["architect design pass in progress"]
 created: 2026-07-16
 relations:
   depends_on: []
@@ -23,26 +23,43 @@ Real Claude Code ships WebFetch and WebSearch tools letting an agent fetch a URL
 
 ## User Stories
 
-### As an agent debugging an unfamiliar error or API, I want to fetch documentation or search the web
+**Owner decision (2026-07-16): four distinct user stories, not one bundled story — WebFetch
+and WebSearch are separate tools with separate opt-in settings, both defaulting off. The
+architect should design the exact settings shape.**
 
-- Given an agent hits an error message it doesn't recognize, when it has WebFetch/WebSearch
-  available, then it can look up the error or the relevant library's docs instead of
-  guessing from training-data knowledge alone.
-- Given an operator running dh air-gapped (the default posture per ADR 0003), when
-  WebFetch/WebSearch is not configured, then the tools are either absent or fail with a
-  clear, expected error -- never a silent hang or a surprising network call.
+### As an agent debugging an unfamiliar error or looking up a specific URL, I want to fetch a page's content
+
+- Given WebFetch is enabled, when the agent calls it with a URL (and optionally a prompt
+  describing what to extract), then it returns processed page content, mirroring real
+  Claude Code's WebFetch shape.
+
+### As an agent needing to search the web for current information, I want a WebSearch tool
+
+- Given WebSearch is enabled, when the agent calls it with a query, then it returns search
+  results, mirroring real Claude Code's WebSearch shape.
+
+### As an operator, I want a setting to enable/disable WebFetch, defaulting off
+
+- Given `dh.json`, when a WebFetch-enabling setting is set, then the tool is registered;
+  when unset, the tool is absent entirely (not registered-but-erroring) — default is off,
+  consistent with the air-gapped-by-default posture (ADR 0003).
+
+### As an operator, I want a separate setting to enable/disable WebSearch, defaulting off
+
+- Given `dh.json`, when a WebSearch-enabling setting is set, then the tool is registered;
+  when unset, absent entirely. Independent of the WebFetch setting — an operator may want
+  one without the other (e.g. WebFetch for a specific allowed URL, no open-ended search).
 
 ## Functional Requirements
 
-- New tools: `src/agent/tools/web-fetch.ts` and/or `src/agent/tools/web-search.ts`, mirroring
+- New tools: `src/agent/tools/web-fetch.ts` and `src/agent/tools/web-search.ts`, mirroring
   real Claude Code's WebFetch (URL + prompt, returns processed content) and WebSearch
   (query, returns results) schemas.
-- Gate behind explicit `dh.json` opt-in (e.g. under `options` or a new config key) rather
-  than being unconditionally registered in `ALL_TOOLS`, given the project's air-gapped-
-  by-default security posture (ADR 0003, Constitution §4.3) -- this likely needs architect
-  (Fable) review per Constitution §6.4 ("anything touching the security posture").
-  identify: does adding network-egress tools count as a security-posture change requiring
-  escalation? Recommend yes, given §6.4's explicit framing.
+- Two independent `dh.json` opt-in settings (exact field names/shape left to the architect
+  design pass) — neither tool is unconditionally registered in `ALL_TOOLS`, given the
+  project's air-gapped-by-default security posture (ADR 0003, Constitution §4.3). This
+  needs architect (Fable) review per Constitution §6.4 ("anything touching the security
+  posture") — routed there.
 - Ownership: `src/agent/tools/` is Core domain per Constitution §3.
 
 ## Assumptions

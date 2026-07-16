@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["deferred (2026-07-16): GitHub issue #7 created to gauge demand"]
 created: 2026-07-16
 relations:
   depends_on: []
@@ -79,3 +79,7 @@ Real Claude Code's AskUserQuestion tool lets the agent pause and ask a human a s
 > speculative findings in the batch -- flagged draft and recommended for architect review
 > given the contracts-level surface it implies, unlike the more mechanical tool-parameter
 > gaps also filed in this pass.
+
+> [!NOTE]
+> Owner decision (2026-07-16): defer. Public GitHub issue created to gauge real demand
+> before any implementation: https://github.com/stefanrusek/dark-harness/issues/7
