@@ -102,7 +102,7 @@ export const SAMPLE_DH_JSON = `{
     {
       "name": "sonnet",
       "provider": "anthropic",
-      "model": "sonnet-5",
+      "model": "claude-sonnet-5",
       "inputPricePerMToken": 3,
       "outputPricePerMToken": 15
     },

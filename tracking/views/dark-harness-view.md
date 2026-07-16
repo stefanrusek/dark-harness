@@ -89,6 +89,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0092](../DH-0092-scaffolded-dh-init-config-uses-invalid-anthropic-model-id-every-real-api-call-404s.md) | Scaffolded dh init config uses invalid Anthropic model id, every real API call 404s | done |
 | [DH-0091](../DH-0091-dh-doesn-t-read-a-project-s-mcp-json-into-its-mcp-server-config.md) | dh doesn't read a project's .mcp.json into its MCP server config | done |
 | [DH-0090](../DH-0090-dh-init-s-scaffolded-config-has-no-api-key-region-placeholders-using-var-env-interpolation.md) | dh init's scaffolded config has no API-key/region placeholders using $(VAR) env interpolation | done |
 | [DH-0087](../DH-0087-create-github-issue-to-gauge-demand-for-mcp-oauth-support.md) | Create GitHub issue to gauge demand for MCP OAuth support | done |
@@ -103,4 +104,3 @@ source: tracking/
 | [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | done |
 | [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | done |
 | [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | done |
-| [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online | done |

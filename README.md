@@ -145,7 +145,7 @@ This is exactly what `dh init` scaffolds:
     {
       "name": "sonnet",
       "provider": "anthropic",
-      "model": "sonnet-5",
+      "model": "claude-sonnet-5",
       "inputPricePerMToken": 3,
       "outputPricePerMToken": 15
     },
