@@ -8,7 +8,13 @@
 // thin adapter in src/cli.ts bridges Core's actual shape to this one. Flagged explicitly in
 // docs/handoffs/server.md's status log as the integration point to verify.
 
-import type { AgentTreeNode, LogLine, ServerSentEvent } from "../contracts/index.ts";
+import type {
+  AgentTreeNode,
+  LogLine,
+  ModelInfo,
+  ServerSentEvent,
+  SkillInfo,
+} from "../contracts/index.ts";
 
 export type AgentLoopEventListener = (event: ServerSentEvent) => void;
 export type AgentLoopLogListener = (agentId: string, line: LogLine) => void;
@@ -25,4 +31,16 @@ export interface AgentLoopHandle {
   stopAgent(agentId: string): void;
   /** Current snapshot of the agent tree (request_agent_tree command). */
   getAgentTree(): AgentTreeNode[];
+  /** DH-0093: the configured model catalog, wire-shaped (list_models command). */
+  listModels(): ModelInfo[];
+  /** DH-0093: switches the given agent's active model (switch_model command). v1 is
+   * root-only — implementations should reject/throw for any other agentId; Server's own
+   * handler (src/server/commands.ts) is responsible for translating that into a 400 ack. */
+  switchModel(agentId: string, model: string): void;
+  /** DH-0093: the currently-known skill catalog, wire-shaped (list_skills command). */
+  listSkills(): SkillInfo[];
+  /** DH-0093: composes and delivers a `/skillname [args]` invocation into the given agent's
+   * conversation (invoke_skill command). May reject/throw for an unknown skill name; Server's
+   * own handler is responsible for translating that into a 404 ack. */
+  invokeSkill(agentId: string, skill: string, args: string | undefined): void | Promise<void>;
 }

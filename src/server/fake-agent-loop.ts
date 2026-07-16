@@ -3,7 +3,13 @@
 // exported for other domains (TUI/Web/E2E) that want a lightweight fixture to develop
 // against before Core's real src/agent/loop.ts lands. Not production code.
 
-import type { AgentTreeNode, LogLine, ServerSentEvent } from "../contracts/index.ts";
+import type {
+  AgentTreeNode,
+  LogLine,
+  ModelInfo,
+  ServerSentEvent,
+  SkillInfo,
+} from "../contracts/index.ts";
 import type {
   AgentLoopEventListener,
   AgentLoopHandle,
@@ -16,6 +22,10 @@ export class FakeAgentLoop implements AgentLoopHandle {
   private tree: AgentTreeNode[] = [];
   readonly sentMessages: Array<{ agentId: string; message: string }> = [];
   readonly stoppedAgents: string[] = [];
+  private models: ModelInfo[] = [];
+  private skills: SkillInfo[] = [];
+  readonly switchedModels: Array<{ agentId: string; model: string }> = [];
+  readonly invokedSkills: Array<{ agentId: string; skill: string; args: string | undefined }> = [];
 
   // An explicit (even empty) constructor is required for Bun's coverage instrumentation to
   // count the class's synthetic constructor slot as "hit" — see docs/handoffs/server.md
@@ -48,6 +58,32 @@ export class FakeAgentLoop implements AgentLoopHandle {
   /** Test setup: install the tree snapshot getAgentTree()/commands should see. */
   setAgentTree(tree: AgentTreeNode[]): void {
     this.tree = tree;
+  }
+
+  listModels(): ModelInfo[] {
+    return this.models;
+  }
+
+  /** Test setup: install the models list listModels()/commands should see. */
+  setModels(models: ModelInfo[]): void {
+    this.models = models;
+  }
+
+  switchModel(agentId: string, model: string): void {
+    this.switchedModels.push({ agentId, model });
+  }
+
+  listSkills(): SkillInfo[] {
+    return this.skills;
+  }
+
+  /** Test setup: install the skills list listSkills()/commands should see. */
+  setSkills(skills: SkillInfo[]): void {
+    this.skills = skills;
+  }
+
+  invokeSkill(agentId: string, skill: string, args: string | undefined): void {
+    this.invokedSkills.push({ agentId, skill, args });
   }
 
   /** Test drive: push an event to every current onEvent subscriber. */

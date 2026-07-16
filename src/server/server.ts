@@ -339,7 +339,7 @@ export class DhServer {
       );
     }
 
-    const result = handleCommand(parsed as ClientCommand, {
+    const result = await handleCommand(parsed as ClientCommand, {
       agentLoop: this.agentLoop,
       logger: this.logger,
       sessionId: this.sessionId,

@@ -329,6 +329,13 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     case "tool_call":
     case "tool_result":
       return next;
+    // DH-0093: `model_switched` is a new additive SSE event (Core/Server's backend piece of
+    // DH-0093) not yet consumed here — the `/model` picker + model_switched handling is a
+    // separate TUI/Web round per the ticket's domain assignment. Handled explicitly (not
+    // folded into the exhaustiveness-check default below) for the same reason tool_call/
+    // tool_result are: this is a deliberately-deferred variant, not a truly unhandled one.
+    case "model_switched":
+      return next;
     default:
       // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added to
       // src/contracts/ without a case here (assertNever's parameter type is `never`, which

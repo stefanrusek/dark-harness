@@ -78,6 +78,10 @@ function fakeAgentLoop(
     sendMessage: () => {},
     stopAgent: () => {},
     getAgentTree: () => [],
+    listModels: () => [],
+    switchModel: () => {},
+    listSkills: () => [],
+    invokeSkill: () => {},
     ...overrides,
   };
 }

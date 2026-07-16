@@ -22,10 +22,12 @@ import type {
   BuildInfo,
   DhConfig,
   ExitCode as ExitCodeType,
+  ModelInfo,
   ProviderConfig,
   SecurityConfig,
   ServerSentEvent,
   SessionClientKind,
+  SkillInfo,
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
 import {
@@ -561,6 +563,25 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
 
   getAgentTree(): AgentTreeNode[] {
     return this.runtime.getAgentTree();
+  }
+
+  /** DH-0093: thin delegations to AgentRuntime — the adapter's job here is only to bridge
+   * the wire-facing AgentLoopHandle shape onto Core's actual methods, same as every other
+   * method in this class. */
+  listModels(): ModelInfo[] {
+    return this.runtime.listModels();
+  }
+
+  switchModel(agentId: string, model: string): void {
+    this.runtime.switchModel(agentId, model);
+  }
+
+  listSkills(): SkillInfo[] {
+    return this.runtime.listSkills();
+  }
+
+  invokeSkill(agentId: string, skill: string, args: string | undefined): Promise<void> {
+    return this.runtime.invokeSkill(agentId, skill, args);
   }
 
   /** DH-0002: delegates to the underlying AgentRuntime.close() (closes the shared
