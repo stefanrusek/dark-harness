@@ -992,6 +992,14 @@ export async function main(
     // §2) — now via the same real interactive surface the no-instructions path uses. Note
     // this is a fresh AgentRuntime/session, not a continuation of the one that just ran the
     // instruction (unifying those is out of scope this round — see the status log).
+    //
+    // DH-0038: this transition is otherwise invisible to the operator — the job's final
+    // output prints, then a silent, contextless session starts with no indication the
+    // conversation didn't just continue. Say so explicitly. Full crash-recovery/session-
+    // resume design is separately handled by the architect; out of scope here.
+    io.stderr(
+      "dh: job complete; starting a new interactive session (prior context is not preserved)",
+    );
     return runInteractiveMode(mode, config, systemPrompt, deps);
   }
 
