@@ -589,3 +589,139 @@ describe("runAgentLoop — Round 5: interactive mode pauses instead of ending on
     ).toBe(true);
   });
 });
+
+describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral identity", () => {
+  test("with only non-deferred (built-in-shaped) tools, the tools array sent to the " +
+    "provider is identical across every turn and matches what the pre-DH-0002 " +
+    "compute-toolDefs-once code would have produced", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "call-1",
+            name: "Bash",
+            input: { command: "echo hi", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "call-2",
+            name: "Bash",
+            input: { command: "echo hi again", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    // Every tool in this Map is built-in-shaped: `deferred` is never set (mirrors ALL_TOOLS —
+    // no MCP tool ever gets merged in when no mcpServers are configured, per runtime.ts).
+    const tools = buildToolMap();
+    const { params } = baseParams({ provider, tools });
+
+    const result = await runAgentLoop(params);
+    expect(result.success).toBe(true);
+    expect(provider.calls).toHaveLength(3);
+
+    // This is exactly what the OLD (pre-DH-0002) code computed once, before the turn loop:
+    // `[...params.tools.values()].map((t) => ({ name, description, inputSchema }))` — with
+    // no `deferred` tools present, the new per-turn filter is a no-op, so every turn's
+    // `tools` array must be reference-shape-identical to this and to each other.
+    const expectedToolDefs = [...tools.values()].map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    }));
+
+    for (const call of provider.calls) {
+      expect(call.tools).toEqual(expectedToolDefs);
+    }
+    // Bit-for-bit identical across turns, not just each individually equal to expected.
+    expect(provider.calls[0]?.tools).toEqual(provider.calls[1]?.tools);
+    expect(provider.calls[1]?.tools).toEqual(provider.calls[2]?.tools);
+  });
+
+  test("a deferred tool not yet activated is filtered out of every turn's tools array", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const tools = buildToolMap();
+    tools.set("mcp__github__create_issue", {
+      name: "mcp__github__create_issue",
+      description: "Create a GitHub issue.",
+      inputSchema: { type: "object", properties: {} },
+      deferred: true,
+      async execute() {
+        return { output: "unused", isError: false };
+      },
+    });
+    const { params } = baseParams({ provider, tools });
+
+    await runAgentLoop(params);
+    const sentNames = provider.calls[0]?.tools.map((t) => t.name) ?? [];
+    expect(sentNames).not.toContain("mcp__github__create_issue");
+  });
+
+  test("a deferred tool activated mid-loop (by a ToolSearch-style call) appears starting " +
+    "the very next turn, not the one where it was activated", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [{ type: "tool_use", id: "call-1", name: "ActivatingSearch", input: {} }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "turn 2: done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const tools = buildToolMap();
+    tools.set("mcp__github__create_issue", {
+      name: "mcp__github__create_issue",
+      description: "Create a GitHub issue.",
+      inputSchema: { type: "object", properties: {} },
+      deferred: true,
+      async execute() {
+        return { output: "unused", isError: false };
+      },
+    });
+    // Stands in for ToolSearch's real activation side effect (runtime.ts's
+    // searchDeferredTools closure adds to ctx.activatedTools when a result is selected) —
+    // this tool mutates the SAME ToolContext the loop passes to every tool call.
+    const toolContext = makeToolContext();
+    tools.set("ActivatingSearch", {
+      name: "ActivatingSearch",
+      description: "test-only stand-in for ToolSearch's activation side effect",
+      inputSchema: { type: "object", properties: {} },
+      async execute(_input, ctx) {
+        ctx.activatedTools.add("mcp__github__create_issue");
+        return { output: "activated", isError: false };
+      },
+    });
+    const { params } = baseParams({ provider, tools, toolContext });
+
+    await runAgentLoop(params);
+
+    // Turn 1's request was built BEFORE ActivatingSearch ran, so the deferred tool is still
+    // hidden; only turn 2 (built fresh, after activation) includes it. Proves the per-turn
+    // recompute — not a one-time-before-the-loop computation — is what makes this possible.
+    expect(provider.calls[0]?.tools.map((t) => t.name)).not.toContain("mcp__github__create_issue");
+    expect(provider.calls[1]?.tools.map((t) => t.name)).toContain("mcp__github__create_issue");
+  });
+});

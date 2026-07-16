@@ -1,8 +1,10 @@
 // McpAuth tool — handles MCP OAuth flows (HANDOFF.md §4).
 //
 // STUB for this round (explicitly allowed by docs/handoffs/core.md: "McpAuth may be a
-// documented stub ... if full implementation doesn't fit this round"). No MCP client is
-// wired up yet (see src/agent/mcp.ts), so there is no OAuth flow to drive. This tool is
+// documented stub ... if full implementation doesn't fit this round"). DH-0002 wired up a
+// real MCP client (src/agent/mcp/) for unauthenticated servers, but OAuth-authenticated MCP
+// servers are split out to DH-0057, still out of scope here — no OAuth flow to drive yet.
+// This tool is
 // wired into the tool set with a real, testable, always-clear-error response rather than
 // being silently omitted, so the model gets an actionable message instead of an unknown-tool
 // failure. Full implementation (device/browser OAuth flow, token storage) is future work.

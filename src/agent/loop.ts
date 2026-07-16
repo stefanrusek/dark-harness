@@ -334,12 +334,6 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     content: params.instruction,
   });
 
-  const toolDefs = [...params.tools.values()].map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema,
-  }));
-
   let turns = 0;
   let finalText = "";
 
@@ -348,6 +342,23 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       return reportStopped(params, finalText, turns, STOPPED_BETWEEN_TURNS_REASON);
     }
     turns += 1;
+
+    // DH-0002: computed fresh every turn (not once before the loop) so a `deferred` MCP
+    // tool that ToolSearch activates mid-conversation becomes visible to the provider on
+    // the very next turn, and so tools that connect asynchronously after runtime startup
+    // (McpManager.connectAll() resolving) are picked up without any extra plumbing — this
+    // reads `params.tools` fresh, and runtime.ts mutates that same Map in place as servers
+    // connect. Built-ins never set `deferred`, so with no `mcpServers` configured (or none
+    // of their tools activated) this filter is a no-op and the provider sees exactly the
+    // same tool list every turn as before this change — see loop.test.ts's explicit
+    // behavioral-identity test.
+    const toolDefs = [...params.tools.values()]
+      .filter((t) => !(t.deferred && !params.toolContext.activatedTools.has(t.name)))
+      .map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      }));
 
     if (pendingMessages.length > 0) {
       const injected = pendingMessages.splice(0, pendingMessages.length).join("\n");

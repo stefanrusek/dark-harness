@@ -22,8 +22,9 @@ export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolConte
       throw new Error("spawnAgent not wired in this test context");
     },
     loadSkill: async () => null,
-    searchDeferredTools: () => [],
+    searchDeferredTools: async () => ({ results: [] }),
     readRegistry: new Map(),
+    activatedTools: new Set(),
     ...overrides,
   };
   return context;

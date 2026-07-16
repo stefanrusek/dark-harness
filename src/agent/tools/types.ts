@@ -49,8 +49,30 @@ export interface ToolContext {
   }): string;
   /** Skill lookup: scans config.skillPaths for `<name>/SKILL.md`. */
   loadSkill(name: string): Promise<{ name: string; path: string; content: string } | null>;
-  /** Deferred-tool discovery over configured mcpServers (see docs/handoffs/core.md status log). */
-  searchDeferredTools(query: string): Array<{ name: string; description: string }>;
+  /** Deferred-tool discovery (DH-0002): searches the merged corpus of every built-in tool
+   * (always "active") plus every MCP-discovered tool across configured mcpServers, per the
+   * real ToolSearch query grammar implemented in tools/tool-search.ts (`select:Name1,Name2`
+   * exact selection + activation, `+term` required-token filtering, keyword ranking,
+   * `max_results`). Async because a `select:` or corpus-touching query may trigger a
+   * throttled reconnect attempt against a previously-failed MCP server (McpManager).
+   * `results` carries full descriptors (including inputSchema) so the model can call a
+   * newly-activated tool on its very next turn; `notFound` lists `select:` names that
+   * matched nothing; `unreachableServers` surfaces currently-failed MCP servers with their
+   * last error so ToolSearch's footer never silently drops that information. */
+  searchDeferredTools(
+    query: string,
+    options?: { maxResults?: number },
+  ): Promise<{
+    results: Array<{
+      name: string;
+      description: string;
+      inputSchema: JsonSchema;
+      deferred?: boolean;
+      serverName?: string;
+    }>;
+    notFound?: string[];
+    unreachableServers?: Array<{ name: string; error: string }>;
+  }>;
   /** Round 13 (docs/handoffs/core.md): per-agent read registry backing read-before-Edit/Write
    * enforcement — mirrors real Claude Code's refusal to blind-edit a file the model never
    * `Read` in this conversation, or that changed on disk since the read. Keyed by resolved
@@ -60,11 +82,25 @@ export interface ToolContext {
    * buildToolContext), so this is naturally scoped to "this agent's own conversation," not
    * shared across sibling sub-agents editing the same filesystem. */
   readRegistry: Map<string, { mtimeMs: number; size: number }>;
+  /** DH-0002: per-agent set of MCP tool names (`mcp__<server>__<tool>`) this agent's
+   * ToolSearch calls have activated via `select:` — same per-ToolContext scoping precedent
+   * as `readRegistry`, fresh per agent lifetime (see runtime.ts's buildToolContext). Built-in
+   * tools never need activation (they never set `deferred`); loop.ts's per-turn `toolDefs`
+   * filter hides any `deferred` tool whose name isn't in this set from the provider. */
+  activatedTools: Set<string>;
 }
 
 export interface Tool {
   name: string;
   description: string;
   inputSchema: JsonSchema;
+  /** DH-0002: true for every MCP-discovered tool (never set by built-ins). A `deferred`
+   * tool is hidden from the model provider's tool list (loop.ts's per-turn `toolDefs`
+   * filter) until ToolSearch's `select:` activates it for this agent (`ToolContext.
+   * activatedTools`) — mirrors real Claude Code's deferred-tool model and keeps large MCP
+   * servers from bloating every turn's context window. Dispatch itself never special-cases
+   * this field: `params.tools.get(name)` finds a deferred tool exactly like a built-in once
+   * it's in the map. */
+  deferred?: boolean;
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>;
 }

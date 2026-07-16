@@ -20,9 +20,14 @@ describe("makeToolContext defaults", () => {
     await expect(ctx.loadSkill("whatever")).resolves.toBeNull();
   });
 
-  test("default searchDeferredTools returns no results", () => {
+  test("default searchDeferredTools returns no results", async () => {
     const ctx = makeToolContext();
-    expect(ctx.searchDeferredTools("whatever")).toEqual([]);
+    await expect(ctx.searchDeferredTools("whatever")).resolves.toEqual({ results: [] });
+  });
+
+  test("default activatedTools is a fresh empty Set", () => {
+    const ctx = makeToolContext();
+    expect(ctx.activatedTools.size).toBe(0);
   });
 
   test("overrides replace defaults", () => {
