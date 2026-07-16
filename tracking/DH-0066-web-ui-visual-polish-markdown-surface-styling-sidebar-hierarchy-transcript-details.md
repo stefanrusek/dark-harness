@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0066
 type: feature
-status: draft
+status: implementing
 owner: stefan
 resolution:
 blocked_by: []
@@ -183,3 +183,57 @@ banner. Missing, in rough value order:
 > already works and should not be churned: the palette and CSS-variable system, the
 > user/agent bubble convention, status badges + dots, connection pill, reduced-motion
 > support, and the accessibility work from DH-0029.
+
+### 2026-07-16 — Susan (Web), first pass
+
+**Done** (all in `src/web/client/`; gates green — `bun run typecheck`, `bun run lint`,
+`bun run test:coverage` 100% funcs/lines on every touched file, `bun run e2e` 30/32, the 2
+failures a pre-existing sandbox tooling gap — no Chromium binary at the expected path — not
+a regression):
+
+- Markdown surface CSS: styled code blocks (panel background/border/`overflow-x` scroll),
+  blockquote left rail, heading type scale in `--font-ui`, tightened list-item spacing,
+  inline-code chip, themed `<hr>`. Scoped `white-space: pre-wrap` to user turns only
+  (assistant turns render structured Markdown DOM, not preformatted text). Implemented the
+  Open Questions' stated recommendation on prose font (`--font-ui` for prose, `--font-mono`
+  for code/pre only) since the ticket framed the all-mono look as an accident, not a locked
+  decision.
+- Fixed the consecutive-assistant-turn concatenation-with-no-boundary bug: added
+  `AgentNode.turnOpen` (`state.ts`), closed whenever `agent_status` leaves `"running"` or a
+  user sends a message, so a new `agent_output` chunk only merges into the prior turn when
+  it's genuinely still open rather than whenever the prior turn happens to also be
+  `"assistant"`.
+- Fixed the "WAITING for just now" broken-English phrasing (`formatStatusElapsed`).
+- Sidebar tree hierarchy: `agentDepth` (`state.ts`) + per-row indentation (`render.ts`), so
+  the sidebar reads as an actual tree instead of a flat list.
+- Sidebar per-row token count gets a "tok" unit suffix.
+- Jump-to-latest pill moved off the bottom-right corner (was overlapping the newest user
+  bubble) to bottom-center, offset above the error/gap banners so the three don't stack.
+- Real empty state ("No output yet — spawned just now, model X") for a transcript with no
+  turns yet, replacing blank space.
+- Pulsing three-dot "thinking" placeholder in the transcript itself while an agent is
+  `running` with no turn currently open — previously nothing in the main pane indicated
+  activity during a long turn except the header's elapsed timer.
+- Browser tab title reflects session state (`● running` / `✓`/`✗ session ended` / idle) and
+  a proper inline-SVG favicon (the ◆ brand mark, no external request — DH-0023 posture)
+  replaces the previously blank one.
+
+**Not done this round, left open rather than guessed at:**
+
+- Tool-call chips in the transcript (Agent spawns, etc.) — the ticket itself says any wire
+  vocabulary gap here routes through architect review first (CLAUDE.md §6); a Web-only pass
+  can't resolve that on its own.
+- A sub-agent's transcript showing its spawn prompt as the opening turn — same blocker: the
+  wire protocol doesn't carry the spawn prompt to the client today.
+- The "sidebar renders empty while viewing a sub-agent after `session_ended`"
+  (`spike-agent-tree.png`) repro — read through `evictCompletedAgents`/`seedFromTree` and
+  found no obvious cause, but couldn't reproduce it live (no Chromium binary in this
+  sandbox to drive a real repro). Left open rather than shipping a speculative fix for a bug
+  I couldn't reproduce — worth a follow-up round with a working browser.
+- Syntax highlighting — ticket's own recommendation was to skip this round.
+- Code-block copy button, and echoing the session-end banner once in the transcript flow —
+  the ticket's cheap "delight" nits; triaged out under this round's time budget, no
+  technical blocker.
+
+Status moved `draft` → `implementing` (not closed) given the items above are genuinely
+undone, not just deferred detail.
