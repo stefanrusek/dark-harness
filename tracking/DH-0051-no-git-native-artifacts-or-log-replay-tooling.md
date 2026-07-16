@@ -41,3 +41,6 @@ the live TUI/Web view.
 
 > [!NOTE]
 > Deferred (owner decision, 2026-07-15) — sweep-sourced, no observed need for either half yet.
+
+> [!NOTE]
+> Public GitHub issue created (2026-07-16) to gauge real demand before building this: https://github.com/stefanrusek/dark-harness/issues/4

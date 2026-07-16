@@ -44,3 +44,6 @@ reactively rather than the harness avoiding proactively.
 > [!NOTE]
 > Deferred (owner decision, 2026-07-15): DH-0009's reactive retry/backoff has been sufficient
 > in practice, no observed 429 storms. Revisit if real throttling pain surfaces.
+
+> [!NOTE]
+> Public GitHub issue created (2026-07-16) to gauge real demand before building this: https://github.com/stefanrusek/dark-harness/issues/3

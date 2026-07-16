@@ -43,3 +43,6 @@ automatic recourse beyond whatever retry behavior DH-0009 adds — there's no wa
 > [!NOTE]
 > Deferred (2026-07-15) — same category as DH-0049: no observed sustained-outage incident,
 > DH-0009's retry covers transient failures. Revisit if a real outage stalls a run.
+
+> [!NOTE]
+> Public GitHub issue created (2026-07-16) to gauge real demand before building this: https://github.com/stefanrusek/dark-harness/issues/5

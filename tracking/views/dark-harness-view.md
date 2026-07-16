@@ -94,6 +94,12 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0087](../DH-0087-create-github-issue-to-gauge-demand-for-mcp-oauth-support.md) | Create GitHub issue to gauge demand for MCP OAuth support | done |
+| [DH-0086](../DH-0086-create-github-issue-to-gauge-demand-for-model-provider-fallback-chains.md) | Create GitHub issue to gauge demand for model/provider fallback chains | done |
+| [DH-0085](../DH-0085-create-github-issue-to-gauge-demand-for-git-native-session-artifacts-and-replay-tooling.md) | Create GitHub issue to gauge demand for git-native session artifacts and replay tooling | done |
+| [DH-0084](../DH-0084-create-github-issue-to-gauge-demand-for-rate-limit-aware-request-scheduling.md) | Create GitHub issue to gauge demand for rate-limit-aware request scheduling | done |
+| [DH-0083](../DH-0083-create-github-issue-to-gauge-demand-for-a-metrics-telemetry-endpoint.md) | Create GitHub issue to gauge demand for a /metrics telemetry endpoint | done |
+| [DH-0082](../DH-0082-create-github-issue-to-gauge-demand-for-checkpoint-rewind-of-file-edits.md) | Create GitHub issue to gauge demand for checkpoint/rewind of file edits | done |
 | [DH-0080](../DH-0080-bash-output-capping-shape-diverges-from-real-claude-code-tail-cut-inline-notice-vs-head-preview-plus-saved-file.md) | Bash output-capping shape diverges from real Claude Code: tail-cut inline notice vs head-preview-plus-saved-file | done |
 | [DH-0079](../DH-0079-read-tool-s-truncation-model-diverges-from-real-claude-code-line-cap-notice-vs-byte-cap-hard-error.md) | Read tool's truncation model diverges from real Claude Code: line-cap+notice vs byte-cap+hard-error | done |
 | [DH-0073](../DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness-and-there-is-no-notebookedit-equivalent.md) | Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent | done |
@@ -103,9 +109,3 @@ source: tracking/
 | [DH-0063](../DH-0063-spile-ops-skill-id-based-ticket-resolution-rename-on-retitle-tool.md) | spile-ops skill: ID-based ticket resolution + rename-on-retitle tool | done |
 | [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | done |
 | [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | done |
-| [DH-0054](../DH-0054-no-first-class-grep-glob-tools.md) | No first-class Grep/Glob tools — all search is delegated informally to Bash | done |
-| [DH-0043](../DH-0043-no-prompt-caching.md) | No prompt caching — one of the largest cost levers for an agentic loop is unused | superseded |
-| [DH-0042](../DH-0042-readme-config-reference-gaps.md) | README's config reference omits `options.maxTurns` and per-model pricing fields, with no automated check against `src/contracts/config.ts` | done |
-| [DH-0041](../DH-0041-missing-user-facing-docs-bundle.md) | A cluster of user-facing documentation is entirely missing | done |
-| [DH-0039](../DH-0039-git-credentials-and-workspace-convention-undocumented.md) | Git credential provisioning and workspace-directory convention are entirely undocumented | done |
-| [DH-0036](../DH-0036-no-container-deployment-reference.md) | No reference Dockerfile or container/deployment documentation for the canonical dark-factory use case | done |

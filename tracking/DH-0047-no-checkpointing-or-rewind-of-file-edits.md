@@ -42,3 +42,6 @@ leaves no automatic way to roll back its file changes short of the operator's ow
 > Owner decision (2026-07-15): deferred in full. This was a gap-analysis-sourced idea, not
 > something the owner has ever wanted or asked for — no real need behind it. Not queuing
 > design or implementation work; revisit only if a real operator need for rollback surfaces.
+
+> [!NOTE]
+> Public GitHub issue created (2026-07-16) to gauge real demand before building this: https://github.com/stefanrusek/dark-harness/issues/1

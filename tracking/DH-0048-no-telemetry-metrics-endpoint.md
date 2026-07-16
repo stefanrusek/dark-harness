@@ -41,3 +41,6 @@ scraping JSONL logs after the fact.
 > Deferred (2026-07-15) — no evidence of a real need for fleet-level scraped metrics yet;
 > sweep-sourced, same pattern as DH-0047 (deferred speculative feature, not a real request).
 > Revisit if a real multi-instance fleet-ops need surfaces.
+
+> [!NOTE]
+> Public GitHub issue created (2026-07-16) to gauge real demand before building this: https://github.com/stefanrusek/dark-harness/issues/2

@@ -34,3 +34,6 @@ McpAuth is an honest, documented stub with no OAuth flow. Split out of DH-0002 (
 > Split from DH-0002 (owner decision, 2026-07-15). Deferred further out than DH-0002's
 > remaining scope — no operator has configured an OAuth-requiring MCP server yet, so there's
 > no concrete auth flow to design against. Revisit once a real integration needs it.
+
+> [!NOTE]
+> Public GitHub issue created (2026-07-16) to gauge real demand before building this: https://github.com/stefanrusek/dark-harness/issues/6
