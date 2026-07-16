@@ -2478,6 +2478,41 @@ describe("main — dh doctor / --check", () => {
       expect(io.stdoutLines).toEqual([]);
     });
 
+    test("advances the spinner frame on a timer while a single check is outstanding, and always clears it (DH-0102)", async () => {
+      const io = fakeIo();
+      const code = await main(["--check"], {
+        ...baseOverrides(io),
+        createProvider: () =>
+          fakeModelProvider({
+            complete: async () => {
+              // Long enough to guarantee at least one SPINNER_FRAME_MS (120ms) tick fires
+              // before this resolves, so the animation timer is exercised, not just armed.
+              await new Promise((resolve) => setTimeout(resolve, 260));
+              return {
+                stopReason: "end_turn",
+                content: [{ type: "text", text: "pong" }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+              };
+            },
+          }),
+      });
+      expect(code).toBe(ExitCode.Success);
+
+      const writes = writeSpy.mock.calls.map(([chunk]) => String(chunk));
+      // First write is the initial pending row (frame 0); at least one more `\r\x1b[K`-prefixed
+      // pending rewrite from the timer must appear before the final resolved-row rewrite.
+      const pendingRewrites = writes
+        .slice(1, -1)
+        .filter((w) => w.startsWith("\r\x1b[K") && w.includes("checking"));
+      expect(pendingRewrites.length).toBeGreaterThan(0);
+      // The very last write is still the resolved PASS row, not a stray pending tick — proof
+      // the timer was cleared before (or synchronously with) the final rewrite, per the
+      // ticket's no-race requirement.
+      const finalRow = writes.at(-2) as string;
+      expect(finalRow).toContain("PASS");
+      expect(finalRow).not.toContain("checking");
+    }, 5000);
+
     test("rewrites the pending row to FAIL in place when the provider call throws", async () => {
       const io = fakeIo();
       const code = await main(["--check"], {
@@ -2837,7 +2872,7 @@ describe("formatDoctorReport (DH-0067)", () => {
     expect(lines).toEqual(['PASS sonnet (provider "anthropic")', "1 model: 1 pass, 0 fail"]);
   });
 
-  test("color: true wraps PASS in green and FAIL in red", () => {
+  test("color: true wraps PASS in green and FAIL in red, with a leading ✓/✗ glyph (DH-0102)", () => {
     const lines = formatDoctorReport(
       [
         { modelName: "sonnet", ok: true, detail: '(provider "anthropic")' },
@@ -2845,9 +2880,34 @@ describe("formatDoctorReport (DH-0067)", () => {
       ],
       true,
     );
-    expect(lines[0]).toBe('\x1b[32mPASS\x1b[0m sonnet (provider "anthropic")');
-    expect(lines[1]).toBe('\x1b[31mFAIL\x1b[0m gemma4 (provider "bedrock"): boom');
-    expect(lines[2]).toBe("2 models: 1 pass, 1 fail");
+    expect(lines[0]).toBe('\x1b[32m✓ PASS\x1b[0m sonnet (provider "anthropic")');
+    expect(lines[1]).toBe('\x1b[31m✗ FAIL\x1b[0m gemma4 (provider "bedrock"): boom');
+    // DH-0102: the trailing summary line is also colorized on the TTY path — red here since
+    // one of the two results failed.
+    expect(lines[2]).toBe("\x1b[31m2 models: 1 pass, 1 fail\x1b[0m");
+  });
+
+  test("color: true, all-pass summary line is colored green (DH-0102)", () => {
+    const lines = formatDoctorReport(
+      [{ modelName: "sonnet", ok: true, detail: '(provider "anthropic")' }],
+      true,
+    );
+    expect(lines.at(-1)).toBe("\x1b[32m1 model: 1 pass, 0 fail\x1b[0m");
+  });
+
+  test("plain (non-TTY) path has no ✓/✗ glyph and no color codes anywhere, including the summary (DH-0102)", () => {
+    const lines = formatDoctorReport(
+      [
+        { modelName: "sonnet", ok: true, detail: '(provider "anthropic")' },
+        { modelName: "gemma4", ok: false, detail: '(provider "bedrock"): boom' },
+      ],
+      false,
+    );
+    for (const line of lines) {
+      expect(line).not.toContain("✓");
+      expect(line).not.toContain("✗");
+      expect(line).not.toContain("\x1b[");
+    }
   });
 
   test("aligns model names to the widest one in the run", () => {

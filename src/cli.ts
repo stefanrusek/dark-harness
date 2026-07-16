@@ -44,6 +44,7 @@ import {
   formatSessionLogTree,
   pruneLogDirectories,
 } from "./server/index.ts";
+import { SPINNER_FRAMES, SPINNER_FRAME_MS } from "./terminal.ts";
 import { startTui as startTuiClient } from "./tui/index.ts";
 // DH-0101: reuse Web's short-id formatter for the activity feed rather than forking the
 // logic (ticket's explicit ask) — pure, DOM-free (only a type-only import of its own), and
@@ -1171,13 +1172,25 @@ const DOCTOR_FAIL_COLOR = CLI_RED;
 const DOCTOR_PENDING_COLOR = CLI_DIM;
 const DOCTOR_RESET = CLI_RESET;
 
+// DH-0102: verdict word is always 4 chars ("PASS"/"FAIL"); the colorized (TTY) verdict field
+// additionally carries a one-glyph + one-space prefix ("✓ "/"✗ "). The pending row's spinner
+// frame is padded out to this same plain-text width so the name column starts at the same
+// screen position whether a row is still pending or already resolved — cosmetic (the
+// `\r\x1b[K` rewrite clears the whole line regardless), but it keeps a multi-model run's rows
+// from visibly shifting left/right as each one resolves.
+const DOCTOR_VERDICT_WORD_WIDTH = 4;
+const DOCTOR_VERDICT_LABEL_WIDTH = 2 + DOCTOR_VERDICT_WORD_WIDTH;
+
 /** Formats one resolved (pass/fail) row — shared by `formatDoctorReport` (the non-TTY /
  * final-summary path) and `runDoctor`'s TTY live-update path, so both agree on alignment and
- * colorization instead of drifting into two subtly different renderings of the same result. */
+ * colorization instead of drifting into two subtly different renderings of the same result.
+ * DH-0102: on the colorized (TTY) path, prepends the canonical `✓`/`✗` verdict glyph (style
+ * guide §5) before the PASS/FAIL word; the plain (non-TTY) path is untouched — just the bare
+ * word, per the ticket's non-TTY contract. */
 function formatDoctorRow(r: DoctorResult, nameWidth: number, color: boolean): string {
   const verdict = r.ok ? "PASS" : "FAIL";
   const coloredVerdict = color
-    ? `${r.ok ? DOCTOR_PASS_COLOR : DOCTOR_FAIL_COLOR}${verdict}${DOCTOR_RESET}`
+    ? `${r.ok ? DOCTOR_PASS_COLOR : DOCTOR_FAIL_COLOR}${r.ok ? "✓" : "✗"} ${verdict}${DOCTOR_RESET}`
     : verdict;
   // A detail starting with ":" (the "no provider named..." case) reads as
   // "<name>: <message>", not "<name> : <message>" — every other detail ("(provider ...)")
@@ -1186,15 +1199,23 @@ function formatDoctorRow(r: DoctorResult, nameWidth: number, color: boolean): st
   return `${coloredVerdict} ${r.modelName.padEnd(nameWidth)}${separator}${r.detail}`;
 }
 
-/** DH-0099: the in-flight row shown the moment a model's check starts, before its
+/** DH-0099/DH-0102: the in-flight row shown the moment a model's check starts, before its
  * `provider.complete()` call resolves — same column alignment as the resolved row so the
  * later `\r` + clear-to-end-of-line rewrite lands in exactly the same place. Never used
  * outside a TTY (there's no "in flight" concept for a piped/CI run that only prints once at
- * the end). */
-function formatDoctorPendingRow(modelName: string, nameWidth: number, color: boolean): string {
-  const verdict = "....";
-  const coloredVerdict = color ? `${DOCTOR_PENDING_COLOR}${verdict}${DOCTOR_RESET}` : verdict;
-  return `${coloredVerdict} ${modelName.padEnd(nameWidth)} checking... (query sent)`;
+ * the end). DH-0102: the marker is now the canonical braille spinner frame (shared with the
+ * TUI via `../terminal.ts`, not a bespoke `....`) and the wording is present-progressive
+ * ("checking…") per the style guide's pending-state vocabulary (§1.1). `frame` is supplied by
+ * the caller so `runDoctor` can advance it on a timer while a single check is outstanding. */
+function formatDoctorPendingRow(
+  modelName: string,
+  nameWidth: number,
+  color: boolean,
+  frame: string,
+): string {
+  const label = frame.padEnd(DOCTOR_VERDICT_LABEL_WIDTH);
+  const coloredVerdict = color ? `${DOCTOR_PENDING_COLOR}${label}${DOCTOR_RESET}` : label;
+  return `${coloredVerdict} ${modelName.padEnd(nameWidth)} checking… (query sent)`;
 }
 
 /** DH-0067: unaligned `PASS <name> (provider "...")` lines with no summary read as a raw
@@ -1207,8 +1228,13 @@ export function formatDoctorReport(results: DoctorResult[], color: boolean): str
   const lines = results.map((r) => formatDoctorRow(r, nameWidth, color));
   const passCount = results.filter((r) => r.ok).length;
   const failCount = results.length - passCount;
+  const summaryText = `${results.length} model${results.length === 1 ? "" : "s"}: ${passCount} pass, ${failCount} fail`;
+  // DH-0102: colorize the summary line on the TTY path too (green all-pass / red any-fail)
+  // so the overall result reads at a glance; the plain (non-TTY) path stays bare text.
   lines.push(
-    `${results.length} model${results.length === 1 ? "" : "s"}: ${passCount} pass, ${failCount} fail`,
+    color
+      ? `${failCount === 0 ? DOCTOR_PASS_COLOR : DOCTOR_FAIL_COLOR}${summaryText}${DOCTOR_RESET}`
+      : summaryText,
   );
   return lines;
 }
@@ -1228,41 +1254,63 @@ async function runDoctor(config: DhConfig, deps: CliDeps): Promise<ExitCodeType>
   const nameWidth = Math.max(0, ...config.models.map((m) => m.name.length));
 
   for (const model of config.models) {
+    // DH-0102: animate the pending row's spinner frame every SPINNER_FRAME_MS while this
+    // model's single `provider.complete()` call is outstanding. TTY-gated (no timer, no
+    // animation off a TTY) and always torn down in `finally` — on both the normal resolve
+    // path and any unexpected throw — so a slow/hanging check can never leave a stray timer
+    // running past this iteration, and the last tick can never race the final resolved-row
+    // rewrite below (the interval is cleared before that write happens).
+    let frameIndex = 0;
+    let spinnerTimer: ReturnType<typeof setInterval> | undefined;
     if (isTTY) {
-      process.stdout.write(formatDoctorPendingRow(model.name, nameWidth, true));
+      process.stdout.write(
+        formatDoctorPendingRow(model.name, nameWidth, true, SPINNER_FRAMES[0] as string),
+      );
+      spinnerTimer = setInterval(() => {
+        frameIndex = (frameIndex + 1) % SPINNER_FRAMES.length;
+        process.stdout.write(
+          `\r\x1b[K${formatDoctorPendingRow(model.name, nameWidth, true, SPINNER_FRAMES[frameIndex] as string)}`,
+        );
+      }, SPINNER_FRAME_MS);
     }
 
-    const providerConfig = providersByName.get(model.provider);
     let result: DoctorResult;
-    if (!providerConfig) {
-      // Shouldn't happen post-validateConfig (models reference known providers), but a
-      // provider-agnostic guard costs nothing and keeps this loop crash-free either way.
-      result = {
-        modelName: model.name,
-        ok: false,
-        detail: `: no provider named "${model.provider}" in config`,
-      };
-    } else {
-      try {
-        const provider = deps.createProvider(providerConfig);
-        await provider.complete({
-          model: model.model,
-          system: "dh doctor: connectivity check.",
-          messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
-          tools: [],
-          maxTokens: 1,
-        });
-        result = {
-          modelName: model.name,
-          ok: true,
-          detail: `(provider "${providerConfig.name}")`,
-        };
-      } catch (err) {
+    try {
+      const providerConfig = providersByName.get(model.provider);
+      if (!providerConfig) {
+        // Shouldn't happen post-validateConfig (models reference known providers), but a
+        // provider-agnostic guard costs nothing and keeps this loop crash-free either way.
         result = {
           modelName: model.name,
           ok: false,
-          detail: `(provider "${providerConfig.name}"): ${(err as Error).message}`,
+          detail: `: no provider named "${model.provider}" in config`,
         };
+      } else {
+        try {
+          const provider = deps.createProvider(providerConfig);
+          await provider.complete({
+            model: model.model,
+            system: "dh doctor: connectivity check.",
+            messages: [{ role: "user", content: [{ type: "text", text: "ping" }] }],
+            tools: [],
+            maxTokens: 1,
+          });
+          result = {
+            modelName: model.name,
+            ok: true,
+            detail: `(provider "${providerConfig.name}")`,
+          };
+        } catch (err) {
+          result = {
+            modelName: model.name,
+            ok: false,
+            detail: `(provider "${providerConfig.name}"): ${(err as Error).message}`,
+          };
+        }
+      }
+    } finally {
+      if (spinnerTimer) {
+        clearInterval(spinnerTimer);
       }
     }
     results.push(result);

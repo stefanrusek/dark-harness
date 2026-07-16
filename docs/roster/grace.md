@@ -1660,3 +1660,67 @@ startup via `b"\x1b" in open(...).read()` — clean plaintext, same information,
 
 Closed DH-0101 (`transition.py DH-0101 closed --resolution done`) after all verification
 above.
+
+### 2026-07-16 — DH-0102: doctor's canonical spinner + verdict glyphs
+
+Migrated `dh doctor`'s live TTY output from bespoke vocabulary (`....` pending marker, bare
+`PASS`/`FAIL` words) to the design guide's shared spinner/glyph vocabulary (§1.1/§3/§5).
+
+**Cross-boundary extraction (the ticket's flagged risk):** the ticket requires the braille
+spinner frames to come from one shared source instead of being forked between `src/tui/` and
+`src/cli.ts`, but explicitly says to coordinate the extraction with Mary (TUI) rather than
+reach into her domain unilaterally. Mary wasn't available live this round and the move is
+mechanical/purely-additive, so per the coordinator's direction I did it myself, keeping it as
+narrow as possible: created a new top-level `src/terminal.ts` holding `SPINNER_FRAMES`
+(`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) and `SPINNER_FRAME_MS` (120) — nothing else. `src/tui/render.ts` now imports
+both names from `../terminal.ts` instead of declaring them locally; every other line in that
+file, and every one of its 304 existing tests, is untouched (`bun test src/tui`: 304 pass, 0
+fail, unmodified files). `src/cli.ts` imports the same two constants for doctor's spinner.
+Flagging this here per the ticket's ask so Mary can review the extraction cleanly on her next
+round — the only change to a file she owns is the two-line re-import swap in `render.ts`.
+
+**doctor changes (`src/cli.ts`):**
+- `formatDoctorPendingRow` now takes a `frame` parameter and renders the shared braille
+  spinner instead of `....`, with present-progressive wording (`checking…` per style guide,
+  was `checking...`).
+- `runDoctor`'s per-model loop starts a `setInterval` (only when `isTTY`) that advances the
+  frame and rewrites the pending row every `SPINNER_FRAME_MS`; the whole check body is wrapped
+  in `try { ... } finally { clearInterval(...) }` so the timer is torn down on both the normal
+  resolve path and any unexpected throw, and is always cleared *before* the final resolved-row
+  rewrite (no tick/rewrite race).
+- `formatDoctorRow` prepends a colored `✓ `/`✗ ` glyph before `PASS`/`FAIL` on the TTY path
+  only; the plain (non-TTY) path is unchanged — bare words, no glyph, no SGR.
+- `formatDoctorReport`'s trailing summary line is now colorized on the TTY path (green if
+  `failCount === 0`, else red); plain path unchanged.
+- Alignment: added `DOCTOR_VERDICT_LABEL_WIDTH` (2 glyph+space + 4-char PASS/FAIL word = 6)
+  and pad the pending row's spinner-frame label to that same plain-text width, so the name
+  column starts at the same screen position whether a row is pending or resolved — the
+  `\r\x1b[K` rewrite clears the whole line either way, but this keeps multi-model runs from
+  visibly jittering as rows resolve at different times.
+
+**Testing:** updated the one pre-existing test that asserted the old bare-`PASS`/`FAIL`
++ uncolored-summary shape; added new assertions for glyph presence on the TTY path and
+absence (plus zero SGR bytes) on the plain path; added a timer-exercising test (a
+`provider.complete()` that takes 260ms, comfortably over one 120ms frame interval) asserting
+at least one `\r\x1b[K`-prefixed pending rewrite fires before the final resolved row, and that
+the final write is the resolved row (not a stray tick) — covers the `setInterval` callback and
+the `finally` cleanup that were otherwise dead in coverage. `bun run test:coverage`: 1711
+pass, 0 fail; `src/cli.ts`/`src/tui/render.ts`/`src/terminal.ts` all clean except the same
+pre-existing 3-line `AgentRuntimeLoopAdapter` gap noted in the DH-0101 entry above (unrelated
+to this ticket, unchanged by it).
+
+**Live verification:** built the real binary, ran `dh doctor --config <2-model config with an
+invalid Anthropic key>` under `script -q` (real PTY) against the real Anthropic endpoint (a
+bad key still round-trips a real HTTP 401, taking long enough to show the spin). Observed:
+frame visibly advanced `⠋→⠙→⠹→⠸` in place via `\r`+`\x1b[K` rewrites with dim styling, then a
+clean in-place rewrite to `✗ FAIL` (red) on resolution with no stray characters or leftover
+spinner glyphs; second model's row started fresh at its own pending state immediately after;
+trailing summary line printed in red (`2 models: 0 pass, 2 fail`). Ran the same config without
+a PTY (piped) and confirmed plain `FAIL <name> ...` text, no glyphs, no ANSI bytes, exactly
+matching the pre-ticket non-TTY output. `bun run typecheck`/`lint` clean; `bun run e2e`: 30
+pass, 2 fail — both failures are the pre-existing sandbox limitation (no headless Chromium
+binary at `/opt/pw-browsers/chromium`), unrelated to this change; no doctor-specific e2e test
+exists in `e2e/` to re-run.
+
+Closed DH-0102 (`transition.py DH-0102 closed --resolution done`) after all verification
+above.

@@ -4,6 +4,7 @@
 
 import type { AgentStatus } from "../contracts/index.ts";
 import { parseMarkdown, sanitizeText } from "../markdown/index.ts";
+import { SPINNER_FRAMES, SPINNER_FRAME_MS } from "../terminal.ts";
 import { renderMarkdownRows } from "./markdown-ansi.ts";
 import { flattenTree } from "./tree.ts";
 import type { AgentInfo, ConnectionStatus, TuiState, Turn } from "./types.ts";
@@ -85,8 +86,9 @@ function dim(text: string): string {
 // which give any "still alive" signal on the always-visible root view during a long turn.
 // Advances off `state.now`, which only moves via the reducer's `tick` action, so this stays
 // a pure function of state (no wall-clock reads inside the render layer).
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const SPINNER_FRAME_MS = 120;
+// DH-0102: SPINNER_FRAMES/SPINNER_FRAME_MS moved to `../terminal.ts` (shared with
+// `src/cli.ts`'s doctor spinner) and imported above — re-imported here under the same names
+// so nothing else in this file changes.
 
 function spinnerFrame(now: number): string {
   const index = Math.floor(now / SPINNER_FRAME_MS) % SPINNER_FRAMES.length;
