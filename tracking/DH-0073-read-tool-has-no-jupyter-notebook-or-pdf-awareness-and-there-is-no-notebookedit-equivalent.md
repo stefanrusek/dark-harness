@@ -2,24 +2,30 @@
 spile: ticket
 id: DH-0073
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
 created: 2026-07-16
 relations:
   depends_on: []
-  relates_to: [DH-0046]
+  relates_to: [DH-0046, DH-0081]
   supersedes: []
 implementation:
   - repo: dark-harness
 ---
 
-# DH-0073: Read tool has no Jupyter-notebook or PDF awareness, and there is no NotebookEdit equivalent
+# DH-0073: Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent
 
 ## Summary
 
-Real Claude Code's Read tool understands .ipynb files (returns cells with code/text/outputs combined) and paginated PDF reading (a 'pages' range parameter, required guidance above 10 pages), and there is a separate NotebookEdit tool for structured cell-level notebook edits. dh's Read tool (src/agent/tools/read.ts) treats every file as plain text/binary with no notebook or PDF awareness, and dh has no NotebookEdit tool at all. This is distinct from DH-0046 (image/multimodal input + screenshot tool), which does not cover notebooks or PDFs.
+**Scope narrowed by owner decision (2026-07-16):** the PDF half of this ticket split out to
+**DH-0081** (a genuinely bigger, from-scratch capability — dh has zero PDF support today,
+unlike Jupyter notebooks which are "just" JSON). This ticket covers only Jupyter-notebook
+awareness. Real Claude Code's Read tool understands `.ipynb` files (returns cells with
+code/text/outputs combined, not raw notebook JSON), and there is a separate NotebookEdit tool
+for structured cell-level edits. dh's Read tool (`src/agent/tools/read.ts`) treats every file
+as plain text/binary with no notebook awareness, and dh has no NotebookEdit tool at all.
 
 ## User Stories
 
@@ -28,8 +34,6 @@ Real Claude Code's Read tool understands .ipynb files (returns cells with code/t
 - Given a `.ipynb` file, when Read is called on it, then the result presents cells (code/
   markdown) and their outputs in a readable form, not the raw notebook JSON as undifferentiated
   text.
-- Given a multi-page PDF, when Read is called with a `pages` range, then only that page
-  range is returned, matching real Claude Code's guidance (required above ~10 pages).
 
 ### As an agent editing a notebook, I want a structured cell-edit tool instead of hand-editing notebook JSON via Edit
 
@@ -40,40 +44,33 @@ Real Claude Code's Read tool understands .ipynb files (returns cells with code/t
 
 ## Functional Requirements
 
-- `src/agent/tools/read.ts`: add `.ipynb` detection and cell-aware rendering; add PDF
-  detection and a `pages` parameter (mirroring the shape of Claude Code's own Read tool,
-  which already documents a `pages` param for PDFs in this very session's own tool
-  definition).
+- `src/agent/tools/read.ts`: add `.ipynb` detection (it's JSON — no new dependency needed)
+  and cell-aware rendering (code cells, markdown cells, and their outputs presented
+  readably).
 - New tool: NotebookEdit-equivalent (`src/agent/tools/notebook-edit.ts` or similar) taking a
-  file path, cell index/id, and new cell source; wire into `ALL_TOOLS` and directory
-  ownership (Core, per `src/agent/` ownership in Constitution §3).
+  file path, cell index/id, and new cell source; wire into `ALL_TOOLS` (Core, per
+  `src/agent/` ownership in Constitution §3).
 - Follow the same read-before-write guard convention (`read-guard.ts`) that Edit/Write use,
   if applicable to notebook cell edits.
 
 ## Assumptions
 
-- This is scoped separately from DH-0046 (image/multimodal input, screenshot tool) --
-  DH-0046's design doc covers image content blocks and a Screenshot tool, not notebooks or
-  PDFs. No overlap to reconcile beyond both touching `src/agent/tools/read.ts`.
-- Whether PDF support requires a bundled PDF-parsing library (Bun/npm dependency) versus
-  shelling out is an implementation detail for whoever picks this up; flagged as an open
-  question below since it affects the single-binary compilation story (Constitution §2).
+- This is scoped separately from DH-0046 (image/multimodal input, screenshot tool) — no
+  overlap to reconcile beyond both touching `src/agent/tools/read.ts`. Notebook outputs can
+  include images (matplotlib plots etc.); rendering those meaningfully likely depends on
+  DH-0046's image-channel work landing — acceptable to render a placeholder for image
+  outputs until then, rather than blocking this ticket on DH-0046.
 
 ## Risks
 
-- PDF text extraction quality varies significantly by library; may need to accept
-  "good enough" text extraction rather than perfect layout fidelity.
-- Notebook outputs can include images/binary data (matplotlib plots etc.) -- rendering
-  those meaningfully likely depends on DH-0046's image-channel work landing first.
+- None significant — `.ipynb` is a well-specified JSON format, no external dependency
+  needed, no single-binary-compilation concern (unlike DH-0081's PDF half).
 
 ## Open Questions
 
-- Does PDF support pull in a new dependency, and if so, does that conflict with the
-  single-compiled-binary goal (`bun build --compile`), or is a pure-JS/Bun-native parser
-  available?
 - Should NotebookEdit be a wholly separate tool, or could Edit be extended with a
-  notebook-aware mode? (Real Claude Code keeps them separate tools; recommend mirroring
-  that rather than inventing a new shape.)
+  notebook-aware mode? Recommend mirroring real Claude Code's separate-tool shape rather
+  than inventing something new.
 
 ## Notes
 
@@ -81,3 +78,8 @@ Real Claude Code's Read tool understands .ipynb files (returns cells with code/t
 > Found 2026-07-16 during the systematic tool-schema/behavior comparison against real
 > Claude Code prompted by the owner following DH-0069. Relates to DH-0046 (image/
 > multimodal input) as a sibling gap in Read's file-type coverage, not a duplicate.
+
+> [!NOTE]
+> Owner decision (2026-07-16): split the PDF half out to DH-0081 — this ticket (Jupyter only)
+> is straightforward enough to queue directly; DH-0081 needs its own dependency evaluation
+> first.
