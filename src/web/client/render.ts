@@ -370,7 +370,7 @@ export function renderAgentHeader(
   const stats = el(doc, "div", "agent-header-stats");
   stats.textContent = `${formatTokenCount(agent.inputTokens)} in / ${formatTokenCount(
     agent.outputTokens,
-  )} out · ${formatCostUsd(agent.costUsd)}`;
+  )} out · ${formatCostUsd(agent.hasCost ? agent.costUsd : null)}`;
   container.appendChild(stats);
 
   const actions = el(doc, "div", "agent-header-actions");

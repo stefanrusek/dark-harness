@@ -549,3 +549,32 @@ sse-client.ts, render.ts + tests) still 100%/100%. `bun run build` succeeds.
 reconnect/live-state logic instead via `src/web/client/sse.test.ts`'s own mocked-fetch
 harness (Susan's scope), which already exercises drop → `reconnecting` → `live` sequences
 deterministically.
+
+### 2026-07-16 — DH-0104: unify number/cost/elapsed/token formatting (TUI slice)
+
+Same joint dispatch as Grace's/Susan's entries this round — read the ticket's owner-resolved
+rulings first: cost 2-dp+`<$0.01`+`—` on interactive views (TUI qualifies), tokens compact in
+glanceable chrome vs. full-comma in detail views, elapsed spaces+"just now" everywhere.
+
+**What changed in `src/tui/render.ts`:** `formatElapsed` now re-exports the shared
+`src/format.ts` implementation (spaces + "just now") instead of its own no-space, no-"just
+now" scheme — this was literally the divergence the ticket was filed over (TUI's old
+`"1m00s"` vs. Web's `"1m 12s"`/`"just now"`). `formatTokenCost` now takes a `tokenStyle:
+"compact" | "full" = "compact"` parameter: tree rows and the header's session-totals strip
+use the default (compact, glanceable chrome), the per-agent detail view (`renderAgent`)
+passes `"full"` explicitly (detail context — precision over density). Cost rendering in
+`formatTokenCost` switched from its old inline 4-dp string to the shared `formatCostUsd`
+(2-dp/`<$0.01`/`—`) — matches Web exactly now.
+
+**Test updates:** existing `formatElapsed` unit tests updated for the new space+"just now"
+output, plus a `matches the shared cross-surface test vectors` test importing
+`ELAPSED_VECTORS` from `../format.ts` so TUI and Web can't silently re-diverge again. Added a
+dedicated `formatTokenCost` describe block asserting the compact-default/full-opt-in split
+and the unknown-cost em-dash in both styles.
+
+Gates: typecheck/lint/test:coverage all green, `src/tui/render.ts` 100%/100%. Live-verified
+via a real rebuilt binary against a fabricated `dh logs` session (see Grace's entry for the
+exact fixture/output) rather than driving the interactive TUI directly this round — the
+render-test suite's assertions (updated above) are the direct proof for the TUI's own
+tree/detail rendering, since `renderFrame` is a pure function I can and did assert against
+byte-for-byte.

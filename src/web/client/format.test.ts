@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { COST_VECTORS, ELAPSED_VECTORS, TOKEN_COMPACT_VECTORS } from "../../format.ts";
 import {
   agentStatusStyle,
   connectionStatusLabel,
   formatCostUsd,
+  formatElapsed,
   formatExitCode,
   formatTokenCount,
   shortAgentId,
@@ -66,6 +68,12 @@ describe("formatTokenCount", () => {
     expect(formatTokenCount(Number.NaN)).toBe("0");
     expect(formatTokenCount(Number.POSITIVE_INFINITY)).toBe("0");
   });
+
+  test("matches the shared cross-surface compact-token test vectors", () => {
+    for (const [n, expected] of TOKEN_COMPACT_VECTORS) {
+      expect(formatTokenCount(n)).toBe(expected);
+    }
+  });
 });
 
 describe("formatCostUsd", () => {
@@ -82,8 +90,29 @@ describe("formatCostUsd", () => {
     expect(formatCostUsd(12)).toBe("$12.00");
   });
 
-  test("handles non-finite input defensively", () => {
-    expect(formatCostUsd(Number.NaN)).toBe("$0.00");
+  test("handles non-finite input as unknown, not zero", () => {
+    // DH-0104: NaN isn't a legitimate "$0.00" (a real, known zero cost) — it's the shape of
+    // "no valid figure available", so it renders the same `—` as an explicit null/undefined.
+    expect(formatCostUsd(Number.NaN)).toBe("—");
+  });
+
+  test("renders unknown (null/undefined) cost as an em dash, never $0.00", () => {
+    expect(formatCostUsd(null)).toBe("—");
+    expect(formatCostUsd(undefined)).toBe("—");
+  });
+
+  test("matches the shared cross-surface test vectors", () => {
+    for (const [input, expected] of COST_VECTORS) {
+      expect(formatCostUsd(input)).toBe(expected);
+    }
+  });
+});
+
+describe("formatElapsed", () => {
+  test("matches the shared cross-surface test vectors (spaces + 'just now', DH-0104)", () => {
+    for (const [ms, expected] of ELAPSED_VECTORS) {
+      expect(formatElapsed(ms)).toBe(expected);
+    }
   });
 });
 

@@ -1796,3 +1796,48 @@ concurrent DH-0105 agent (`sse-client.test.ts`), not touched by this round.
 
 Closed DH-0103 (`transition.py DH-0103 closed --resolution done`) after all verification
 above.
+
+### 2026-07-16 — DH-0104: unify number/cost/elapsed/token formatting (Core's `dh logs` slice)
+
+Joint dispatch across Core/TUI/Web (this entry covers my `src/server/log-analysis.ts` slice;
+Mary and Susan cover TUI/Web in their own roster files for the same round). Read the ticket's
+owner-resolved rulings (2026-07-16) before touching anything: cost 2-dp+`<$0.01`+`—` on
+interactive surfaces, `dh logs` keeps 4-dp as a *documented* exception; tokens compact vs.
+full-comma picked per context-class (glanceable chrome vs. detail/log), not per surface;
+elapsed gets spaces + "just now" *everywhere*, no exception for `dh logs`.
+
+**What I built:** a new shared, pure top-level module `src/format.ts` (same "shared utility
+lives at `src/*.ts`, not inside one domain's directory" pattern already established by
+`src/terminal.ts`'s spinner constants) — `formatTokenCountCompact`/`formatTokenCountFull`,
+`formatCostUsd` (2-dp/`<$0.01`/`—`, accepts `number | null | undefined`), `formatElapsed`
+(spaces + "just now"), plus exported `ELAPSED_VECTORS`/`TOKEN_COMPACT_VECTORS`/
+`TOKEN_FULL_VECTORS`/`COST_VECTORS` cross-surface test-vector tables. This is a genuine
+shared *import*, not just shared test vectors — the ticket's "prefer a shared module" bar,
+not just its minimum one. TUI and Web both import and re-export/wrap from it now.
+
+**My slice specifically:** `log-analysis.ts`'s `formatCost` keeps its own 4-dp body
+unchanged (that's the deliberate exception) but now documents *why* inline; `formatDuration`
+now delegates to the shared `formatElapsed` instead of its own ms-precision scheme — ticket
+explicitly said elapsed has no two-tier split, so `dh logs`' sub-second durations now read
+"just now" instead of e.g. "1ms". Updated `log-analysis.test.ts`'s one affected assertion
+(`duration=1ms` -> `duration=just now`).
+
+**Cross-domain judgment call I made (not explicitly enumerated in the ticket):** Web's
+`AgentNode.costUsd` had no way to distinguish "known cost of exactly $0" from "no cost event
+ever arrived" — both were the same `0` default, which is exactly the "$0.00 misrepresents
+unpriced as free" bug the ticket flags as its one real-correctness-angle risk. Fixed by
+adding a `hasCost: boolean` flag (display-layer only, doesn't change how `costUsd` is
+summed — the ticket's Assumptions section explicitly keeps accounting/computation out of
+scope, so I was careful this is purely a "do we know a number or not" flag, not a change to
+what gets summed). `sessionTotals().costUsd` is now `number | null` for the same reason.
+
+**Live verification:** built the real binary, fabricated a two-agent synthetic JSONL session
+under `/tmp/dh-verify/session1`, ran `./dist/dh logs`: `root [done] cost=$0.0457
+duration=5m 12s model=sonnet` / `child1 (unpriced worker) [failed] cost=— duration=31s
+model=haiku` — 4-dp cost, em-dash unknown, space+no-ms elapsed, all confirmed.
+
+Gates: `bun run typecheck`/`lint`/`test:coverage` all green, 100%/100% on every changed file
+(`src/format.ts`, `src/server/log-analysis.ts`, plus TUI/Web files — see their roster
+entries). `bun run e2e`: 30/32 pass; the 2 failures are `web.test.ts`/`connect-web.test.ts`
+failing on this sandbox's pre-existing missing-Chromium binary (`/opt/pw-browsers/chromium`),
+unrelated to this change (documented by Mary/Susan in prior rounds too).

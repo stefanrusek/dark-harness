@@ -52,6 +52,13 @@ export interface AgentNode {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** DH-0104: whether any `token_usage` event for this agent has ever carried a `costUsd`
+   * (i.e. the model has pricing configured). Distinguishes "known cost of exactly $0.00"
+   * from "cost unknown" (unpriced model) — without this, both looked identical (`costUsd`
+   * defaulting to 0) and the unknown case rendered as `$0.00`, misrepresenting an unpriced
+   * model as free (the ticket's one "real correctness angle" per its Risks section). Purely
+   * a display-layer flag — doesn't change how `costUsd` itself is summed. */
+  hasCost: boolean;
   spawnOrder: number;
   /**
    * DH-0066: whether the transcript's last turn is still an "open" assistant turn that a
@@ -202,6 +209,7 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
+    hasCost: false,
     spawnOrder: spawnCounter++,
     turnOpen: false,
     statusSince: timestamp,
@@ -312,7 +320,10 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
       node.inputTokens += event.inputTokens;
       node.outputTokens += event.outputTokens;
-      node.costUsd += event.costUsd ?? 0;
+      if (event.costUsd !== undefined) {
+        node.costUsd += event.costUsd;
+        node.hasCost = true;
+      }
       next.agents.set(event.agentId, node);
       return next;
     }
@@ -405,6 +416,7 @@ export function seedFromTree(
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
+      hasCost: false,
       spawnOrder: spawnCounter++,
       turnOpen: false,
       statusSince: nowIso,
@@ -494,7 +506,11 @@ export function agentDepth(state: WebState, agentId: string): number {
 export interface SessionTotals {
   inputTokens: number;
   outputTokens: number;
-  costUsd: number;
+  /** `null` if no tracked agent has ever reported a cost figure (DH-0104's unknown-cost
+   * case), matching each agent's own `hasCost` semantics. Otherwise sums whatever cost
+   * figures are known — an agent with no cost signal contributes 0 to the sum but doesn't
+   * flip an otherwise-known total back to unknown. */
+  costUsd: number | null;
 }
 
 /**
@@ -515,11 +531,11 @@ export function documentTitle(state: WebState): string {
 export function sessionTotals(state: WebState): SessionTotals {
   let inputTokens = 0;
   let outputTokens = 0;
-  let costUsd = 0;
+  let costUsd: number | null = null;
   for (const agent of state.agents.values()) {
     inputTokens += agent.inputTokens;
     outputTokens += agent.outputTokens;
-    costUsd += agent.costUsd;
+    if (agent.hasCost) costUsd = (costUsd ?? 0) + agent.costUsd;
   }
   return { inputTokens, outputTokens, costUsd };
 }

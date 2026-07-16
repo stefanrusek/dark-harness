@@ -215,8 +215,38 @@ Consistent nouns/verbs across help text, labels, docs, and logs:
 - **short id** — the display form of an agent id (`shortAgentId`, `src/web/client/format.ts`).
   **Never** show a full 36-char UUID in human chrome — use `model · short-id` (DH-0065). This
   applies to the `--server` activity feed too (currently prints full UUIDs — a gap).
-- **tokens / cost** — stat strip format is `<in> in · <out> out · <cost>`; unpriced →
-  `—`, excluded from totals, never `$0.00` (web-ui-guide.md).
+- **tokens / cost / elapsed (DH-0104 — canonical, shared TUI/Web/CLI)**: three surfaces
+  (TUI, Web, `dh logs`) once rendered the same value three different ways. The rules below
+  are the single source of truth; `src/format.ts` implements them once and `src/tui/
+  render.ts`, `src/web/client/format.ts`, and `src/server/log-analysis.ts` all import from
+  it (rather than each keeping its own copy) so a future edit to one surface can't silently
+  re-diverge from the others. Stat strip format stays `<in> in · <out> out · <cost>`.
+
+  - **Cost**: known cost renders `$0.00`-style at **2 decimal places**, with `<$0.01` for a
+    tiny nonzero amount (e.g. `$0.0031`) rather than rounding it to `$0.00`, which would
+    read as free. **Unknown** cost (the model has no pricing configured) renders `—` (em
+    dash) — **never** `$0.00`, which misrepresents an unpriced model as free — and is
+    excluded from any total (a total with at least one known-cost contributor still sums
+    the known figures; it only reads as `—` if *no* contributor has a known cost). This
+    2-dp rule applies to every **interactive** view: the TUI's tree/root/agent views and
+    Web's sidebar/strip/detail.
+    - **`dh logs` exception**: the CLI's `dh logs` audit-dump tool is a deliberate,
+      owner-confirmed exception that keeps **4 decimal places** (`$0.0456`) instead of 2 —
+      an operator inspecting raw session logs may care about sub-cent differences the 2-dp
+      interactive views round away. It still follows the unknown-cost rule (`—`, never
+      `$0.00`). This is a permanent two-tier rule, not a divergence to converge away.
+  - **Tokens**: which of two forms applies is a property of the *context*, not the
+    surface — apply the same rule on every surface:
+    - **Glanceable chrome** (TUI tree rows, the TUI header's session-totals strip, Web
+      sidebar badges and the session-totals strip) uses the **compact** `12.3k`/`1.2M`
+      form — density matters more than precision when it's one of several things on a row.
+    - **Detail/log contexts** (`dh logs`, the TUI's per-agent detail view, Web's per-agent
+      detail header) use the **full comma-grouped** `12,345` form — the operator is reading
+      closely enough here that precision matters more than density.
+  - **Elapsed**: one rule everywhere, no two-tier split (unlike cost/tokens) — spaces
+    between unit groups and a `"just now"` affordance for sub-second durations:
+    `just now`, `42s`, `3m 12s`, `1h 05m`. `dh logs`' `formatDuration` uses this same
+    shared elapsed formatter (it does **not** get its own exception the way cost does).
 - CLI voice: user-facing lines are prefixed `dh: ` and written as plain, lowercase-leading,
   full sentences. Keep it; but see §5 for adding structure/hierarchy on top.
 

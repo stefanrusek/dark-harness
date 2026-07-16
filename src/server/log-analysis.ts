@@ -12,6 +12,10 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentStatus, LogEvent, LogLine } from "../contracts/index.ts";
+// DH-0104 (docs/design/style-guide.md §4): elapsed formatting is shared with the TUI/Web via
+// `src/format.ts` — see `formatDuration` below for why `dh logs` doesn't keep its own
+// elapsed exception (only cost does).
+import { formatElapsed } from "../format.ts";
 
 /** DH-0038: generalizes the same tolerant JSONL parsing `summarizeFile` below uses so
  * Core's `src/agent/resume.ts` (which needs full per-line event replay, not just a
@@ -156,16 +160,24 @@ export function buildAgentLogTree(summaries: AgentLogSummary[]): AgentLogTreeNod
   return roots;
 }
 
+// DH-0104 (docs/design/style-guide.md §4): elapsed rendering is unified across every
+// surface — including `dh logs` — via the shared `src/format.ts`'s `formatElapsed` (spaces +
+// "just now" affordance). Elapsed has no glanceable/detail two-tier split (unlike cost and
+// tokens), so `dh logs` doesn't get its own exception here the way it does for cost below.
 function formatDuration(ms: number | undefined): string {
   if (ms === undefined) return "?";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+  return formatElapsed(ms);
 }
 
 /** DH-0067 fix: this used to return the literal string `$?` for an unpriced/unknown cost —
  * indistinguishable from an unexpanded shell variable in a paste of `dh logs` output ("cost
  * =$?" read as a shell-expansion bug, not a deliberate "unknown" marker). `—` (em dash) is
- * unambiguous prose for "no value available" and can't be mistaken for shell syntax. */
+ * unambiguous prose for "no value available" and can't be mistaken for shell syntax.
+ *
+ * DH-0104: `dh logs` is a deliberate, documented 4-dp exception to the interactive surfaces'
+ * 2-dp `formatCostUsd` rule (docs/design/style-guide.md §4) — an audit-dump context where an
+ * operator may care about sub-cent differences the 2-dp interactive views round away. It
+ * still shares the interactive rule's other half: unknown cost is `—`, never `$0.00`. */
 function formatCost(costUsd: number | undefined): string {
   return costUsd === undefined ? "—" : `$${costUsd.toFixed(4)}`;
 }

@@ -426,3 +426,55 @@ than a live browser run — this sandbox is missing `/opt/pw-browsers/chromium`
 that same pre-existing gap, not a regression from this change. The one e2e assertion that
 does exercise the connection pill live end-to-end without a browser
 (`e2e/tui.test.ts`, PTY-based) passes against a freshly rebuilt binary.
+
+### 2026-07-16 — DH-0104: unify number/cost/elapsed/token formatting (Web slice)
+
+Same joint dispatch as Grace's/Mary's entries this round. Read the owner's 2026-07-16
+rulings first: 2-dp cost + `<$0.01` + `—` unknown (Web already mostly did this, minus the
+unknown-cost distinction — see below); tokens compact in glanceable chrome (badges/strips,
+which is everywhere Web shows a token count today); elapsed spaces+"just now" (Web's
+`formatElapsed` already matched this exactly — no change needed there, just re-pointed at
+the new shared implementation so it can't drift from TUI's independently in the future).
+
+**What changed in `src/web/client/format.ts`:** `formatTokenCount`, `formatCostUsd`, and
+`formatElapsed` are now thin re-exports of the new shared `src/format.ts` (imported as
+`sharedFormatCostUsd`/`sharedFormatElapsed`/`formatTokenCountCompact` to avoid name
+collisions with the wrapper functions) rather than three independent implementations.
+`formatCostUsd`'s signature changed from `(costUsd: number)` to `(costUsd: number | null |
+undefined)` — `null`/`undefined` now render `—`, closing the ticket's one real-correctness-
+angle gap: Web previously had no way to represent "unknown cost" distinctly from "known cost
+of exactly $0", so an unpriced model rendered as `$0.00` (indistinguishable from free).
+
+**The correctness fix that required touching `state.ts` (not just formatting):** to actually
+have an "unknown" value to pass into the new `formatCostUsd`, `AgentNode` needed a signal for
+"has any `token_usage` event for this agent ever carried a `costUsd`" — added `hasCost:
+boolean`, set `true` only when `event.costUsd !== undefined` in the `token_usage` reducer
+case. `SessionTotals.costUsd` is now `number | null` (`null` only if *no* tracked agent has
+ever reported a cost). This is a display-layer flag, not an accounting change — `costUsd`
+itself still sums exactly the same numbers it always did; `hasCost` only decides whether the
+render layer is allowed to say "$0.00" vs. "—". Judgment call I made without it being
+spelled out in the ticket: this genuinely required a `state.ts` field, not just a
+`format.ts`/`render.ts` change, because the "unknown" signal didn't exist anywhere in the
+reducer's output before — I scoped it as narrowly as possible (one boolean, one `if`) to stay
+inside the ticket's "rendering only, not accounting" assumption.
+
+`render.ts`'s one `agent.costUsd` call site (the detail header) now passes `agent.hasCost ?
+agent.costUsd : null`. Session-totals/sidebar-badge call sites already passed a `number |
+null`-shaped value through `formatCostUsd`, unaffected beyond the signature widening.
+
+**Tests:** `state.test.ts`'s "empty session" totals test updated (`costUsd: 0` -> `costUsd:
+null`, with a comment explaining why null is correct for zero agents). `render.test.ts`'s
+`fakeAgentNode` helper got a `hasCost: true` default (matches its historical always-`$0.00`-
+if-unset behavior for existing tests that don't care about the unknown case).
+`format.test.ts` gained: unknown-cost em-dash tests, a non-finite-input test updated (NaN now
+`—`, not `$0.00` — a real behavior change, and the more correct one), and three "matches the
+shared cross-surface test vectors" tests (cost/tokens/elapsed) importing the vector tables
+from `../../format.ts` directly.
+
+Gates: typecheck/lint/test:coverage green, every touched file 100%/100%
+(`format.ts`/`render.ts`/`state.ts` all at 100% funcs, state.ts's 99.60% line figure is a
+pre-existing gap unrelated to this diff, unchanged by it). `e2e/web.test.ts`/
+`e2e/connect-web.test.ts` still fail in this sandbox on the pre-existing missing-Chromium gap
+(documented in my and Mary's prior-round entries) — not exercised live this round for that
+reason; Web's formatting call sites are proven via `render.test.ts`/`format.test.ts`'s direct
+assertions instead.

@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentTreeNode } from "../contracts/index.ts";
+import { ELAPSED_VECTORS } from "../format.ts";
 import {
   CURSOR_MARKER,
   colorizeStatus,
   formatElapsed,
+  formatTokenCost,
   frameToAnsi,
   renderFrame,
   renderTranscript,
@@ -404,7 +406,8 @@ describe("renderFrame", () => {
     );
     const rows = renderFrame(state);
     const joined = rows.join("\n");
-    expect(joined).toContain("(1m00s)");
+    // DH-0104: shared `formatElapsed` now adds a space between the number and unit.
+    expect(joined).toContain("(1m 00s)");
     expect(joined).toContain("Last event: 12s ago");
   });
 
@@ -555,25 +558,58 @@ describe("renderTranscript", () => {
   });
 });
 
+// DH-0104: `formatElapsed` is now the shared `src/format.ts` implementation (spaces +
+// "just now" affordance) — these vectors match Web's `format.test.ts` exactly, per the
+// ticket's cross-surface same-input -> same-output requirement.
 describe("formatElapsed", () => {
+  test("formats sub-second durations as 'just now'", () => {
+    expect(formatElapsed(0)).toBe("just now");
+    expect(formatElapsed(999)).toBe("just now");
+  });
+
   test("formats sub-minute durations as seconds", () => {
-    expect(formatElapsed(0)).toBe("0s");
+    expect(formatElapsed(1000)).toBe("1s");
     expect(formatElapsed(12_000)).toBe("12s");
     expect(formatElapsed(59_000)).toBe("59s");
   });
 
-  test("formats sub-hour durations as minutes and zero-padded seconds", () => {
-    expect(formatElapsed(60_000)).toBe("1m00s");
-    expect(formatElapsed(65_000)).toBe("1m05s");
-    expect(formatElapsed(3_599_000)).toBe("59m59s");
+  test("formats sub-hour durations as minutes and zero-padded seconds, space-separated", () => {
+    expect(formatElapsed(60_000)).toBe("1m 00s");
+    expect(formatElapsed(65_000)).toBe("1m 05s");
+    expect(formatElapsed(3_599_000)).toBe("59m 59s");
   });
 
-  test("formats hour-plus durations as hours and zero-padded minutes", () => {
-    expect(formatElapsed(3_600_000)).toBe("1h00m");
-    expect(formatElapsed(7_380_000)).toBe("2h03m");
+  test("formats hour-plus durations as hours and zero-padded minutes, space-separated", () => {
+    expect(formatElapsed(3_600_000)).toBe("1h 00m");
+    expect(formatElapsed(7_380_000)).toBe("2h 03m");
   });
 
-  test("clamps negative durations to 0s", () => {
-    expect(formatElapsed(-5_000)).toBe("0s");
+  test("clamps negative durations to 'just now'", () => {
+    expect(formatElapsed(-5_000)).toBe("just now");
+  });
+
+  test("matches the shared cross-surface test vectors", () => {
+    for (const [ms, expected] of ELAPSED_VECTORS) {
+      expect(formatElapsed(ms)).toBe(expected);
+    }
+  });
+});
+
+// DH-0104: `formatTokenCost` picks token style per call site's context-class — compact for
+// glanceable chrome (the tree rows and header totals, the default), full comma-form for the
+// detail agent view (opted in via the "full" argument). Cost always renders via the shared
+// 2-dp `formatCostUsd`, regardless of token style.
+describe("formatTokenCost", () => {
+  test("defaults to compact tokens (glanceable chrome: tree rows, header totals)", () => {
+    expect(formatTokenCost(10_000, 2_345, 0.0456)).toBe("12.3k tok / $0.05");
+  });
+
+  test("uses full comma-form tokens when asked for the detail view", () => {
+    expect(formatTokenCost(10_000, 2_345, 0.0456, "full")).toBe("12,345 tok / $0.05");
+  });
+
+  test("renders unknown cost as an em dash in both token styles", () => {
+    expect(formatTokenCost(100, 50, null)).toBe("150 tok / —");
+    expect(formatTokenCost(100, 50, null, "full")).toBe("150 tok / —");
   });
 });

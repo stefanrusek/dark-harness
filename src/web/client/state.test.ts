@@ -468,9 +468,12 @@ describe("sessionTotals", () => {
     expect(totals.costUsd).toBeCloseTo(0.03, 5);
   });
 
-  test("returns zeros for an empty session", () => {
+  test("returns zero tokens and unknown (null) cost for an empty session", () => {
+    // DH-0104: an empty session has no `token_usage` events at all, so cost is genuinely
+    // unknown (`null`), not "$0" — matching `formatCostUsd`'s unknown-cost `—` rendering
+    // rather than misrepresenting "no data" as "known to cost nothing".
     const totals = sessionTotals(createInitialState());
-    expect(totals).toEqual({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
+    expect(totals).toEqual({ inputTokens: 0, outputTokens: 0, costUsd: null });
   });
 });
 

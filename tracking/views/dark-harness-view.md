@@ -68,7 +68,6 @@ source: tracking/
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
 | [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | feature | stefan |
-| [DH-0104](../DH-0104-unify-number-cost-elapsed-and-token-formatting-across-tui-web-and-cli.md) | Unify number, cost, elapsed, and token formatting across TUI, Web, and CLI | feature | stefan |
 
 ### implementing
 
@@ -92,6 +91,7 @@ source: tracking/
 | ID | Title | Resolution |
 | --- | --- | --- |
 | [DH-0105](../DH-0105-unify-connection-state-and-status-vocabulary-across-tui-and-web.md) | Unify connection-state and status vocabulary across TUI and Web | done |
+| [DH-0104](../DH-0104-unify-number-cost-elapsed-and-token-formatting-across-tui-web-and-cli.md) | Unify number, cost, elapsed, and token formatting across TUI, Web, and CLI | done |
 | [DH-0103](../DH-0103-dh-help-styled-width-aware-visually-structured-output.md) | dh --help: styled, width-aware, visually structured output | done |
 | [DH-0102](../DH-0102-dh-doctor-migrate-to-the-canonical-pending-spinner-and-check-cross-verdict-glyphs.md) | dh doctor: migrate to the canonical pending spinner and check/cross verdict glyphs | done |
 | [DH-0101](../DH-0101-give-cli-command-output-a-real-visual-system-glyphs-hierarchy-color-liveness-beyond-dh-doctor.md) | Give CLI command output a real visual system (glyphs, hierarchy, color, liveness) beyond dh doctor | done |
@@ -105,4 +105,3 @@ source: tracking/
 | [DH-0092](../DH-0092-scaffolded-dh-init-config-uses-invalid-anthropic-model-id-every-real-api-call-404s.md) | Scaffolded dh init config uses invalid Anthropic model id, every real API call 404s | done |
 | [DH-0091](../DH-0091-dh-doesn-t-read-a-project-s-mcp-json-into-its-mcp-server-config.md) | dh doesn't read a project's .mcp.json into its MCP server config | done |
 | [DH-0090](../DH-0090-dh-init-s-scaffolded-config-has-no-api-key-region-placeholders-using-var-env-interpolation.md) | dh init's scaffolded config has no API-key/region placeholders using $(VAR) env interpolation | done |
-| [DH-0087](../DH-0087-create-github-issue-to-gauge-demand-for-mcp-oauth-support.md) | Create GitHub issue to gauge demand for MCP OAuth support | done |

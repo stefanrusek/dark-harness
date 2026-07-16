@@ -2,6 +2,14 @@
 // formatting rule is unit-testable without a DOM shim.
 
 import type { AgentStatus } from "../../contracts/index.ts";
+// DH-0104 (docs/design/style-guide.md §4): token/cost/elapsed formatting is now defined
+// once in the shared `src/format.ts` module and re-exported/wrapped here, rather than
+// hand-kept-in-sync copies — see that module's header comment for the full two-tier rule.
+import {
+  formatTokenCountCompact,
+  formatCostUsd as sharedFormatCostUsd,
+  formatElapsed as sharedFormatElapsed,
+} from "../../format.ts";
 import type { ConnectionStatus } from "./state.ts";
 
 export interface StatusStyle {
@@ -39,20 +47,18 @@ export function connectionStatusLabel(status: ConnectionStatus): string {
   return CONNECTION_LABELS[status];
 }
 
-/** Compact human count: 950 -> "950", 12_345 -> "12.3k", 1_234_567 -> "1.2M". */
-export function formatTokenCount(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  const abs = Math.abs(n);
-  if (abs < 1000) return String(Math.round(n));
-  if (abs < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
-}
+/** Compact human count: 950 -> "950", 12_345 -> "12.3k", 1_234_567 -> "1.2M". Web only ever
+ * uses this compact glanceable-chrome form (badges/strips) today — re-exported from the
+ * shared `src/format.ts` (DH-0104) so it stays byte-for-byte identical to the TUI's tree-row
+ * rendering rather than a hand-kept-in-sync copy. */
+export const formatTokenCount = formatTokenCountCompact;
 
-export function formatCostUsd(costUsd: number): string {
-  if (!Number.isFinite(costUsd) || costUsd === 0) return "$0.00";
-  if (costUsd < 0.01) return "<$0.01";
-  return `$${costUsd.toFixed(2)}`;
-}
+/** Canonical cost rendering (DH-0104, docs/design/style-guide.md §4): 2-dp, `<$0.01` for a
+ * tiny nonzero amount, `—` for unknown/unpriced — re-exported from the shared
+ * `src/format.ts` so Web and the TUI's interactive views render identically. `null`/
+ * `undefined` mean "unknown" (see `AgentNode.hasCost`/`SessionTotals.costUsd` in
+ * `state.ts`). */
+export const formatCostUsd = sharedFormatCostUsd;
 
 export function formatExitCode(exitCode: number): string {
   if (exitCode === 0) return "success (exit 0)";
@@ -66,19 +72,7 @@ export function formatExitCode(exitCode: number): string {
  * (drops sub-second precision) since its job is letting an operator eyeball "still a normal
  * turn" vs. "this has been running a suspiciously long time," not precise timing.
  */
-export function formatElapsed(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  if (totalSeconds < 1) return "just now";
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (totalMinutes < 60) return `${totalMinutes}m ${String(seconds).padStart(2, "0")}s`;
-
-  const totalHours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${totalHours}h ${String(minutes).padStart(2, "0")}m`;
-}
+export const formatElapsed = sharedFormatElapsed;
 
 /** Short id for display: keeps a stable prefix so identical ids remain visually distinct. */
 export function shortAgentId(agentId: string): string {

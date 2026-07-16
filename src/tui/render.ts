@@ -3,6 +3,15 @@
 // app.ts is the only place that actually writes to a terminal.
 
 import type { AgentStatus } from "../contracts/index.ts";
+// DH-0104 (docs/design/style-guide.md §4): token/cost/elapsed formatting is defined once in
+// the shared `src/format.ts` module (see its header comment for the two-tier rule) so the
+// TUI, Web, and `dh logs` render the same value the same way instead of drifting apart.
+import {
+  formatCostUsd,
+  formatTokenCountCompact,
+  formatTokenCountFull,
+  formatElapsed as sharedFormatElapsed,
+} from "../format.ts";
 import { parseMarkdown, sanitizeText } from "../markdown/index.ts";
 import { SPINNER_FRAMES, SPINNER_FRAME_MS } from "../terminal.ts";
 import { renderMarkdownRows } from "./markdown-ansi.ts";
@@ -107,20 +116,16 @@ function spinnerFrame(now: number): string {
 }
 
 /** Format a non-negative millisecond duration as a short human-readable elapsed string
- * (`"0s"`, `"12s"`, `"1m05s"`, `"2h03m"`) — the liveness indicator shown per agent in the
- * tree/agent views (Round 5, docs/handoffs/tui.md). Negative input (a clock that hasn't
- * caught up to an event's timestamp yet) clamps to `"0s"` rather than showing a confusing
- * negative duration. */
-export function formatElapsed(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (totalMinutes < 60) return `${totalMinutes}m${String(seconds).padStart(2, "0")}s`;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${hours}h${String(minutes).padStart(2, "0")}m`;
-}
+ * (`"just now"`, `"12s"`, `"1m 05s"`, `"2h 03m"`) — the liveness indicator shown per agent in
+ * the tree/agent views (Round 5, docs/handoffs/tui.md). Negative input (a clock that hasn't
+ * caught up to an event's timestamp yet) clamps to `"just now"` rather than showing a
+ * confusing negative duration.
+ *
+ * DH-0104: re-exported from the shared `src/format.ts` (spaces + "just now" affordance,
+ * matching Web's `formatElapsed` byte-for-byte) — this used to be a separate no-space,
+ * no-"just now" implementation, which was exactly the surface-to-surface divergence this
+ * ticket closed. */
+export const formatElapsed = sharedFormatElapsed;
 
 // DH-0065: distinct per-role gutter markers so a user turn reads apart from an agent turn "at
 // a glance" in a long scrollback, not just via a same-color two-character prefix. Both
@@ -238,16 +243,24 @@ function rootAgent(state: TuiState): AgentInfo | null {
   return state.rootAgentId ? (state.agents.get(state.rootAgentId) ?? null) : null;
 }
 
-/** Format a token/cost figure as `"12,345 tok"` (no cost known) or `"12,345 tok / $0.0456"`
- * (DH-0028) — shared by the per-agent and session-total displays so both read consistently. */
+/** Format a token/cost figure — DH-0104: cost is always the canonical 2-dp/`<$0.01`/`—`
+ * interactive-surface form (`formatCostUsd`, shared with Web); tokens follow the two-tier
+ * context-class rule (docs/design/style-guide.md §4) picked per call site via `tokenStyle`:
+ * `"compact"` (`12.3k`) for glanceable chrome — the tree rows and the always-visible header
+ * totals strip — and `"full"` (`12,345`) for the detail agent view, which is read closely
+ * enough that precision matters more than density. */
 export function formatTokenCost(
   inputTokens: number,
   outputTokens: number,
   costUsd: number | null,
+  tokenStyle: "compact" | "full" = "compact",
 ): string {
   const totalTokens = inputTokens + outputTokens;
-  const tokenPart = `${totalTokens.toLocaleString("en-US")} tok`;
-  return costUsd === null ? tokenPart : `${tokenPart} / $${costUsd.toFixed(4)}`;
+  const tokenCount =
+    tokenStyle === "compact"
+      ? formatTokenCountCompact(totalTokens)
+      : formatTokenCountFull(totalTokens);
+  return `${tokenCount} tok / ${formatCostUsd(costUsd)}`;
 }
 
 /** Session-wide token/cost totals summed across every currently-tracked agent (DH-0028) —
@@ -370,7 +383,10 @@ function renderAgent(
     ? `Model: ${agent.model}   Status: ${colorizeStatus(agent.status, agent.status)}` +
       ` (${formatElapsed(state.now - agent.statusSince)})` +
       `   Last event: ${formatElapsed(state.now - agent.lastEventAt)} ago` +
-      `   ${formatTokenCost(agent.inputTokens, agent.outputTokens, agent.costUsd)}`
+      // DH-0104: the agent detail view is a detail/log context per the style guide's
+      // two-tier token rule, so it gets full comma-form tokens (not the tree's compact form)
+      // even though the cost figure alongside it stays the same 2-dp interactive style.
+      `   ${formatTokenCost(agent.inputTokens, agent.outputTokens, agent.costUsd, "full")}`
     : "Model: (unknown)";
   const hint = state.statusMessage ?? `${meta}   —   ${dim("[Esc] back to root (read-only)")}`;
   return { content: padRows(content, contentRows), footer: [hint] };

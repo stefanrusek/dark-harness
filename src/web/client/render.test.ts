@@ -35,6 +35,7 @@ function fakeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
+    hasCost: true,
     spawnOrder: 0,
     turnOpen: false,
     statusSince: "2026-07-15T00:00:00.000Z",

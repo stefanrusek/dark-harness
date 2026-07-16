@@ -176,7 +176,10 @@ describe("readSessionLogSummaries / formatSessionLogTree", () => {
     expect(output).toContain("cost=$0.0050");
     expect(output).toContain("child2");
     expect(output).toContain("[failed]");
-    expect(output).toContain("1ms");
+    // DH-0104: elapsed is unified via the shared `formatElapsed` (spaces + "just now"
+    // affordance) everywhere, including `dh logs` — a 1ms duration now reads "just now"
+    // rather than the old ms-precision "1ms".
+    expect(output).toContain("duration=just now");
     expect(output.split("\n").length).toBe(3);
   });
 
