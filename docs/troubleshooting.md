@@ -47,9 +47,18 @@ account/region. Check model access in the Bedrock console for the exact region c
 
 ## MCP server configured but its tools never show up
 
-Expected today — the MCP client isn't wired up yet; configuring `mcpServers` only gets you a
-placeholder `ToolSearch` result per server, not real tool access. See the
-[MCP server examples](mcp-servers.md) status note and `tracking/DH-0002`.
+MCP tools are **deferred** — discovered and connected at startup, but hidden from the model
+until `ToolSearch` activates them with an exact-name `select:` query (e.g.
+`select:mcp__yourserver__sometool`). If that still finds nothing:
+
+- Check the connection actually succeeded — an unreachable server is logged (stderr) at
+  startup and marked failed rather than blocking the rest of the session; `ToolSearch`'s own
+  output includes a footer listing any currently-unreachable configured servers with their
+  last error.
+- A failed server gets one throttled reconnect attempt (at most every 60s) whenever
+  `ToolSearch` runs — if it just came back up, try again in a minute rather than restarting.
+- Confirm the `command`/`args` (stdio) or `url` (HTTP) in `dh.json` are actually correct for
+  that server — see the [MCP server examples](mcp-servers.md).
 
 ## Where do the logs live, and how do I read them?
 
