@@ -15,6 +15,7 @@ source: tracking/
 | --- | --- | --- |
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance | deferred (owner decision 2026-07-15): no incident behind this, revisit near real release cut |
 | [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | architect design pass in progress (resume mechanism); message-fix piece is unblocked |
+| [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | architect design pass in progress |
 | [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback | deferred (owner decision 2026-07-15): sweep-sourced idea, not a real requested need |
 | [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | architect design pass in progress |
 
@@ -25,7 +26,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance 🔒 | feature | stefan |
-| [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | feature | stefan |
 | [DH-0046](../DH-0046-no-multimodal-image-input-or-screenshot-tool.md) | No image/multimodal input, and no screenshot tool — blocks visual web-testing/verification workflows | feature | stefan |
 | [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback 🔒 | feature | stefan |
 | [DH-0048](../DH-0048-no-telemetry-metrics-endpoint.md) | No telemetry/metrics endpoint for fleet-level observability | feature | stefan |
@@ -40,6 +40,7 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session 🔒 | feature | stefan |
+| [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support 🔒 | feature | stefan |
 | [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop 🔒 | bug | stefan |
 
 ### ready

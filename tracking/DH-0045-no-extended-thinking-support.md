@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0045
 type: feature
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["architect design pass in progress"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -37,3 +37,7 @@ harness today.
 
 > [!NOTE]
 > Source: Competitive-differentiation sweep finding #9.
+
+> [!NOTE]
+> Owner decision (2026-07-15): queue now — real quality lever, not speculative. New content-
+> block type/config knob/client display needs an architect design pass before implementation.
