@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0012
 type: bug
-status: draft
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: []
 created: 2026-07-15
 relations:
   depends_on: []
@@ -44,9 +44,20 @@ TUI); the Web client has no per-agent transcript cap at all, backed by ever-grow
 
 ## Functional Requirements
 
-- Given any of the above structures, when an entry becomes terminal/irrelevant and has been read at
-  least once (or exceeds a TTL), then it is eligible for eviction, with a config knob for the
-  bound.
+- **Owner decision (2026-07-15): fixed-count cap, not TTL/read-tracking.** Each of the four
+  structures (`TaskRegistry`'s task map + `readCursors`, `EventBuffer`, TUI's `agents` map,
+  Web's `agents` map) caps at the **50 most-recent terminal/completed entries**, evicting the
+  oldest beyond that count — same simple shape `EventBuffer` already uses for its 1000-event
+  cap, just applied consistently everywhere and at a smaller default since these are
+  per-agent/per-task entries, not fine-grained events. Active (non-terminal) entries are never
+  evicted regardless of count.
+- A single `dh.json` config knob controls the default (e.g. `limits.completedRetention: 50`),
+  so it can be changed without a code change per the owner's explicit "we can change it later
+  if needed" framing.
+- `EventBuffer` additionally needs a byte-bound (not just count), since a single large
+  `agent_output.chunk` can dominate memory regardless of entry count — implementer's call on
+  a reasonable default byte cap (e.g. 10MB), evicting oldest entries first when exceeded, same
+  as the count-based eviction.
 
 ## Notes
 
