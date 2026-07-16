@@ -17,6 +17,7 @@ import {
 } from "../contracts/index.ts";
 import { runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
+import { loadProjectMcpServers } from "./mcp/project-config.ts";
 import { buildMcpTools } from "./mcp/tools.ts";
 import { createProvider } from "./providers/index.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
@@ -245,6 +246,16 @@ export class AgentRuntime {
     // unhandled rejection, and startup never blocks on or fails because of it.
     this.mcpManager = new McpManager(this.config.mcpServers);
     void this.mcpManager.connectAll().then(() => this.mergeMcpTools());
+    // DH-0091: pick up a project's own `.mcp.json` (working-directory root only, same scoping
+    // DH-0055 assumes for CLAUDE.md) alongside dh.json's own `mcpServers` — read once here at
+    // construction time, consistent with connectAll()'s own eager-at-startup timing above.
+    // `McpManager.addServers()` skips any name already configured via dh.json, which is what
+    // gives dh.json's own definition precedence on a collision (see project-config.ts's doc
+    // comment for the full rationale). Never throws into the constructor: a missing file is a
+    // silent no-op (loadProjectMcpServers() itself returns undefined), and a malformed file
+    // logs a clear error to stderr rather than crashing startup — the same "degrade
+    // gracefully, never block startup" contract connectAll() already has.
+    void this.loadAndMergeProjectMcpServers();
     this.onEvent = options.onEvent;
     this.onLogLine = options.onLogLine;
     this.interactive = options.interactive ?? false;
@@ -438,6 +449,25 @@ export class AgentRuntime {
     for (const tool of buildMcpTools(this.mcpManager)) {
       this.toolMap.set(tool.name, tool);
     }
+  }
+
+  /** DH-0091: reads `<cwd>/.mcp.json` (if any) and adds its `mcpServers` to `mcpManager` —
+   * see the constructor's call site and project-config.ts's doc comment for the full
+   * precedence rationale. Never throws: a missing file is a no-op (per
+   * `loadProjectMcpServers()`'s own contract), and any other failure (malformed JSON, a
+   * `mcpServers` shape that fails validation) is logged to stderr and otherwise swallowed —
+   * a bad `.mcp.json` must never prevent the rest of the runtime from starting. */
+  private async loadAndMergeProjectMcpServers(): Promise<void> {
+    let projectServers: Awaited<ReturnType<typeof loadProjectMcpServers>>;
+    try {
+      projectServers = await loadProjectMcpServers(this.cwd);
+    } catch (err) {
+      console.error(`dh: failed to load .mcp.json: ${(err as Error).message}`);
+      return;
+    }
+    if (projectServers === undefined) return;
+    await this.mcpManager.addServers(projectServers);
+    this.mergeMcpTools();
   }
 
   /** DH-0002: closes every MCP connection (terminating stdio children). Coordinates with

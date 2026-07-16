@@ -131,10 +131,27 @@ function startMockAnthropicServer(onRequest?: (body: { model: string }) => void)
             "tool_use",
           );
         }
+        // DH-0091 test support: a keyword query that actually ranks the fixture .mcp.json
+        // server's discovered tool into ToolSearch's (default top-5) results, unlike the
+        // generic "q" query below.
+        if (text.includes("use-toolsearch-project")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_search_project",
+                name: "ToolSearch",
+                input: { query: "fixture echo" },
+              },
+            ],
+            "tool_use",
+          );
+        }
         if (
           text.includes("use-toolsearch") &&
           !text.includes("select-and-call") &&
-          !text.includes("unreachable")
+          !text.includes("unreachable") &&
+          !text.includes("project")
         ) {
           return message(
             [{ type: "tool_use", id: "tu_search", name: "ToolSearch", input: { query: "q" } }],
@@ -578,6 +595,104 @@ describe("AgentRuntime", () => {
     "children) without throwing, even with no mcpServers configured", async () => {
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     await expect(runtime.close()).resolves.toBeUndefined();
+  });
+
+  describe("DH-0091: project .mcp.json auto-load", () => {
+    const fixturePath = fileURLToPath(
+      new URL("./mcp/__fixtures__/fake-stdio-server.ts", import.meta.url),
+    );
+
+    function tempProjectDir(mcpJsonContents?: string): string {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), "dh-runtime-mcp-")));
+      if (mcpJsonContents !== undefined) {
+        writeFileSync(join(dir, ".mcp.json"), mcpJsonContents);
+      }
+      return dir;
+    }
+
+    test("no .mcp.json present in cwd — behavior is unchanged, no error", async () => {
+      const dir = tempProjectDir();
+      const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", cwd: dir });
+      const result = await runtime.runRoot("please just answer");
+      expect(result.success).toBe(true);
+      await runtime.close();
+    });
+
+    test("a .mcp.json server is merged into the runtime's MCP tool set", async () => {
+      const { logLines, onLogLine } = collectors();
+      const dir = tempProjectDir(
+        JSON.stringify({
+          mcpServers: { fixture: { command: process.execPath, args: ["run", fixturePath] } },
+        }),
+      );
+      const runtime = newAgentRuntime({
+        config: baseConfig(),
+        systemPrompt: "sp",
+        cwd: dir,
+        onLogLine,
+      });
+      // Let the fire-and-forget .mcp.json read + connect settle before ToolSearch runs.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const result = await runtime.runRoot("use-toolsearch-project");
+      expect(result.success).toBe(true);
+      const searchResult = logLines.find(
+        (l) => l.type === "tool_result" && l.toolUseId === "tu_search_project",
+      );
+      const output = searchResult && searchResult.type === "tool_result" ? searchResult.output : "";
+      expect(output).toContain("mcp__fixture__echo");
+      await runtime.close();
+    });
+
+    test("on a name collision, dh.json's own mcpServers entry wins over .mcp.json's", async () => {
+      const dir = tempProjectDir(
+        JSON.stringify({
+          mcpServers: { shared: { command: process.execPath, args: ["run", fixturePath] } },
+        }),
+      );
+      const { logLines, onLogLine } = collectors();
+      const runtime = newAgentRuntime({
+        config: baseConfig({
+          mcpServers: { shared: { command: "/definitely/does/not/exist/mcp-server" } },
+        }),
+        systemPrompt: "sp",
+        cwd: dir,
+        onLogLine,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const result = await runtime.runRoot("use-toolsearch-project");
+      expect(result.success).toBe(true);
+      const searchResult = logLines.find(
+        (l) => l.type === "tool_result" && l.toolUseId === "tu_search_project",
+      );
+      const output = searchResult && searchResult.type === "tool_result" ? searchResult.output : "";
+      // dh.json's own ("shared" -> broken command) definition must win: the .mcp.json fixture
+      // server's tool never gets discovered, and the server shows up as unreachable instead.
+      expect(output).not.toContain("mcp__shared__echo");
+      expect(output).toContain("shared");
+      expect(output).toContain("Unreachable");
+      await runtime.close();
+    });
+
+    test("a malformed .mcp.json logs a clear error and does not crash startup", async () => {
+      const dir = tempProjectDir("{ not valid json");
+      const originalConsoleError = console.error;
+      const errors: unknown[][] = [];
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+      try {
+        const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", cwd: dir });
+        const result = await runtime.runRoot("please just answer");
+        expect(result.success).toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(errors.some((a) => String(a[0]).includes(".mcp.json"))).toBe(true);
+        await runtime.close();
+      } finally {
+        console.error = originalConsoleError;
+      }
+    });
   });
 
   test("buildToolContext defaults cwd to process.cwd() when not overridden", async () => {

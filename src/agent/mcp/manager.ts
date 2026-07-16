@@ -53,6 +53,23 @@ export class McpManager {
     await Promise.all([...this.connections.values()].map((conn) => this.connectAndCache(conn)));
   }
 
+  /** DH-0091: adds and connects servers discovered after construction — specifically, a
+   * project's `.mcp.json`, read asynchronously by `AgentRuntime` alongside its own eager
+   * `connectAll()` at startup. Any name already present (from `dh.json`'s own `mcpServers`,
+   * passed to the constructor) is skipped entirely, never overwritten — that's what gives
+   * `dh.json`'s definition precedence on a collision, per DH-0091's stated precedence rule.
+   * Never throws — same "degrade gracefully per server" contract as `connectAll()`. */
+  async addServers(servers: Record<string, McpServerConfig>): Promise<void> {
+    const added: McpConnection[] = [];
+    for (const [name, config] of Object.entries(servers)) {
+      if (this.connections.has(name)) continue;
+      const conn = new McpConnection(name, config);
+      this.connections.set(name, conn);
+      added.push(conn);
+    }
+    await Promise.all(added.map((conn) => this.connectAndCache(conn)));
+  }
+
   private async connectAndCache(conn: McpConnection): Promise<void> {
     const existing = this.inFlightConnects.get(conn.serverName);
     if (existing) {

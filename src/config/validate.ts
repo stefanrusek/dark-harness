@@ -217,7 +217,10 @@ function validateLogRetention(raw: unknown): DhConfig["logRetention"] {
   };
 }
 
-function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | undefined {
+// Exported for DH-0091: src/agent/mcp/project-config.ts reuses this exact validation path for
+// a project's `.mcp.json` `mcpServers` key, so a `.mcp.json` entry is held to the same shape/
+// validation as dh.json's own `mcpServers` field rather than a second, invented schema.
+export function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | undefined {
   if (raw === undefined) return undefined;
   if (!isRecord(raw)) {
     throw new ConfigError("mcpServers must be an object");
