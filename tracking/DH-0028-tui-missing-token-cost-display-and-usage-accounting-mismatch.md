@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0028
 type: bug
-status: draft
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: []
 created: 2026-07-15
 relations:
   depends_on: []
@@ -47,9 +47,32 @@ being resolved unilaterally by either domain.
   (correct) accumulation semantics, and the ambiguity is resolved in `src/contracts/`, not left to
   each client's guess.
 
+## Functional Requirements
+
+- **Resolved by reading the code directly (2026-07-15), no architect pass needed:**
+  `src/agent/loop.ts` emits one `token_usage` event per provider completion call (i.e. once
+  per turn), with `inputTokens`/`outputTokens` sourced directly from the provider SDK's
+  per-request `usage` field (`response.usage.input_tokens`/`output_tokens` in
+  `src/agent/providers/anthropic.ts`, equivalent in `bedrock.ts`) — this is a **per-turn
+  delta**, not a running total; the Anthropic/Bedrock API's own `usage` field never reflects
+  conversation-wide cumulative counts. Web's client (`src/web/client/state.ts`) already sums
+  these deltas correctly. **The TUI's handler is the actual bug** — it replaces
+  `AgentInfo.inputTokens`/`outputTokens`/`costUsd` on each event instead of accumulating.
+  Fix: TUI's `token_usage` handler must add (not replace) into the running per-agent totals,
+  matching Web's existing (correct) behavior.
+- No `src/contracts/` change needed — `TokenUsageEvent`'s shape is fine as-is; only its
+  doc comment should gain a one-line clarification that the fields are per-event deltas, to
+  prevent this exact bug recurring. This does NOT need Fable/architect sign-off per CLAUDE.md
+  §6.2 since it's a doc-comment clarification, not a schema/shape change.
+- Once TUI accumulates correctly, render both per-agent and session-total token/cost figures
+  in `src/tui/render.ts`, matching the Web UI's existing display (per the ticket's first user
+  story).
+
 ## Notes
 
 > [!NOTE]
-> Source: TUI/Web domain sweep findings #28 and #29. Finding #29 is explicitly flagged by the
-> originating sweep as warranting an architect decision (CLAUDE.md §6.5) since it's a live
-> cross-domain disagreement about wire semantics, not just a UI gap.
+> Source: TUI/Web domain sweep findings #28 and #29. Finding #29 was originally flagged by the
+> sweep as warranting an architect decision (CLAUDE.md §6.5), but on inspection the wire
+> semantics are unambiguous from the existing provider-adapter code — no live disagreement
+> requiring arbitration, just a straightforward TUI bug (replace instead of accumulate). Owner
+> confirmed no further input needed; ticket is ready to implement directly.
