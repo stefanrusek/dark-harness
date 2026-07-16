@@ -2,6 +2,7 @@
 // no reliance on globals — so it's testable with happy-dom in addition to a real browser.
 // See docs/handoffs/web.md status log for the "joy to use" design notes.
 
+import { parseMarkdown } from "../../markdown/index.ts";
 import {
   agentStatusStyle,
   connectionStatusLabel,
@@ -11,6 +12,7 @@ import {
   formatTokenCount,
   shortAgentId,
 } from "./format.ts";
+import { renderMarkdownInto } from "./markdown-dom.ts";
 import {
   type AgentNode,
   type Turn,
@@ -393,13 +395,28 @@ function turnRoleLabel(role: Turn["role"]): string {
   return role === "user" ? "You" : "Agent";
 }
 
+/**
+ * Renders a turn's text into `container` (its existing content is fully replaced). User
+ * turns are the operator's own echoed input, not Markdown, so they stay plain `textContent`
+ * (DH-0056 D3/D4 parity with the TUI: only assistant output is parsed as Markdown). Assistant
+ * turns go through the shared parser (`src/markdown/index.ts`) and the DOM-only renderer
+ * (`markdown-dom.ts`) — never `innerHTML`.
+ */
+function renderTurnText(doc: Document, container: HTMLElement, turn: Turn): void {
+  if (turn.role === "user") {
+    container.textContent = turn.text;
+    return;
+  }
+  renderMarkdownInto(doc, container, parseMarkdown(turn.text));
+}
+
 function buildTurnElement(doc: Document, turn: Turn): HTMLElement {
   const wrapper = el(doc, "div", `turn turn-${turn.role}`);
   const role = el(doc, "div", "turn-role");
   role.textContent = turnRoleLabel(turn.role);
   wrapper.appendChild(role);
   const text = el(doc, "div", "turn-text");
-  text.textContent = turn.text;
+  renderTurnText(doc, text, turn);
   wrapper.appendChild(text);
   return wrapper;
 }
@@ -455,10 +472,13 @@ export function appendTranscript(
   if (lastRenderedTurn && lastRenderedTurn.text.length > rendered.lastTurnTextLength) {
     const lastTurnEl = container.children[rendered.turnCount - 1];
     const textEl = lastTurnEl?.querySelector<HTMLElement>(".turn-text");
+    // DH-0056 D4: a streamed chunk can retroactively change the last turn's Markdown
+    // structure (e.g. close a previously-unterminated fenced code block), so the fast path
+    // re-parses and rebuilds the whole turn's text rather than appending a raw text node —
+    // appending would be wrong once the turn is rendered as Markdown instead of plain text.
+    // Still cheap: one re-parse of one (bounded) turn per event, not the whole transcript.
     if (textEl) {
-      textEl.appendChild(
-        doc.createTextNode(lastRenderedTurn.text.slice(rendered.lastTurnTextLength)),
-      );
+      renderTurnText(doc, textEl, lastRenderedTurn);
     }
   }
 

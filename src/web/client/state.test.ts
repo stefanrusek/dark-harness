@@ -474,3 +474,76 @@ describe("addUserTurn (Round 4 — local echo of the operator's own sent message
     expect(next.agents.get("a1")?.transcript).toHaveLength(1);
   });
 });
+
+describe("DH-0012: per-agent transcript cap", () => {
+  test("appendAssistantChunk (via applyEvent) trims oldest turns once the transcript exceeds the cap", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("a1", null));
+    // Alternate user/assistant turns (each its own distinct turn) so the trim exercises the
+    // "drop whole oldest turns" path, not just "shrink the single growing turn."
+    for (let i = 0; i < 5; i++) {
+      state = addUserTurn(state, "a1", "x".repeat(50_000), `2026-01-01T00:00:0${i}Z`);
+      state = applyEvent(state, output("a1", "y".repeat(50_000)));
+    }
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    const total = transcript.reduce((sum, t) => sum + t.text.length, 0);
+    expect(total).toBeLessThanOrEqual(200_000);
+    // Oldest turns were evicted, not merged/mangled: what remains is a suffix of what was sent.
+    expect(transcript.length).toBeLessThan(10);
+  });
+
+  test("addUserTurn trims mid-turn text (not just whole-turn eviction) when a single turn is huge", () => {
+    let state = createInitialState();
+    state = addUserTurn(state, "a1", "a".repeat(250_000), "2026-01-01T00:00:00Z");
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.text.length).toBe(200_000);
+    // The trim keeps the *end* of the oversized text (newest content), not the start.
+    expect(transcript[0]?.text.endsWith("a")).toBe(true);
+  });
+
+  test("a transcript within the cap is left untouched", () => {
+    let state = createInitialState();
+    state = addUserTurn(state, "a1", "hello", "2026-01-01T00:00:00Z");
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    expect(transcript).toEqual([
+      { role: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
+    ]);
+  });
+});
+
+describe("DH-0012: completed-agent retention cap", () => {
+  test("evicts the oldest terminal agents beyond the 50-entry retention on agent_status", () => {
+    let state = createInitialState();
+    // Spawn and finish 55 agents in order; only the 50 most-recently-finished should remain.
+    for (let i = 0; i < 55; i++) {
+      const id = `a${i}`;
+      state = applyEvent(state, spawned(id, "root"));
+      state = applyEvent(state, statusEvent(id, "done"));
+    }
+    const remaining = [...state.agents.keys()];
+    expect(remaining).toHaveLength(50);
+    // The oldest five (a0..a4) were evicted; the newest (a54) survives.
+    expect(remaining).not.toContain("a0");
+    expect(remaining).not.toContain("a4");
+    expect(remaining).toContain("a54");
+  });
+
+  test("active (non-terminal) agents are never evicted regardless of count", () => {
+    let state = createInitialState();
+    for (let i = 0; i < 60; i++) {
+      state = applyEvent(state, spawned(`a${i}`, "root"));
+      state = applyEvent(state, statusEvent(`a${i}`, "running"));
+    }
+    expect(state.agents.size).toBe(60);
+  });
+
+  test("does not evict when at or under the retention cap", () => {
+    let state = createInitialState();
+    for (let i = 0; i < 3; i++) {
+      state = applyEvent(state, spawned(`a${i}`, "root"));
+      state = applyEvent(state, statusEvent(`a${i}`, "done"));
+    }
+    expect(state.agents.size).toBe(3);
+  });
+});

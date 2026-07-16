@@ -98,6 +98,61 @@ export interface ErrorLogEntry {
 
 const MAX_ERROR_LOG_ENTRIES = 50;
 
+/** DH-0012: bound per-agent transcript buffer (total chars across all turns) so a very long
+ * session's DOM/state doesn't grow memory unboundedly, matching the TUI's `MAX_OUTPUT_CHARS`
+ * cap (`src/tui/state.ts`) conceptually — oldest turns are dropped first (and, if needed, the
+ * oldest remaining turn's text is trimmed from its start), newest content is always kept in
+ * full. Web has no reason to diverge from TUI's number. */
+const MAX_TRANSCRIPT_CHARS = 200_000;
+
+/** DH-0012: cap `agents` at this many *terminal* (done/failed/stopped) entries, oldest evicted
+ * first — active (non-terminal) agents are never evicted regardless of count. Matches the
+ * owner's fixed-count-cap decision applied consistently across Core/Server/TUI/Web (see
+ * tracking/DH-0012 and `src/tui/state.ts`'s `DEFAULT_COMPLETED_RETENTION`); the Web client has
+ * no `dh.json` access (it's browser-only), so this is its own default until/unless a config
+ * value is threaded through some other way. */
+export const DEFAULT_COMPLETED_RETENTION = 50;
+
+const TERMINAL_STATUSES = new Set<AgentStatus>(["done", "failed", "stopped"]);
+
+/** Evict the oldest terminal (done/failed/stopped) agents from `state.agents` beyond
+ * `retention` most-recent terminal entries, in first-seen (`spawnOrder`) order. Active agents
+ * are never evicted, so `retention` bounds only "how much completed history sticks around,"
+ * never "how many agents can be in flight." */
+function evictCompletedAgents(state: WebState, retention: number): WebState {
+  const terminal = [...state.agents.values()]
+    .filter((agent) => TERMINAL_STATUSES.has(agent.status))
+    .sort((a, b) => a.spawnOrder - b.spawnOrder);
+  if (terminal.length <= retention) return state;
+  const toEvict = terminal.slice(0, terminal.length - retention);
+  const agents = new Map(state.agents);
+  for (const agent of toEvict) agents.delete(agent.agentId);
+  return { ...state, agents };
+}
+
+/** Drop oldest turns (and, if needed, trim the oldest remaining turn's text from its start)
+ * until the total character count across `transcript` is at or under `max`. Mirrors the TUI's
+ * `trimTranscript` (`src/tui/state.ts`); Web transcripts are always plain JS strings (no
+ * terminal-width/codepoint-slicing concerns), so a plain string `slice` is sufficient here. */
+function trimTranscript(transcript: Turn[], max: number): Turn[] {
+  let total = transcript.reduce((sum, turn) => sum + turn.text.length, 0);
+  if (total <= max) return transcript;
+  const out = [...transcript];
+  while (out.length > 0 && total > max) {
+    const oldest = out[0];
+    if (!oldest) break;
+    const excess = total - max;
+    if (oldest.text.length <= excess) {
+      total -= oldest.text.length;
+      out.shift();
+    } else {
+      out[0] = { ...oldest, text: oldest.text.slice(excess) };
+      total -= excess;
+    }
+  }
+  return out;
+}
+
 let spawnCounter = 0;
 
 export function createInitialState(): WebState {
@@ -142,10 +197,11 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
  */
 function appendAssistantChunk(transcript: Turn[], chunk: string, timestamp: string): Turn[] {
   const last = transcript.at(-1);
-  if (last && last.role === "assistant") {
-    return [...transcript.slice(0, -1), { ...last, text: last.text + chunk }];
-  }
-  return [...transcript, { role: "assistant", text: chunk, timestamp }];
+  const next =
+    last && last.role === "assistant"
+      ? [...transcript.slice(0, -1), { ...last, text: last.text + chunk }]
+      : [...transcript, { role: "assistant" as const, text: chunk, timestamp }];
+  return trimTranscript(next, MAX_TRANSCRIPT_CHARS);
 }
 
 /**
@@ -162,7 +218,10 @@ export function addUserTurn(
 ): WebState {
   const next: WebState = { ...state, agents: new Map(state.agents) };
   const node = { ...ensureAgent(next, agentId, timestamp) };
-  node.transcript = [...node.transcript, { role: "user", text, timestamp }];
+  node.transcript = trimTranscript(
+    [...node.transcript, { role: "user", text, timestamp }],
+    MAX_TRANSCRIPT_CHARS,
+  );
   next.agents.set(agentId, node);
   return next;
 }
@@ -202,7 +261,9 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       }
       node.status = event.status;
       next.agents.set(event.agentId, node);
-      return next;
+      // DH-0012: only a status change can newly make an agent terminal, so eviction only
+      // needs to run here (matching the TUI's placement in `src/tui/state.ts`).
+      return evictCompletedAgents(next, DEFAULT_COMPLETED_RETENTION);
     }
     case "token_usage": {
       const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
