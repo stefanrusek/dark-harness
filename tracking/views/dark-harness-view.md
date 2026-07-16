@@ -49,6 +49,8 @@ source: tracking/
 | [DH-0076](../DH-0076-no-taskcreate-tasklist-taskget-taskupdate-equivalent-structured-todo-plan-tracking-for-the-main-agent.md) | No TaskCreate/TaskList/TaskGet/TaskUpdate-equivalent structured todo/plan tracking for the main agent | feature | stefan |
 | [DH-0077](../DH-0077-no-enterworktree-exitworktree-equivalent-for-isolating-a-spawned-sub-agent-s-working-directory.md) | No EnterWorktree/ExitWorktree-equivalent for isolating a spawned sub-agent's working directory | feature | stefan |
 | [DH-0078](../DH-0078-sendmessage-monitor-can-only-address-a-task-by-task-id-not-by-the-human-readable-name-claude-code-allows.md) | SendMessage/Monitor can only address a task by task_id, not by the human-readable name Claude Code allows | feature | stefan |
+| [DH-0079](../DH-0079-read-tool-s-truncation-model-diverges-from-real-claude-code-line-cap-notice-vs-byte-cap-hard-error.md) | Read tool's truncation model diverges from real Claude Code: line-cap+notice vs byte-cap+hard-error | bug | stefan |
+| [DH-0080](../DH-0080-bash-output-capping-shape-diverges-from-real-claude-code-tail-cut-inline-notice-vs-head-preview-plus-saved-file.md) | Bash output-capping shape diverges from real Claude Code: tail-cut inline notice vs head-preview-plus-saved-file | bug | stefan |
 
 ### ready
 
