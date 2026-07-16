@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0038
 type: feature
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["architect design pass in progress (resume mechanism); message-fix piece is unblocked"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -51,3 +51,10 @@ then silently gets a fresh, contextless session with no explicit message explain
 > restart"). Related to but distinct from **DH-0003** (`SendMessage` resuming a *finished-but-
 > still-in-process* agent) — this ticket is about surviving a full process restart, not an
 > in-process finished-task resume.
+
+> [!NOTE]
+> Owner decision (2026-07-15): queue both stories now — the confusing-message fix and the full
+> `--resume` mechanism. Full resume (reconstructing conversation state from JSONL after a
+> process restart) is substantial and needs an architect design pass before implementation,
+> per CLAUDE.md §6.1/§6.3; the message fix is small enough to implement directly without one.
+> Routed to Fable for the resume design.
