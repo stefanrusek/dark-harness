@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0065
 type: feature
-status: draft
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-16
 relations:
@@ -218,6 +218,80 @@ Leaving this ticket in `draft` — still open in this ticket: word-boundary wrap
 transcript user/agent visual identity (and the consecutive-same-role-turn boundary
 question), agent tree readability (short ids/connectors/status-aware elapsed/status
 labels), tool-call visibility in the transcript, and header/footer/heading chrome styling.
+
+### 2026-07-16 — Mary (TUI): remaining five items closed out
+
+Picked up where the previous round left off and implemented every remaining open item.
+
+- **Word-boundary wrapping (item 1).** `wrapText` (`width.ts`) and `wrapSegments`
+  (`markdown-ansi.ts`) now tokenize into whitespace/non-whitespace runs and prefer breaking
+  at the last whitespace before the column limit; a single token wider than a full row
+  still hard-breaks by codepoint/display-width (no infinite loop, no split surrogate pair).
+  `wrapPlainDim` (code blocks) is untouched, per the ticket's assumption that verbatim
+  hard-slicing is fine there.
+  - **Regression caught by the spike, not by unit tests**: my first pass had a bug where
+    `flushRow()`/`flush()`'s unconditional `justWrapped = true` leaked past the point where
+    real content was already placed back on the row (both the hard-break-token branch and
+    the ordinary overflow-flush branch), wrongly swallowing the *next* token's leading
+    space whenever a flush happened mid-line. Visually this glued words together
+    ("exercise" + "word" → "exerciseword") — a different, equally visible defect. Running
+    `e2e/spikes/tui/explore-design-review.ts` and eyeballing the raw captures (per this
+    ticket's own instruction) is what caught it; unit tests alone did not, since my first
+    round of tests happened to avoid that exact shape. Fixed by only clearing `justWrapped`
+    once content is actually placed, and added regression tests in both files ("aaa bbb
+    cc" → `["aaa","bbb","cc"]`, "hi abcdef ghi" → `["hi","abcde","f ghi"]`).
+- **Transcript user/agent visual identity (item 2).** Every transcript row now gets a
+  role-colored 2-column gutter: bold-yellow `"> "` for a user turn's first row, cyan `"● "`
+  for an agent turn's, blank aligned indent on continuation rows. Both colors (33, 36) and
+  bold (1) were already emitted elsewhere in `render.ts`/`markdown-ansi.ts` — no new SGR
+  class. Left open, undecided: the review's report of two consecutive assistant turns
+  concatenating with no separator — reproduces on Web too (per the review), so it's likely
+  a shared loop/event-semantics question (does the wire signal a new-turn boundary at all?),
+  not a TUI render bug. Coordinate with Web/DH-0066 rather than guessing at a client-side
+  heuristic that could paper over a real protocol gap.
+- **Tool-call visibility (item 3).** Implemented what's achievable without touching
+  `src/contracts/`: an `agent_spawned` event whose `parentAgentId` names a tracked agent now
+  appends a synthetic `"tool"`-role turn to the parent's transcript (`⚙ Agent(model):
+  "description"`, dim). Deliberately **not done**: visibility for generic tool calls (Bash,
+  Read, Edit, ...) — the live `ServerSentEvent` union (`src/contracts/events.ts`) has no
+  tool-call event at all (only the offline JSONL log schema does). That's a
+  `src/contracts/` change and needs architect sign-off per CLAUDE.md §6.2 — flagging for the
+  coordinator/architect rather than inventing a wire shape unilaterally.
+- **Agent tree readability (item 4).** Added tree connectors (`├─`/`└─`/`│  `, mirroring
+  `dh logs`'s `formatNode`) via a new `prefix` field on `flattenTree`'s `FlatTreeEntry`,
+  replacing the flat per-depth space indent. Also added the status word next to the glyph
+  (color is never the only cue) and made the elapsed bracket status-aware: only shown for
+  running/waiting (using `statusSince`, "time in current status"), omitted entirely for
+  done/failed/stopped so it stops looking like a stuck/frozen counter.
+- **Header/footer/heading chrome (item 5).** Bold app name, status-colored connection pill
+  (green open / yellow connecting / red error / gray closed), dimmed totals/separator/
+  default footer key hints. Markdown h2+ headings now carry cyan in addition to bold, so
+  they're no longer byte-identical to inline bold body text (h1 keeps bold+underline).
+- **Liveness (item 6).** A braille spinner appears next to the connection pill whenever the
+  root agent's own status is `"running"` — distinct from `rootActive` (which never resets
+  once true) and from the tree/agent view's elapsed counter, neither of which gave the
+  always-visible root view any "still alive" sign during a long turn.
+- **Verification**: `e2e/spikes/tui/explore-design-review.ts` reran and its raw-ANSI/plain
+  captures eyeballed directly (this is what caught the word-wrap regression above). Also ran
+  the full `e2e/spikes/tui/run-all.ts` orchestrator (DH-0060) — found and fixed two more
+  issues while doing so: `spike-agent-tree-hierarchy.ts` and `spike-ctrlc-exit-code.ts` both
+  asserted on tree-line string shapes the connector/status-word changes altered (exactly the
+  risk this ticket's own Risks section flagged); separately, `spike-tree-scroll.ts` was
+  already broken (unrelated to this ticket — a pre-existing DH-0069 label-format assumption,
+  `.includes("(sub)")`, that stopped matching once labels started preferring `description`)
+  and was fixed in the same pass since it blocked a clean orchestrator run. Final orchestrator
+  run: 0 hard FAIL across all 19 Test Plan items (was 1 hard FAIL before the
+  `spike-tree-scroll.ts` fix). `REPORT.md` regenerated and committed.
+- **Gates**: `bun run typecheck`, `bun run lint`, `bun run test:coverage` all clean — 1416
+  tests pass, 100%/100% line/function coverage on every changed file
+  (`width.ts`, `markdown-ansi.ts`, `render.ts`, `state.ts`, `types.ts`, `tree.ts`).
+  `bun run e2e` (the `bun:test`-based suite): 30/32 pass — the 2 failures are
+  `web.test.ts`/`connect-web.test.ts`, both failing on `launch: Failed to launch chromium
+  because executable doesn't exist at /opt/pw-browsers/chromium` — a sandbox/environment gap
+  (no headless Chromium binary available here), unrelated to any TUI change and outside
+  `src/tui/`'s domain entirely.
+
+All items from this ticket are now addressed. Closing.
 
 ## Notes
 
