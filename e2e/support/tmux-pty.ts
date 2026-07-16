@@ -21,6 +21,12 @@ export interface TmuxSession {
   sessionName: string;
   /** Current visible screen content (plain text, no ANSI), like a real terminal snapshot. */
   capture(): string;
+  /** Current visible screen content *with* the escape sequences tmux's own terminal emulation
+   * applied to it (`capture-pane -e`) — i.e. the literal bytes tmux would draw with. Used by
+   * hostile-input tests (DH-0056) to assert the only ANSI ever present is the client's
+   * allowlisted SGR output, never a raw OSC/DCS/cursor-movement/DA-DSR sequence that made it
+   * through from model text unsanitized. */
+  captureRaw(): string;
   /** Sends one or more literal tmux key names (e.g. "Enter", "Left", "C-c", "Tab"). */
   sendKeys(...keys: string[]): void;
   /** Sends literal text as if typed (tmux `send-keys -l`). */
@@ -72,6 +78,13 @@ export function startTmuxSession(command: string[], options: TmuxSessionOptions 
       const result = run(["tmux", "capture-pane", "-t", sessionName, "-p"]);
       if (!result.ok) {
         throw new Error(`tmux capture-pane failed: ${result.stderr}`);
+      }
+      return result.stdout;
+    },
+    captureRaw() {
+      const result = run(["tmux", "capture-pane", "-t", sessionName, "-e", "-p"]);
+      if (!result.ok) {
+        throw new Error(`tmux capture-pane -e failed: ${result.stderr}`);
       }
       return result.stdout;
     },

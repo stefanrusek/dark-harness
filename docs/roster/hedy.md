@@ -303,3 +303,43 @@ the pre-existing `security.test.ts` bearer-token timeout) — no regressions fro
 
 **Both tickets closed.** No new open threads; `tmux`/Chromium sandbox gaps remain, as every
 round has noted since Round 1.
+
+### 2026-07-15 — Round 9 (fresh process again): DH-0056 hostile-Markdown TUI e2e coverage
+
+Came online fresh for DH-0056 (Markdown rendering, not raw escape passthrough). Full detail
+in `docs/handoffs/e2e.md`'s Round 9 entry. Worktree-provenance issue recurred with an extra
+wrinkle: fast-forwarding to the `local/` remote's same-named branch tip still landed short of
+the real local `claude/coordinator-onboarding-kab9ls` branch, which is what actually carried
+DH-0056's landed work — checked `git merge-base` before each reset, no unique commits lost.
+
+**What I built:** `e2e/markdown-rendering.test.ts` — a positive Markdown-formatting smoke
+test and a hostile-input test combining DA/DSR, OSC 52 clipboard-hijack, and cursor/
+screen-clear frame-spoof sequences in one scripted turn, both against the real compiled
+binary via the existing tmux PTY harness. Added `TmuxSession.captureRaw()` (`tmux
+capture-pane -e`) so hostile-ANSI tests can assert on the *raw* escape-inclusive pane content,
+not just the already-stripped plain capture `capture()` returns.
+
+**Web coverage explicitly deferred:** confirmed via `git log`/`find src/web -iname
+"*markdown*"` that Susan's `src/web/client/markdown-dom.ts` hasn't landed yet — only the
+shared parser and TUI's renderer exist. Follow-up round should mirror this round's TUI
+scenarios for the DOM renderer once it lands.
+
+**Real regression found (not mine, not fixed):** installed `tmux` via `brew install tmux` to
+actually verify my new file against the real binary (never available in this sandbox before,
+per every prior round's notes) — this let `e2e/tui.test.ts` run to completion for what looks
+like the first time, and both its existing scenarios now hang on a `⚠ Reconnected — history
+may be incomplete.` banner and never reach `"session ended"`, reproducible in total isolation
+from my diff. Likely the recently-merged periodic SSE keep-alive (Server round 2,
+`d7acdb4`) causing a spurious mid-turn reconnect. Flagged prominently in the handoff, not
+fixed (Server/TUI's files) and not routed around in my own tests (switched my own wait
+condition to rendered content instead of session-lifecycle text, which was the correct
+target for what these tests are actually proving anyway).
+
+**Gates:** `bun run typecheck`/`bun run lint` clean (171 files). `bun run test:coverage`:
+1138/1138 pass on rerun, 100% coverage, no `src/` touched. `bun test
+e2e/markdown-rendering.test.ts`: 2/2 pass. Full `bun run e2e`: 27 pass / 5 fail — 2
+Chromium-path gap (pre-existing), 1 pre-existing `security.test.ts` timeout, 2 newly-surfaced
+`tui.test.ts` reconnect failures (the regression above, not this round's diff).
+
+**Open threads:** Web-side DH-0056 coverage (blocked on Susan's round landing); the
+SSE-reconnect regression (Server/TUI cross-domain question, not e2e's to fix).
