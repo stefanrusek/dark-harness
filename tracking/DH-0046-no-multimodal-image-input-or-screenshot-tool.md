@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0046
 type: feature
-status: draft
+status: refining
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["architect design pass in progress"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -37,3 +37,7 @@ changes it makes.
 
 > [!NOTE]
 > Source: Competitive-differentiation sweep finding #10.
+
+> [!NOTE]
+> Owner decision (2026-07-15): queue now — real capability gap for verifying web UI changes,
+> not speculative. Needs an architect pass (new content-block type, screenshot tool design).
