@@ -1,7 +1,66 @@
 import { describe, expect, test } from "bun:test";
-import type { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import type { ConverseStreamCommand, ConverseStreamOutput } from "@aws-sdk/client-bedrock-runtime";
 import { type BedrockClientLike, BedrockProvider } from "./bedrock.ts";
+import type { ProviderStreamCallbacks } from "./types.ts";
 import { ProviderError } from "./types.ts";
+
+// DH-0044: both adapters now always request streaming — every fixture here is a fake
+// async-iterable `ConverseStreamOutput` sequence rather than a single whole `ConverseCommand`
+// response (see bedrock.ts's `BedrockClientLike` doc comment).
+
+async function* streamOf(events: ConverseStreamOutput[]): AsyncGenerator<ConverseStreamOutput> {
+  for (const event of events) {
+    yield event;
+  }
+}
+
+function textBlock(index: number, text: string): ConverseStreamOutput[] {
+  // Bedrock has no explicit text block-start event — the first delta at an unseen index
+  // implicitly opens the accumulator (see bedrock.ts's consumeBedrockStream doc comment).
+  return [
+    {
+      contentBlockDelta: { contentBlockIndex: index, delta: { text } },
+    } as unknown as ConverseStreamOutput,
+    { contentBlockStop: { contentBlockIndex: index } } as unknown as ConverseStreamOutput,
+  ];
+}
+
+function toolUseBlock(
+  index: number,
+  toolUseId: string,
+  name: string,
+  inputJson: string,
+): ConverseStreamOutput[] {
+  return [
+    {
+      contentBlockStart: { contentBlockIndex: index, start: { toolUse: { toolUseId, name } } },
+    } as unknown as ConverseStreamOutput,
+    {
+      contentBlockDelta: {
+        contentBlockIndex: index,
+        delta: { toolUse: { input: inputJson } },
+      },
+    } as unknown as ConverseStreamOutput,
+    { contentBlockStop: { contentBlockIndex: index } } as unknown as ConverseStreamOutput,
+  ];
+}
+
+function messageStop(stopReason: string): ConverseStreamOutput {
+  return { messageStop: { stopReason } } as unknown as ConverseStreamOutput;
+}
+
+function metadata(usage?: {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheWriteInputTokens?: number;
+}): ConverseStreamOutput {
+  return { metadata: { usage } } as unknown as ConverseStreamOutput;
+}
+
+function fakeClient(events: ConverseStreamOutput[]): BedrockClientLike {
+  return { send: async () => ({ stream: streamOf(events) }) };
+}
 
 const BASE_REQUEST = {
   model: "gemma4",
@@ -18,13 +77,11 @@ const BASE_REQUEST = {
 
 describe("BedrockProvider", () => {
   test("translates a text response and end_turn stop reason", async () => {
-    const client: BedrockClientLike = {
-      send: async () => ({
-        output: { message: { role: "assistant", content: [{ text: "hello back" }] } },
-        stopReason: "end_turn",
-        usage: { inputTokens: 10, outputTokens: 5 },
-      }),
-    };
+    const client = fakeClient([
+      ...textBlock(0, "hello back"),
+      messageStop("end_turn"),
+      metadata({ inputTokens: 10, outputTokens: 5 }),
+    ]);
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.stopReason).toBe("end_turn");
@@ -33,18 +90,11 @@ describe("BedrockProvider", () => {
   });
 
   test("translates a tool_use response and tool_use stop reason", async () => {
-    const client: BedrockClientLike = {
-      send: async () => ({
-        output: {
-          message: {
-            role: "assistant",
-            content: [{ toolUse: { toolUseId: "tu_1", name: "Bash", input: { command: "ls" } } }],
-          },
-        },
-        stopReason: "tool_use",
-        usage: { inputTokens: 20, outputTokens: 8 },
-      }),
-    };
+    const client = fakeClient([
+      ...toolUseBlock(0, "tu_1", "Bash", '{"command":"ls"}'),
+      messageStop("tool_use"),
+      metadata({ inputTokens: 20, outputTokens: 8 }),
+    ]);
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.stopReason).toBe("tool_use");
@@ -53,70 +103,66 @@ describe("BedrockProvider", () => {
     ]);
   });
 
+  test("an empty tool_use input JSON buffer parses as {}", async () => {
+    const client = fakeClient([...toolUseBlock(0, "tu_1", "Bash", ""), messageStop("tool_use")]);
+    const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+    const result = await provider.complete(BASE_REQUEST);
+    expect(result.content).toEqual([{ type: "tool_use", id: "tu_1", name: "Bash", input: {} }]);
+  });
+
   test("maps max_tokens and other stop reasons", async () => {
-    const client: BedrockClientLike = {
-      send: async () => ({
-        output: { message: { role: "assistant", content: [] } },
-        stopReason: "max_tokens",
-      }),
-    };
+    const client = fakeClient([messageStop("max_tokens")]);
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.stopReason).toBe("max_tokens");
 
-    const client2: BedrockClientLike = {
-      send: async () => ({
-        output: { message: { role: "assistant", content: [] } },
-        stopReason: "guardrail_intervened",
-      }),
-    };
+    const client2 = fakeClient([messageStop("guardrail_intervened")]);
     const provider2 = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client2);
     const result2 = await provider2.complete(BASE_REQUEST);
     expect(result2.stopReason).toBe("other");
   });
 
+  test("a stream with no messageStop event at all reports 'other'", async () => {
+    const client = fakeClient([]);
+    const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+    const result = await provider.complete(BASE_REQUEST);
+    expect(result.stopReason).toBe("other");
+    expect(result.content).toEqual([]);
+  });
+
   test("skips malformed tool_use blocks missing an id or name", async () => {
-    const client: BedrockClientLike = {
-      send: async () => ({
-        output: {
-          message: {
-            role: "assistant",
-            content: [{ toolUse: { toolUseId: undefined, name: "Bash", input: {} } }],
-          },
+    const client = fakeClient([
+      {
+        contentBlockStart: {
+          contentBlockIndex: 0,
+          start: { toolUse: { toolUseId: undefined, name: "Bash" } },
         },
-        stopReason: "tool_use",
-      }),
-    };
+      } as unknown as ConverseStreamOutput,
+      { contentBlockStop: { contentBlockIndex: 0 } } as unknown as ConverseStreamOutput,
+      messageStop("tool_use"),
+    ]);
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.content).toEqual([]);
   });
 
   test("defaults usage to zero when absent from the response", async () => {
-    const client: BedrockClientLike = {
-      send: async () => ({
-        output: { message: { role: "assistant", content: [] } },
-        stopReason: "end_turn",
-      }),
-    };
+    const client = fakeClient([messageStop("end_turn")]);
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.usage).toEqual({ inputTokens: 0, outputTokens: 0 });
   });
 
   test("includes cache token usage when present", async () => {
-    const client: BedrockClientLike = {
-      send: async () => ({
-        output: { message: { role: "assistant", content: [] } },
-        stopReason: "end_turn",
-        usage: {
-          inputTokens: 1,
-          outputTokens: 1,
-          cacheReadInputTokens: 2,
-          cacheWriteInputTokens: 3,
-        },
+    const client = fakeClient([
+      messageStop("end_turn"),
+      metadata({
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 2,
+        cacheWriteInputTokens: 3,
       }),
-    };
+    ]);
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.usage.cacheReadTokens).toBe(2);
@@ -124,11 +170,11 @@ describe("BedrockProvider", () => {
   });
 
   test("sends tool_result content blocks, mapping isError to a status", async () => {
-    let captured: ConverseCommand | undefined;
+    let captured: ConverseStreamCommand | undefined;
     const client: BedrockClientLike = {
       send: async (command) => {
         captured = command;
-        return { output: { message: { role: "assistant", content: [] } }, stopReason: "end_turn" };
+        return { stream: streamOf([messageStop("end_turn")]) };
       },
     };
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
@@ -147,16 +193,138 @@ describe("BedrockProvider", () => {
   });
 
   test("omits toolConfig when there are no tools", async () => {
-    let captured: ConverseCommand | undefined;
+    let captured: ConverseStreamCommand | undefined;
     const client: BedrockClientLike = {
       send: async (command) => {
         captured = command;
-        return { output: { message: { role: "assistant", content: [] } }, stopReason: "end_turn" };
+        return { stream: streamOf([messageStop("end_turn")]) };
       },
     };
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
     await provider.complete({ ...BASE_REQUEST, tools: [] });
     expect(captured?.input.toolConfig).toBeUndefined();
+  });
+
+  test("a response with no stream at all is treated as an empty turn", async () => {
+    const client: BedrockClientLike = { send: async () => ({}) };
+    const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+    const result = await provider.complete(BASE_REQUEST);
+    expect(result).toEqual({
+      stopReason: "other",
+      content: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+    });
+  });
+
+  describe("DH-0044: streaming callbacks and event ordering", () => {
+    test("invokes onTextDelta once per text delta, in order, and accumulates content", async () => {
+      const client = fakeClient([
+        ...textBlock(0, "hello "),
+        {
+          contentBlockDelta: { contentBlockIndex: 0, delta: { text: "world" } },
+        } as unknown as ConverseStreamOutput,
+        { contentBlockStop: { contentBlockIndex: 0 } } as unknown as ConverseStreamOutput,
+        messageStop("end_turn"),
+      ]);
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const deltas: string[] = [];
+      const callbacks: ProviderStreamCallbacks = { onTextDelta: (t) => deltas.push(t) };
+      const result = await provider.complete(BASE_REQUEST, undefined, callbacks);
+      expect(deltas).toEqual(["hello ", "world"]);
+      expect(result.content).toEqual([{ type: "text", text: "hello world" }]);
+    });
+
+    test("does not surface tool_use input deltas via onTextDelta", async () => {
+      const client = fakeClient([
+        ...toolUseBlock(0, "tu_1", "Bash", '{"command":"ls"}'),
+        messageStop("tool_use"),
+      ]);
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const deltas: string[] = [];
+      await provider.complete(BASE_REQUEST, undefined, { onTextDelta: (t) => deltas.push(t) });
+      expect(deltas).toEqual([]);
+    });
+
+    test("multiple interleaved text and tool_use blocks are ordered by index in final content", async () => {
+      const client = fakeClient([
+        ...textBlock(0, "thinking..."),
+        ...toolUseBlock(1, "tu_1", "Bash", '{"command":"ls"}'),
+        messageStop("tool_use"),
+      ]);
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([
+        { type: "text", text: "thinking..." },
+        { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+      ]);
+    });
+
+    test("a caller that passes no callbacks still works (callbacks fully optional)", async () => {
+      const client = fakeClient([...textBlock(0, "fine"), messageStop("end_turn")]);
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([{ type: "text", text: "fine" }]);
+    });
+  });
+
+  describe("DH-0044 D6: retry gates on first delta, not before", () => {
+    test("a stream that errors before any text delta still retries (existing behavior preserved)", async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          if (calls < 2) {
+            const err = new Error("slow down");
+            err.name = "ThrottlingException";
+            throw err;
+          }
+          return { stream: streamOf([...textBlock(0, "ok"), messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider(
+        {
+          name: "bedrock",
+          type: "bedrock",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+      expect(calls).toBe(2);
+    });
+
+    test("once a text delta has streamed, a subsequent error in the same attempt is not retried", async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          async function* failMidStream(): AsyncGenerator<ConverseStreamOutput> {
+            yield* textBlock(0, "partial");
+            const err = new Error("stream broke");
+            err.name = "ThrottlingException";
+            throw err;
+          }
+          return { stream: failMidStream() };
+        },
+      };
+      const provider = new BedrockProvider(
+        {
+          name: "bedrock",
+          type: "bedrock",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const deltas: string[] = [];
+      const err = await provider
+        .complete(BASE_REQUEST, undefined, { onTextDelta: (t) => deltas.push(t) })
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(deltas).toEqual(["partial"]);
+      expect(calls).toBe(1);
+    });
   });
 
   test("wraps SDK failures in ProviderError", async () => {
@@ -248,9 +416,11 @@ describe("BedrockProvider", () => {
           calls += 1;
           if (calls < 2) throw errorWithName("ThrottlingException", "slow down");
           return {
-            output: { message: { role: "assistant", content: [{ text: "worked eventually" }] } },
-            stopReason: "end_turn",
-            usage: { inputTokens: 1, outputTokens: 1 },
+            stream: streamOf([
+              ...textBlock(0, "worked eventually"),
+              messageStop("end_turn"),
+              metadata({ inputTokens: 1, outputTokens: 1 }),
+            ]),
           };
         },
       };
@@ -288,14 +458,14 @@ describe("BedrockProvider", () => {
     expect(provider).toBeInstanceOf(BedrockProvider);
   });
 
-  // Round 3 (docs/handoffs/core.md status log): complete()'s new second `signal` parameter.
+  // Round 3 (docs/handoffs/core.md status log): complete()'s `signal` parameter.
   test("forwards the given AbortSignal to the SDK's send() call as abortSignal", async () => {
     let receivedOptions: { abortSignal?: AbortSignal } | undefined;
     const controller = new AbortController();
     const client: BedrockClientLike = {
       send: async (_command, options) => {
         receivedOptions = options;
-        return { output: { message: { role: "assistant", content: [] } }, stopReason: "end_turn" };
+        return { stream: streamOf([messageStop("end_turn")]) };
       },
     };
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
@@ -310,7 +480,7 @@ describe("BedrockProvider", () => {
       send: async (_command, options) => {
         wasCalled = true;
         receivedOptions = options;
-        return { output: { message: { role: "assistant", content: [] } }, stopReason: "end_turn" };
+        return { stream: streamOf([messageStop("end_turn")]) };
       },
     };
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);

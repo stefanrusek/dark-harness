@@ -3,11 +3,11 @@
 
 import {
   type ContentBlock as BedrockContentBlock,
-  type Message as BedrockMessage,
   BedrockRuntimeClient,
   type StopReason as BedrockStopReason,
   type Tool as BedrockTool,
-  ConverseCommand,
+  ConverseStreamCommand,
+  type ConverseStreamOutput,
 } from "@aws-sdk/client-bedrock-runtime";
 import type { ProviderConfig } from "../../contracts/index.ts";
 import { withRetry } from "./retry.ts";
@@ -18,24 +18,22 @@ import type {
   ProviderContentBlock,
   ProviderErrorKind,
   ProviderStopReason,
+  ProviderStreamCallbacks,
 } from "./types.ts";
 import { ProviderError } from "./types.ts";
 
 /** Minimal slice of the Bedrock runtime client this adapter depends on — lets tests inject a
- * fake without touching AWS. */
+ * fake without touching AWS.
+ *
+ * DH-0044: `send()` now issues a `ConverseStreamCommand` and returns a `stream` async
+ * iterable of `ConverseStreamOutput` union members, rather than `ConverseCommand`'s single
+ * whole-response shape. */
 export interface BedrockClientLike {
   send(
-    command: ConverseCommand,
+    command: ConverseStreamCommand,
     options?: { abortSignal?: AbortSignal },
   ): Promise<{
-    output?: { message?: BedrockMessage };
-    stopReason?: BedrockStopReason;
-    usage?: {
-      inputTokens?: number;
-      outputTokens?: number;
-      cacheReadInputTokens?: number;
-      cacheWriteInputTokens?: number;
-    };
+    stream?: AsyncIterable<ConverseStreamOutput>;
   }>;
 }
 
@@ -56,18 +54,6 @@ function toBedrockContent(block: ProviderContentBlock): BedrockContentBlock {
         },
       };
   }
-}
-
-function fromBedrockContent(block: BedrockContentBlock): ProviderContentBlock | null {
-  if (block.text !== undefined) {
-    return { type: "text", text: block.text };
-  }
-  if (block.toolUse) {
-    const { toolUseId, name, input } = block.toolUse;
-    if (!toolUseId || !name) return null;
-    return { type: "tool_use", id: toolUseId, name, input };
-  }
-  return null;
 }
 
 function mapStopReason(reason: BedrockStopReason | undefined): ProviderStopReason {
@@ -130,6 +116,7 @@ export class BedrockProvider implements ModelProvider {
   async complete(
     request: ProviderCompletionRequest,
     signal?: AbortSignal,
+    callbacks?: ProviderStreamCallbacks,
   ): Promise<ProviderCompletionResult> {
     const tools: BedrockTool[] = request.tools.map(
       (t) =>
@@ -142,12 +129,15 @@ export class BedrockProvider implements ModelProvider {
         }) as unknown as BedrockTool,
     );
 
-    let response: Awaited<ReturnType<BedrockClientLike["send"]>>;
+    // DH-0044 D6: retry only until the first text delta actually reaches the caller — see
+    // anthropic.ts's identical `emittedAny` closure for the full rationale.
+    let emittedAny = false;
+    let result: ProviderCompletionResult;
     try {
-      response = await withRetry(
-        () =>
-          this.client.send(
-            new ConverseCommand({
+      result = await withRetry(
+        async () => {
+          const response = await this.client.send(
+            new ConverseStreamCommand({
               modelId: request.model,
               system: [{ text: request.system }],
               messages: request.messages.map((m) => ({
@@ -157,8 +147,12 @@ export class BedrockProvider implements ModelProvider {
               ...(tools.length > 0 ? { toolConfig: { tools } } : {}),
             }),
             signal ? { abortSignal: signal } : undefined,
-          ),
-        (err) => classifyBedrockError(err).retryable,
+          );
+          return consumeBedrockStream(response.stream, callbacks, () => {
+            emittedAny = true;
+          });
+        },
+        (err) => !emittedAny && classifyBedrockError(err).retryable,
         this.retryPolicy,
         signal,
       );
@@ -167,28 +161,106 @@ export class BedrockProvider implements ModelProvider {
       throw new ProviderError(`bedrock provider request failed: ${(err as Error).message}`, {
         cause: err,
         kind,
-        retryable,
+        retryable: retryable && !emittedAny,
       });
     }
 
-    const rawContent = response.output?.message?.content ?? [];
-    const content = rawContent
-      .map(fromBedrockContent)
-      .filter((b): b is ProviderContentBlock => b !== null);
-
-    return {
-      stopReason: mapStopReason(response.stopReason),
-      content,
-      usage: {
-        inputTokens: response.usage?.inputTokens ?? 0,
-        outputTokens: response.usage?.outputTokens ?? 0,
-        ...(response.usage?.cacheReadInputTokens != null
-          ? { cacheReadTokens: response.usage.cacheReadInputTokens }
-          : {}),
-        ...(response.usage?.cacheWriteInputTokens != null
-          ? { cacheWriteTokens: response.usage.cacheWriteInputTokens }
-          : {}),
-      },
-    };
+    return result;
   }
+}
+
+/** DH-0044 D4: accumulates a Bedrock `ConverseStreamOutput` async iterable into a complete
+ * `ProviderCompletionResult`, invoking `callbacks.onTextDelta` for each text delta and
+ * `onFirstDelta` the first time any *text* delta is observed (gates retry — see D6, mirrors
+ * anthropic.ts's identical convention). Unlike Anthropic, Bedrock has no explicit block-start
+ * event for *text* blocks — a `contentBlockDelta` with `delta.text` at an unseen index
+ * implicitly opens the accumulator. */
+async function consumeBedrockStream(
+  stream: AsyncIterable<ConverseStreamOutput> | undefined,
+  callbacks: ProviderStreamCallbacks | undefined,
+  onFirstDelta: () => void,
+): Promise<ProviderCompletionResult> {
+  if (!stream) {
+    // No stream at all (a fake/misbehaving client) — treat as a whole-turn no-op result;
+    // callers see zero deltas and no content, same shape a genuinely empty turn would produce.
+    return { stopReason: "other", content: [], usage: { inputTokens: 0, outputTokens: 0 } };
+  }
+  const blocks = new Map<number, { type: "text"; text: string } | ProviderContentBlock>();
+  const toolJsonBuffers = new Map<number, string>();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheReadTokens: number | undefined;
+  let cacheWriteTokens: number | undefined;
+  let stopReason: ProviderStopReason = "other";
+
+  for await (const event of stream) {
+    if (event.contentBlockStart) {
+      const { contentBlockIndex, start } = event.contentBlockStart;
+      if (contentBlockIndex === undefined) continue;
+      if (start?.toolUse) {
+        const { toolUseId, name } = start.toolUse;
+        if (toolUseId && name) {
+          blocks.set(contentBlockIndex, { type: "tool_use", id: toolUseId, name, input: {} });
+          toolJsonBuffers.set(contentBlockIndex, "");
+        }
+      }
+      // No accumulator opened for an unrecognized/unsupported block-start kind (e.g. image)
+      // — finalized as skipped at contentBlockStop, same as fromBedrockContent's existing
+      // null-for-unrecognized-block handling.
+    } else if (event.contentBlockDelta) {
+      const { contentBlockIndex, delta } = event.contentBlockDelta;
+      if (contentBlockIndex === undefined || !delta) continue;
+      if (delta.text !== undefined) {
+        onFirstDelta();
+        const existing = blocks.get(contentBlockIndex);
+        if (existing && existing.type === "text") {
+          existing.text += delta.text;
+        } else if (!existing) {
+          // Bedrock has no explicit text block-start — first text delta at an unseen index
+          // implicitly opens the accumulator.
+          blocks.set(contentBlockIndex, { type: "text", text: delta.text });
+        }
+        callbacks?.onTextDelta?.(delta.text);
+      } else if (delta.toolUse?.input !== undefined) {
+        const buffered = toolJsonBuffers.get(contentBlockIndex);
+        if (buffered !== undefined) {
+          toolJsonBuffers.set(contentBlockIndex, buffered + delta.toolUse.input);
+        }
+      }
+    } else if (event.contentBlockStop) {
+      const { contentBlockIndex } = event.contentBlockStop;
+      if (contentBlockIndex === undefined) continue;
+      const buffered = toolJsonBuffers.get(contentBlockIndex);
+      if (buffered !== undefined) {
+        const block = blocks.get(contentBlockIndex);
+        if (block && block.type === "tool_use") {
+          block.input = buffered.length > 0 ? JSON.parse(buffered) : {};
+        }
+      }
+    } else if (event.messageStop) {
+      stopReason = mapStopReason(event.messageStop.stopReason);
+    } else if (event.metadata) {
+      const { usage } = event.metadata;
+      inputTokens = usage?.inputTokens ?? 0;
+      outputTokens = usage?.outputTokens ?? 0;
+      if (usage?.cacheReadInputTokens != null) cacheReadTokens = usage.cacheReadInputTokens;
+      if (usage?.cacheWriteInputTokens != null) cacheWriteTokens = usage.cacheWriteInputTokens;
+    }
+    // messageStart carries only the role — nothing to accumulate.
+  }
+
+  const content = [...blocks.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, block]) => block as ProviderContentBlock);
+
+  return {
+    stopReason,
+    content,
+    usage: {
+      inputTokens,
+      outputTokens,
+      ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+      ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    },
+  };
 }

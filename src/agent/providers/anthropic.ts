@@ -12,19 +12,26 @@ import type {
   ProviderContentBlock,
   ProviderErrorKind,
   ProviderStopReason,
+  ProviderStreamCallbacks,
 } from "./types.ts";
 import { ProviderError } from "./types.ts";
 
 const DEFAULT_MAX_TOKENS = 8192;
 
 /** Minimal slice of the Anthropic SDK client this adapter depends on — lets tests inject a
- * fake without touching the network. */
+ * fake without touching the network.
+ *
+ * DH-0044: `create()` now always requests `stream: true` and returns an async iterable of
+ * `Anthropic.RawMessageStreamEvent` — the SDK's *raw* streaming shape, not the `messages.
+ * stream()` helper (`MessageStream`). The raw iterable keeps this a minimal injectable slice
+ * (tests inject a plain fake async-iterable, no `MessageStream` class to fake) and the
+ * accumulation logic below is small and explicit, which the 100%-coverage gate wants anyway. */
 export interface AnthropicClientLike {
   messages: {
     create(
-      params: Anthropic.MessageCreateParamsNonStreaming,
+      params: Anthropic.MessageCreateParamsStreaming,
       options?: { signal?: AbortSignal },
-    ): Promise<Anthropic.Message>;
+    ): Promise<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
   };
 }
 
@@ -42,16 +49,6 @@ function toAnthropicContent(block: ProviderContentBlock): Anthropic.ContentBlock
         ...(block.isError !== undefined ? { is_error: block.isError } : {}),
       };
   }
-}
-
-function fromAnthropicContent(block: Anthropic.ContentBlock): ProviderContentBlock | null {
-  if (block.type === "text") {
-    return { type: "text", text: block.text };
-  }
-  if (block.type === "tool_use") {
-    return { type: "tool_use", id: block.id, name: block.name, input: block.input };
-  }
-  return null;
 }
 
 function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopReason {
@@ -108,16 +105,23 @@ export class AnthropicProvider implements ModelProvider {
   async complete(
     request: ProviderCompletionRequest,
     signal?: AbortSignal,
+    callbacks?: ProviderStreamCallbacks,
   ): Promise<ProviderCompletionResult> {
-    let response: Anthropic.Message;
+    // DH-0044 D6: retry only until the first delta actually reaches the caller — retrying a
+    // request after partial text has already been streamed (and displayed live) would
+    // duplicate that text on screen and in the durable log. `emittedAny` is shared across
+    // every withRetry attempt via this closure.
+    let emittedAny = false;
+    let result: ProviderCompletionResult;
     try {
-      response = await withRetry(
-        () =>
-          this.client.messages.create(
+      result = await withRetry(
+        async () => {
+          const stream = await this.client.messages.create(
             {
               model: request.model,
               system: request.system,
               max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+              stream: true,
               messages: request.messages.map((m) => ({
                 role: m.role,
                 content: m.content.map(toAnthropicContent),
@@ -129,8 +133,12 @@ export class AnthropicProvider implements ModelProvider {
               })),
             },
             signal ? { signal } : undefined,
-          ),
-        (err) => classifyAnthropicError(err).retryable,
+          );
+          return consumeAnthropicStream(stream, callbacks, () => {
+            emittedAny = true;
+          });
+        },
+        (err) => !emittedAny && classifyAnthropicError(err).retryable,
         this.retryPolicy,
         signal,
       );
@@ -139,27 +147,100 @@ export class AnthropicProvider implements ModelProvider {
       throw new ProviderError(`anthropic provider request failed: ${(err as Error).message}`, {
         cause: err,
         kind,
-        retryable,
+        retryable: retryable && !emittedAny,
       });
     }
 
-    const content = response.content
-      .map(fromAnthropicContent)
-      .filter((b): b is ProviderContentBlock => b !== null);
-
-    return {
-      stopReason: mapStopReason(response.stop_reason),
-      content,
-      usage: {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-        ...(response.usage.cache_read_input_tokens != null
-          ? { cacheReadTokens: response.usage.cache_read_input_tokens }
-          : {}),
-        ...(response.usage.cache_creation_input_tokens != null
-          ? { cacheWriteTokens: response.usage.cache_creation_input_tokens }
-          : {}),
-      },
-    };
+    return result;
   }
+}
+
+/** DH-0044 D3: accumulates a raw Anthropic message stream into a complete
+ * `ProviderCompletionResult`, invoking `callbacks.onTextDelta` for each text delta as it
+ * arrives and `onFirstDelta` the first time any *text* delta is observed (used by the caller
+ * to gate retry — see D6; a stream that only got as far as `message_start`/tool-input deltas
+ * before failing is still safely retryable, since no visible text has reached the caller).
+ * Block accumulation follows the SDK's documented event
+ * order: `message_start` -> per block {`content_block_start`, `content_block_delta`*,
+ * `content_block_stop`} -> `message_delta` -> `message_stop`. Unknown block/delta types are
+ * skipped, matching the adapter's existing null-for-unknown-block behavior. */
+async function consumeAnthropicStream(
+  stream: AsyncIterable<Anthropic.RawMessageStreamEvent>,
+  callbacks: ProviderStreamCallbacks | undefined,
+  onFirstDelta: () => void,
+): Promise<ProviderCompletionResult> {
+  const blocks = new Map<number, { type: "text"; text: string } | ProviderContentBlock>();
+  const toolJsonBuffers = new Map<number, string>();
+  let inputTokens = 0;
+  let cacheReadTokens: number | undefined;
+  let cacheWriteTokens: number | undefined;
+  let outputTokens = 0;
+  let stopReason: ProviderStopReason = "other";
+
+  for await (const event of stream) {
+    if (event.type === "message_start") {
+      inputTokens = event.message.usage.input_tokens;
+      if (event.message.usage.cache_read_input_tokens != null) {
+        cacheReadTokens = event.message.usage.cache_read_input_tokens;
+      }
+      if (event.message.usage.cache_creation_input_tokens != null) {
+        cacheWriteTokens = event.message.usage.cache_creation_input_tokens;
+      }
+      outputTokens = event.message.usage.output_tokens;
+    } else if (event.type === "content_block_start") {
+      const block = event.content_block;
+      if (block.type === "text") {
+        blocks.set(event.index, { type: "text", text: "" });
+      } else if (block.type === "tool_use") {
+        blocks.set(event.index, { type: "tool_use", id: block.id, name: block.name, input: {} });
+        toolJsonBuffers.set(event.index, "");
+      }
+      // Unknown block types (server tools, thinking, etc.) get no accumulator — finalized
+      // as null/skipped at content_block_stop — same treatment unknown blocks got in the
+      // adapter's prior non-streaming implementation.
+    } else if (event.type === "content_block_delta") {
+      if (event.delta.type === "text_delta") {
+        onFirstDelta();
+        const existing = blocks.get(event.index);
+        if (existing && existing.type === "text") {
+          existing.text += event.delta.text;
+        }
+        callbacks?.onTextDelta?.(event.delta.text);
+      } else if (event.delta.type === "input_json_delta") {
+        const buffered = toolJsonBuffers.get(event.index);
+        if (buffered !== undefined) {
+          toolJsonBuffers.set(event.index, buffered + event.delta.partial_json);
+        }
+      }
+    } else if (event.type === "content_block_stop") {
+      const buffered = toolJsonBuffers.get(event.index);
+      if (buffered !== undefined) {
+        const block = blocks.get(event.index);
+        if (block && block.type === "tool_use") {
+          block.input = buffered.length > 0 ? JSON.parse(buffered) : {};
+        }
+      }
+    } else if (event.type === "message_delta") {
+      if (event.delta.stop_reason !== null) {
+        stopReason = mapStopReason(event.delta.stop_reason);
+      }
+      outputTokens = event.usage.output_tokens;
+    }
+    // message_stop carries no additional data — the loop just ends naturally after it.
+  }
+
+  const content = [...blocks.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, block]) => block as ProviderContentBlock);
+
+  return {
+    stopReason,
+    content,
+    usage: {
+      inputTokens,
+      outputTokens,
+      ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+      ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+    },
+  };
 }

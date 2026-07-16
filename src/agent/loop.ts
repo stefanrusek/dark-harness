@@ -4,15 +4,22 @@
 // callbacks — the Server domain wires these to real HTTP/SSE + JSONL sinks. This module
 // never imports src/server/.
 //
-// SELF-REPORT CONVENTION (a design decision this round explicitly had to make — see
-// docs/handoffs/core.md status log for the cross-domain request to Prompt): the loop ends
-// when the model produces a turn with no tool calls (stopReason !== "tool_use"). The final
-// assistant text is scanned for the literal marker `TASK_FAILED` (case-sensitive, anywhere
-// in the text); its presence means self-reported failure, its absence means success. A
-// max_tokens stop on a no-tool-call turn is always treated as failure (the response is
-// truncated, not a deliberate completion). The system prompt must instruct the model to
-// emit `TASK_FAILED` when it cannot complete its instructions — that's a request to the
-// Prompt domain, not implemented here.
+// SELF-REPORT CONVENTION (DH-0050, architect design Fable 2026-07-15, superseding the
+// original TASK_FAILED-only convention below): in non-interactive mode, detection precedence
+// is (1) an authoritative `ReportOutcome` tool call — the turn it lands in is terminal,
+// checked right after that turn's tool calls run; last valid call in the turn wins; (2) if a
+// non-tool-use turn ends with no valid ReportOutcome ever recorded and stopReason !==
+// "max_tokens", one harness-injected reminder turn (REPORT_OUTCOME_NUDGE_MESSAGE) is sent —
+// exactly once — before falling back to; (3) the legacy convention: the final assistant text
+// is scanned for the literal marker `TASK_FAILED` (case-sensitive, anywhere in the text); its
+// presence means self-reported failure, its absence means success. A max_tokens stop on a
+// no-tool-call turn is always treated as failure (the response is truncated, not a
+// deliberate completion) and skips the nudge (nudging a truncating model just truncates
+// again). `ReportOutcome` is only ever registered for non-interactive runtimes (runtime.ts) —
+// interactive sessions have no exit-code semantics to report into and never reach this
+// branch at all (see MODE DISTINCTION below). The system prompt must instruct the model to
+// call `ReportOutcome` (with `TASK_FAILED` taught as the deprecated fallback) — that's a
+// request to the Prompt domain, not implemented here.
 //
 // MODE DISTINCTION (Round 5, docs/handoffs/core.md status log): the self-report convention
 // above is exactly right for the standalone `--instructions`/`--job` dark-factory path (a
@@ -44,7 +51,14 @@
 
 import { randomUUID } from "node:crypto";
 import { BUILD_INFO } from "../config/build-info.ts";
-import type { LogLine, ServerSentEvent, SessionClientKind } from "../contracts/index.ts";
+import {
+  type LogLine,
+  type OutcomeReportedBy,
+  REPORT_OUTCOME_TOOL_NAME,
+  type ReportedOutcome,
+  type ServerSentEvent,
+  type SessionClientKind,
+} from "../contracts/index.ts";
 import type {
   ModelProvider,
   ProviderCompletionResult,
@@ -52,10 +66,27 @@ import type {
   ProviderMessage,
 } from "./providers/types.ts";
 import { summarizeToolInput } from "./tool-summary.ts";
+import { parseReportedOutcome } from "./tools/report-outcome.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 
 export const TASK_FAILED_MARKER = "TASK_FAILED";
 const DEFAULT_MAX_TURNS = 100;
+
+/** DH-0044 D5: coalescing thresholds for turning raw provider text deltas into `agent_output`
+ * SSE events. A raw delta can be per-token; the loop buffers them and flushes one event when
+ * *either* threshold is hit first — caps the steady-state event rate at ~20 events/agent/sec
+ * while keeping perceived latency well under a frame. Exported so tests can drive both
+ * thresholds deterministically without waiting on real wall-clock time. */
+export const STREAM_FLUSH_BYTES = 1024;
+export const STREAM_FLUSH_INTERVAL_MS = 50;
+
+/** DH-0050: the harness-injected reminder sent (once) when a non-interactive turn ends with
+ * no tool call and no `ReportOutcome` was ever recorded — the "missed-call nudge" that makes
+ * a forgotten self-report a detectable, recoverable state instead of silently scoring as
+ * success. Exported so e2e fixtures/tests can assert against the exact text. */
+export const REPORT_OUTCOME_NUDGE_MESSAGE =
+  "You ended your turn without calling the ReportOutcome tool. Call ReportOutcome now with " +
+  'status "success" or "failure" (plus optional summary/filesChanged/artifacts). Do nothing else.';
 
 // Round 3 (docs/handoffs/core.md status log): the two distinct points `signal` is checked,
 // each with its own log reason so a "why did this stop" reader can tell which one fired.
@@ -185,6 +216,12 @@ export interface AgentLoopResult {
   success: boolean;
   finalOutput: string;
   turns: number;
+  /** DH-0050: present iff `reportedBy === "tool"`. */
+  outcome?: ReportedOutcome;
+  /** DH-0050: which detection-precedence tier produced `success` — absent only for the
+   * interactive "stopped mid-conversation" (`reportStopped()`) return path, which has no
+   * self-report semantics at all. */
+  reportedBy?: OutcomeReportedBy;
 }
 
 function nowIso(): string {
@@ -416,6 +453,10 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
 
   let turns = 0;
   let finalText = "";
+  // DH-0050: set once the missed-call nudge has been sent, so it's only ever injected once
+  // per run — the second consecutive non-tool-use turn falls through to the legacy fallback
+  // regardless of whether the model complied.
+  let nudged = false;
 
   while (turns < maxTurns) {
     if (params.signal?.aborted) {
@@ -452,6 +493,51 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       });
     }
 
+    // DH-0044 D5: per-turn coalescing state for the provider's `onTextDelta` side-channel.
+    // `streamBuffer` holds text not yet flushed as an `agent_output` event; `streamedSoFar`
+    // is the full accumulated text streamed *this turn* regardless of flush state (used only
+    // for the mid-turn-error partial log line below). `deltaCount` distinguishes "this
+    // provider streamed nothing" (fallback: emit one whole-turn agent_output, exactly as
+    // before this change) from "it streamed, and the buffer's already been flushed live".
+    let streamBuffer = "";
+    let streamedSoFar = "";
+    let deltaCount = 0;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function flushStreamBuffer(): void {
+      if (flushTimer !== null) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      if (streamBuffer.length === 0) return;
+      const chunk = streamBuffer;
+      streamBuffer = "";
+      emitEvent(params, {
+        version: 1,
+        id: randomUUID(),
+        timestamp: nowIso(),
+        type: "agent_output",
+        agentId: params.agentId,
+        chunk,
+      });
+    }
+
+    function onTextDelta(delta: string): void {
+      deltaCount += 1;
+      streamedSoFar += delta;
+      streamBuffer += delta;
+      if (Buffer.byteLength(streamBuffer, "utf8") >= STREAM_FLUSH_BYTES) {
+        flushStreamBuffer();
+        return;
+      }
+      if (flushTimer === null) {
+        flushTimer = setTimeout(() => {
+          flushTimer = null;
+          flushStreamBuffer();
+        }, STREAM_FLUSH_INTERVAL_MS);
+      }
+    }
+
     let completion: ProviderCompletionResult;
     try {
       completion = await binding.provider.complete(
@@ -462,8 +548,26 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
           tools: toolDefs,
         },
         params.signal,
+        { onTextDelta },
       );
     } catch (err) {
+      // D5.3: mid-turn error/stop with partial output — flush whatever's buffered, then
+      // record the accumulated partial text as its own `message` log line (marked
+      // `partial: true`) so text an operator watched stream live doesn't vanish from the
+      // durable log just because the turn never completed normally. Only when at least one
+      // delta actually arrived — a provider that failed before streaming anything (or one
+      // that doesn't stream at all) has nothing partial to record here.
+      flushStreamBuffer();
+      if (deltaCount > 0) {
+        emitLog(params, {
+          version: 1,
+          timestamp: nowIso(),
+          type: "message",
+          role: "assistant",
+          content: streamedSoFar,
+          partial: true,
+        });
+      }
       if (params.signal?.aborted) {
         return reportStopped(params, finalText, turns, STOPPED_DURING_PROVIDER_CALL_REASON);
       }
@@ -472,16 +576,31 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
 
     messages.push({ role: "assistant", content: completion.content });
 
+    // D5.4 ordering guarantee: flush is synchronous, right here, before any other event this
+    // turn emits (token_usage, agent_status, or the next turn's tool_call) — so no later
+    // event can ever precede this turn's last streamed chunk.
+    flushStreamBuffer();
+
     const text = textOf(completion.content);
     if (text.length > 0) {
-      emitEvent(params, {
-        version: 1,
-        id: randomUUID(),
-        timestamp: nowIso(),
-        type: "agent_output",
-        agentId: params.agentId,
-        chunk: text,
-      });
+      // D5.2: the old whole-turn `agent_output` emission is removed except as a fallback —
+      // a provider that streamed at least one delta already emitted its output live above
+      // (via onTextDelta/flushStreamBuffer); a provider that ignored `callbacks` entirely
+      // (zero deltas) still needs its output to reach clients somehow, so it gets exactly
+      // today's whole-turn event instead.
+      if (deltaCount === 0) {
+        emitEvent(params, {
+          version: 1,
+          id: randomUUID(),
+          timestamp: nowIso(),
+          type: "agent_output",
+          agentId: params.agentId,
+          chunk: text,
+        });
+      }
+      // The JSONL log stays turn-granular regardless of streaming — one `message` line per
+      // completed turn, always the full text from `completion.content` (the single source of
+      // truth), never the chunked stream.
       emitLog(params, {
         version: 1,
         timestamp: nowIso(),
@@ -524,8 +643,34 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
 
     if (completion.stopReason !== "tool_use") {
       if (!params.interactive) {
-        const success =
-          completion.stopReason !== "max_tokens" && !finalText.includes(TASK_FAILED_MARKER);
+        // DH-0050 precedence tier 2: a non-tool-use turn that never produced a valid
+        // ReportOutcome call gets exactly one harness-injected reminder turn before falling
+        // back to the legacy marker scan. A max_tokens truncation skips the nudge entirely —
+        // nudging a model whose response is already being cut off just truncates again, so it
+        // goes straight to the unconditional failure it always has.
+        if (completion.stopReason !== "max_tokens" && !nudged) {
+          nudged = true;
+          messages.push({
+            role: "user",
+            content: [{ type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE }],
+          });
+          emitLog(params, {
+            version: 1,
+            timestamp: nowIso(),
+            type: "message",
+            role: "user",
+            content: REPORT_OUTCOME_NUDGE_MESSAGE,
+          });
+          continue;
+        }
+
+        const reportedBy: OutcomeReportedBy =
+          completion.stopReason === "max_tokens"
+            ? "max-tokens"
+            : finalText.includes(TASK_FAILED_MARKER)
+              ? "text-marker"
+              : "clean-end";
+        const success = reportedBy === "clean-end";
         emitEvent(params, {
           version: 1,
           id: randomUUID(),
@@ -543,12 +688,12 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
                 timestamp: nowIso(),
                 type: "failed",
                 reason:
-                  completion.stopReason === "max_tokens"
+                  reportedBy === "max-tokens"
                     ? "response truncated at max_tokens before completion"
                     : "model reported TASK_FAILED",
               },
         );
-        return { success, finalOutput: finalText, turns };
+        return { success, finalOutput: finalText, turns, reportedBy };
       }
 
       // Round 5, interactive mode: no self-report checking, no terminal return — pause and
@@ -617,6 +762,50 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     );
     const toolResults = await runToolCalls(toolUses, params);
     messages.push({ role: "user", content: toolResults });
+
+    // DH-0050 precedence tier 1: an authoritative ReportOutcome call, checked only for
+    // non-interactive runs (the tool is never registered for interactive ones — see
+    // runtime.ts/tools/index.ts). The turn this lands in is terminal: tool calls have already
+    // run above; last valid ReportOutcome call in the turn wins if the model (incorrectly)
+    // called it more than once.
+    if (!params.interactive) {
+      let reported: ReportedOutcome | null = null;
+      for (const toolUse of toolUses) {
+        if (toolUse.name !== REPORT_OUTCOME_TOOL_NAME) continue;
+        const parsed = parseReportedOutcome(toolUse.input);
+        if (parsed) reported = parsed;
+      }
+      if (reported) {
+        const success = reported.status === "success";
+        emitEvent(params, {
+          version: 1,
+          id: randomUUID(),
+          timestamp: nowIso(),
+          type: "agent_status",
+          agentId: params.agentId,
+          status: success ? "done" : "failed",
+        });
+        emitLog(
+          params,
+          success
+            ? {
+                version: 1,
+                timestamp: nowIso(),
+                type: "completed",
+                success: true,
+                outcome: reported,
+              }
+            : {
+                version: 1,
+                timestamp: nowIso(),
+                type: "failed",
+                reason: "model reported failure via ReportOutcome",
+                outcome: reported,
+              },
+        );
+        return { success, finalOutput: finalText, turns, outcome: reported, reportedBy: "tool" };
+      }
+    }
   }
 
   emitEvent(params, {
@@ -633,5 +822,5 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     type: "failed",
     reason: `exceeded max turns (${maxTurns}) without completing`,
   });
-  return { success: false, finalOutput: finalText, turns };
+  return { success: false, finalOutput: finalText, turns, reportedBy: "max-turns" };
 }

@@ -9,6 +9,15 @@ export interface SseEventBase {
   timestamp: string;
 }
 
+/**
+ * DH-0044: a single logical assistant turn MAY be delivered as many `agent_output` events,
+ * in order, as the provider streams text incrementally — not necessarily one event per whole
+ * completed turn. Clients MUST accumulate consecutive chunks (no intervening event for a
+ * different turn/agent) into one logical turn rather than assuming each event is a complete,
+ * independently-renderable message. This is a semantics clarification, not a shape change —
+ * both built-in clients (TUI's `appendOutput`, Web's `appendAssistantChunk`) already
+ * implement this accumulation.
+ */
 export interface AgentOutputEvent extends SseEventBase {
   type: "agent_output";
   agentId: string;

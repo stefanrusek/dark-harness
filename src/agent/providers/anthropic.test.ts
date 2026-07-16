@@ -1,10 +1,90 @@
 import { describe, expect, test } from "bun:test";
 import type Anthropic from "@anthropic-ai/sdk";
 import { type AnthropicClientLike, AnthropicProvider } from "./anthropic.ts";
+import type { ProviderStreamCallbacks } from "./types.ts";
 import { ProviderError } from "./types.ts";
 
-function fakeClient(response: Anthropic.Message): AnthropicClientLike {
-  return { messages: { create: async () => response } };
+// DH-0044: both adapters now always request streaming, so every fixture here is a fake
+// async-iterable of raw `Anthropic.RawMessageStreamEvent`s rather than a single whole
+// `Anthropic.Message` — see anthropic.ts's `AnthropicClientLike` doc comment for why (no
+// `MessageStream` class to fake, tests inject a plain async generator).
+
+async function* streamOf(
+  events: Anthropic.RawMessageStreamEvent[],
+): AsyncGenerator<Anthropic.RawMessageStreamEvent> {
+  for (const event of events) {
+    yield event;
+  }
+}
+
+function messageStart(usage: Partial<Anthropic.Usage> = {}): Anthropic.RawMessageStreamEvent {
+  return {
+    type: "message_start",
+    message: {
+      id: "msg_1",
+      type: "message",
+      role: "assistant",
+      model: "sonnet-5",
+      content: [],
+      stop_reason: null,
+      stop_sequence: null,
+      usage: { input_tokens: 0, output_tokens: 0, ...usage } as Anthropic.Usage,
+    },
+  } as unknown as Anthropic.RawMessageStreamEvent;
+}
+
+function textBlock(index: number, text: string): Anthropic.RawMessageStreamEvent[] {
+  return [
+    {
+      type: "content_block_start",
+      index,
+      content_block: { type: "text", text: "", citations: null },
+    } as unknown as Anthropic.RawMessageStreamEvent,
+    {
+      type: "content_block_delta",
+      index,
+      delta: { type: "text_delta", text },
+    } as unknown as Anthropic.RawMessageStreamEvent,
+    { type: "content_block_stop", index } as unknown as Anthropic.RawMessageStreamEvent,
+  ];
+}
+
+function toolUseBlock(
+  index: number,
+  id: string,
+  name: string,
+  inputJson: string,
+): Anthropic.RawMessageStreamEvent[] {
+  return [
+    {
+      type: "content_block_start",
+      index,
+      content_block: { type: "tool_use", id, name, input: {} },
+    } as unknown as Anthropic.RawMessageStreamEvent,
+    {
+      type: "content_block_delta",
+      index,
+      delta: { type: "input_json_delta", partial_json: inputJson },
+    } as unknown as Anthropic.RawMessageStreamEvent,
+    { type: "content_block_stop", index } as unknown as Anthropic.RawMessageStreamEvent,
+  ];
+}
+
+function messageDelta(
+  stopReason: Anthropic.Message["stop_reason"],
+  outputTokens: number,
+): Anthropic.RawMessageStreamEvent {
+  return {
+    type: "message_delta",
+    delta: { container: null, stop_details: null, stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: outputTokens } as Anthropic.MessageDeltaUsage,
+  } as unknown as Anthropic.RawMessageStreamEvent;
+}
+
+const messageStop = { type: "message_stop" } as unknown as Anthropic.RawMessageStreamEvent;
+
+function fakeClient(events: Anthropic.RawMessageStreamEvent[]): AnthropicClientLike {
+  return { messages: { create: async () => streamOf(events) } };
 }
 
 const BASE_REQUEST = {
@@ -22,16 +102,12 @@ const BASE_REQUEST = {
 
 describe("AnthropicProvider", () => {
   test("translates a text response and end_turn stop reason", async () => {
-    const client = fakeClient({
-      id: "msg_1",
-      type: "message",
-      role: "assistant",
-      model: "sonnet-5",
-      content: [{ type: "text", text: "hello back", citations: null }],
-      stop_reason: "end_turn",
-      stop_sequence: null,
-      usage: { input_tokens: 10, output_tokens: 5 } as Anthropic.Usage,
-    } as unknown as Anthropic.Message);
+    const client = fakeClient([
+      messageStart({ input_tokens: 10 }),
+      ...textBlock(0, "hello back"),
+      messageDelta("end_turn", 5),
+      messageStop,
+    ]);
     const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.stopReason).toBe("end_turn");
@@ -40,16 +116,12 @@ describe("AnthropicProvider", () => {
   });
 
   test("translates a tool_use response and tool_use stop reason", async () => {
-    const client = fakeClient({
-      id: "msg_2",
-      type: "message",
-      role: "assistant",
-      model: "sonnet-5",
-      content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } }],
-      stop_reason: "tool_use",
-      stop_sequence: null,
-      usage: { input_tokens: 20, output_tokens: 8 } as Anthropic.Usage,
-    } as unknown as Anthropic.Message);
+    const client = fakeClient([
+      messageStart({ input_tokens: 20 }),
+      ...toolUseBlock(0, "tu_1", "Bash", '{"command":"ls"}'),
+      messageDelta("tool_use", 8),
+      messageStop,
+    ]);
     const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.stopReason).toBe("tool_use");
@@ -58,54 +130,45 @@ describe("AnthropicProvider", () => {
     ]);
   });
 
+  test("an empty tool_use input JSON buffer parses as {}", async () => {
+    const client = fakeClient([
+      messageStart(),
+      ...toolUseBlock(0, "tu_1", "Bash", ""),
+      messageDelta("tool_use", 1),
+      messageStop,
+    ]);
+    const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+    const result = await provider.complete(BASE_REQUEST);
+    expect(result.content).toEqual([{ type: "tool_use", id: "tu_1", name: "Bash", input: {} }]);
+  });
+
   test("maps max_tokens stop reason", async () => {
-    const client = fakeClient({
-      id: "msg_3",
-      type: "message",
-      role: "assistant",
-      model: "sonnet-5",
-      content: [],
-      stop_reason: "max_tokens",
-      stop_sequence: null,
-      usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
-    } as unknown as Anthropic.Message);
+    const client = fakeClient([messageStart(), messageDelta("max_tokens", 1), messageStop]);
     const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.stopReason).toBe("max_tokens");
   });
 
   test("maps any other stop reason (e.g. stop_sequence) to 'other'", async () => {
-    const client = fakeClient({
-      id: "msg_4",
-      type: "message",
-      role: "assistant",
-      model: "sonnet-5",
-      content: [],
-      stop_reason: "stop_sequence",
-      stop_sequence: "STOP",
-      usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
-    } as unknown as Anthropic.Message);
+    const client = fakeClient([messageStart(), messageDelta("stop_sequence", 1), messageStop]);
+    const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+    const result = await provider.complete(BASE_REQUEST);
+    expect(result.stopReason).toBe("other");
+  });
+
+  test("a stream with no message_delta stop_reason (only message_stop) reports 'other'", async () => {
+    const client = fakeClient([messageStart(), messageStop]);
     const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.stopReason).toBe("other");
   });
 
   test("includes cache token usage when present", async () => {
-    const client = fakeClient({
-      id: "msg_5",
-      type: "message",
-      role: "assistant",
-      model: "sonnet-5",
-      content: [],
-      stop_reason: "end_turn",
-      stop_sequence: null,
-      usage: {
-        input_tokens: 1,
-        output_tokens: 1,
-        cache_read_input_tokens: 3,
-        cache_creation_input_tokens: 4,
-      } as Anthropic.Usage,
-    } as unknown as Anthropic.Message);
+    const client = fakeClient([
+      messageStart({ input_tokens: 1, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 }),
+      messageDelta("end_turn", 1),
+      messageStop,
+    ]);
     const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
     const result = await provider.complete(BASE_REQUEST);
     expect(result.usage.cacheReadTokens).toBe(3);
@@ -118,16 +181,7 @@ describe("AnthropicProvider", () => {
       messages: {
         create: async (params) => {
           captured = params;
-          return {
-            id: "msg_6",
-            type: "message",
-            role: "assistant",
-            model: "sonnet-5",
-            content: [],
-            stop_reason: "end_turn",
-            stop_sequence: null,
-            usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
-          } as unknown as Anthropic.Message;
+          return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
         },
       },
     };
@@ -141,9 +195,147 @@ describe("AnthropicProvider", () => {
         },
       ],
     });
-    expect((captured as Anthropic.MessageCreateParamsNonStreaming).messages[0]?.content).toEqual([
+    expect((captured as Anthropic.MessageCreateParamsStreaming).messages[0]?.content).toEqual([
       { type: "tool_result", tool_use_id: "tu_1", content: "ok", is_error: false },
     ]);
+    expect((captured as Anthropic.MessageCreateParamsStreaming).stream).toBe(true);
+  });
+
+  describe("DH-0044: streaming callbacks and event ordering", () => {
+    test("invokes onTextDelta once per text delta, in order, and accumulates content", async () => {
+      const client = fakeClient([
+        messageStart({ input_tokens: 1 }),
+        ...textBlock(0, "hello "),
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "world" },
+        } as unknown as Anthropic.RawMessageStreamEvent,
+        messageDelta("end_turn", 2),
+        messageStop,
+      ]);
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const deltas: string[] = [];
+      const callbacks: ProviderStreamCallbacks = { onTextDelta: (t) => deltas.push(t) };
+      const result = await provider.complete(BASE_REQUEST, undefined, callbacks);
+      // textBlock() itself emits one delta ("hello "), plus the extra "world" delta above.
+      expect(deltas).toEqual(["hello ", "world"]);
+      expect(result.content).toEqual([{ type: "text", text: "hello world" }]);
+    });
+
+    test("does not surface tool_use input_json_delta via onTextDelta", async () => {
+      const client = fakeClient([
+        messageStart(),
+        ...toolUseBlock(0, "tu_1", "Bash", '{"command":"ls"}'),
+        messageDelta("tool_use", 1),
+        messageStop,
+      ]);
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const deltas: string[] = [];
+      await provider.complete(BASE_REQUEST, undefined, { onTextDelta: (t) => deltas.push(t) });
+      expect(deltas).toEqual([]);
+    });
+
+    test("multiple interleaved text and tool_use blocks are ordered by index in final content", async () => {
+      const client = fakeClient([
+        messageStart(),
+        ...textBlock(0, "thinking..."),
+        ...toolUseBlock(1, "tu_1", "Bash", '{"command":"ls"}'),
+        messageDelta("tool_use", 1),
+        messageStop,
+      ]);
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([
+        { type: "text", text: "thinking..." },
+        { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+      ]);
+    });
+
+    test("a provider caller that passes no callbacks still works (callbacks fully optional)", async () => {
+      const client = fakeClient([
+        messageStart(),
+        ...textBlock(0, "fine"),
+        messageDelta("end_turn", 1),
+        messageStop,
+      ]);
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([{ type: "text", text: "fine" }]);
+    });
+  });
+
+  describe("DH-0044 D6: retry gates on first delta, not before", () => {
+    test("a stream that errors before any text delta still retries (existing behavior preserved)", async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            if (calls < 2) {
+              const err = new Error("slow down") as Error & { status: number };
+              err.status = 429;
+              throw err;
+            }
+            return streamOf([
+              messageStart(),
+              ...textBlock(0, "ok"),
+              messageDelta("end_turn", 1),
+              messageStop,
+            ]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider(
+        {
+          name: "anthropic",
+          type: "anthropic",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+      expect(calls).toBe(2);
+    });
+
+    test("once a text delta has streamed, a subsequent error in the same attempt is not retried", async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            // Simulates a stream that produced one delta then failed mid-generator.
+            async function* failMidStream(): AsyncGenerator<Anthropic.RawMessageStreamEvent> {
+              yield messageStart();
+              yield* textBlock(0, "partial");
+              const err = new Error("stream broke") as Error & { status: number };
+              err.status = 429;
+              throw err;
+            }
+            return failMidStream();
+          },
+        },
+      };
+      const provider = new AnthropicProvider(
+        {
+          name: "anthropic",
+          type: "anthropic",
+          retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
+        },
+        client,
+      );
+      const deltas: string[] = [];
+      const err = await provider
+        .complete(BASE_REQUEST, undefined, { onTextDelta: (t) => deltas.push(t) })
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(deltas).toEqual(["partial"]);
+      // Exactly one real attempt — retrying after a delta streamed would duplicate the
+      // already-displayed "partial" text.
+      expect(calls).toBe(1);
+    });
   });
 
   test("wraps SDK failures in ProviderError", async () => {
@@ -244,16 +436,12 @@ describe("AnthropicProvider", () => {
           create: async () => {
             calls += 1;
             if (calls < 2) throw errorWithStatus(429, "slow down");
-            return {
-              id: "msg_retry",
-              type: "message",
-              role: "assistant",
-              model: "sonnet-5",
-              content: [{ type: "text", text: "worked eventually" }],
-              stop_reason: "end_turn",
-              stop_sequence: null,
-              usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
-            } as unknown as Anthropic.Message;
+            return streamOf([
+              messageStart(),
+              ...textBlock(0, "worked eventually"),
+              messageDelta("end_turn", 1),
+              messageStop,
+            ]);
           },
         },
       };
@@ -284,34 +472,38 @@ describe("AnthropicProvider", () => {
       expect((err as ProviderError).retryable).toBe(true);
     });
 
-    test("a malformed (non-JSON) response body classifies as other and is not retried, not network", async () => {
+    // DH-0044: the pre-streaming version of this test served a malformed non-JSON body and
+    // asserted `messages.create()` itself threw a JSON.parse SyntaxError. Under streaming,
+    // the SDK decodes an SSE event stream rather than parsing one JSON body — a garbled body
+    // with no `data:`/`event:` framing is read as an empty event stream, not a parse error
+    // (confirmed empirically: it no longer throws at all). The scenario this test actually
+    // exists to cover — "a thrown value with no `.status` and no `APIConnectionError` marker
+    // classifies as `other`, not `network`" — is still real and still needs coverage, so it's
+    // rewritten against a fake client that throws exactly that shape directly, rather than
+    // trying to coerce the real SDK into throwing via a malformed HTTP response.
+    test("a thrown SyntaxError with no status classifies as other, not network, and is not retried", async () => {
       let calls = 0;
-      const malformedServer = Bun.serve({
-        port: 0,
-        fetch() {
-          calls += 1;
-          return new Response("not json{{{", {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          });
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            throw new SyntaxError("Unexpected token in JSON");
+          },
         },
-      });
-      try {
-        const provider = new AnthropicProvider({
+      };
+      const provider = new AnthropicProvider(
+        {
           name: "anthropic",
           type: "anthropic",
-          baseURL: malformedServer.url.toString(),
-          apiKey: "sk-test",
           retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 2 },
-        });
-        const err = await provider.complete(BASE_REQUEST).catch((e) => e);
-        expect(err).toBeInstanceOf(ProviderError);
-        expect((err as ProviderError).kind).toBe("other");
-        expect((err as ProviderError).retryable).toBe(false);
-        expect(calls).toBe(1);
-      } finally {
-        malformedServer.stop(true);
-      }
+        },
+        client,
+      );
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).kind).toBe("other");
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(calls).toBe(1);
     });
 
     test("a 4xx other than 401/403/429 classifies as other and is not retried", async () => {
@@ -344,11 +536,11 @@ describe("AnthropicProvider", () => {
     expect(provider).toBeInstanceOf(AnthropicProvider);
   });
 
-  // Round 3 (docs/handoffs/core.md status log): complete()'s new second `signal` parameter
-  // — end-to-end proof that it actually reaches the underlying SDK call lives in
-  // runtime.test.ts's "stopRoot() aborts a running root loop's in-flight provider call"
-  // (a real never-responding HTTP server + a real abort); these two are the adapter-local
-  // unit-level check that the exact signal object is forwarded, not dropped or copied.
+  // Round 3 (docs/handoffs/core.md status log): complete()'s `signal` parameter — end-to-end
+  // proof that it actually reaches the underlying SDK call lives in runtime.test.ts's
+  // "stopRoot() aborts a running root loop's in-flight provider call" (a real never-
+  // responding HTTP server + a real abort); these two are the adapter-local unit-level check
+  // that the exact signal object is forwarded, not dropped or copied.
   test("forwards the given AbortSignal to the SDK's create() call as its second argument", async () => {
     let receivedOptions: { signal?: AbortSignal } | undefined;
     const controller = new AbortController();
@@ -356,16 +548,7 @@ describe("AnthropicProvider", () => {
       messages: {
         create: async (_params, options) => {
           receivedOptions = options;
-          return {
-            id: "msg_7",
-            type: "message",
-            role: "assistant",
-            model: "sonnet-5",
-            content: [],
-            stop_reason: "end_turn",
-            stop_sequence: null,
-            usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
-          } as unknown as Anthropic.Message;
+          return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
         },
       },
     };
@@ -382,16 +565,7 @@ describe("AnthropicProvider", () => {
         create: async (_params, options) => {
           wasCalled = true;
           receivedOptions = options;
-          return {
-            id: "msg_8",
-            type: "message",
-            role: "assistant",
-            model: "sonnet-5",
-            content: [],
-            stop_reason: "end_turn",
-            stop_sequence: null,
-            usage: { input_tokens: 1, output_tokens: 1 } as Anthropic.Usage,
-          } as unknown as Anthropic.Message;
+          return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
         },
       },
     };

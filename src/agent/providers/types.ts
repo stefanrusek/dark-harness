@@ -46,14 +46,40 @@ export interface ProviderCompletionResult {
   usage: ProviderUsage;
 }
 
+/**
+ * DH-0044: optional streaming side-channel `complete()`'s third param can accept. A callback
+ * and not an async generator/return-type change — `loop.ts` needs the *complete* result at
+ * the end of every turn regardless (the full content block array for `messages` history,
+ * `usage` for `token_usage`, `stopReason` for the tool-use/self-report branch); with a
+ * generator every consumer would have to re-implement content-block assembly (accumulate
+ * text deltas, buffer tool_use JSON, map stop reason, collect usage) just to rebuild what
+ * the adapter already knows. Keeping assembly inside the adapter (where the SDK-shape
+ * knowledge lives) makes streaming a pure side-channel: `complete()`'s contract stays
+ * identical (same return type, same error taxonomy, same retry wrapper), and a caller/
+ * third-party adapter that ignores `callbacks` still works exactly as before this change.
+ */
+export interface ProviderStreamCallbacks {
+  /** Called zero or more times, in order, with incremental assistant *text* as the provider
+   * streams it. Advisory/display-only: the resolved ProviderCompletionResult remains the
+   * single source of truth for content, stopReason, and usage. Tool-use input deltas are
+   * never surfaced here (only text, per the design — DH-0044 D3/D4). A provider that ignores
+   * this degrades gracefully to whole-turn output (loop.ts has a fallback — see loop.ts's
+   * turn-completion handling). */
+  onTextDelta?: (text: string) => void;
+}
+
 export interface ModelProvider {
   /** `signal` (Round 3: docs/handoffs/core.md status log) is optional and best-effort — both
    * built-in adapters forward it straight to their SDK's own abort support so an in-flight
    * request can actually be cancelled, not just prevented from starting. A provider that
-   * ignores it degrades gracefully to loop.ts's between-turn check only. */
+   * ignores it degrades gracefully to loop.ts's between-turn check only.
+   *
+   * `callbacks` (DH-0044) is likewise optional and best-effort — see ProviderStreamCallbacks'
+   * own doc comment. */
   complete(
     request: ProviderCompletionRequest,
     signal?: AbortSignal,
+    callbacks?: ProviderStreamCallbacks,
   ): Promise<ProviderCompletionResult>;
 }
 

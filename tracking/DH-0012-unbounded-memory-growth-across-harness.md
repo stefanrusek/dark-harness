@@ -67,3 +67,14 @@ TUI); the Web client has no per-agent transcript cap at all, backed by ever-grow
 > both clients, no per-agent cap at all in Web). Four independently-discovered instances of the
 > same underlying pattern — worth fixing as one theme even though the fixes land in different
 > domains (Core, Server, TUI, Web).
+
+> [!NOTE]
+> DH-0044 (2026-07-16, Radia): once always-on streaming lands, `EventBuffer`'s **1000-event
+> count cap becomes the binding constraint far sooner in wall-clock terms** — a single
+> assistant turn now coalesces into many `agent_output` events (~1 per 1 KiB/50ms flush,
+> roughly 50-1000 events for a large turn) instead of one, while total buffered *bytes* stay
+> roughly flat (same text, ~150B/event envelope overhead). Whoever implements this ticket's
+> byte-bound for `EventBuffer` should size the event-count cap with this in mind (e.g. bump it
+> to ~5000) or lean on the byte cap (already noted above, ~10MB) as the primary bound rather
+> than the count cap. Not implemented here — DH-0044 is Core+Server's streaming ticket, this is
+> just a sizing flag for this ticket's own implementer.

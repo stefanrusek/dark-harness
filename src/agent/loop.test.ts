@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { LogLine, ServerSentEvent } from "../contracts/index.ts";
 import {
   type ModelBinding,
+  REPORT_OUTCOME_NUDGE_MESSAGE,
   STOPPED_BETWEEN_TURNS_REASON,
   STOPPED_DURING_PROVIDER_CALL_REASON,
   TASK_FAILED_MARKER,
@@ -79,13 +80,22 @@ describe("runAgentLoop", () => {
         content: [{ type: "text", text: "All done, task succeeded." }],
         usage: { inputTokens: 12, outputTokens: 6 },
       },
+      // DH-0050: this test predates the missed-call nudge — the first clean end_turn above
+      // now triggers exactly one nudge turn before the loop's legacy fallback can terminate
+      // it; this repeats the same text so finalOutput/success are unaffected, just one turn
+      // later (see the dedicated DH-0050 describe block below for nudge-specific assertions).
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "All done, task succeeded." }],
+        usage: { inputTokens: 12, outputTokens: 6 },
+      },
     ]);
     const { params, events, logLines } = baseParams({ provider });
     const result = await runAgentLoop(params);
 
     expect(result.success).toBe(true);
     expect(result.finalOutput).toBe("All done, task succeeded.");
-    expect(result.turns).toBe(2);
+    expect(result.turns).toBe(3);
 
     // Events shaped per src/contracts/events.ts
     expect(events.some((e) => e.type === "agent_spawned")).toBe(true);
@@ -153,6 +163,12 @@ describe("runAgentLoop", () => {
         content: [{ type: "text", text: "All done, task succeeded." }],
         usage: { inputTokens: 12, outputTokens: 6 },
       },
+      // DH-0050: see the identical comment in the previous test — one extra nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "All done, task succeeded." }],
+        usage: { inputTokens: 12, outputTokens: 6 },
+      },
     ]);
     const sequence: string[] = [];
     const { params } = baseParams({
@@ -180,6 +196,12 @@ describe("runAgentLoop", () => {
   // happened to match, which is presumably why it shipped unnoticed.
   test("provider.complete() receives providerModel, not the friendly display model alias", async () => {
     const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn — this test only inspects provider.calls[0].
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done" }],
@@ -214,6 +236,12 @@ describe("runAgentLoop", () => {
         content: [{ type: "text", text: `I could not finish. ${TASK_FAILED_MARKER}` }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
+      // DH-0050: one nudge-ack turn — the model repeats the same marker after being nudged.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: `I could not finish. ${TASK_FAILED_MARKER}` }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
     ]);
     const { params, logLines } = baseParams({ provider });
     const result = await runAgentLoop(params);
@@ -243,6 +271,12 @@ describe("runAgentLoop", () => {
         content: [{ type: "tool_use", id: "tu_1", name: "NotARealTool", input: {} }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done" }],
@@ -307,6 +341,12 @@ describe("runAgentLoop", () => {
         content: [{ type: "text", text: "done, task succeeded." }],
         usage: { inputTokens: 1_000_000, outputTokens: 500_000 },
       },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1_000_000, outputTokens: 500_000 },
+      },
     ]);
     const { params, events } = baseParams({
       provider,
@@ -321,6 +361,12 @@ describe("runAgentLoop", () => {
 
   test("token_usage events leave costUsd undefined when pricing isn't configured (no regression)", async () => {
     const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done, task succeeded." }],
@@ -347,6 +393,12 @@ describe("runAgentLoop", () => {
         content: [{ type: "text", text: "done, task succeeded." }],
         usage: { inputTokens: 1_000_000, outputTokens: 500_000 },
       },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1_000_000, outputTokens: 500_000 },
+      },
     ]);
     const { params, logLines } = baseParams({
       provider,
@@ -361,6 +413,12 @@ describe("runAgentLoop", () => {
 
   test("token_usage LOG LINES leave costUsd undefined when pricing isn't configured (no regression)", async () => {
     const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done, task succeeded." }],
@@ -389,6 +447,12 @@ describe("runAgentLoop", () => {
         ],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done" }],
@@ -440,6 +504,12 @@ describe("runAgentLoop — DH-0093: mid-session model switch via registerModelSw
         content: [{ type: "text", text: "answered by provider B" }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "answered by provider B" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
     ]);
 
     let switchFn: ((binding: ModelBinding) => void) | undefined;
@@ -462,8 +532,9 @@ describe("runAgentLoop — DH-0093: mid-session model switch via registerModelSw
     expect(providerA.calls).toHaveLength(1);
     expect(providerA.calls[0]?.model).toBe("sonnet-real-id");
     // The next turn's call went to providerB with the new providerModel — the switch took
-    // effect starting the next turn, not mid-flight.
-    expect(providerB.calls).toHaveLength(1);
+    // effect starting the next turn, not mid-flight. (DH-0050: a second providerB call
+    // follows, the missed-call nudge-ack — irrelevant to this test's own assertions.)
+    expect(providerB.calls.length).toBeGreaterThanOrEqual(1);
     expect(providerB.calls[0]?.model).toBe("other-provider-id");
     // Messages history is the same array threaded across both calls (the loop was never
     // restarted) — the second call's history includes the first call's tool_use/tool_result.
@@ -504,6 +575,12 @@ describe("runAgentLoop — DH-0093: mid-session model switch via registerModelSw
       },
     ]);
     const providerB = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1_000_000, outputTokens: 0 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done" }],
@@ -550,6 +627,12 @@ describe("runAgentLoop — DH-0093: mid-session model switch via registerModelSw
 
   test("without registerModelSwitch, behavior is exactly unchanged (no regression)", async () => {
     const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "no switch involved" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "no switch involved" }],
@@ -702,6 +785,12 @@ describe("runAgentLoop — Round 3: cooperative cancellation via AbortSignal", (
         content: [{ type: "text", text: "all good" }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "all good" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
     ]);
     const { params } = baseParams({ provider });
     const result = await runAgentLoop(params);
@@ -713,6 +802,12 @@ describe("runAgentLoop — Round 3: cooperative cancellation via AbortSignal", (
 describe("runAgentLoop — Round 5: interactive mode pauses instead of ending on a non-tool-use turn", () => {
   test("without interactive: true, behavior is exactly unchanged — a non-tool-use turn still ends the loop", async () => {
     const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, as before" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done, as before" }],
@@ -853,6 +948,12 @@ describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral 
         content: [{ type: "text", text: "done" }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
     ]);
     // Every tool in this Map is built-in-shaped: `deferred` is never set (mirrors ALL_TOOLS —
     // no MCP tool ever gets merged in when no mcpServers are configured, per runtime.ts).
@@ -861,7 +962,7 @@ describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral 
 
     const result = await runAgentLoop(params);
     expect(result.success).toBe(true);
-    expect(provider.calls).toHaveLength(3);
+    expect(provider.calls).toHaveLength(4);
 
     // This is exactly what the OLD (pre-DH-0002) code computed once, before the turn loop:
     // `[...params.tools.values()].map((t) => ({ name, description, inputSchema }))` — with
@@ -883,6 +984,12 @@ describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral 
 
   test("a deferred tool not yet activated is filtered out of every turn's tools array", async () => {
     const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "done" }],
@@ -914,6 +1021,12 @@ describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral 
         content: [{ type: "tool_use", id: "call-1", name: "ActivatingSearch", input: {} }],
         usage: { inputTokens: 1, outputTokens: 1 },
       },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "turn 2: done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
       {
         stopReason: "end_turn",
         content: [{ type: "text", text: "turn 2: done" }],
@@ -952,5 +1065,478 @@ describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral 
     // recompute — not a one-time-before-the-loop computation — is what makes this possible.
     expect(provider.calls[0]?.tools.map((t) => t.name)).not.toContain("mcp__github__create_issue");
     expect(provider.calls[1]?.tools.map((t) => t.name)).toContain("mcp__github__create_issue");
+  });
+});
+
+describe("runAgentLoop — DH-0044: streaming coalescing, fallback, and mid-turn partial output", () => {
+  /** A fake provider that invokes `callbacks.onTextDelta` for each entry in `deltas`
+   * (synchronously, in order) before resolving with `result` — simulates a real streaming
+   * adapter's side-channel without any real SDK involved. */
+  function streamingProvider(
+    deltas: string[],
+    result: ProviderCompletionResult,
+  ): ModelProvider & { calls: number } {
+    let calls = 0;
+    return {
+      async complete(_request, _signal, callbacks) {
+        calls += 1;
+        for (const delta of deltas) {
+          callbacks?.onTextDelta?.(delta);
+        }
+        return result;
+      },
+      get calls() {
+        return calls;
+      },
+    };
+  }
+
+  test("small deltas well under the byte threshold coalesce into one agent_output event, flushed at turn completion", async () => {
+    // stopReason: "tool_use" + maxTurns: 1 keeps this a single-provider-call test regardless
+    // of DH-0050's non-tool-use nudge/self-report precedence (orthogonal to streaming, and
+    // not this ticket's concern) — the turn ends after exactly one provider.complete() call
+    // either way, so the streaming/coalescing behavior under test is unaffected.
+    const provider = streamingProvider(["Hel", "lo, ", "world!"], {
+      stopReason: "tool_use",
+      content: [{ type: "text", text: "Hello, world!" }],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const { params, events, logLines } = baseParams({ provider, maxTurns: 1 });
+    const result = await runAgentLoop(params);
+
+    const outputEvents = events.filter((e) => e.type === "agent_output");
+    // All three deltas are well under STREAM_FLUSH_BYTES and arrive faster than
+    // STREAM_FLUSH_INTERVAL_MS (synchronously, in this test) — coalesced into exactly one
+    // flush, which happens at turn completion (not the removed whole-turn fallback path,
+    // since deltaCount > 0 here).
+    expect(outputEvents).toHaveLength(1);
+    expect(outputEvents[0]).toMatchObject({ chunk: "Hello, world!" });
+    // The JSONL log stays turn-granular regardless: exactly one non-partial `message` line
+    // with the full text, sourced from completion.content — not the chunk stream.
+    const messageLines = logLines.filter((l) => l.type === "message" && l.role === "assistant");
+    expect(messageLines).toEqual([
+      {
+        version: 1,
+        timestamp: expect.any(String),
+        type: "message",
+        role: "assistant",
+        content: "Hello, world!",
+      },
+    ]);
+    expect(result.finalOutput).toBe("Hello, world!");
+  });
+
+  test("a delta that pushes the buffer at/over STREAM_FLUSH_BYTES flushes immediately, before the turn completes", async () => {
+    const big = "x".repeat(1024);
+    const provider = streamingProvider(["small ", big, " tail"], {
+      stopReason: "tool_use",
+      content: [{ type: "text", text: `small ${big} tail` }],
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const { params, events } = baseParams({ provider, maxTurns: 1 });
+    await runAgentLoop(params);
+
+    const outputEvents = events.filter((e) => e.type === "agent_output");
+    // First flush fires as soon as the buffer ("small " + big) crosses 1024 bytes — before
+    // the turn resolves; the remaining " tail" flushes at turn completion as a second event.
+    expect(outputEvents).toHaveLength(2);
+    expect(outputEvents[0]).toMatchObject({ chunk: `small ${big}` });
+    expect(outputEvents[1]).toMatchObject({ chunk: " tail" });
+  });
+
+  test("a provider that streams no deltas at all falls back to one whole-turn agent_output event, exactly as before streaming existed", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [{ type: "text", text: "whole turn at once" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, events } = baseParams({ provider, maxTurns: 1 });
+    await runAgentLoop(params);
+
+    const outputEvents = events.filter((e) => e.type === "agent_output");
+    expect(outputEvents).toHaveLength(1);
+    expect(outputEvents[0]).toMatchObject({ chunk: "whole turn at once" });
+  });
+
+  test("ordering: the flushed agent_output event precedes the same turn's token_usage event", async () => {
+    const provider = streamingProvider(["streamed text"], {
+      stopReason: "tool_use",
+      content: [{ type: "text", text: "streamed text" }],
+      usage: { inputTokens: 3, outputTokens: 4 },
+    });
+    const { params, events } = baseParams({ provider, maxTurns: 1 });
+    await runAgentLoop(params);
+
+    const relevantTypes = events
+      .filter((e) => e.type === "agent_output" || e.type === "token_usage")
+      .map((e) => e.type);
+    expect(relevantTypes).toEqual(["agent_output", "token_usage"]);
+  });
+
+  test("a delta under threshold flushes on its own via the 50ms timer when the turn takes longer than that to complete", async () => {
+    const provider: ModelProvider = {
+      async complete(_request, _signal, callbacks) {
+        callbacks?.onTextDelta?.("slow trickle");
+        // Long enough that STREAM_FLUSH_INTERVAL_MS (50ms) fires the pending flush timer
+        // before this turn ever resolves — proves the timer path actually flushes on its
+        // own, not just the turn-completion flush every other test in this file exercises.
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        return {
+          stopReason: "tool_use",
+          content: [{ type: "text", text: "slow trickle" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        };
+      },
+    };
+    const { params, events } = baseParams({ provider, maxTurns: 1 });
+    await runAgentLoop(params);
+
+    const outputEvents = events.filter((e) => e.type === "agent_output");
+    // The timer fired mid-turn and flushed the only delta; the turn-completion flush that
+    // follows finds an empty buffer and is a no-op — exactly one event either way.
+    expect(outputEvents).toHaveLength(1);
+    expect(outputEvents[0]).toMatchObject({ chunk: "slow trickle" });
+  });
+
+  test("mid-turn provider failure after >=1 delta streamed logs the accumulated partial text with partial: true, then rethrows (non-abort path unchanged)", async () => {
+    const provider: ModelProvider = {
+      async complete(_request, _signal, callbacks) {
+        callbacks?.onTextDelta?.("partial output ");
+        callbacks?.onTextDelta?.("before the crash");
+        throw new Error("provider exploded mid-stream");
+      },
+    };
+    const { params, events, logLines } = baseParams({ provider });
+
+    await expect(runAgentLoop(params)).rejects.toThrow("provider exploded mid-stream");
+
+    // The buffered partial text was flushed live as agent_output before the throw...
+    const outputEvents = events.filter((e) => e.type === "agent_output");
+    expect(outputEvents).toHaveLength(1);
+    expect(outputEvents[0]).toMatchObject({ chunk: "partial output before the crash" });
+
+    // ...and also durably recorded as a `partial: true` message log line, so it's not lost
+    // from the JSONL log just because the turn never completed normally.
+    const partialLines = logLines.filter(
+      (l) => l.type === "message" && "partial" in l && l.partial === true,
+    );
+    expect(partialLines).toEqual([
+      {
+        version: 1,
+        timestamp: expect.any(String),
+        type: "message",
+        role: "assistant",
+        content: "partial output before the crash",
+        partial: true,
+      },
+    ]);
+  });
+
+  test("mid-turn provider failure with zero deltas streamed logs no partial line (nothing to record)", async () => {
+    const provider: ModelProvider = {
+      async complete() {
+        throw new Error("failed before streaming anything");
+      },
+    };
+    const { params, logLines } = baseParams({ provider });
+
+    await expect(runAgentLoop(params)).rejects.toThrow("failed before streaming anything");
+
+    const partialLines = logLines.filter((l) => l.type === "message" && "partial" in l);
+    expect(partialLines).toEqual([]);
+  });
+
+  test("a genuine stop (AbortSignal) mid-provider-call after streaming still flushes and logs the partial line before reportStopped runs", async () => {
+    const controller = new AbortController();
+    const provider: ModelProvider = {
+      async complete(_request, signal, callbacks) {
+        callbacks?.onTextDelta?.("streamed before stop");
+        controller.abort();
+        // Simulate the provider observing the abort and rejecting, same as a real SDK call
+        // whose signal fires mid-request.
+        if (signal?.aborted) {
+          throw new DOMException("aborted", "AbortError");
+        }
+        throw new Error("unreachable");
+      },
+    };
+    const { params, events, logLines } = baseParams({ provider, signal: controller.signal });
+
+    const result = await runAgentLoop(params);
+
+    expect(result.success).toBe(false);
+    const statusEvents = events.filter((e) => e.type === "agent_status");
+    expect(statusEvents[statusEvents.length - 1]).toMatchObject({ status: "stopped" });
+
+    const partialLines = logLines.filter(
+      (l) => l.type === "message" && "partial" in l && l.partial === true,
+    );
+    expect(partialLines).toHaveLength(1);
+    expect(partialLines[0]).toMatchObject({ content: "streamed before stop" });
+  });
+});
+
+// DH-0050: the ReportOutcome self-report mechanism's detection precedence, exercised
+// entirely at the loop level via scriptedProvider — none of these need the tool actually
+// registered in `params.tools` (loop.ts only inspects the completion's tool_use blocks by
+// name), matching how the real runtime only ever registers it for non-interactive runs.
+describe("runAgentLoop — DH-0050 ReportOutcome self-report", () => {
+  test("a valid ReportOutcome(success) call is terminal and authoritative", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "ReportOutcome",
+            input: { status: "success", summary: "did the thing", filesChanged: ["a.ts"] },
+          },
+        ],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+    ]);
+    const { params, events, logLines } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+
+    expect(result.success).toBe(true);
+    expect(result.reportedBy).toBe("tool");
+    expect(result.outcome).toEqual({
+      status: "success",
+      summary: "did the thing",
+      filesChanged: ["a.ts"],
+    });
+    // Only one provider call — the loop never asks for a second turn once a valid call lands.
+    expect(provider.calls).toHaveLength(1);
+
+    const statusEvent = events.find((e) => e.type === "agent_status");
+    expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe("done");
+    const completedLine = logLines.find((l) => l.type === "completed");
+    expect(completedLine).toMatchObject({
+      type: "completed",
+      success: true,
+      outcome: result.outcome,
+    });
+  });
+
+  test("a valid ReportOutcome(failure) call reports failure, not success", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "failure" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+
+    expect(result.success).toBe(false);
+    expect(result.reportedBy).toBe("tool");
+    expect(result.outcome).toEqual({ status: "failure" });
+    const failedLine = logLines.find((l) => l.type === "failed");
+    expect(failedLine).toMatchObject({
+      type: "failed",
+      reason: "model reported failure via ReportOutcome",
+      outcome: { status: "failure" },
+    });
+  });
+
+  test("the last valid ReportOutcome call in a turn wins when the model calls it twice", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "failure" } },
+          { type: "tool_use", id: "tu_2", name: "ReportOutcome", input: { status: "success" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+    expect(result.success).toBe(true);
+    expect(result.outcome).toEqual({ status: "success" });
+  });
+
+  test("an invalid status doesn't terminate the run — the model gets another turn", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          // Garbled: "status" isn't a recognized value — degrades gracefully, no crash.
+          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "maybe" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "tool_use",
+        content: [
+          { type: "tool_use", id: "tu_2", name: "ReportOutcome", input: { status: "success" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+    expect(provider.calls).toHaveLength(2);
+    expect(result.success).toBe(true);
+    expect(result.reportedBy).toBe("tool");
+  });
+
+  test("a non-tool-use turn with no ReportOutcome call gets exactly one nudge, then the model " +
+    "complies and the loop ends via the tool", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "I think I'm done." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "tool_use",
+        content: [
+          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+
+    expect(provider.calls).toHaveLength(2);
+    expect(result.success).toBe(true);
+    expect(result.reportedBy).toBe("tool");
+    // The nudge text reached the model as a user message on the second call.
+    const secondCallMessages = provider.calls[1]?.messages ?? [];
+    const lastMessage = secondCallMessages[secondCallMessages.length - 1];
+    expect(lastMessage?.role).toBe("user");
+    expect(lastMessage?.content).toEqual([{ type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE }]);
+    expect(
+      logLines.some(
+        (l) =>
+          l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
+      ),
+    ).toBe(true);
+  });
+
+  test("a nudge is sent only once — a second consecutive non-tool-use turn falls back to the " +
+    "legacy marker scan instead of nudging again", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "still thinking" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "All done, no marker here." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+
+    expect(provider.calls).toHaveLength(2);
+    expect(result.success).toBe(true);
+    expect(result.reportedBy).toBe("clean-end");
+    expect(result.finalOutput).toBe("All done, no marker here.");
+  });
+
+  test("legacy fallback: TASK_FAILED after the nudge is still reported as failure", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "hmm" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: `Couldn't finish. ${TASK_FAILED_MARKER}` }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+
+    expect(result.success).toBe(false);
+    expect(result.reportedBy).toBe("text-marker");
+  });
+
+  test("max_tokens truncation is an immediate failure — no nudge, no extra turn", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "max_tokens",
+        content: [{ type: "text", text: "cut off mid-" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+
+    expect(provider.calls).toHaveLength(1);
+    expect(result.success).toBe(false);
+    expect(result.reportedBy).toBe("max-tokens");
+  });
+
+  test("exceeding maxTurns reports reportedBy: max-turns", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: { command: "true" } }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "tool_use",
+        content: [{ type: "tool_use", id: "tu_2", name: "Bash", input: { command: "true" } }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider, maxTurns: 2 });
+    const result = await runAgentLoop(params);
+
+    expect(result.reportedBy).toBe("max-turns");
+    expect(result.success).toBe(false);
+  });
+
+  test("interactive mode never checks for ReportOutcome — an unregistered call just reports " +
+    "'Unknown tool' and the conversation keeps waiting, it doesn't end the session", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "waiting for you" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const controller = new AbortController();
+    const { params, logLines } = baseParams({
+      provider,
+      interactive: true,
+      signal: controller.signal,
+      registerSendMessage: () => {},
+    });
+    // Abort right after the loop would otherwise pause in "waiting", so the test doesn't hang.
+    const originalOnEvent = params.onEvent;
+    params.onEvent = (e) => {
+      originalOnEvent?.(e);
+      if (e.type === "agent_status" && e.status === "waiting") controller.abort();
+    };
+    const result = await runAgentLoop(params);
+
+    // Never terminated via the tool — it fell through to the interactive "waiting" pause and
+    // was only ended by the test's own abort.
+    expect(result.reportedBy).toBeUndefined();
+    expect(
+      logLines.some((l) => l.type === "tool_result" && l.output === "Unknown tool: ReportOutcome"),
+    ).toBe(true);
   });
 });

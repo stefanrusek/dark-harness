@@ -7,6 +7,8 @@
 // (written before this amendment) must tolerate their absence — additive, backward-
 // compatible-to-read schema change, not a header format version bump.
 
+import type { ReportedOutcome } from "./outcome.ts";
+
 /** How the log-writing process was invoked, per ADR 0001's mode composition — a one-shot
  * fact captured at session start, not an attempt to track every remote client that connects
  * to a `--server` process over its lifetime. `"server"` describes the headless server
@@ -62,6 +64,12 @@ export interface LogMessageEvent extends LogEventBase {
   type: "message";
   role: "user" | "assistant" | "system";
   content: string;
+  /** DH-0044: set true only when this line records a mid-turn error/stop's *partial*
+   * accumulated text (streamed to clients live but the turn never completed normally) —
+   * absent on every complete turn and on every line written before this field existed.
+   * Additive/optional; readers must tolerate its absence exactly like `costUsd`/
+   * `cacheReadTokens` elsewhere in this file. */
+  partial?: true;
 }
 
 export interface LogToolCallEvent extends LogEventBase {
@@ -110,11 +118,23 @@ export interface LogStatusChangeEvent extends LogEventBase {
 export interface LogCompletedEvent extends LogEventBase {
   type: "completed";
   success: true;
+  /** DH-0050: present iff the model self-reported via the `ReportOutcome` tool (see
+   * src/contracts/outcome.ts) — absent for a clean no-tool-call end (the pre-existing,
+   * still-supported fallback), and on every line written before this field existed.
+   * Additive/optional, same tolerance contract as every other optional field in this file. */
+  outcome?: ReportedOutcome;
 }
 
 export interface LogFailedEvent extends LogEventBase {
   type: "failed";
+  /** DH-0050: gains the value `"model reported failure via ReportOutcome"` alongside the
+   * pre-existing `"model reported TASK_FAILED"`/`"response truncated at max_tokens..."`/
+   * `"exceeded max turns..."` reasons — still a plain string, no union added, so no reader
+   * needs updating to keep compiling. */
   reason: string;
+  /** DH-0050: see {@link LogCompletedEvent.outcome} — present iff the model self-reported
+   * failure via `ReportOutcome`. */
+  outcome?: ReportedOutcome;
 }
 
 /** DH-0093: durable record of a mid-session model switch (`switch_model` command taking

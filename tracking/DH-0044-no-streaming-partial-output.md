@@ -295,3 +295,48 @@ TUI/Web in parallel → E2E.
 > accumulation semantics and both clients already implement it, so the incremental change is
 > producer-side only plus two additive contract edits (doc comment + optional log field),
 > both signed off in this pass.
+
+> [!NOTE]
+> **2026-07-16 (Grace/Radia): Core + Server done, ticket stays `ready` — TUI/Web/E2E still
+> pending per D10.**
+>
+> **Server (Radia):** both pre-approved contract edits landed — `AgentOutputEvent`'s doc
+> comment in `src/contracts/events.ts` (D1) and `LogMessageEvent.partial?: true` in
+> `src/contracts/log.ts` (D5), no handler changes. Added a sizing note to DH-0012 re: D8
+> (event-count cap needs raising, or lean on the byte cap, once streaming multiplies
+> per-turn event count).
+>
+> **Core (Grace):** `ProviderStreamCallbacks`/`complete()`'s third param
+> (`src/agent/providers/types.ts`); Anthropic adapter switched to raw `messages.create({
+> stream: true })` per D3 (not the SDK's `messages.stream()` helper); Bedrock adapter
+> switched to `ConverseStreamCommand` per D4; `loop.ts` coalescing (1 KiB/50ms flush,
+> `STREAM_FLUSH_BYTES`/`STREAM_FLUSH_INTERVAL_MS`), whole-turn fallback for a
+> callback-ignoring provider, and the `partial: true` mid-turn-error log line per D5; D6's
+> `emittedAny`-gated retry (retry only until the first *text* delta, not the first raw
+> stream event — see implementer note below) in both adapters.
+>
+> **Implementer judgment call (not resolved by the design text):** D6 says "retry only
+> until first delta." Read literally as "first stream event," a provider that streamed
+> `message_start`/tool-input deltas but zero visible text before failing would become
+> non-retryable even though nothing ever reached a client — that seemed like an
+> unintended tightening of the existing retry safety net for no benefit (no text was ever
+> displayed, so there's nothing to duplicate on a retry). Implemented `emittedAny`/gating
+> against the first *text* delta specifically (`onTextDelta`'s first call), not the first
+> raw event of any kind. Documented inline in both adapters.
+>
+> **Verification:** unit tests per D2-D6's own prescribed approach — fake async-iterable
+> streaming clients for both adapters (event ordering, block accumulation, retry gating),
+> fake providers driving `loop.ts`'s coalescing/fallback/ordering/mid-turn-error paths.
+> `bun run typecheck`/`lint`/`test:coverage` all green on every file this round touched
+> (100%/100% on `anthropic.ts`, `bedrock.ts`, `types.ts`, `events.ts`, `log.ts`; 100%
+> funcs/99.8%+ lines on `loop.ts`, remaining gap is pre-existing DH-0038/DH-0050 code this
+> round didn't touch). Live-verified against real Anthropic credentials via both the
+> `--instructions --job` path (JSONL log: exactly one non-partial `message` line per turn,
+> full text) and a real `dh --server` + raw SSE curl (49 incremental `agent_output` events
+> for one long turn, reconstructing byte-for-byte to the JSONL log's full text). Also
+> live-verified against real AWS Bedrock (Claude Haiku 4.5) the same way — 109 incremental
+> `agent_output` events for one turn over the real `ConverseStreamCommand` path.
+>
+> **Still pending per D10:** TUI (Mary) frame-coalesced redraw, Web (Susan) rAF batching,
+> E2E (Hedy) mock-provider SSE streaming support + the multi-event assertion. Leaving this
+> ticket `ready`, not closing it.
