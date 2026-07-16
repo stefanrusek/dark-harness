@@ -2,13 +2,13 @@
 spile: ticket
 id: DH-0001
 type: bug
-status: implementing
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["owner/architect decision needed on structured self-report mechanism (same question as DH-0050)"]
+blocked_by: []
 created: 2026-07-15
 relations:
-  depends_on: []
+  depends_on: [DH-0050]
   relates_to: [DH-0050]
   supersedes: []
 implementation:
@@ -55,6 +55,10 @@ emitted the marker, so `dh` reported exit code 0 (success) for a self-acknowledg
 
 - Is a stronger prompt (more repetition, different phrasing/placement) sufficient, or does
   ADR 0006's exit-code contract need a less string-dependent self-report mechanism?
+  - **Answered 2026-07-15 (architect, Fable):** a structural mechanism is needed — prompt
+    wording is tapped out (round 5 maximized it) and cannot fix the underlying property that
+    a forgotten marker is indistinguishable from success. See the Design section in
+    **DH-0050** and the status-log entry below.
 
 ## Notes
 
@@ -92,3 +96,40 @@ Leaving status as `implementing`, not closing: the prompt change is committed an
 but neither behaviorally verified nor a full resolution of the ticket's actual open question.
 Needs either (a) a live re-test against gemma-4-31b or a similar small/local model to see if
 this materially helps, and/or (b) an architect decision on the structural alternative above.
+
+### 2026-07-15 — Architect design pass (Fable)
+
+Decision made; escalation resolved. **DH-0050's structural mechanism subsumes this ticket's
+open question** — the full design (contract, tool schema, loop semantics, NDJSON stream,
+ADR 0006 amendment text, domain assignment) lives in DH-0050's Design section. What lands
+here is the bug-fix slice, summarized:
+
+- New built-in **`ReportOutcome` tool** (`src/agent/tools/report-outcome.ts`, name constant
+  in `src/contracts/outcome.ts`), registered only for non-interactive runtimes. A valid call
+  (`status: "success" | "failure"`, optional summary/filesChanged/artifacts) is the
+  authoritative self-report; the turn it lands in is terminal.
+- **Missed-call nudge — the part that actually fixes this bug's shape:** if a non-tool-use
+  turn ends with no `ReportOutcome` recorded (and not `max_tokens`-truncated), `loop.ts`
+  injects one synthetic reminder turn demanding the call. The gemma-4-31b failure mode
+  (honest prose admission, missing signal) becomes *detectable and recoverable* instead of
+  silently scoring as success — that property, not "models remember tools better," is why
+  this beats any further prompt strengthening. It also rides a stronger channel: the tool
+  schema travels in every request's `tools` slot, and any model able to operate dh at all
+  has already proven it can call tools (gemma called Bash/Read fine; it only dropped a
+  free-text token).
+- **`TASK_FAILED` scan retained as deprecated fallback** after the nudge — no model or e2e
+  fixture behaves worse than today; Iris's round-5 prompt work keeps its value as the
+  fallback's teaching text (her `REQUIRED_CONTRACT` gets rewritten to lead with
+  `ReportOutcome`, marker demoted to fallback — Prompt task in DH-0050).
+- **ADR 0006 exit-code values unchanged** (0/1/2+); only the detection mechanism is amended
+  (amendment text in DH-0050, applied by the coordinator when Core's round lands).
+
+Ownership: Core (Grace) implements the tool + `loop.ts` changes per DH-0050's Design;
+Prompt (Iris) the `REQUIRED_CONTRACT` rewrite; E2E (Hedy) the fixture/exit-code coverage.
+
+Status → `ready` (back from `implementing` — deliberate, advisory-lifecycle jump: the
+round-5 prompt strengthening is committed, but the actual fix is now a fresh, fully-specced
+implementation task). `blocked_by` cleared — the architect decision it was blocked on is
+this entry. Ticket stays open past implementation for the piece no gate can cover: a live
+re-test against gemma-4-31b or a comparable small local model to confirm the nudge+tool
+path closes the observed failure.
