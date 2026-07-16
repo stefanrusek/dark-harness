@@ -82,6 +82,25 @@ export interface TuiState {
    * arbitrary fake clock instead of sleeping. Drives the tree/agent-view liveness indicator
    * (elapsed = now - agent.lastEventAt). */
   now: number;
+  /** DH-0059: true when this process also constructed the `DhServer` this TUI talks to
+   * (local mode) — false for a `--connect` client attached to a server it doesn't own.
+   * Seeded once at construction (`initialState`'s second argument) from `startTui`'s
+   * `ownsServer` option; only `src/cli.ts` knows which branch it took, so this can't be
+   * inferred from anything the TUI itself observes (see DH-0059 for the full reasoning).
+   * Drives whether Ctrl+C sends `stop_agent` before quitting. */
+  ownsServer: boolean;
+  /** DH-0059: set on the first Ctrl+C when `ownsServer` is true and the root has been
+   * active — a `stop_agent` command has been sent and the TUI is now waiting for
+   * `session_ended` before it quits. A second Ctrl+C while this is true force-quits
+   * immediately (the escape hatch for a stop that never completes). */
+  shutdownRequested: boolean;
+  /** DH-0059: true once the root agent has produced any real activity (an `agent_spawned`,
+   * `agent_output`, or `token_usage` event for it, or the operator has sent it a message) —
+   * as opposed to merely being known about via the startup `request_agent_tree` bootstrap,
+   * which synthesizes a root node before the loop has ever actually started. Ctrl+C only
+   * sends `stop_agent` when this is true; `stop_agent` on a never-started root is a no-op
+   * and `session_ended` would never arrive, so Ctrl+C quits immediately instead. */
+  rootActive: boolean;
 }
 
 export type Action =
@@ -94,7 +113,14 @@ export type Action =
   | { type: "reconnected" }
   | { type: "tick"; now: number };
 
-export type Effect = { type: "send_command"; command: ClientCommand } | { type: "quit" };
+export type Effect =
+  | { type: "send_command"; command: ClientCommand }
+  /** DH-0059: `afterMs`, when set, means "draw the current frame first, then quit after
+   * this many ms" — used for the deferred quit on `session_ended` so the "session ended
+   * (exit N)" frame actually paints before the terminal is torn down (see app.ts's
+   * `dispatch()` doc comment for why this matters: effects run before the frame is drawn,
+   * so an immediate cleanup would tear the terminal down before the frame ever rendered). */
+  | { type: "quit"; afterMs?: number };
 
 export interface ReducerResult {
   state: TuiState;
