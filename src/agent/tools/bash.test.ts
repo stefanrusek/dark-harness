@@ -164,7 +164,7 @@ describe("Bash tool", () => {
       expect(result.output).toContain("timed out after 50ms");
     }, 3000);
 
-    test("caps returned output to its tail with a notice stating the true total size", async () => {
+    test("DH-0080: caps returned output with a head+tail preview and saves the full output to a file", async () => {
       const ctx = makeToolContext({ cwd: dir });
       // Produce well over the 30,000-char cap.
       const result = await bashTool.execute(
@@ -175,8 +175,17 @@ describe("Bash tool", () => {
         ctx,
       );
       expect(result.isError).toBe(false);
-      expect(result.output.length).toBeLessThan(31_000);
-      expect(result.output).toContain("[output truncated: showing last 30000 of");
+      expect(result.output).toContain("Output too large (40000 chars)");
+      expect(result.output).toContain("Full output saved to:");
+      expect(result.output).toContain("Preview (first 2000 chars)");
+      expect(result.output).toContain("Tail preview (last 2000 chars)");
+
+      const pathMatch = result.output.match(/Full output saved to: (\S+)/);
+      expect(pathMatch).not.toBeNull();
+      const savedPath = pathMatch?.[1] ?? "";
+      const saved = await Bun.file(savedPath).text();
+      expect(saved.length).toBe(40000);
+      expect(saved.replace(/\n/g, "")).toBe("x".repeat(saved.replace(/\n/g, "").length));
     });
 
     test("working directory does NOT persist between calls (documented statelessness)", async () => {
