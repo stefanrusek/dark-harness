@@ -69,6 +69,7 @@ source: tracking/
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
 | [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | feature | stefan |
 | [DH-0096](../DH-0096-dh-init-s-scaffolded-config-should-be-a-richer-real-model-catalog-all-claude-tiers-bedrock-oss-models-local-url-env-var.md) | dh init's scaffolded config should be a richer, real model catalog (all Claude tiers, Bedrock OSS models, local URL env var) | feature | stefan |
+| [DH-0097](../DH-0097-cli-ts-never-wires-in-the-real-built-in-system-prompt-from-src-prompt-ships-a-placeholder-instead.md) | cli.ts never wires in the real built-in system prompt from src/prompt -- ships a placeholder instead | bug | stefan |
 
 ### implementing
 
