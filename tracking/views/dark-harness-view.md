@@ -13,7 +13,6 @@ source: tracking/
 
 | ID | Title | Blocked by |
 | --- | --- | --- |
-| [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) | architect design pass in progress |
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance | deferred (owner decision 2026-07-15): no incident behind this, revisit near real release cut |
 | [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback | deferred (owner decision 2026-07-15): sweep-sourced idea, not a real requested need |
 
@@ -37,12 +36,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | feature | stefan |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 
-### refining
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) 🔒 | feature | stefan |
-
 ### ready
 
 | ID | Title | Type | Owner |
@@ -52,6 +45,7 @@ source: tracking/
 | [DH-0003](../DH-0003-sendmessage-resume-finished-conversation.md) | `SendMessage` should resume a finished agent's conversation, not just error cleanly | feature | stefan |
 | [DH-0004](../DH-0004-npm-packaging-single-platform.md) | npm package only ships a single-platform binary | feature | stefan |
 | [DH-0005](../DH-0005-npm-token-secret.md) | `NPM_TOKEN` repository secret not yet set | feature | stefan |
+| [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) | feature | stefan |
 | [DH-0012](../DH-0012-unbounded-memory-growth-across-harness.md) | Unbounded in-memory growth across the harness for long/wide-fanout runs | bug | stefan |
 | [DH-0020](../DH-0020-jsonl-logger-robustness-and-secrets-redaction.md) | JSONL logger has no write-error handling, no fsync, and no awareness of secrets in tool call I/O | bug | stefan |
 | [DH-0022](../DH-0022-default-server-bind-address-not-loopback.md) | Add a `dh.json` field to configure the server/web bind address (default unchanged) | feature | stefan |
