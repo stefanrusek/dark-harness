@@ -212,4 +212,161 @@ describe("Read tool", () => {
     expect(result.output).toContain("binary file");
     expect(result.output).toContain(`${bytes.length} bytes`);
   });
+
+  describe(".ipynb notebooks (DH-0073)", () => {
+    function makeNotebook(cells: unknown[]): string {
+      return JSON.stringify({ cells, nbformat: 4, nbformat_minor: 5 });
+    }
+
+    test("renders code and markdown cells with their source", async () => {
+      const path = join(dir, "nb.ipynb");
+      await Bun.write(
+        path,
+        makeNotebook([
+          { cell_type: "markdown", source: ["# Title\n", "Some text."], id: "md1" },
+          { cell_type: "code", source: "print('hi')", id: "code1", outputs: [] },
+        ]),
+      );
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("Cell 0 (markdown, id=md1)");
+      expect(result.output).toContain("# Title\nSome text.");
+      expect(result.output).toContain("Cell 1 (code, id=code1)");
+      expect(result.output).toContain("print('hi')");
+    });
+
+    test("renders stream and execute_result text outputs", async () => {
+      const path = join(dir, "nb.ipynb");
+      await Bun.write(
+        path,
+        makeNotebook([
+          {
+            cell_type: "code",
+            source: "print('hello')",
+            outputs: [{ output_type: "stream", name: "stdout", text: ["hello\n"] }],
+          },
+          {
+            cell_type: "code",
+            source: "1 + 1",
+            outputs: [{ output_type: "execute_result", data: { "text/plain": ["2"] } }],
+          },
+        ]),
+      );
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("Output:\nhello");
+      expect(result.output).toContain("Output:\n2");
+    });
+
+    test("renders error outputs with traceback", async () => {
+      const path = join(dir, "nb.ipynb");
+      await Bun.write(
+        path,
+        makeNotebook([
+          {
+            cell_type: "code",
+            source: "1/0",
+            outputs: [
+              {
+                output_type: "error",
+                ename: "ZeroDivisionError",
+                evalue: "division by zero",
+                traceback: ["Traceback...", "ZeroDivisionError: division by zero"],
+              },
+            ],
+          },
+        ]),
+      );
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("ZeroDivisionError: division by zero");
+      expect(result.output).toContain("Traceback...");
+    });
+
+    test("renders image outputs as a placeholder, not raw base64", async () => {
+      const path = join(dir, "nb.ipynb");
+      const fakeBase64 = "QUJDRA=="; // "ABCD" - 8 chars -> 6 bytes decoded
+      await Bun.write(
+        path,
+        makeNotebook([
+          {
+            cell_type: "code",
+            source: "plt.show()",
+            outputs: [{ output_type: "display_data", data: { "image/png": fakeBase64 } }],
+          },
+        ]),
+      );
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("[image output, 6 bytes, not yet displayable — see DH-0046]");
+      expect(result.output).not.toContain(fakeBase64);
+    });
+
+    test("renders an output with no known renderable content", async () => {
+      const path = join(dir, "nb.ipynb");
+      await Bun.write(
+        path,
+        makeNotebook([
+          {
+            cell_type: "code",
+            source: "weird()",
+            outputs: [{ output_type: "display_data", data: {} }],
+          },
+        ]),
+      );
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain("no renderable content");
+    });
+
+    test("cells with no outputs render without an Output section", async () => {
+      const path = join(dir, "nb.ipynb");
+      await Bun.write(path, makeNotebook([{ cell_type: "code", source: "x = 1" }]));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).not.toContain("Output:");
+    });
+
+    test("errors on invalid JSON in a .ipynb file", async () => {
+      const path = join(dir, "bad.ipynb");
+      await Bun.write(path, "{ not json");
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("not valid JSON");
+    });
+
+    test("errors when a .ipynb file lacks a cells array", async () => {
+      const path = join(dir, "notreally.ipynb");
+      await Bun.write(path, JSON.stringify({ nbformat: 4 }));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain("does not look like a notebook");
+    });
+
+    test("a .ipynb file larger than the 256KB whole-file cap is still rendered (notebooks bypass that cap)", async () => {
+      const path = join(dir, "big.ipynb");
+      const bigSource = "x".repeat(300 * 1024);
+      await Bun.write(path, makeNotebook([{ cell_type: "code", source: bigSource }]));
+      const ctx = makeToolContext({ cwd: dir });
+      const result = await readTool.execute({ file_path: path }, ctx);
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain(bigSource);
+    });
+
+    test("records the read for the read-before-write guard", async () => {
+      const path = join(dir, "nb.ipynb");
+      await Bun.write(path, makeNotebook([{ cell_type: "code", source: "x = 1" }]));
+      const ctx = makeToolContext({ cwd: dir });
+      await readTool.execute({ file_path: path }, ctx);
+      expect(ctx.readRegistry.has(path)).toBe(true);
+    });
+  });
 });

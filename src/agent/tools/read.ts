@@ -53,6 +53,96 @@ function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
 }
 
+// DH-0073 (tracking/DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness...): Jupyter
+// notebooks are well-specified JSON — detect `.ipynb` by extension and render cells/outputs
+// readably instead of dumping raw notebook JSON as undifferentiated text. Image outputs are
+// placeholdered pending DH-0046 (image-channel support); PDF support is out of scope here
+// (split to DH-0081).
+
+export interface NotebookOutput {
+  output_type: "stream" | "execute_result" | "display_data" | "error";
+  text?: string | string[];
+  data?: Record<string, string | string[]>;
+  name?: string;
+  ename?: string;
+  evalue?: string;
+  traceback?: string[];
+}
+
+export interface NotebookCell {
+  cell_type: "code" | "markdown" | "raw" | string;
+  source: string | string[];
+  outputs?: NotebookOutput[];
+  execution_count?: number | null;
+  id?: string;
+}
+
+export interface NotebookJson {
+  cells: NotebookCell[];
+  nbformat?: number;
+  nbformat_minor?: number;
+}
+
+export function joinSource(source: string | string[] | undefined): string {
+  if (source === undefined) return "";
+  return Array.isArray(source) ? source.join("") : source;
+}
+
+const IMAGE_MIME_PREFIX = "image/";
+
+/** Renders a single cell output. Text/stream outputs are shown verbatim; image outputs (e.g.
+ * matplotlib plots) get a placeholder per DH-0073's assumption that full image-channel support
+ * depends on DH-0046 landing separately. */
+function renderOutput(output: NotebookOutput, index: number): string {
+  if (output.output_type === "stream") {
+    return joinSource(output.text);
+  }
+  if (output.output_type === "error") {
+    const traceback = (output.traceback ?? []).join("\n");
+    return `${output.ename ?? "Error"}: ${output.evalue ?? ""}${traceback ? `\n${traceback}` : ""}`;
+  }
+  // execute_result / display_data: `data` maps MIME type -> content.
+  const data = output.data ?? {};
+  const mimeTypes = Object.keys(data);
+  const textMime = mimeTypes.find((mime) => !mime.startsWith(IMAGE_MIME_PREFIX));
+  if (textMime) {
+    return joinSource(data[textMime]);
+  }
+  const imageMime = mimeTypes.find((mime) => mime.startsWith(IMAGE_MIME_PREFIX));
+  if (imageMime) {
+    const raw = data[imageMime];
+    const b64 = Array.isArray(raw) ? raw.join("") : (raw ?? "");
+    // Base64 length -> approximate decoded byte count (4 base64 chars encode 3 bytes).
+    const approxBytes = Math.floor((b64.length * 3) / 4);
+    return `[image output, ${approxBytes} bytes, not yet displayable — see DH-0046]`;
+  }
+  return `[output ${index}: no renderable content]`;
+}
+
+export function renderNotebook(notebook: NotebookJson): string {
+  const cells = notebook.cells ?? [];
+  const sections = cells.map((cell, i) => {
+    const header = `--- Cell ${i} (${cell.cell_type}${cell.id ? `, id=${cell.id}` : ""}) ---`;
+    const source = joinSource(cell.source);
+    const parts = [header, source];
+    if (cell.outputs && cell.outputs.length > 0) {
+      const rendered = cell.outputs
+        .map((output, oi) => renderOutput(output, oi))
+        .filter((text) => text.length > 0)
+        .join("\n");
+      if (rendered.length > 0) {
+        parts.push("Output:", rendered);
+      }
+    }
+    return parts.join("\n");
+  });
+  return sections.join("\n\n");
+}
+
+export function isNotebookPath(path: string): boolean {
+  return path.toLowerCase().endsWith(".ipynb");
+}
+
 /** Round 13: a NUL byte anywhere in the sampled prefix is a reliable binary signal — no valid
  * UTF-8 text file legitimately contains one. Cheap and doesn't require a full decode attempt. */
 function looksBinary(bytes: Uint8Array): boolean {
@@ -170,6 +260,34 @@ export const readTool: Tool = {
         output: `Read tool error: file is ${file.size} bytes, exceeding the ${MAX_READABLE_BYTES}-byte readable limit. Use 'offset'/'limit' to read a smaller window, or search it with Bash (e.g. grep) instead of reading it whole.`,
         isError: true,
       };
+    }
+
+    // DH-0073: `.ipynb` notebooks are JSON, not line-oriented text — render cells/outputs
+    // instead of running them through the byte-cap/binary-sniff/line-window pipeline below.
+    // Offset/limit aren't meaningful for cell-level rendering, so they're ignored for
+    // notebooks (same as real Claude Code's Read tool). The absolute ceiling check above still
+    // applies (already ran), so an oversized .ipynb is refused there.
+    if (isNotebookPath(absPath)) {
+      const raw = await file.text();
+      let notebook: NotebookJson;
+      try {
+        notebook = JSON.parse(raw) as NotebookJson;
+      } catch (err) {
+        await recordRead(ctx, absPath);
+        return {
+          output: `Read tool error: ${absPath} has a .ipynb extension but is not valid JSON: ${(err as Error).message}`,
+          isError: true,
+        };
+      }
+      if (!notebook || !Array.isArray(notebook.cells)) {
+        await recordRead(ctx, absPath);
+        return {
+          output: `Read tool error: ${absPath} does not look like a notebook (missing a 'cells' array).`,
+          isError: true,
+        };
+      }
+      await recordRead(ctx, absPath);
+      return { output: renderNotebook(notebook), isError: false };
     }
 
     // DH-0079: a whole-file read (no offset/limit given) additionally hard-errors past a much

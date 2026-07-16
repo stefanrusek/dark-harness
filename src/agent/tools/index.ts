@@ -7,6 +7,7 @@ import { globTool } from "./glob.ts";
 import { grepTool } from "./grep.ts";
 import { mcpAuthTool } from "./mcp-auth.ts";
 import { monitorTool } from "./monitor.ts";
+import { notebookEditTool } from "./notebook-edit.ts";
 import { readTool } from "./read.ts";
 import { sendMessageTool } from "./send-message.ts";
 import { skillTool } from "./skill.ts";
@@ -35,6 +36,7 @@ export const ALL_TOOLS: Tool[] = [
   mcpAuthTool,
   grepTool,
   globTool,
+  notebookEditTool,
 ];
 
 export function buildToolMap(tools: Tool[] = ALL_TOOLS): Map<string, Tool> {
@@ -48,6 +50,7 @@ export * from "./glob.ts";
 export * from "./grep.ts";
 export * from "./mcp-auth.ts";
 export * from "./monitor.ts";
+export * from "./notebook-edit.ts";
 export * from "./read.ts";
 export * from "./send-message.ts";
 export * from "./skill.ts";
