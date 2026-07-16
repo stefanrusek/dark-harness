@@ -105,6 +105,20 @@ export interface DhOptions {
   maxAgentDepth?: number;
 }
 
+/**
+ * DH-0012 (tracking/DH-0012-unbounded-memory-growth-across-harness.md): caps on in-memory
+ * structures that would otherwise grow unboundedly across a long/wide-fanout session.
+ * Owner-decided policy: fixed-count cap, oldest-evicted-first, applied only to
+ * terminal/completed entries — active entries are never evicted regardless of count. Each
+ * domain (Core's TaskRegistry, Server's EventBuffer, TUI's/Web's agent maps) applies this
+ * cap independently to its own structure(s).
+ */
+export interface LimitsConfig {
+  /** Max number of terminal/completed entries retained per capped structure before the
+   * oldest are evicted. Default 50 when omitted. */
+  completedRetention?: number;
+}
+
 export interface DhConfig {
   options: DhOptions;
   models: ModelConfig[];
@@ -115,4 +129,6 @@ export interface DhConfig {
   /** Path overriding the built-in system prompt. */
   systemPrompt?: string | null;
   security?: SecurityConfig;
+  /** DH-0012: caps on in-memory structures that would otherwise grow unboundedly. */
+  limits?: LimitsConfig;
 }

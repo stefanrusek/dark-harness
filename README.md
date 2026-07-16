@@ -147,6 +147,11 @@ connection survives ordinary HTTP proxies and reconnects cleanly via `Last-Event
   exists to bound a pathological loop, not to constrain a legitimate long-running
   dark-factory task.
 - **`security`** — see below.
+- **`limits.completedRetention`** — (DH-0012) caps how many terminal/completed entries the
+  harness's in-memory structures (e.g. Core's task registry) retain before evicting the
+  oldest, so a long/wide-fanout session's memory footprint reflects currently-relevant
+  agents rather than every agent ever spawned. Optional; defaults to 50. Active (running/
+  waiting) entries are never evicted regardless of count.
 
 Full schema rationale: [`docs/adr/0007-dhjson-schema.md`](docs/adr/0007-dhjson-schema.md).
 

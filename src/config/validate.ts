@@ -37,7 +37,10 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   "mcpServers",
   "systemPrompt",
   "security",
+  "limits",
 ]);
+
+const KNOWN_LIMITS_KEYS = new Set(["completedRetention"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -158,6 +161,28 @@ function validatePositiveNumber(
     );
   }
   return value;
+}
+
+/** DH-0012: validates the optional `limits` block controlling fixed-count eviction caps
+ * (e.g. Core's TaskRegistry, Server's EventBuffer, TUI's/Web's agent maps). */
+function validateLimits(raw: unknown): DhConfig["limits"] {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) {
+    throw new ConfigError("limits must be an object");
+  }
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_LIMITS_KEYS.has(key)) {
+      throw new ConfigError(
+        `limits has unknown key "${key}"; known keys: ${[...KNOWN_LIMITS_KEYS].join(", ")}`,
+      );
+    }
+  }
+  const completedRetention = validatePositiveNumber(
+    raw.completedRetention,
+    "limits.completedRetention",
+    true,
+  );
+  return completedRetention !== undefined ? { completedRetention } : {};
 }
 
 function validateMcpServers(raw: unknown): Record<string, McpServerConfig> | undefined {
@@ -301,6 +326,8 @@ export function validateConfig(raw: unknown): DhConfig {
     security = { ...(token !== undefined ? { token } : {}), ...(tls !== undefined ? { tls } : {}) };
   }
 
+  const limits = validateLimits(raw.limits);
+
   const config: DhConfig = {
     options: {
       defaultModel,
@@ -318,6 +345,7 @@ export function validateConfig(raw: unknown): DhConfig {
     ...(mcpServers !== undefined ? { mcpServers } : {}),
     ...(systemPrompt !== undefined ? { systemPrompt } : {}),
     ...(security !== undefined ? { security } : {}),
+    ...(limits !== undefined ? { limits } : {}),
   };
   return config;
 }
