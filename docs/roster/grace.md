@@ -8,6 +8,34 @@
 
 ## Memory
 
+### 2026-07-16 — DH-0050: ReportOutcome self-report tool + --job --json NDJSON stream
+
+Implemented the full architect-signed design (Fable, 2026-07-15) end to end: the
+`ReportOutcome` tool (`src/agent/tools/report-outcome.ts`), the three-tier loop precedence
+in `src/agent/loop.ts` (authoritative tool call > one missed-call nudge > legacy TASK_FAILED/
+max_tokens fallback), the new `src/contracts/outcome.ts` contract, `AgentRuntime` registering
+the tool only for `!interactive` runtimes, and `--job --json`'s NDJSON progress stream +
+terminal `job_result` line in `cli.ts`. Full details, judgment calls, and live-verification
+transcript are in `tracking/DH-0050-...md`'s own status log — not duplicated here.
+
+**Two things worth remembering for next time:**
+
+1. **The missed-call nudge is a real behavior change, not additive-only.** Every
+   non-interactive run that used to terminate cleanly on its first non-tool-use turn now
+   costs one extra turn (the nudge-ack) before the legacy fallback can end it. This broke
+   ~18 pre-existing `loop.test.ts` unit tests whose scripted providers only had one turn's
+   worth of responses queued — not a bug, just something to expect and budget test-fixup
+   time for whenever a "detect the absence of a signal and react" mechanism like this one
+   lands on top of an existing "silence means done" convention.
+2. **Concurrent-round file churn got weird this session** — a different in-flight round
+   (DH-0044, streaming) touched `loop.ts`/`contracts/events.ts`/`contracts/log.ts` at the
+   same time; it merged cleanly (disjoint regions of the turn loop), but a *third* concurrent
+   commit (`731fb0e`, DH-0110 Web UI fix) swept my then-uncommitted changes to those four
+   files into its own unrelated commit before I could commit them myself. Content was
+   unaffected (verified via `git diff HEAD` showing zero remaining diff after the sweep) —
+   just an unusual commit boundary, worth knowing about if `git blame` on those files looks
+   surprising later.
+
 ### 2026-07-16 — DH-0071: Monitor unread-output count (non-advancing peek)
 
 Implemented the architect's (Fable) resolved design exactly: kept Monitor as the

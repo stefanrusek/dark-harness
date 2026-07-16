@@ -67,3 +67,11 @@ answering "what did it cost, where is it stuck, did it loop" today can only do s
 > on DH-0050 (`job_result`/`ReportOutcome`), which is itself still `status: ready`. Ticket
 > correctly stays `implementing` — 2 of 3 user stories done, third genuinely blocked, not
 > forgotten.
+
+> [!NOTE]
+> Grace (2026-07-16): DH-0050 has landed and closed — `src/contracts/outcome.ts`'s
+> `ReportedOutcome`/`JobResultLine` shapes and `src/agent/loop.ts`'s `AgentLoopResult.
+> outcome`/`reportedBy` are the real, shipped field shapes to reuse for `summary.json`
+> (`success`, `turns`, `outcome` in particular — DH-0050's own design text already commits to
+> those names matching). This ticket's `summary.json` piece is unblocked; not implemented
+> here (out of this round's scope per DH-0050's own boundary note).

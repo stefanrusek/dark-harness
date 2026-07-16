@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0050
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -219,3 +219,73 @@ and the NDJSON stream design, and subsumes DH-0001's open question (that ticket 
 bug-fix slice — the loop detection change — and its behavioral verification). Status →
 `ready`, `blocked_by` cleared: nothing blocks implementation; Core can pick up both tasks,
 Prompt in parallel once contracts land.
+
+### 2026-07-16 — Core implementation (Grace), closed
+
+Implemented the full Core slice per the design above, verbatim:
+
+- **`src/contracts/outcome.ts`** (new): `REPORT_OUTCOME_TOOL_NAME`, `ReportedOutcome`,
+  `OutcomeReportedBy`, `JobResultLine` — exactly as architect-signed. Additive `outcome?`
+  field added to `LogCompletedEvent`/`LogFailedEvent` in `src/contracts/log.ts`.
+- **`src/agent/tools/report-outcome.ts`** (new): the `ReportOutcome` tool plus an exported
+  `parseReportedOutcome()` helper shared with `loop.ts` (garbled optional fields degrade
+  gracefully — only `status` is load-bearing, per the design's own argument). Excluded from
+  `ALL_TOOLS`/`composeTools()` (`src/agent/tools/index.ts`) — `AgentRuntime`'s constructor
+  (`src/agent/runtime.ts`) adds it to the toolMap only when `!this.interactive`.
+- **`src/agent/loop.ts`**: full three-tier precedence implemented — authoritative tool call
+  (last valid call in the turn wins), one missed-call nudge
+  (`REPORT_OUTCOME_NUDGE_MESSAGE`, exported), then the legacy TASK_FAILED/max_tokens
+  fallback. `AgentLoopResult` gained `outcome?`/`reportedBy?`; threaded through
+  `AgentRuntime.runRoot()`'s return shape (now also includes `turns`) into `cli.ts`.
+- **`--job --json`** (`src/cli.ts`): validated to require `--job` (usage error otherwise);
+  streams every `ServerSentEvent` as one NDJSON line via a new `onEvent` param threaded
+  through `CliDeps.createRuntime`, closed by a terminal `job_result` line. Judgment call
+  (not resolved by the design): `JobResultLine.exitCode`'s `0 | 1` type only covers the
+  model self-report outcome, not the full harness-error exit-code space — an
+  operator-interrupted (SIGTERM/SIGINT) or crashed run has no self-report outcome to
+  describe, so neither path emits a `job_result` line; the NDJSON stream just ends with no
+  terminal line, the same signal any NDJSON consumer already gets from a killed process.
+
+**Judgment call on test fallout**: the missed-call nudge is a genuine, intentional behavior
+change — every non-interactive run that used to end cleanly on the first non-tool-use turn
+now takes one extra turn (the nudge-ack) before the legacy fallback can terminate it. This
+broke ~18 pre-existing `loop.test.ts` unit tests whose scripted providers only had one
+turn's worth of responses; fixed by adding one repeated nudge-ack turn to each (documented
+inline in the test file) rather than changing the design to avoid the churn — the ticket is
+explicit that "every legacy-behaving run pays one extra (cheap) nudge turn. Accepted."
+
+**File-conflict note**: this round ran concurrently with an in-flight DH-0044 (streaming)
+round touching the same files (`src/agent/loop.ts`, `src/contracts/events.ts`/`log.ts`,
+`src/agent/providers/*`) exactly as flagged going in. `loop.ts` merged cleanly — DH-0044's
+streaming/coalescing changes and this ticket's precedence-tier logic touch disjoint regions
+of the turn loop. Separately, a concurrent commit (`731fb0e`, DH-0110 Web UI fix) swept
+`loop.ts`/`loop.test.ts`/`contracts/log.ts`/`contracts/events.ts` into its own unrelated
+commit before this round could commit them itself — content unaffected (verified via `git
+diff HEAD` showing zero remaining diff on those files after the sweep), just an unusual
+commit boundary; this round's own commit (`6666027`) covers every file it could still add
+directly (new files, `runtime.ts`, `cli.ts`, `tools/index.ts`, `contracts/index.ts`, tests).
+`runtime.test.ts`'s real-HTTP-mock-server suite (25 tests) and 2 tests in `cli.test.ts` fail
+independent of this ticket — traced to DH-0044's provider layer now unconditionally
+requesting `stream: true` from the Anthropic SDK while the shared mock server in that test
+file still returns non-streaming JSON; confirmed by a trivial single-turn test with zero
+ReportOutcome/nudge involvement (`runRoot runs the default model end-to-end...`) failing
+the same way. Not touched — out of scope, DH-0044's owning round's responsibility.
+
+**Gates**: `bun run typecheck`/`bun run lint` clean for every file this round touched
+(`src/web/server.ts`'s pre-existing errors are DH-0110/Susan's, untouched). `bun test src`:
+1919 pass / 27 fail — all 27 failures are the DH-0044-provider-layer issue above (confirmed
+zero new failures attributable to this ticket by running the affected suites in isolation).
+100% coverage on every new/changed file in this round's own diff
+(`src/contracts/outcome.ts`, `src/agent/tools/report-outcome.ts`: 100%/100%; `src/agent/
+loop.ts`: 100%/99.80%; `src/cli.ts`: 90.10%/99.61%, the two uncovered lines a pre-existing
+thin-delegation gap noted in `docs/roster/grace.md`, not new).
+
+**Live verification** (real Bedrock credentials, `secrets.env`, compiled binary): (1) a
+scripted "say hello, then call ReportOutcome" instruction produced `reportedBy: "tool"`,
+the structured `outcome` (status/summary) carried through both the `--json` `job_result`
+NDJSON line and the JSONL log's `completed` line, exit code 0; (2) an instruction telling
+the model to reply with plain text and no tool call triggered the missed-call nudge live —
+the model's second turn called `ReportOutcome` after being reminded, `reportedBy: "tool"`,
+exit code 0.
+
+Closed via `transition.py DH-0050 closed --resolution done`.
