@@ -72,10 +72,14 @@ try {
 
   session.sendKeys("Left");
   pane = await session.waitFor((screen) => screen.includes("Agent Tree"), 10_000);
-  // Give every agent_spawned event a moment to land before counting entries.
+  // Give every agent_spawned event a moment to land before counting entries. DH-0069
+  // changed the child label from "agentId (model)" to the tool call's `description` when
+  // present (this spike's own `Helper N say hi` descriptions), so "(sub)" (the old
+  // model-name fallback) never appears here — check for the first child's actual label
+  // instead.
   pane = await session.waitFor((screen) => {
     const rootCount = (screen.match(/agent-root/g) ?? []).length;
-    return rootCount > 0 && screen.includes("(sub)");
+    return rootCount > 0 && screen.includes("Helper 0 say hi");
   }, 10_000);
 
   const initialScreenHasRoot = pane.includes("agent-root");
