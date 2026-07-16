@@ -147,4 +147,61 @@ describe("Agent tool", () => {
     expect(result.isError).toBe(true);
     expect(result.output).toContain("'description'");
   });
+
+  // DH-0077: isolation is optional and, when omitted, never reaches ctx.spawnAgent — proven
+  // by a spy on top of the normal fake spawn, not just by "the call succeeds."
+  test("omits 'isolation' from the spawnAgent call when not provided", async () => {
+    const ctx = withFakeSpawn();
+    let seenParams: Record<string, unknown> | undefined;
+    const originalSpawn = ctx.spawnAgent;
+    ctx.spawnAgent = (params) => {
+      seenParams = params;
+      return originalSpawn(params);
+    };
+    const result = await agentTool.execute({ prompt: "hi", description: "say hi" }, ctx);
+    expect(result.isError).toBe(false);
+    expect(seenParams).toBeDefined();
+    expect("isolation" in (seenParams ?? {})).toBe(false);
+  });
+
+  test("passes isolation: 'worktree' through to ctx.spawnAgent", async () => {
+    const ctx = withFakeSpawn();
+    let seenParams: Record<string, unknown> | undefined;
+    const originalSpawn = ctx.spawnAgent;
+    ctx.spawnAgent = (params) => {
+      seenParams = params;
+      return originalSpawn(params);
+    };
+    const result = await agentTool.execute(
+      { prompt: "hi", description: "say hi", isolation: "worktree" },
+      ctx,
+    );
+    expect(result.isError).toBe(false);
+    expect(seenParams?.isolation).toBe("worktree");
+  });
+
+  test("rejects an unsupported isolation value", async () => {
+    const ctx = withFakeSpawn();
+    const result = await agentTool.execute(
+      { prompt: "hi", description: "say hi", isolation: "sandbox" },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("isolation");
+  });
+
+  test("surfaces a worktree-creation refusal (e.g. not a git repo) as a normal tool error", async () => {
+    const ctx = withFakeSpawn();
+    ctx.spawnAgent = () => {
+      throw new Error(
+        'spawn refused: isolation: "worktree" requires the parent agent\'s cwd to be inside a git repository.',
+      );
+    };
+    const result = await agentTool.execute(
+      { prompt: "hi", description: "say hi", isolation: "worktree" },
+      ctx,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("git repository");
+  });
 });

@@ -8,7 +8,8 @@
 // loop -> tool dispatch without ever touching the network.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -193,6 +194,25 @@ function startMockAnthropicServer(onRequest?: (body: { model: string }) => void)
                 id: "tu_bash",
                 name: "Bash",
                 input: { command: "pwd", run_in_background: false },
+              },
+            ],
+            "tool_use",
+          );
+        }
+        // DH-0077 test support: writes a file into the sub-agent's cwd, so a worktree-
+        // isolation test can assert the file lands in the isolated worktree (and that the
+        // worktree — now having changes — is retained rather than auto-cleaned).
+        if (text.includes("use-bash-write-file")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_bash_write",
+                name: "Bash",
+                input: {
+                  command: "echo hello > new-file.txt",
+                  run_in_background: false,
+                },
               },
             ],
             "tool_use",
@@ -1386,6 +1406,113 @@ describe("AgentRuntime — DH-0013: session-wide budgets", () => {
     expect(() =>
       runtime.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "child instruction" }),
     ).toThrow(/maxConcurrentAgents/);
+  });
+
+  test("DH-0077: isolation: 'worktree' points the sub-agent's cwd at a fresh worktree, " +
+    "auto-cleaned up when it has no changes", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "dh-runtime-wt-"));
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "hi\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repo });
+
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      cwd: repo,
+      onLogLine,
+    });
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "use-bash-pwd",
+      isolation: "worktree",
+    });
+    await runtime.tasks.awaitDone(taskId);
+    const snapshot = runtime.tasks.snapshot(taskId);
+    expect(snapshot.status).toBe("done");
+
+    const toolResult = logLines.find((l) => l.type === "tool_result");
+    const output = toolResult && toolResult.type === "tool_result" ? toolResult.output : "";
+    const pwd = typeof output === "string" ? output.trim() : "";
+    // The sub-agent's cwd was the worktree, not the repo itself.
+    expect(pwd).not.toBe(realpathSync(repo));
+    expect(pwd).toContain("dh-worktrees-");
+    // Worktree had no changes (just ran `pwd`) — cleaned up automatically.
+    expect(existsSync(pwd)).toBe(false);
+  });
+
+  test("DH-0077: a worktree left with changes is retained and reported back, not deleted", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "dh-runtime-wt-changes-"));
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "hi\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repo });
+
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", cwd: repo });
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "use-bash-write-file",
+      isolation: "worktree",
+    });
+    await runtime.tasks.awaitDone(taskId);
+    const snapshot = runtime.tasks.snapshot(taskId);
+    expect(snapshot.status).toBe("done");
+    expect(snapshot.output).toContain("[isolation worktree] changes retained at");
+    const pathMatch = snapshot.output.match(/changes retained at (\S+) on branch (\S+)/);
+    expect(pathMatch).not.toBeNull();
+    const worktreePath = pathMatch?.[1];
+    if (!worktreePath) throw new Error("expected a worktree path in the output");
+    // Not cleaned up: the worktree directory (and its new file) should still exist.
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(existsSync(join(worktreePath, "new-file.txt"))).toBe(true);
+    // Clean up manually so the test doesn't leak a worktree registration in the repo.
+    execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: repo });
+  });
+
+  test("DH-0077: refuses isolation: 'worktree' when the parent's cwd isn't a git repo", () => {
+    const notARepo = mkdtempSync(join(tmpdir(), "dh-runtime-wt-notrepo-"));
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", cwd: notARepo });
+    expect(() =>
+      runtime.spawnAgent(ROOT_AGENT_ID, {
+        model: "test-model",
+        prompt: "child instruction",
+        isolation: "worktree",
+      }),
+    ).toThrow(/git repository/);
+  });
+
+  test("DH-0077: caps concurrent worktree creation, tied to maxConcurrentAgents", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "dh-runtime-wt-cap-"));
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+    execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
+    writeFileSync(join(repo, "README.md"), "hi\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repo });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repo });
+
+    const runtime = newAgentRuntime({
+      config: baseConfig({ options: { defaultModel: "test-model", maxConcurrentAgents: 1 } }),
+      systemPrompt: "sp",
+      cwd: repo,
+    });
+    runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+      background: true,
+      isolation: "worktree",
+    });
+    expect(() =>
+      runtime.spawnAgent(ROOT_AGENT_ID, {
+        model: "test-model",
+        prompt: "child instruction",
+        isolation: "worktree",
+      }),
+    ).toThrow(/already live/);
   });
 
   test("the Agent tool surfaces a fan-out refusal as a normal tool-error, not an uncaught exception", async () => {

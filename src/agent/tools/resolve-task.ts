@@ -60,11 +60,6 @@ export function resolveByName(ctx: ToolContext, toolName: string, name: string):
       error: `${toolName} tool error: "${name}" is ambiguous — matches multiple tasks (${candidates.map((c) => c.id).join(", ")}); address by task_id instead.`,
     };
   }
-  const first = candidates[0];
-  if (!first) {
-    // Unreachable (candidates.length is exactly 1 here) — satisfies noUncheckedIndexedAccess
-    // without a non-null assertion.
-    return { error: `${toolName} tool error: internal error resolving name "${name}".` };
-  }
-  return { id: first.id };
+  // biome-ignore lint/style/noNonNullAssertion: length is exactly 1 here (0 and >1 handled above)
+  return { id: candidates[0]!.id };
 }
