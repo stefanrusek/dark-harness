@@ -415,3 +415,59 @@ confirm the DOM structure/status labels/button semantics my new assertions rely 
 correct.
 
 No new open threads from this round.
+
+### 2026-07-16 — Round 12 (fresh process again): DH-0061 round 2, remaining Web spikes + orchestrator/report
+
+Came online fresh for DH-0061's remaining Test Plan coverage (Fable's architect pass had
+already landed 4 of 9 spikes plus proven plumbing). Worktree-provenance issue recurred for
+the sixth time: launched into a worktree stuck at the pre-domain ancestor `12679e4` with
+none of `e2e/`, `src/`, or `tracking/` present at all — worse than prior rounds' "stale
+branch tip," this one was missing entire directories. `git fetch origin
+claude/coordinator-onboarding-kab9ls && git merge FETCH_HEAD` (the local worktree-path fetch
+was denied by the auto-mode classifier as a shared-resource edit; the `origin` remote fetch
+was not) brought it to real HEAD (`55fd1b9`, later `8c4f89b`) before anything else was
+possible. This is now six-for-six rounds hitting this — strongly worth a fix at the
+provisioning layer rather than each fresh instance re-discovering the `git fetch origin
+<branch> && git merge FETCH_HEAD` workaround independently.
+
+**What I built:** five new spikes (`spike-agent-tree.ts`, `spike-log-download.ts`,
+`spike-multi-turn.ts`, `spike-liveness.ts`, `spike-reconnect.ts`) plus matching stamped
+prompts, and `e2e/spikes/web/run-all.ts` — the orchestrator the ticket's 2026-07-15
+owner-requirement note asked for, which runs all nine spikes as subprocesses and writes one
+standalone `REPORT.html` (Test-Plan-item coverage table + per-scenario detail + embedded
+base64 screenshots). Full description in the ticket's `## Orchestrator + comprehensive
+report` section — not duplicating it here.
+
+**Two real discoveries while writing the liveness spike:**
+1. A first-ever root turn never emits an `agent_status: "running"` SSE event —
+   `runRoot()` sets it internally but nothing pushes it over the wire; only turn-*end*
+   emits a status event. First draft asserted a `"running"` transition and hung for the
+   full 18s timeout; fixed by asserting the actual Test Plan item instead (elapsed-time text
+   advancing), which doesn't depend on a status transition the protocol doesn't send.
+2. `e2e/web.test.ts`/`e2e/connect-web.test.ts` assert a `.agent-output` selector that
+   `src/web/client/render.ts` no longer has (superseded by
+   `.agent-transcript .turn-assistant .turn-text` post-DH-0056). Not fixed here — those are
+   gated `.test.ts` files, out of a spike's scope — but flagged in the ticket and in every
+   new spike's own selectors (all use the current structure).
+
+**Judgment call — orchestrator bug found by actually running it, not just reading it:** my
+first `run-all.ts` draft used `Bun.resolveSync(reportPath, cwd)` to log the report's
+resolved path, which throws if the target doesn't already exist on disk — meaning every run
+crashed *after* successfully writing `REPORT.html` but before printing its own `RESULT:`
+line, which would have made the orchestrator's own exit code and completion signal
+unreliable despite the report being fine. Caught this by actually executing the full 9-spike
+run twice (per the task's explicit "run it yourself and confirm" instruction) rather than
+trusting typecheck/lint alone; fixed with a plain `node:path` `resolve()` instead.
+
+**Gates:** `bun run typecheck`/`bun run lint` clean (one biome auto-format pass on the new
+files, one manual optional-chain fix). `bun run test:coverage`: 1259/1259 pass, 100%
+coverage, no `src/` touched this round. Confirmed `bun run e2e` (`bun test e2e`) does not
+pick up any new spike/orchestrator file (none end in `.test.ts`) — no gate-set change.
+Ran `bun e2e/spikes/web/run-all.ts` end-to-end twice (once to catch the resolve bug, once
+clean): `RESULT: PASS (9/9 spikes fully passed)`, `REPORT.html` (~430KB) inspected directly —
+12 Test Plan items PASS, 2 correctly OUT OF SCOPE, 8/9 script sections carrying an embedded
+screenshot (headers is browserless by design, correctly has none).
+
+**Open threads for whoever picks this up next:** the `.agent-output` stale-selector defect
+in `e2e/web.test.ts`/`e2e/connect-web.test.ts` (noted above); DH-0044 streaming coverage,
+once that ships; the recurring worktree-provisioning issue (now six rounds running).
