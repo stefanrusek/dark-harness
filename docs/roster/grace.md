@@ -8,6 +8,43 @@
 
 ## Memory
 
+### 2026-07-16 — URGENT fix: post-DH-0044 test-mock breakage (no ticket, direct commit)
+
+`main`'s test gate was broken (27-28 failures) after DH-0044 (streaming) landed: both
+provider adapters now always request `stream: true`, but `runtime.test.ts`'s and
+`cli.test.ts`'s shared mock Anthropic HTTP servers still returned a single non-streaming JSON
+body. Added a `sseMessageResponse()` helper to each file (mirroring
+`providers/anthropic.test.ts`'s `streamOf`/`textBlock`/`toolUseBlock` SDK-level event shapes)
+that emits a real `message_start`/`content_block_*`/`message_delta`/`message_stop` SSE
+stream, and converted every mock-server response builder in both files to use it.
+
+Two more bugs found in the same pass, confirmed independent of DH-0044 (verified in a clean
+detached-HEAD worktree, not the shared dirty checkout — this session had already been bitten
+by concurrent-round interference once):
+
+1. `cli.test.ts`'s "AgentRuntimeLoopAdapter + DhServer + waitForExitCode" describe block
+   constructed two real `DhServer`s with no explicit `port`, silently defaulting to the real
+   4000 and colliding with anything else on that port ("Failed to start server. Is port 4000
+   in use?"). Fixed with `port: 0`, same as every other real server in the suite.
+2. `runtime.test.ts`'s "buildToolContext wires searchDeferredTools" test pointed a
+   configured MCP server at a real `https://example.com` just to exercise ToolSearch wiring —
+   McpManager's eager `connectAll()` made a real outbound HTTP call, surfacing as a stray hit
+   to `iana.org` (example.com's redirect target). Swapped for `http://127.0.0.1:1` (still
+   "never actually connects", but no real network).
+
+Also found — while chasing these — that the "fail please" and "sendMessageToRoot" mock-server
+fixtures predated DH-0050 (ReportOutcome tier-1/tier-2 precedence, the harness-injected
+"missed-call nudge" turn) and hadn't been updated for it; masked by the streaming breakage
+until that was fixed. Updated them to either match on `firstText` (survives the nudge turn)
+or call `ReportOutcome` directly like a real model would, rather than relying on legacy
+`TASK_FAILED`-marker text across an extra turn.
+
+Result: `bun test src --coverage` — 1947 pass, 0 fail, coverage unaffected. No production
+code touched, no new DH-NNNN ticket (pure test-infra fix, per CLAUDE.md). One lesson worth
+keeping: whenever a wire-level behavior change lands (streaming, a new tool-call precedence
+rule, etc.), grep test files for hand-built mock response bodies that encode the *old* shape
+— they don't show up in any type error, only as a wall of runtime failures.
+
 ### 2026-07-16 — DH-0050: ReportOutcome self-report tool + --job --json NDJSON stream
 
 Implemented the full architect-signed design (Fable, 2026-07-15) end to end: the
