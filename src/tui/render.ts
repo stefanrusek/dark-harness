@@ -53,11 +53,26 @@ export function formatElapsed(ms: number): string {
   return `${hours}h${String(minutes).padStart(2, "0")}m`;
 }
 
-/** Render a conversation transcript with real turn separation: each turn wrapped to `cols`,
- * a blank line between consecutive turns, and a role label (`"> "`, matching the input
- * prompt's own marker, so a user turn visually echoes what was typed) on user turns only.
- * Without this, turns read as one unbroken wall of concatenated text with no visual boundary
- * and no sign the user ever said anything (Round 6, docs/handoffs/tui.md).
+// DH-0065: distinct per-role gutter markers so a user turn reads apart from an agent turn "at
+// a glance" in a long scrollback, not just via a same-color two-character prefix. Both
+// markers are exactly `TRANSCRIPT_GUTTER_COLS` visual columns wide so every row (marker or
+// continuation) lines up in a stable left column, the same "gutter" convention already used
+// for blockquotes/code blocks in markdown-ansi.ts. Colors reuse codes already emitted
+// elsewhere in this file (STATUS_COLOR's 33/36 below) — no new SGR class, per the DH-0056 D3
+// allowlist constraint.
+const USER_ROLE_SGR = "\x1b[1;33m"; // bold yellow — matches the input box's own "> " marker
+const AGENT_ROLE_SGR = "\x1b[36m"; // cyan — pairs with the tree view's "●" status-glyph language
+const TRANSCRIPT_GUTTER_COLS = 2; // "> " and "● " are both exactly 2 visual columns
+const TRANSCRIPT_CONT_GUTTER = "  "; // continuation rows: aligned blank indent, no marker
+
+/** Render a conversation transcript with real turn separation: each turn wrapped to
+ * `cols - TRANSCRIPT_GUTTER_COLS`, a blank line between consecutive turns, and every row
+ * (first row and any wrapped continuation) prefixed with a role-colored gutter — `"> "` in
+ * bold yellow for a user turn's first row, `"● "` in cyan for an agent turn's, and a plain
+ * blank indent of the same width on continuation rows, so the whole transcript reads as two
+ * visually distinct, left-aligned columns of turns rather than a same-color wall of text
+ * (Round 6, docs/handoffs/tui.md; DH-0065 review: "the only cue is a two-character prefix in
+ * the same default color as everything else").
  *
  * Assistant turns are rendered as Markdown (DH-0056): parsed via `parseMarkdown` (which
  * applies the defensive `sanitizeText` escape-stripping unconditionally as its own step
@@ -67,12 +82,21 @@ export function formatElapsed(ms: number): string {
  * plain text. */
 export function renderTranscript(transcript: Turn[], cols: number): string[] {
   const lines: string[] = [];
+  const innerCols = Math.max(1, cols - TRANSCRIPT_GUTTER_COLS);
   transcript.forEach((turn, index) => {
     if (index > 0) lines.push("");
     if (turn.role === "user") {
-      lines.push(...wrapText(`> ${sanitizeText(turn.text)}`, cols));
+      const rows = wrapText(sanitizeText(turn.text), innerCols);
+      rows.forEach((row, i) => {
+        const gutter = i === 0 ? `${USER_ROLE_SGR}>${RESET} ` : TRANSCRIPT_CONT_GUTTER;
+        lines.push(`${gutter}${row}`);
+      });
     } else {
-      lines.push(...renderMarkdownRows(parseMarkdown(turn.text), cols));
+      const rows = renderMarkdownRows(parseMarkdown(turn.text), innerCols);
+      rows.forEach((row, i) => {
+        const gutter = i === 0 ? `${AGENT_ROLE_SGR}●${RESET} ` : TRANSCRIPT_CONT_GUTTER;
+        lines.push(`${gutter}${row}`);
+      });
     }
   });
   return lines;

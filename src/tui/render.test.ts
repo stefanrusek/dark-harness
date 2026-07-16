@@ -355,9 +355,10 @@ describe("renderFrame", () => {
     });
     state = { ...state, rootAgentId: "root" };
     const rows = renderFrame(state);
-    const joined = rows.join("\n");
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping real ESC bytes is the point
+    const joined = rows.join("\n").replace(/\x1b\[[0-9;]*m/g, "");
     expect(joined).toContain("> hello there");
-    expect(joined).toContain("hi, how can I help?");
+    expect(joined).toContain("● hi, how can I help?");
   });
 
   test("multiple back-to-back assistant turns render as visually separate turns", () => {
@@ -378,21 +379,37 @@ describe("renderFrame", () => {
 });
 
 describe("renderTranscript", () => {
-  test("renders a single turn as its wrapped text with no separator", () => {
-    expect(renderTranscript([assistantTurn("hello")], 40)).toEqual(["hello"]);
+  test("renders a single turn as its wrapped, marker-prefixed text with no separator", () => {
+    expect(renderTranscript([assistantTurn("hello")], 40)).toEqual(["\x1b[36m●\x1b[0m hello"]);
   });
 
-  test("user turns are prefixed with the input-prompt marker", () => {
-    expect(renderTranscript([{ role: "user", text: "hi" }], 40)).toEqual(["> hi"]);
+  test("user turns are prefixed with the bold-yellow '>' marker", () => {
+    expect(renderTranscript([{ role: "user", text: "hi" }], 40)).toEqual(["\x1b[1;33m>\x1b[0m hi"]);
   });
 
-  test("assistant turns are not prefixed", () => {
-    expect(renderTranscript([assistantTurn("hi")], 40)).toEqual(["hi"]);
+  test("assistant turns are prefixed with the cyan '●' marker", () => {
+    expect(renderTranscript([assistantTurn("hi")], 40)).toEqual(["\x1b[36m●\x1b[0m hi"]);
+  });
+
+  test("user vs. agent markers use visibly different SGR codes", () => {
+    const lines = renderTranscript([{ role: "user", text: "hi" }, assistantTurn("yo")], 40);
+    expect(lines[0]).toContain("\x1b[1;33m");
+    expect(lines[2]).toContain("\x1b[36m");
+  });
+
+  test("wrapped continuation rows get a blank gutter, not a repeated marker", () => {
+    const lines = renderTranscript([{ role: "user", text: "a b c d e f g h" }], 5);
+    expect(lines[0]?.startsWith("\x1b[1;33m>\x1b[0m ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines.slice(1)) {
+      expect(line.startsWith("\x1b[")).toBe(false);
+      expect(line.startsWith("  ")).toBe(true);
+    }
   });
 
   test("inserts exactly one blank separator line between consecutive turns", () => {
     const lines = renderTranscript([{ role: "user", text: "hi" }, assistantTurn("hello back")], 40);
-    expect(lines).toEqual(["> hi", "", "hello back"]);
+    expect(lines).toEqual(["\x1b[1;33m>\x1b[0m hi", "", "\x1b[36m●\x1b[0m hello back"]);
   });
 
   test("an empty transcript renders no lines", () => {
