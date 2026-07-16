@@ -739,3 +739,87 @@ regenerated.
 
 **Open threads:** none newly introduced. `tmux`/Chromium sandbox gaps are unchanged and, as
 ever, not fixable from within this domain's own scope.
+
+### 2026-07-15 — Round 9 (Hedy, fresh process): DH-0056 hostile-Markdown TUI coverage; found a live SSE-reconnect regression
+
+Came online fresh for DH-0056 (render agent output as Markdown, not raw escape passthrough).
+Same worktree-provenance issue every round has hit: this worktree was on a branch
+(`worktree-agent-aa25c0e3442227641`) forked from the pre-domain ancestor `12679e4`, zero
+unique commits — but this time a second layer: fast-forwarding to the `local/` remote's
+`claude/coordinator-onboarding-kab9ls` tip (`6986089`) still landed short of the real local
+branch of the same name (`e1ec683`), which is what actually carries DH-0056's landed work
+(`src/markdown/index.ts`, `src/tui/markdown-ansi.ts`). Confirmed via `git merge-base` at each
+step before resetting — no unique commits lost either time. Worth someone tracing why two
+refs sharing the same branch name diverge in this provisioning path.
+
+**Checked before writing tests (per the task's own instruction):** `git log --all | grep
+0056` plus `find src/web -iname "*markdown*"` — confirms Mary's shared parser
+(`src/markdown/index.ts`) and TUI's renderer (`src/tui/markdown-ansi.ts`) have landed, but
+Susan's Web-side `src/web/client/markdown-dom.ts` has not. Web coverage is therefore fully
+deferred to a follow-up round once that lands — noted here explicitly rather than skipped
+silently.
+
+**What I built:** `e2e/markdown-rendering.test.ts`, two real-PTY scenarios against the actual
+compiled binary:
+1. Positive smoke test — a turn with an ATX heading, `**bold**`/`*italic*`, a two-item list,
+   and a fenced code block. Asserts the plain (escape-stripped) tmux capture shows the
+   rendered *content* with none of the literal Markdown syntax characters (`#`, `**`,
+   ` ``` `), and that the raw (`tmux capture-pane -e`) capture actually contains SGR escape
+   sequences (bold used for the heading/strong) — proving real ANSI styling fired, not just
+   plain text.
+2. Hostile-input test — one turn combining every escape class the ticket calls out by name:
+   DA (`ESC[c`, `ESC[>c`), DSR (`ESC[5n`, `ESC[6n`), an OSC 52 clipboard-hijack payload, and a
+   screen-clear-plus-cursor-move frame-spoof attempt (`ESC[2J ESC[H ESC[10;5H`). Asserts (a)
+   none of the seven literal hostile byte sequences appear anywhere in the raw
+   escape-inclusive tmux capture, (b) no CSI final byte outside the renderer's own allowlisted
+   `m`/`K` survives (`c`, `n`, `H`, `J`, `f` — DA/DSR/cursor-position/clear-screen), no OSC
+   introducer, no DCS/SOS/PM/APC introducer, (c) the sanitized text still renders adjacently
+   as *inert* literal content (stripped, not swallowing the whole turn), (d) the real UI chrome
+   ("Dark Harness" header, "Root Agent" title) survived intact — a real cursor-move/clear
+   sequence, had it reached the terminal, could have overwritten it, (e) typing fresh text into
+   the input box afterward produces exactly that text with no fake-keystroke residue from a
+   DA/DSR reply that might have leaked into the pty's stdin queue.
+
+Added `TmuxSession.captureRaw()` (`e2e/support/tmux-pty.ts`, `tmux capture-pane -t <name> -e
+-p`) as reusable infrastructure for this and future hostile-ANSI assertions — the existing
+`capture()` already strips escapes, which is right for content assertions but useless for
+"what ANSI bytes actually got applied."
+
+**Judgment call — don't wait on `"session ended"`:** my first draft copied
+`tui.test.ts`'s existing pattern of waiting for `"session ended"` after `Enter`. That
+consistently timed out (see the regression below), so I switched both new scenarios to wait
+on rendered turn content instead (`"code line here"` / `"FAKE FRAME"`) — the point of these
+tests is what got rendered, not session lifecycle, which `server-protocol.test.ts`/the rest of
+`tui.test.ts` already cover.
+
+**Real regression found, not introduced by this round's diff:** while chasing why
+`"session ended"` never appeared, reproduced the same timeout in the pre-existing, untouched
+`e2e/tui.test.ts` running in isolation (`bun test e2e/tui.test.ts`, no other file involved) —
+both its scenarios now hang until timeout on a screen reading `⚠ Reconnected — history may be
+incomplete.` and never reach `"session ended"`. This sandbox didn't have `tmux` in any prior
+round (every dated entry above notes it), so this is the first round any instance of this role
+has actually been able to run `tui.test.ts` to completion — installed `tmux` via `brew install
+tmux` specifically to verify my own new file against the real binary per the task's gate
+instructions, and it surfaced this as a side effect. Likely candidate: the recently-merged
+periodic SSE keep-alive (`d7acdb4`/Radia's "Server round 2") — a spurious reconnect firing
+mid-turn would explain the reconnect banner and a stale/reset session-lifecycle client state.
+Did not fix it (Server/TUI's files, not `e2e/`'s, per CLAUDE.md §3) and did not design my new
+test to avoid the affected code path — flagging it loudly here instead, same posture every
+prior round has taken for cross-domain findings.
+
+**Gates:** `bun run typecheck` clean, `bun run lint` clean (171 files). `bun run
+test:coverage`: 1138/1138 pass on a clean rerun (100% coverage; no `src/` touched this round —
+one rerun showed a single unrelated flake, reran clean, not chased further, not caused by this
+diff). `bun test e2e/markdown-rendering.test.ts`: 2/2 pass, 31 `expect()` calls. Full `bun run
+e2e`: 27 pass / 5 fail — 2 Chromium-dependent (`web.test.ts`, `connect-web.test.ts`, same
+`/opt/pw-browsers/chromium` executable-path gap every prior round has hit), the pre-existing
+`security.test.ts` bearer-token SSE timeout, and the 2 newly-surfaced `tui.test.ts` reconnect
+failures above (not mine, not fixed).
+
+**Open threads for whoever picks this up next:**
+- Web-side DH-0056 coverage (hostile Markdown through `src/web/client/markdown-dom.ts` once
+  Susan's round lands): scenarios should mirror this round's TUI ones — assert the rendered
+  DOM contains no unexpected elements/attributes from hostile bytes and that link hrefs are
+  scheme-filtered (`javascript:`/`data:` degrade to plain text per the ticket's D4).
+- The SSE-reconnect-resets-session-state regression above: a Server/TUI cross-domain question,
+  not e2e's to fix — surfaced here for whichever coordinator round wants to route it.
