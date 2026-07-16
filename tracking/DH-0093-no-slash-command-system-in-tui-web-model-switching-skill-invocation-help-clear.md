@@ -223,6 +223,48 @@ Sequencing: Contracts first (one small PR, this design is the sign-off), then Se
 in parallel (Server defines the handle methods, Core implements them), then TUI + Web in
 parallel, E2E last.
 
+## Status log
+
+### 2026-07-16 — Backend round: Contracts + Server + Core implemented
+
+Contracts, Server, and Core's slices of the design above are implemented and merged (`src/
+contracts/commands.ts`/`events.ts`/`log.ts`, `src/prompt/skill-invocation.ts`, `src/agent/
+loop.ts`/`runtime.ts`/`skills.ts`, `src/server/agent-loop.ts`/`commands.ts`/
+`fake-agent-loop.ts`, `src/cli.ts`'s `AgentRuntimeLoopAdapter`). All four new commands
+(`list_models`/`switch_model`/`list_skills`/`invoke_skill`) are live end to end against a
+real `AgentRuntime`, wired through the real HTTP command handler, with 400/404 acks for the
+error cases the design calls for (unknown model alias or non-root `agentId` on
+`switch_model`; unknown skill name on `invoke_skill`). Model switching takes effect on the
+loop's *next* turn without restarting it (messages history intact) — the root case is
+covered end to end (root-not-started pending-switch path, and root-live push-through-sink
+path); sub-agent switching remains explicitly out of v1 scope per the design (throws
+`RootOnlyModelSwitchError`). `typecheck`/`lint`/`test:coverage` all green for this round's
+new/changed code (the repo-wide 100% coverage aggregate has a handful of small pre-existing
+gaps unrelated to this ticket — confirmed identical before/after on `main`). `e2e` has two
+pre-existing failures in this sandbox (missing headless Chromium binary), also confirmed
+identical before/after this round's changes — unrelated to DH-0093.
+
+One minimal, unavoidable touch outside this round's assigned domains: `src/web/client/
+state.ts` gained a explicit no-op `case "model_switched"` in its `applyEvent` exhaustiveness
+switch (mirroring the existing `tool_call`/`tool_result` precedent) — the new additive SSE
+event otherwise fails `tsc --noEmit -p src/web`'s compile-time exhaustiveness check. This is
+NOT the real Web consumption of `model_switched` (no UI change, no picker) — just what's
+needed for the whole repo to typecheck with the new event added to the union.
+
+**Remaining for the TUI/Web round** (Mary/Susan, per the design's domain-assignment table):
+client-side slash-command parsing/interception (`src/tui/commands.ts` and a Web-side
+equivalent), the `/model` picker view/modal (TUI: a new `"picker"` view kind; Web: a
+dropdown/modal over the composer), `/help`/`/clear` local-only handling, real
+`model_switched` SSE handling (updating the displayed active model, not just the no-op
+compile fix above), and a startup `list_skills` fetch (alongside the existing
+`request_agent_tree` bootstrap) so `/name` and `/help` can resolve skill commands locally.
+
+**Remaining for the E2E round** (Hedy, follow-up): PTY-driven `/model` picker → next
+mock-provider request carries the new provider-side model id; `/help` renders locally with
+zero provider calls; `/skillname [args]` → mock provider sees the expanded
+`<command-name>`/`<command-args>` content. None of this backend round's own tests
+substitute for real-binary E2E coverage of the client-side interception/rendering layer.
+
 ## Notes
 
 > [!NOTE]
