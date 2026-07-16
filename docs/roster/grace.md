@@ -1389,3 +1389,34 @@ Closed DH-0091 (`transition.py DH-0091 closed --resolution done`).
 from a stale/empty `origin/main` (no `src/` tree) — had to
 `git merge claude/coordinator-onboarding-kab9ls` (fast-forwarded cleanly) before any real
 source existed to edit. Same flag as prior rounds; worth fixing at the provisioning layer.
+
+### 2026-07-16 — DH-0094: per-agent self-info threading (joint with Prompt/Iris)
+
+Iris added `renderSelfInfoSection(config, model, buildInfo?)` to
+`src/prompt/system-prompt.ts` (self-facts: dh version/build, current model config name +
+provider model id, sibling model names). My piece: threading it in per-agent at
+`src/agent/runtime.ts`, since a sub-agent may run a different resolved `ModelConfig` than its
+parent/root, so this can't be baked once into the shared `this.systemPrompt` string. Added a
+small `buildAgentSystemPrompt(model)` private method (`${this.systemPrompt}\n\n${renderSelfInfoSection(this.config, model)}`)
+and swapped both `runAgentLoop()` call sites' `systemPrompt: this.systemPrompt` (in
+`spawnAgent()` and `runRoot()`) to `systemPrompt: this.buildAgentSystemPrompt(model)` — each
+call site already has its own resolved `model` in scope from `resolveModel()`, so no new
+plumbing was needed beyond the one new method.
+
+Added a runtime.test.ts case exercising exactly the "sub-agent on a different model" scenario
+the ticket called out: configures two models, runs root under one, spawns a sub-agent under
+the other, and asserts (via a new `receivedSystemPrompts` capture keyed by provider model id
+in the shared mock Anthropic server) that each agent's own HTTP request carried its own
+correct self-info section — root's names the root's model and lists the sub-agent's model as
+"other", and vice versa for the child.
+
+Gates: `typecheck`/`lint` clean. `test:coverage`: 1668 pass, 0 fail; `src/agent/runtime.ts`
+and `src/prompt/system-prompt.ts` both 100% lines/funcs. `e2e`: 30/32 pass, same pre-existing
+headless-Chromium-unavailable-in-sandbox failures every prior round has footnoted. Closed
+DH-0094 (`transition.py DH-0094 closed --resolution done`).
+
+**Worktree note (repeat, still true):** this round's assigned worktree was again branched
+from a stale/tiny ref (only `HANDOFF.md`/`LICENSE`/`METHODOLOGY.md`, no `src/` tree at all)
+— had to `git merge claude/coordinator-onboarding-kab9ls` (fast-forwarded cleanly) before any
+real source existed to edit. Same flag as prior rounds; worth fixing at the provisioning
+layer.
