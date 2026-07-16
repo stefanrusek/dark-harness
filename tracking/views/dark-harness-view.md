@@ -63,7 +63,6 @@ source: tracking/
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | feature | stefan |
 | [DH-0050](../DH-0050-no-structured-final-output-or-headless-json-progress.md) | No structured final-result convention beyond the `TASK_FAILED` text marker, and no machine-readable progress stream for `--job` | feature | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
-| [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | feature | stefan |
 
 ### implementing
 
@@ -97,4 +96,4 @@ source: tracking/
 | [DH-0096](../DH-0096-dh-init-s-scaffolded-config-should-be-a-richer-real-model-catalog-all-claude-tiers-bedrock-oss-models-local-url-env-var.md) | dh init's scaffolded config should be a richer, real model catalog (all Claude tiers, Bedrock OSS models, local URL env var) | done |
 | [DH-0095](../DH-0095-tui-chrome-padding-looks-unchanged-despite-dh-0065-closing-as-fully-done.md) | TUI chrome/padding looks unchanged despite DH-0065 closing as fully done | done |
 | [DH-0094](../DH-0094-agent-has-no-self-awareness-of-its-own-dh-build-current-model-or-other-available-models.md) | Agent has no self-awareness of its own dh build, current model, or other available models | done |
-| [DH-0092](../DH-0092-scaffolded-dh-init-config-uses-invalid-anthropic-model-id-every-real-api-call-404s.md) | Scaffolded dh init config uses invalid Anthropic model id, every real API call 404s | done |
+| [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | done |

@@ -593,3 +593,56 @@ sandbox; verified correctness by reading the actual DOM-building code instead.
 **Open threads unchanged:** DH-0044 streaming coverage; the seven-round-running
 worktree-provisioning issue (now worth escalating past "note it every round" — every single
 round back to at least Round 1 has hit some variant of this).
+
+### 2026-07-16 — Round 15 (fresh process again): DH-0093 E2E round, closed the ticket
+
+Came online fresh for the final (E2E) round of DH-0093 — Contracts/Server/Core and TUI/Web
+had already landed and merged, and the owner had manually confirmed `/model`/`/help` in the
+real TUI. Launched directly in the main checkout this time, not a provisioned worktree — the
+recurring worktree-provisioning bug noted every round since Round 1 did not recur, since
+there was no separate worktree to mis-provision.
+
+**What I built:** `e2e/slash-commands.test.ts`, three scenarios against the real compiled
+binary + real tmux PTY + real mock provider — `/model` (picker navigation, then confirming
+the *next* mock-provider request's `model` field carries the new provider-side id, not just
+a UI confirmation), `/help` (renders locally, asserted `provider.callCount === 0`), and
+`/skillname [args]` (a real `SKILL.md` fixture under a workspace `skillPaths` entry; asserts
+the mock provider's received request literally contains the `<command-name>`/
+`<command-args>` expansion template plus the skill body).
+
+**Real environment trap, not a product bug — worth remembering:** this checkout had five or
+six *other* tickets' background rounds concurrently mid-edit across `src/agent/`,
+`src/contracts/`, `src/prompt/`, etc. at the same time I was working (visible in `git status`
+throughout). `e2e/support/build.ts` always compiles whatever's on disk right now — building
+against that half-edited tree produced a `dh` binary that silently hung forever on every
+chat turn (root-caused to the Anthropic SDK's SSE decoder never resolving against the mock
+provider's plain-JSON response body once one particular concurrent edit landed mid-flight).
+Burned real time bisecting this with a hand-rolled minimal mock before recognizing the
+pattern. The auto-mode classifier also declined a `git stash` of the other tickets' files
+(reasonably — not mine to touch). **Fix that generalizes:** when this checkout is visibly
+dirty with unrelated concurrent work, build and run the full e2e suite from a disjoint
+`git worktree add --detach HEAD` checkout instead (copy just the new/changed `e2e/` files
+in) — proves the change against a clean, single-point-in-time tree without touching anyone
+else's in-flight edits, and without needing worktree-provisioning infrastructure at all.
+Recommend this as the default move any time `git status` is dirty outside `e2e/` before an
+e2e run, not just this once.
+
+**Gates** (all run from that clean worktree): `bun run lint` clean (one formatting fix on
+the new file). Two full `bun run e2e` runs: 33/35 both times, the same 2 pre-existing
+missing-headless-Chromium failures (`web.test.ts`/`connect-web.test.ts`) every round since
+Round 9 has hit. `bun run typecheck`/`bun run test:coverage` both show pre-existing failures
+at that same `HEAD` commit *with my file removed* too (2 `tsc` errors in `src/cli.test.ts`
+around a stale `CliOptions`/`json` overload, 3 `bun test` failures — 2 more in
+`src/cli.test.ts`, 1 in `src/agent/runtime.test.ts`'s `cwd` assertion tripping on this
+sandbox's `/tmp` → `/private/tmp` symlink) — confirmed byte-identical with/without this
+round's diff, i.e. not mine. `bun test e2e/slash-commands.test.ts` alone: 3/3 pass,
+run three times total (twice back-to-back plus the full-suite runs), no flakiness.
+
+**Closed DH-0093** via spile-ops (`ready` → `closed`, resolution `done`) — the last of the
+five domain rounds the architect's design called for.
+
+**Open threads unchanged:** DH-0044 streaming coverage (still open, now several rounds);
+the worktree-provisioning issue is moot for a round launched directly in the main checkout,
+but the *dirty-tree-while-building* trap documented above is a new, related risk worth
+carrying forward — any round building `dh` for e2e purposes while other tickets are
+concurrently mid-edit here should default to a disposable clean worktree.

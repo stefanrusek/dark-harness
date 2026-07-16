@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0093
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-16
 relations:
@@ -336,6 +336,65 @@ thing but isn't a repeatable CI-gate assertion); `/help` renders locally with ze
 calls; `/skillname [args]` → mock provider sees the expanded `<command-name>`/`<command-args>`
 content; and now also a real-browser run of the Web picker/skill-invocation flow once headless
 Chromium is available in this sandbox or CI.
+
+### 2026-07-16 — E2E round: PTY + mock-provider coverage (Hedy) — ticket closed
+
+Final round. Added `e2e/slash-commands.test.ts`, following this project's existing e2e
+patterns (real compiled binary, `e2e/support/tmux-pty.ts`'s PTY harness, `e2e/support/
+mock-provider.ts`'s mock Anthropic-compatible endpoint) — no new harness style introduced.
+Three scenarios, all assert on the mock provider's recorded requests directly, not just
+rendered screen text:
+
+- **`/model`**: a two-model `dh.json` fixture; sends one chat turn to confirm the baseline
+  provider-side model id (`mock-model-a`), opens the picker with no argument, navigates
+  down to the second model and confirms, then sends a second chat turn and asserts the
+  *next* request to the mock provider actually carries `mock-model-b` — the direct
+  wire-level check the ticket's design called for, not just the picker UI or a status
+  message.
+- **`/help`**: asserts the rendered local transcript entry (built-ins + `/clear`'s
+  explicit "does NOT reset the agent's context" disclosure) and that `provider.callCount`
+  stays `0` after a grace period — confirms it never reaches the network, not just that it
+  renders something locally.
+- **`/skillname [args]`**: writes a real `skills/greet/SKILL.md` fixture into the test
+  workspace (`skillPaths: ["./skills"]`), invokes `/greet hello world`, and asserts the
+  mock provider's received request literally contains the
+  `<command-name>/greet</command-name>` / `<command-args>hello world</command-args>`
+  template plus the skill's body text — the actual expanded wire content, not the local
+  echo shown on screen.
+
+**Debugging note (environment-specific, not a product bug):** this checkout had several
+other tickets' background rounds concurrently mid-edit in `src/agent/`, `src/contracts/`,
+`src/prompt/`, etc. at the time of this work. `e2e/support/build.ts` always compiles
+whatever's currently on disk (by design — ADR 0008), so building against that partially-
+edited tree produced a `dh` binary whose TUI silently hung forever on every chat turn (the
+Anthropic SDK's SSE stream decoder never resolving against the mock provider's plain-JSON,
+non-streaming response body — spent real time bisecting this against a minimal hand-rolled
+mock before realizing the dirty tree, not the test or the mock, was the cause). Per this
+project's stash-avoidance rule around concurrent unrelated work, resolved it by building and
+running the full suite from a disjoint `git worktree add --detach HEAD` checkout instead of
+this one, leaving every other in-flight round's uncommitted changes untouched here. All gate
+results below are from that clean worktree.
+
+**Gates** (clean worktree at `HEAD` = `dc163ba`, plus this round's one new file copied in):
+`bun run lint` clean (one formatting fix applied to the new file). `bun run e2e`: two full
+runs, 33/35 passing both times — the same 2 pre-existing missing-headless-Chromium failures
+(`e2e/web.test.ts`, `e2e/connect-web.test.ts`) documented in every prior round of this
+ticket, confirmed unrelated. `bun run typecheck` and `bun run test:coverage` both show
+pre-existing failures already present at that same `HEAD` commit with this round's file
+removed (2 `tsc` errors in `src/cli.test.ts` around a `CliOptions`/`json` overload mismatch;
+3 `bun test` failures — 2 in `src/cli.test.ts`, 1 in `src/agent/runtime.test.ts`'s `cwd`
+assertion tripping on this sandbox's `/tmp` → `/private/tmp` symlink) — confirmed byte-for-
+byte identical with and without this round's `e2e/slash-commands.test.ts` present, i.e. not
+caused by this change. This round's own new file is 100% covered by definition (e2e tests
+aren't part of the `src`-scoped coverage gate) and introduces no typecheck errors of its own.
+
+**Live verification:** the three scenarios above ran twice in succession in the clean
+worktree with identical pass/fail results both times (no flakiness observed).
+
+**Closing this ticket**: this was the last of the five domain rounds (Contracts+Server+Core,
+then TUI+Web, now E2E) called for by the design above; the owner has also manually confirmed
+`/model` and `/help` working in the real TUI per the TUI/Web round's status-log entry.
+Transitioning `ready` → `closed` / `resolution: done`.
 
 ## Notes
 
