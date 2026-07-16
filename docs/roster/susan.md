@@ -255,3 +255,72 @@ every `src/web/` file (`src/cli.ts` remains the only sub-100% file project-wide,
 `bun run e2e`: 21/25 — the 4 failures are the same sandbox tooling gaps as every prior round
 (no `tmux`, no Chromium binary, one bearer-token-matrix timeout), not a regression; nothing
 this round touches routes, auth, or the wire protocol.
+
+### 2026-07-15 — Round 6: DH-0056 (Markdown rendering) + DH-0012 (Web's memory-growth piece)
+
+**DH-0056:** built `src/web/client/markdown-dom.ts` against Mary's already-landed shared
+parser (`src/markdown/index.ts` — `parseMarkdown`/`sanitizeText`/AST types, signed off on as
+spec'd, no changes needed on my side). Programmatic DOM only (`createElement`/`textContent`/
+`createTextNode`), zero `innerHTML`, matching `render.ts`'s existing style and the ticket's
+D4 element mapping exactly (heading→h1-h6, code span→`<code>`, code block→`<pre><code
+class="language-...">` with the info string filtered to `[a-z0-9-]`, lists→`<ul>`/`<ol
+start=N>`, blockquote→`<blockquote>`, thematic break→`<hr>`, strong/em/strike→`<strong>`/
+`<em>`/`<del>`, preserved line breaks→`<br>`). Links: `new URL(url, pageOrigin)` resolved,
+scheme-allowlisted to `http:`/`https:`/`mailto:` only — anything else (including
+`javascript:`/`data:`, and anything unparsable) renders as plain inline text instead of an
+anchor; allowed links get `rel="noopener noreferrer"` + `target="_blank"`, `href` set via the
+element property.
+
+**Wired into `render.ts`:** `buildTurnElement` now calls a new `renderTurnText` helper — user
+turns stay plain `textContent` (they're echoed operator input, not model-authored Markdown),
+assistant turns go through `parseMarkdown` + `renderMarkdownInto`. **The fast path changed as
+the ticket's Risks section predicted was necessary:** `appendTranscript`'s old behavior
+(`textEl.appendChild(createTextNode(newSuffix))`) is wrong once a turn is Markdown — a
+streamed chunk can retroactively close/change an unterminated fenced code block (D1's
+"streaming rule": an unclosed fence at end-of-input renders as closed), so the still-growing
+last turn needs a full re-parse-and-rebuild (`renderTurnText` again, which calls
+`renderMarkdownInto`'s `container.textContent = ""` + rebuild) on every chunk, not just an
+append. Still cheap in practice — one bounded turn's worth of re-parse per event, not the
+whole transcript; the ticket's Risks section explicitly called this an acceptable trade,
+revisit only if profiling ever says otherwise.
+
+**DH-0012 (Web's piece):** added the two caps this domain was missing, both modeled directly
+on Mary's already-shipped TUI equivalents (`src/tui/state.ts`) rather than inventing a new
+shape: `MAX_TRANSCRIPT_CHARS = 200_000` (same number as TUI's `MAX_OUTPUT_CHARS`, no reason
+for Web to pick a different one) trims oldest turns first (shifting whole turns, then
+trimming the new-oldest turn's *start* if still over budget) inside both
+`appendAssistantChunk` and `addUserTurn` — Web's turn text is always a plain JS string with no
+terminal-width/codepoint-slicing concern TUI has to worry about, so a plain `.slice()` is
+sufficient (no codepoint-safe slicing needed here). `DEFAULT_COMPLETED_RETENTION = 50`
+(exported, matching the owner's fixed-count decision) evicts the oldest *terminal*
+(done/failed/stopped) agents from `state.agents` beyond 50, oldest-by-`spawnOrder`-first,
+active agents never evicted — wired into `applyEvent`'s `agent_status` case only (that's the
+only event that can newly make an agent terminal, mirroring exactly where the TUI's
+equivalent call sits).
+
+**One thing intentionally not done, flagged rather than silently skipped:** the ticket
+mentions a `dh.json` `limits.completedRetention` knob so the default can be changed without a
+code change. Web has no `dh.json` access at all (it's browser-only, served client-side per
+ADR 0001) — same situation Mary already noted for the TUI not reading `dh.json` directly.
+This is Web's own hardcoded default until/unless a config value gets threaded through some
+other mechanism (e.g. embedded into the served `index.html`/an API response) — that threading
+decision is bigger than this ticket and not mine to invent unilaterally.
+
+**Test note:** new `markdown-dom.test.ts` covers every block/inline AST kind and the link
+scheme-filter matrix (http/https/mailto allowed; javascript:/data:/unparsable rejected,
+including a relative-URL-resolves-against-origin case) against `happy-dom`. New DH-0012 tests
+in `state.test.ts` exercise both caps through the public reducer API (`applyEvent`/
+`addUserTurn`), not by reaching into the private `trimTranscript`/`evictCompletedAgents`
+helpers — same style the file already used throughout.
+
+**Bun coverage-instrumentation quirk, recurred a third time:** the "last switch-case closing
+brace shows as an uncovered line" quirk (Radia's original finding, refined by me in Round 2)
+showed up again in `markdown-dom.ts`'s `renderInlineNode` — the switch's closing `}` shows
+0-hit even with full case coverage. Left as-is (matches the documented, accepted pattern);
+not a real gap.
+
+**Gates:** `bun run typecheck` (both TS programs), `bun run lint` (clean after `biome check
+--write .`), `bun run test:coverage` — 1167 tests project-wide, 0 fail, 100% funcs/lines on
+every file touched this round. Did not run `bun run e2e` this round (out of scope for this
+task per the coordinator's brief — Hedy's DH-0056 E2E piece per the ticket's D7 table is
+separate follow-on work).
