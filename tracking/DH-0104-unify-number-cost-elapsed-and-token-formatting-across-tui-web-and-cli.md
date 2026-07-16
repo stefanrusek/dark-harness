@@ -42,21 +42,24 @@ all three land the same conventions.
 
 ### As an operator, I want cost shown the same way wherever I read it
 
-- Given a known cost anywhere (TUI tree/detail, `dh logs`, Web sidebar/strip), when rendered,
-  then it uses one canonical form. Recommended: `$0.00` style with 2 decimals for display,
-  and `<$0.01` for tiny non-zero costs (the Web form reads better for humans than raw 4-dp);
-  keep 4-dp only where precision genuinely matters (if `dh logs` is treated as a machine-ish
-  audit dump, that's a documented exception, not an accident).
+- Given a known cost in an interactive/glanceable context (TUI tree/detail, Web sidebar/
+  strip), when rendered, then it uses `$0.00` style with 2 decimals, and `<$0.01` for tiny
+  non-zero costs.
+- Given a known cost in `dh logs`, when rendered, then it keeps 4-dp precision — a deliberate,
+  owner-confirmed exception for this audit-dump context, documented as such in the design
+  guide, not left as an accidental divergence.
 - Given an *unknown* cost (model has no pricing configured), when rendered on any surface,
   then it shows `—` (em dash) and is excluded from any total — never `$0.00`, which reads as
   "free" (web-ui-guide.md already commits to this; make it true everywhere).
 
 ### As an operator, I want token counts shown the same way everywhere
 
-- Given a token count anywhere, when rendered, then it uses one canonical form. Recommended:
-  compact `12.3k`/`1.2M` for glanceable chrome (tree rows, badges, strips) with the full
-  comma form reserved for detail/log contexts if wanted — but pick ONE per context-class and
-  document it; the current split (comma in TUI, compact on Web) is the seam to close.
+- Given a token count in glanceable chrome (TUI tree rows, Web badges/strips), when rendered,
+  then it uses compact `12.3k`/`1.2M` form.
+- Given a token count in a detail/log context (`dh logs`, TUI/Web detail panels), when
+  rendered, then it uses the full comma form (`12,345`). One rule per context-class, applied
+  identically across surfaces — the current split (comma always in TUI, compact always on
+  Web) is the seam to close.
 
 ### As an operator, I want elapsed durations shown the same way everywhere
 
@@ -105,13 +108,17 @@ all three land the same conventions.
   than the status quo. Coordinate as one change; the shared-test-vector requirement is the
   guard.
 
-## Open Questions
+## Open Questions — resolved by the owner 2026-07-16
 
-- Final rule per value is a design-crew call to record in §4. Leaning: cost 2-dp + `<$0.01` +
-  `—` unknown; tokens compact `k/M` in chrome; elapsed with spaces + `just now`. But this is
-  exactly the kind of taste call worth confirming with the owner before dispatch (it changes
-  numbers he reads constantly) — recommend triaging this ticket as "needs owner input" (§4.7
-  bucket 2) rather than auto-queuing.
+- **Cost precision**: `dh logs` keeps 4-dp as a documented precise-audit exception. TUI
+  interactive views and Web use 2-dp + `<$0.01` + `—` unknown (never `$0.00`). Record both the
+  general rule and the `dh logs` exception explicitly in the design guide §4 — this is now a
+  deliberate two-tier rule, not an oversight to converge away.
+- **Tokens**: compact `k`/`M` in glanceable chrome (TUI tree rows, Web badges/strips); full
+  comma form in detail/log contexts (`dh logs`, any TUI/Web detail panel that shows precise
+  usage). Same two-tier shape as the cost decision — pick per context-class, not per surface.
+- **Elapsed**: spaces + `just now` affordance (`3m 12s`, sub-second reads as `just now`),
+  confirmed as recommended.
 
 ## Notes
 
