@@ -598,3 +598,15 @@ merged first.
   Origin reflected (not `*`), spoofed `Host: evil.example` rejected with 421, valid loopback
   Host accepted, `X-Frame-Options`/CSP present on every response including the web UI's own
   page and `/dh-config.json`. Closed DH-0023 via spile-ops after live verification.
+
+### 2026-07-16 — DH-0108: comprehensive Markdown rendering fixture suite (joint with Mary)
+
+Same round as Mary's entry in `docs/roster/mary.md` — full detail there. Web side: every
+fixture row's `web` callback asserts DOM shape via `querySelector`/`textContent`/`className`/
+`getAttribute` against a headless `happy-dom` document (`createTestDom`), never `innerHTML`,
+matching the renderer's own no-innerHTML-sink convention. Confirmed live behavior for the
+scheme-filtered link case and the three degrade-to-literal-text exclusions (tables, setext
+headings, reference-style links) — none produce a `<table>`/heading/`<a>` element, all land as
+plain text nodes inside the paragraph, no crash. `markdown-dom.ts` itself needed no production
+changes — this ticket was pure test coverage over already-shipped DH-0056 behavior, confirmed
+by `git stash` diffing typecheck output before/after.

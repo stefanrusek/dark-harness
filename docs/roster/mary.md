@@ -672,3 +672,39 @@ same area (DH-0105 here), don't assume the refactor either caused or fixed it wi
 checking — read the actual root-cause commit/comment first. `git log -p -S"<distinctive
 string from the bug report>"` found the fixing commit directly rather than guessing from
 current code alone.
+
+### 2026-07-16 — DH-0108: comprehensive Markdown rendering fixture suite (joint with Susan)
+
+Built the shared fixture table the ticket asked for at `src/markdown/rendering-fixtures.ts`
+(deliberately not a `.test.ts` — pure data + per-renderer assertion callbacks, no tests of its
+own) covering headings 1-6, bold, italic, strike, inline code, fenced code blocks with/without
+a language tag, blockquote + nested blockquote, unordered/ordered/nested/mixed lists, links,
+thematic breaks, plus the three documented exclusions (tables, setext headings, reference
+links) each asserted to degrade to literal text with no crash. `markdown-ansi.test.ts` and
+`markdown-dom.test.ts` both loop over the same fixture array and invoke its `tui`/`web`
+callback — one row, one name, both renderers, traceable by construct.
+
+Judgment call: pinned exact TUI output where it's a single unstyled/single-styled token
+(`toEqual` on the full row string), but for multi-word headings fell back to `stripAnsi` text
++ `startsWith`/`endsWith` on the SGR wrapper, because the real renderer re-opens style per
+*token* (space-tokenization in `tokenizeSegments`) — asserting the full byte-exact string for
+"Heading 1" would have required literally reproducing that per-token reset/reopen behavior in
+the fixture, which is an implementation detail, not the contract worth pinning. Discovered
+this the hard way: my first draft asserted the full string and failed with an unexpected
+per-token `RESET`/re-`SGR` pattern — not a bug, just how `serializeRow` treats same-styled
+runs; confirmed against `wrapSegments`'s design (every segment carries its own style prefix by
+construction).
+
+Also had to type the shared `web` callback's DOM parameter against a small hand-written
+`FixtureElement` structural interface rather than `HTMLElement`, because `src/markdown/` is
+covered by the root `tsconfig.json` (no `dom` lib — only `src/web/tsconfig.json` opts in) but
+still needs to typecheck against a real `HTMLElement` passed in from
+`src/web/client/markdown-dom.test.ts`. Structural typing handles this fine as long as the
+interface only lists the subset of `Element` members actually used.
+
+Gates: `bun run typecheck` and `bun run lint` clean on every file this ticket touched (root
+tsconfig's pre-existing errors in `src/agent/`/`src/contracts/`/`src/cli.ts` are from other
+concurrent background rounds, confirmed via `git stash` — not from this change).
+`bun test src/markdown src/tui src/web --coverage`: 757 pass, 0 fail;
+`rendering-fixtures.ts`/`markdown-ansi.ts` 100%/100%, `markdown-dom.ts` 100% line (pre-existing
+99.21% branch, untouched by this ticket). Closed DH-0108 via spile-ops.

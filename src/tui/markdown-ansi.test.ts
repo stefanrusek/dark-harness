@@ -1,6 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { parseMarkdown } from "../markdown/index.ts";
+import { renderingFixtures } from "../markdown/rendering-fixtures.ts";
 import { renderBlocks, renderMarkdownRows } from "./markdown-ansi.ts";
+
+// DH-0108: comprehensive fixture-based coverage, one test per construct row in the shared
+// fixture table (src/markdown/rendering-fixtures.ts) — traceable by name, and shared verbatim
+// with the Web renderer's suite so both sides are asserting against the same input set.
+describe("renderMarkdownRows — DH-0108 comprehensive construct fixtures", () => {
+  for (const fixture of renderingFixtures) {
+    test(fixture.name, () => {
+      const rows = renderMarkdownRows(parseMarkdown(fixture.markdown), 80);
+      fixture.tui(rows);
+    });
+  }
+});
 
 const RESET = "\x1b[0m";
 

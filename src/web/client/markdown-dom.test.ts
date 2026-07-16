@@ -1,11 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { parseMarkdown } from "../../markdown/index.ts";
+import { renderingFixtures } from "../../markdown/rendering-fixtures.ts";
 import { renderMarkdownInto } from "./markdown-dom.ts";
 import { createTestDom } from "./test-dom.ts";
 
 function renderMd(doc: Document, container: HTMLElement, markdown: string): void {
   renderMarkdownInto(doc, container, parseMarkdown(markdown));
 }
+
+// DH-0108: comprehensive fixture-based coverage, one test per construct row in the shared
+// fixture table (src/markdown/rendering-fixtures.ts) — traceable by name, and shared verbatim
+// with the TUI renderer's suite so both sides are asserting against the same input set.
+describe("renderMarkdownInto — DH-0108 comprehensive construct fixtures", () => {
+  for (const fixture of renderingFixtures) {
+    test(fixture.name, () => {
+      const { document, root } = createTestDom();
+      renderMd(document, root, fixture.markdown);
+      fixture.web(root);
+    });
+  }
+});
 
 describe("renderMarkdownInto — block constructs", () => {
   test("paragraph renders as <p>", () => {
