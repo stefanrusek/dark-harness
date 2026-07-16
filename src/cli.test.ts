@@ -2271,8 +2271,9 @@ describe("main — dh init", () => {
       expect(names).toContain(`${tier}-bedrock`);
     }
 
-    // Default model is a working Bedrock gemma config, not a placeholder string.
-    expect(parsed.options.defaultModel).toBe("gemma4");
+    // DH-0106: default model swapped off gemma4/Gemma 3 (reliably hallucinates tool calls)
+    // to a Claude tier confirmed reliable for agentic tool use.
+    expect(parsed.options.defaultModel).toBe("haiku-bedrock");
     const gemma = parsed.models.find((m: { name: string }) => m.name === "gemma4");
     expect(gemma.provider).toBe("bedrock");
     expect(gemma.model).not.toBe("gemma4"); // real Bedrock model id, not the DH-0092 mistake shape
@@ -2318,7 +2319,7 @@ describe("main — dh init", () => {
     process.env.LOCAL_AI_PROVIDER = "http://localhost:8080";
     try {
       const config = await loadConfig(target);
-      expect(config.options.defaultModel).toBe("gemma4");
+      expect(config.options.defaultModel).toBe("haiku-bedrock");
     } finally {
       // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
@@ -2399,7 +2400,10 @@ describe("main — dh init", () => {
       expect(io.stdoutLines[1]).toStartWith("\x1b[2mdh:");
       expect(io.stdoutLines[2]).toStartWith("\x1b[2mdh:");
       expect(io.stdoutLines[2]).toEndWith("\x1b[0m");
-      expect(io.stdoutLines[3]).toBe(
+      expect(io.stdoutLines[3]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[3]).toContain("gemma4");
+      expect(io.stdoutLines[3]).toEndWith("\x1b[0m");
+      expect(io.stdoutLines[4]).toBe(
         'dh: Next: run "dh doctor" to probe credentials, then "dh" to start.',
       );
     });
@@ -2407,6 +2411,28 @@ describe("main — dh init", () => {
 });
 
 describe("main — dh doctor / --check", () => {
+  // DH-0106: the fake provider below answers the connectivity ping with plain text (no
+  // tools requested) and the tool-use capability probe (request.tools non-empty) with a
+  // real tool_use block, so the model reads as a fully tool-capable PASS — same shape as a
+  // real Claude-tier model.
+  const fakeToolCapableProvider = () =>
+    fakeModelProvider({
+      complete: async (request) => {
+        if (request.tools.length > 0) {
+          return {
+            stopReason: "tool_use",
+            content: [{ type: "tool_use", id: "1", name: "noop", input: {} }],
+            usage: { inputTokens: 1, outputTokens: 1 },
+          };
+        }
+        return {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "pong" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        };
+      },
+    });
+
   test("reports PASS for every model when every provider call succeeds, exits 0", async () => {
     const io = fakeIo();
     const calls: Array<{ model: string; maxTokens: number | undefined; tools: unknown[] }> = [];
@@ -2421,6 +2447,13 @@ describe("main — dh doctor / --check", () => {
               tools: request.tools,
             });
             expect(config.name).toBe("anthropic");
+            if (request.tools.length > 0) {
+              return {
+                stopReason: "tool_use",
+                content: [{ type: "tool_use", id: "1", name: "noop", input: {} }],
+                usage: { inputTokens: 1, outputTokens: 1 },
+              };
+            }
             return {
               stopReason: "end_turn",
               content: [{ type: "text", text: "pong" }],
@@ -2434,14 +2467,73 @@ describe("main — dh doctor / --check", () => {
       'PASS sonnet (provider "anthropic")',
       "1 model: 1 pass, 0 fail",
     ]);
-    expect(calls).toEqual([{ model: "sonnet-5", maxTokens: 1, tools: [] }]);
+    expect(calls).toEqual([
+      { model: "sonnet-5", maxTokens: 1, tools: [] },
+      {
+        model: "sonnet-5",
+        maxTokens: 64,
+        tools: [
+          {
+            name: "noop",
+            description:
+              "A no-op probe tool. Call it with no arguments to confirm you can call tools.",
+            inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("reports a distinct 'no tool-use' PASS when a model connects but never emits a real tool_use block (DH-0106)", async () => {
+    const io = fakeIo();
+    const code = await main(["--check"], {
+      ...baseOverrides(io),
+      createProvider: () =>
+        fakeModelProvider({
+          complete: async () => ({
+            stopReason: "end_turn",
+            content: [{ type: "text", text: "I would call the tool now: tool_code Agent(...)" }],
+            usage: { inputTokens: 1, outputTokens: 1 },
+          }),
+        }),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines).toEqual([
+      'PASS (no tool-use) sonnet (provider "anthropic")',
+      "1 model: 1 pass, 0 fail",
+    ]);
+  });
+
+  test("a throwing tool-use probe still reports as 'no tool-use' rather than FAIL (DH-0106)", async () => {
+    const io = fakeIo();
+    const code = await main(["--check"], {
+      ...baseOverrides(io),
+      createProvider: () =>
+        fakeModelProvider({
+          complete: async (request) => {
+            if (request.tools.length > 0) {
+              throw new Error("boom during probe");
+            }
+            return {
+              stopReason: "end_turn",
+              content: [{ type: "text", text: "pong" }],
+              usage: { inputTokens: 1, outputTokens: 1 },
+            };
+          },
+        }),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines).toEqual([
+      'PASS (no tool-use) sonnet (provider "anthropic")',
+      "1 model: 1 pass, 0 fail",
+    ]);
   });
 
   test("the dh doctor subcommand is an alias for --check", async () => {
     const io = fakeIo();
     const code = await main(["doctor"], {
       ...baseOverrides(io),
-      createProvider: () => fakeModelProvider(),
+      createProvider: () => fakeToolCapableProvider(),
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines).toEqual([

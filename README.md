@@ -140,7 +140,7 @@ This is exactly what `dh init` scaffolds:
 
 ```json
 {
-  "options": { "defaultModel": "gemma4", "runInBackgroundDefault": true, "maxTurns": 100 },
+  "options": { "defaultModel": "haiku-bedrock", "runInBackgroundDefault": true, "maxTurns": 100 },
   "models": [
     { "name": "fable-anthropic", "provider": "anthropic", "model": "claude-fable-5" },
     { "name": "fable-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-fable-5" },
@@ -195,7 +195,12 @@ region-specific and change over time, so re-verify before relying on this list i
 region. The Claude tiers use cross-region `us.*` inference profile ids on Bedrock (the bare
 on-demand model ids aren't invokable directly for those); `us.anthropic.claude-fable-5` also
 requires your AWS org to be configured for 30-day (or longer) data retention — it returns a
-validation error under the default zero/short retention configuration.
+validation error under the default zero/short retention configuration. `"gemma4"` connects
+fine (`dh doctor` PASSes it) but is **chat-only** — live testing found it reliably
+hallucinates tool calls (fake fenced text describing a call, never a real `tool_use` block)
+rather than actually performing agentic tool use, which is why it's in the menu but not
+`options.defaultModel`; `dh doctor` flags this distinctly rather than as a plain `PASS` (see
+below).
 
 - **`models`** — named entries mapping to a named `provider` plus a provider-side model id.
   Tools and options refer to models by `name`, never by the provider-side id directly.

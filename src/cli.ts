@@ -12,7 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createProvider } from "./agent/providers/index.ts";
-import type { ModelProvider } from "./agent/providers/types.ts";
+import type { ModelProvider, ProviderToolDefinition } from "./agent/providers/types.ts";
 import { type ResumeResult, loadResumeSession } from "./agent/resume.ts";
 import { AgentRuntime, type AgentRuntimeOptions, ROOT_AGENT_ID } from "./agent/runtime.ts";
 import { BUILD_INFO } from "./config/build-info.ts";
@@ -115,7 +115,7 @@ const FLAGS_WITH_VALUES = new Set([
  * This is a menu of working entries to trim to what you actually use, not a recommendation
  * to run `dh doctor` against all of them by default (see the `dh init` stdout note below). */
 export const SAMPLE_DH_JSON = `{
-  "options": { "defaultModel": "gemma4", "runInBackgroundDefault": true, "maxTurns": 100 },
+  "options": { "defaultModel": "haiku-bedrock", "runInBackgroundDefault": true, "maxTurns": 100 },
   "models": [
     { "name": "fable-anthropic", "provider": "anthropic", "model": "claude-fable-5" },
     { "name": "fable-bedrock", "provider": "bedrock", "model": "us.anthropic.claude-fable-5" },
@@ -1309,6 +1309,17 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
       initTty,
     ),
   );
+  // DH-0106: "gemma4" is a real, connectable model (dh doctor PASSes it) but reliably
+  // hallucinates tool calls instead of making them — flagged here so an operator who
+  // deliberately switches defaultModel to it isn't surprised later. JSON has no comment
+  // syntax, so this can't live inline in the scaffold itself; the stdout caveat is the next
+  // best place, alongside the other menu caveats above.
+  io.stdout(
+    cliDim(
+      `dh:   "gemma4" in that menu connects fine but is chat-only — it does not reliably make real tool calls, so it's not the default; see "dh doctor"'s tool-use column.`,
+      initTty,
+    ),
+  );
   io.stdout(`dh: Next: run "dh doctor" to probe credentials, then "dh" to start.`);
   io.exit(ExitCode.Success);
   return ExitCode.Success;
@@ -1319,12 +1330,31 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
  * call (a 1-token completion, no tools) and reports pass/fail — never enters the real agent
  * loop, so a broken credential/model-access problem surfaces before an operator commits to a
  * real (possibly costly, possibly unattended) run.
+ *
+ * DH-0106: on top of that connectivity check, a model that connects also gets a second, cheap
+ * probe request that offers it one trivial no-op tool and instructs it to call it — this is a
+ * distinct capability from "the API call succeeds" (DH-0106's root cause: a Bedrock model that
+ * connects fine but responds with prose/fake fenced pseudo-tool-call text instead of a real
+ * `tool_use` content block). `toolUse` is `undefined` when the connectivity check itself
+ * failed (no point probing a model we can't even reach) or when the model reference doesn't
+ * resolve to a provider at all; `false` means it connected but never emitted a real tool-use
+ * block; `true` means it did.
  */
 interface DoctorResult {
   modelName: string;
   ok: boolean;
   detail: string;
+  toolUse?: boolean;
 }
+
+/** DH-0106: the trivial no-op tool offered to every model during the doctor tool-use capability
+ * probe — deliberately as simple as a tool definition gets (no inputs) so a "can't call tools"
+ * result reflects the model's own capability/willingness, not a schema it couldn't parse. */
+const DOCTOR_TOOL_PROBE_DEFINITION: ProviderToolDefinition = {
+  name: "noop",
+  description: "A no-op probe tool. Call it with no arguments to confirm you can call tools.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+};
 
 // DH-0101: aliases onto the shared CLI styling constants above (was its own copy) — dim
 // still distinguishes "still checking" from a resolved verdict, per style-guide §1.1.
@@ -1349,7 +1379,12 @@ const DOCTOR_VERDICT_LABEL_WIDTH = 2 + DOCTOR_VERDICT_WORD_WIDTH;
  * guide §5) before the PASS/FAIL word; the plain (non-TTY) path is untouched — just the bare
  * word, per the ticket's non-TTY contract. */
 function formatDoctorRow(r: DoctorResult, nameWidth: number, color: boolean): string {
-  const verdict = r.ok ? "PASS" : "FAIL";
+  // DH-0106: a model that connects (r.ok) but never emitted a real tool-use block in the
+  // capability probe gets a distinct verdict word — "PASS (no tool-use)" — rather than a
+  // plain PASS indistinguishable from a model that's actually reliable for agentic tool use.
+  // Still green/✓ on the TTY path: it *did* pass connectivity, which is what that glyph means;
+  // the qualifier text itself is what carries the "but not agentic-capable" distinction.
+  const verdict = r.ok ? (r.toolUse === false ? "PASS (no tool-use)" : "PASS") : "FAIL";
   const coloredVerdict = color
     ? `${r.ok ? DOCTOR_PASS_COLOR : DOCTOR_FAIL_COLOR}${r.ok ? "✓" : "✗"} ${verdict}${DOCTOR_RESET}`
     : verdict;
@@ -1456,9 +1491,31 @@ async function runDoctor(config: DhConfig, deps: CliDeps): Promise<ExitCodeType>
             tools: [],
             maxTokens: 1,
           });
+          // DH-0106: connectivity alone doesn't confirm agentic tool use — probe separately
+          // with one trivial no-op tool and an instruction to call it. A probe-call throw
+          // (rare — connectivity just succeeded above) is treated the same as "no tool-use
+          // block observed" rather than flipping the whole model to FAIL: the model
+          // demonstrably answers requests, it just didn't produce a real tool call here.
+          let toolUse = false;
+          try {
+            const toolProbe = await provider.complete({
+              model: model.model,
+              system:
+                'dh doctor: tool-use capability probe. You must call the "noop" tool now; do not respond with text describing a call instead of making one.',
+              messages: [
+                { role: "user", content: [{ type: "text", text: "Call the noop tool now." }] },
+              ],
+              tools: [DOCTOR_TOOL_PROBE_DEFINITION],
+              maxTokens: 64,
+            });
+            toolUse = toolProbe.content.some((block) => block.type === "tool_use");
+          } catch {
+            toolUse = false;
+          }
           result = {
             modelName: model.name,
             ok: true,
+            toolUse,
             detail: `(provider "${providerConfig.name}")`,
           };
         } catch (err) {
