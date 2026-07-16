@@ -497,3 +497,55 @@ Verified live via a synthetic `.dh-logs/` session run through `dh logs` under a 
 red/magenta render correctly and the status word always accompanies the glyph. Landed in
 the same round as Grace's `src/server/log-analysis.ts` change per the ticket's explicit
 risk note (don't split the two terminal surfaces across rounds).
+
+### 2026-07-16 — DH-0105: unify connection-state vocabulary (joint TUI/Web round with Susan)
+
+Investigated the real semantics before touching anything, per the ticket's explicit risk
+flag: the TUI's `error` state (`src/tui/sse-client.ts`) fired transiently after *every*
+failed reconnect attempt, and its `closed` state fired after *every* clean stream end — in
+both cases the client's `while` loop immediately retried again on the very next iteration,
+exactly like the Web client's `reconnecting`. Neither old TUI state was actually fatal.
+Crucially, neither client (TUI or Web) ever gives up retrying on its own — both loop forever
+until an external stop (`AbortSignal` for TUI, `close()` for Web). So a naive relabel
+(`error` → `disconnected`) would genuinely have been wrong, exactly the risk the ticket
+warned about; `error`/`closed` both actually meant "mid-retry," i.e. `reconnecting`.
+
+Closed the real gap the ticket anticipated: the TUI had no way to distinguish "first attempt
+of the session" from "retrying after a drop." Added that distinction to
+`runSseClient` by mirroring the Web client's own logic exactly — both now key off whether
+`lastEventId` has ever been set (an event/id has been seen) to decide `connecting` (never
+connected) vs `reconnecting` (had a prior connection or a prior failed attempt after one).
+Added one genuinely new behavior: the loop now emits a `disconnected` status once, after it
+actually exits (on abort) — previously the TUI had no such terminal signal at all, so the
+header could freeze on a stale word. This is a small, contained addition to
+`src/tui/sse-client.ts`, within the ticket's anticipated scope, not a bigger reconnect
+redesign.
+
+Final shared model (recorded in `docs/design/style-guide.md` new §1.2): `connecting` /
+`live` / `reconnecting` / `disconnected`, amber-pending for the middle two (never red),
+green for `live`, red for `disconnected`. Renamed `ConnectionStatus`'s `"open"`→`"live"` and
+folded `"error"`/`"closed"`→`"reconnecting"` (mid-retry) or `"disconnected"` (loop actually
+stopped) in `src/tui/types.ts`/`sse-client.ts`/`render.ts`. `render.ts` now shows a leading
+braille spinner glyph on `connecting`/`reconnecting` (previously the TUI connection pill had
+no pending-state animation at all, unlike the Web's CSS pulse) — a judgment call to actually
+satisfy style-guide §1.1's "liveness is mandatory for anything that waits," not just relabel
+the word. Casing kept lowercase per the existing DH-0100 rule, now applied explicitly to
+connection words too (style-guide §4).
+
+Added a shared `EXPECTED_CONNECTION_LABEL_WORDS` table in both `render.test.ts` (here) and
+`format.test.ts` (Susan's side) asserting the same word list modulo casing — the ticket's
+explicit drift-prevention ask.
+
+Fixed one stale e2e assertion: `e2e/tui.test.ts` waited on `/—\s+(open|connecting)\b/`
+against the real rendered header; updated to match `live`/`connecting` (tolerating the new
+spinner glyph prefix and ellipsis). Ran it against a freshly rebuilt binary — confirmed the
+connection pill legitimately reads `live` once the SSE stream opens, not a stale label.
+
+Gates: `bun run typecheck`/`lint`/`test:coverage` all clean, every file touched (types.ts,
+sse-client.ts, render.ts + tests) still 100%/100%. `bun run build` succeeds.
+`e2e/tui.test.ts` (2/2) passes with the rebuilt binary; `e2e/web.test.ts`/
+`e2e/connect-web.test.ts` still fail on this sandbox's pre-existing missing-Chromium gap
+(`/opt/pw-browsers/chromium` absent), unrelated to this change — verified the Web-side
+reconnect/live-state logic instead via `src/web/client/sse.test.ts`'s own mocked-fetch
+harness (Susan's scope), which already exercises drop → `reconnecting` → `live` sequences
+deterministically.

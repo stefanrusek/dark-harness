@@ -69,11 +69,22 @@ export function colorizeStatus(status: AgentStatus, text: string): string {
 // introduced.
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
+// DH-0105: canonical connection-state color + label vocabulary (docs/design/style-guide.md
+// §1/§6), shared word-for-word (modulo TUI/CLI's lowercase casing rule, DH-0100 §4) with the
+// Web client's `CONNECTION_LABELS` (src/web/client/format.ts) — see
+// `EXPECTED_CONNECTION_LABEL_WORDS` in each surface's tests for the drift guard.
 const CONNECTION_COLOR: Record<ConnectionStatus, string> = {
-  open: "\x1b[32m",
+  live: "\x1b[32m",
   connecting: "\x1b[33m",
-  error: "\x1b[31m",
-  closed: "\x1b[90m",
+  reconnecting: "\x1b[33m",
+  disconnected: "\x1b[31m",
+};
+
+const CONNECTION_LABEL: Record<ConnectionStatus, string> = {
+  connecting: "connecting…",
+  live: "live",
+  reconnecting: "reconnecting…",
+  disconnected: "disconnected",
 };
 
 function dim(text: string): string {
@@ -205,7 +216,13 @@ function headerRows(state: TuiState, cols: number): string[] {
     `  —  ${formatTokenCost(totals.inputTokens, totals.outputTokens, totals.costUsd)}`,
   );
   const appName = `${BOLD}Dark Harness${RESET}`;
-  const connection = `${CONNECTION_COLOR[state.connection]}${state.connection}${RESET}`;
+  // DH-0105 / style-guide §1.1: connecting/reconnecting get the animated braille spinner
+  // (pending, non-alarming — amber) ahead of the word; live/disconnected are resolved states
+  // and show only the word.
+  const connectionPending =
+    state.connection === "connecting" || state.connection === "reconnecting";
+  const connectionGlyph = connectionPending ? `${spinnerFrame(state.now)} ` : "";
+  const connection = `${CONNECTION_COLOR[state.connection]}${connectionGlyph}${CONNECTION_LABEL[state.connection]}${RESET}`;
   // DH-0065 liveness: a spinner next to the connection pill whenever the root agent is
   // actively "running" — the root view otherwise gives no live sign the agent is thinking
   // during a long turn (only the tree/agent view's elapsed counter did).

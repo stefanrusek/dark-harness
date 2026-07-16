@@ -82,6 +82,40 @@ verdict yet" shown while an operation is in flight. It has a fixed vocabulary:
 implementation. `....`/`checking... (query sent)` should migrate to the canonical spinner +
 `checking…` wording (see DH tickets).
 
+### 1.2 The connection-state model (DH-0105 — canonical, shared TUI/Web)
+
+The connection pill is the operator's only signal that a long unattended run is still
+attached, and it previously spoke two different dialects (Web: `connecting`/`open`/
+`reconnecting`/`closed`; TUI: `connecting`/`open`/`error`/`closed`, with no `reconnecting`
+state at all). Both clients now share one four-state vocabulary, defined here and rendered
+identically (modulo the §4 casing rule) on both surfaces:
+
+| State | Meaning | Web label | TUI/CLI label | Color |
+| --- | --- | --- | --- | --- |
+| `connecting` | first connection attempt of the session, not yet succeeded once | `Connecting…` | `connecting…` | amber (pending, §1.1) |
+| `live` | stream open, receiving events | `Live` | `live` | green |
+| `reconnecting` | dropped after at least one prior success (or mid-retry after any failure), resuming via `Last-Event-ID` (DH-0024) | `Reconnecting…` | `reconnecting…` | amber (pending, §1.1) |
+| `disconnected` | the client has stopped trying — a deliberate close, not a live retry loop | `Disconnected` | `disconnected` | red |
+
+Investigation finding (the risk this ticket flagged): before this round, the TUI's `error`
+state fired transiently after *every* failed reconnect attempt, and its `closed` state fired
+after *every* clean stream end — in both cases the client's `while` loop immediately retried
+again, exactly like the Web client's `reconnecting`. Neither TUI state was actually fatal;
+relabeling `error` straight to a Web-style terminal state would have been wrong. Conversely,
+neither client actually gives up and stops retrying on its own — both loop forever until an
+external stop (TUI: `AbortSignal`; Web: `close()`). So `disconnected` is reserved for that one
+real "given up" condition, and both the old TUI `error` and the old TUI `closed` (as well as
+the Web's failure-driven retry scheduling) map to `reconnecting`. `src/tui/sse-client.ts` was
+extended (previously it had no reconnect-vs-initial-connect distinction) to mirror the Web
+client's `lastEventId`-presence check so `connecting` only ever describes the true first
+attempt of a session.
+
+`reconnecting` is always amber and animated (braille spinner on TUI/CLI per §1.1, CSS pulse
+on Web) — never red — since it is a normal, non-alarming state per DH-0024's documented
+resume story. `disconnected` is red on both surfaces. A word always accompanies the dot/pill
+on both surfaces (§0 principle 3) — TUI shows the label word inline next to the colored pill
+text, Web shows it as the pill's own text content.
+
 ---
 
 ## 2. Color & typography reference
@@ -173,7 +207,10 @@ Consistent nouns/verbs across help text, labels, docs, and logs:
   choice, not an inconsistency to fix — the real divergence this ticket closed was *color*,
   not casing. `dh logs`' `running (no terminal event seen)` qualifier is a real offline-log
   distinction (the live surfaces can't detect a missing terminal event) and stays as-is; it
-  is not a third status vocabulary.
+  is not a third status vocabulary. The same per-surface casing rule applies to the §1.2
+  connection-state words (DH-0105): lowercase (`connecting…`, `live`, `reconnecting…`,
+  `disconnected`) on TUI/CLI, Title Case (`Connecting…`, `Live`, `Reconnecting…`,
+  `Disconnected`) on Web — one shared word list, cased per surface, not two vocabularies.
 - **turn** — one user/assistant exchange unit in a transcript.
 - **short id** — the display form of an agent id (`shortAgentId`, `src/web/client/format.ts`).
   **Never** show a full 36-char UUID in human chrome — use `model · short-id` (DH-0065). This
@@ -215,9 +252,10 @@ correct, lifeless. Conventions to close that:
   observation-only ("coordinator holds the conversation"). Any new key must be documented
   there and, ideally, hinted in the footer.
 - **Footer hints** recede: dim brackets/labels (`SGR 2`) so they sit behind content.
-- **Reconnect** (both surfaces): a visible, non-alarming pending state (`connecting…`,
-  spinner/pulse) using the §1.1 vocabulary — then silent catch-up via `Last-Event-ID`; never
-  a full reset of the view (web-ui-guide.md, DH-0024).
+- **Reconnect** (both surfaces): a visible, non-alarming pending state (`connecting…`/
+  `reconnecting…`, spinner/pulse) using the §1.1 vocabulary and the §1.2 connection-state
+  model — then silent catch-up via `Last-Event-ID`; never a full reset of the view
+  (web-ui-guide.md, DH-0024).
 - **Focus & selection** are always visible (TUI selection highlight; Web focus ring in
   `--accent`). Never rely on color alone for the selected row — also a marker/indent.
 - **Motion is purposeful:** running-pulse and content fade-in only. No spinners that outlive

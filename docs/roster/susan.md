@@ -391,3 +391,38 @@ DH-0029 regression guard holds — no silent fallback to an unstyled default). N
 found, no CSS changes made. Also recorded the DH-0100 casing decision in style-guide.md §4:
 Web keeps Title Case badges, TUI/CLI keep lowercase — intentional per-surface convention,
 not a residual inconsistency.
+
+### 2026-07-16 — DH-0105: unify connection-state vocabulary (joint TUI/Web round with Mary)
+
+Web's own connection states (`connecting`/`open`/`reconnecting`/`closed` in
+`src/web/client/state.ts`/`sse.ts`) turned out to already have the right *semantics* —
+`reconnecting` already correctly covered "dropped, actively retrying" (both a scheduled-
+retry wait and the next attempt itself), and `closed` already only fired from an explicit
+`close()` (never from a mid-loop failure, since the SSE loop retries forever on its own).
+The only real change on the Web side was renaming two of the four words to the shared
+vocabulary Mary and I settled on jointly (`docs/design/style-guide.md` new §1.2): `"open"`→
+`"live"`, `"closed"`→`"disconnected"`. `"connecting"`/`"reconnecting"` were already correct
+and unchanged. Updated `state.ts`'s `ConnectionStatus` type, `sse.ts`'s two
+`onStatusChange` call sites, `format.ts`'s `CONNECTION_LABELS`, and the `.connection-*` CSS
+class names in `styles.css` (`.connection-open`→`.connection-live`,
+`.connection-closed`→`.connection-disconnected`) to match.
+
+The investigation that mattered was on Mary's side (TUI's `error`/`closed` states were
+genuinely ambiguous, mine weren't) — see her roster entry for the full reasoning; I confirm
+here that the Web's `reconnecting` semantics (mid-retry, whether waiting or actively
+attempting) is exactly what both surfaces now share, so nothing on my end needed the
+"can't distinguish X" gap-closing the ticket anticipated might be necessary.
+
+Added the shared `EXPECTED_CONNECTION_LABEL_WORDS` drift-guard table to `format.test.ts`
+(mirrors Mary's in `render.test.ts`), asserting Web's labels match the same word list modulo
+Title Case.
+
+Gates: `bun run typecheck`/`lint`/`test:coverage` clean; `state.ts`/`sse.ts`/`format.ts`
+still 100%/100%. Verified via `sse.test.ts`'s existing mocked-fetch reconnect scenarios
+(drop → `reconnecting` → `live` sequences, already deterministic, now just relabeled) rather
+than a live browser run — this sandbox is missing `/opt/pw-browsers/chromium`
+(pre-existing, documented in my 2026-07-16 DH-0100 entry above), so `e2e/web.test.ts`/
+`e2e/connect-web.test.ts` can't run headless-browser assertions here; both still fail on
+that same pre-existing gap, not a regression from this change. The one e2e assertion that
+does exercise the connection pill live end-to-end without a browser
+(`e2e/tui.test.ts`, PTY-based) passes against a freshly rebuilt binary.

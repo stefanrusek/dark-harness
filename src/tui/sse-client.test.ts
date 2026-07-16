@@ -64,7 +64,10 @@ describe("runSseClient", () => {
     });
 
     expect(events).toEqual([first, second]);
-    expect(statuses).toEqual(["connecting", "open", "closed"]);
+    // DH-0105: a clean stream end is not fatal (the loop always retries), so it's reported
+    // as `reconnecting`, matching the Web client's equivalent path; `disconnected` only
+    // fires once the loop actually stops (here, because the signal was already aborted).
+    expect(statuses).toEqual(["connecting", "live", "reconnecting", "disconnected"]);
   });
 
   test("requests the events path with an SSE accept header", async () => {
@@ -164,7 +167,18 @@ describe("runSseClient", () => {
       delayImpl: noDelay,
     });
 
-    expect(statuses).toEqual(["connecting", "error", "connecting", "open", "closed"]);
+    // DH-0105: a failed attempt is always followed by another retry, so it's reported as
+    // `reconnecting` (never a fatal `error`); the retry attempt itself is still labeled
+    // `connecting` because no event/id has ever been seen yet (mirrors the Web client's
+    // `lastEventId`-presence check). `disconnected` only fires once the loop actually stops.
+    expect(statuses).toEqual([
+      "connecting",
+      "reconnecting",
+      "connecting",
+      "live",
+      "reconnecting",
+      "disconnected",
+    ]);
   });
 
   test("reconnects after fetch itself throws", async () => {
@@ -188,7 +202,14 @@ describe("runSseClient", () => {
       delayImpl: noDelay,
     });
 
-    expect(statuses).toEqual(["connecting", "error", "connecting", "open", "closed"]);
+    expect(statuses).toEqual([
+      "connecting",
+      "reconnecting",
+      "connecting",
+      "live",
+      "reconnecting",
+      "disconnected",
+    ]);
   });
 
   test("does not attempt to connect at all when the signal starts aborted", async () => {
@@ -256,7 +277,7 @@ describe("runSseClient", () => {
       delayImpl: noDelay,
     });
 
-    expect(statuses[1]).toBe("error");
+    expect(statuses[1]).toBe("reconnecting");
   });
 
   test("does nothing when the signal starts aborted, without a delayImpl or fetchImpl", async () => {

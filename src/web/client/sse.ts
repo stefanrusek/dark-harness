@@ -229,7 +229,7 @@ export function connectEvents(
     const isReconnect = everConnected;
     everConnected = true;
     reconnectAttempt = 0;
-    handlers.onStatusChange("open");
+    handlers.onStatusChange("live");
     if (isReconnect) handlers.onReconnected?.();
     const parser = new SseStreamParser();
     const reader = response.body.getReader();
@@ -260,7 +260,7 @@ export function connectEvents(
       closed = true;
       if (reconnectTimer !== undefined) clearTimeoutImpl(reconnectTimer);
       abortController?.abort();
-      handlers.onStatusChange("closed");
+      handlers.onStatusChange("disconnected");
     },
   };
 }

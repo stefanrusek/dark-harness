@@ -22,9 +22,26 @@ describe("agentStatusStyle", () => {
 describe("connectionStatusLabel", () => {
   test("has a human label for every ConnectionStatus", () => {
     expect(connectionStatusLabel("connecting")).toBe("Connecting…");
-    expect(connectionStatusLabel("open")).toBe("Live");
+    expect(connectionStatusLabel("live")).toBe("Live");
     expect(connectionStatusLabel("reconnecting")).toBe("Reconnecting…");
-    expect(connectionStatusLabel("closed")).toBe("Disconnected");
+    expect(connectionStatusLabel("disconnected")).toBe("Disconnected");
+  });
+
+  // DH-0105: shared expected-label table, word-for-word matched (modulo Web's Title Case vs
+  // TUI/CLI's lowercase, DH-0100 §4) against `EXPECTED_CONNECTION_LABEL_WORDS` in
+  // `src/tui/render.test.ts` — a drift guard so one surface's words can't silently diverge
+  // from the other's.
+  const EXPECTED_CONNECTION_LABEL_WORDS: Record<string, string> = {
+    connecting: "connecting",
+    live: "live",
+    reconnecting: "reconnecting",
+    disconnected: "disconnected",
+  };
+
+  test("connection labels match the canonical vocabulary (docs/design/style-guide.md §1/§6)", () => {
+    for (const [status, word] of Object.entries(EXPECTED_CONNECTION_LABEL_WORDS)) {
+      expect(connectionStatusLabel(status as never).toLowerCase()).toContain(word);
+    }
   });
 });
 

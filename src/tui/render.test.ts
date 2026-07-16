@@ -196,19 +196,49 @@ describe("renderFrame", () => {
   });
 
   test("root view header reflects connection status and view label", () => {
-    const rows = renderFrame(baseState({ connection: "open" }));
+    const rows = renderFrame(baseState({ connection: "live" }));
     expect(rows[0]).toContain("Root Agent");
-    expect(rows[0]).toContain("open");
+    expect(rows[0]).toContain("live");
   });
 
-  test("header styles the app name bold and colors the connection pill per status (DH-0065)", () => {
-    const openRow = renderFrame(baseState({ connection: "open" }))[0] ?? "";
-    const errorRow = renderFrame(baseState({ connection: "error" }))[0] ?? "";
-    const closedRow = renderFrame(baseState({ connection: "closed" }))[0] ?? "";
-    expect(openRow).toContain("\x1b[1mDark Harness\x1b[0m");
-    expect(openRow).toContain("\x1b[32mopen\x1b[0m");
-    expect(errorRow).toContain("\x1b[31merror\x1b[0m");
-    expect(closedRow).toContain("\x1b[90mclosed\x1b[0m");
+  // DH-0105: canonical connection-state colors (docs/design/style-guide.md §1/§2.3) —
+  // live green, connecting/reconnecting amber (with a leading pending spinner glyph),
+  // disconnected red. `EXPECTED_CONNECTION_LABEL_WORDS` below is the shared drift guard
+  // against `src/web/client/format.ts`'s `CONNECTION_LABELS`.
+  test("header styles the app name bold and colors the connection pill per status (DH-0065, DH-0105)", () => {
+    const liveRow = renderFrame(baseState({ connection: "live" }))[0] ?? "";
+    const reconnectingRow = renderFrame(baseState({ connection: "reconnecting" }))[0] ?? "";
+    const disconnectedRow = renderFrame(baseState({ connection: "disconnected" }))[0] ?? "";
+    expect(liveRow).toContain("\x1b[1mDark Harness\x1b[0m");
+    expect(liveRow).toContain("\x1b[32mlive\x1b[0m");
+    expect(reconnectingRow).toContain("\x1b[33m");
+    expect(reconnectingRow).toContain("reconnecting…\x1b[0m");
+    expect(disconnectedRow).toContain("\x1b[31mdisconnected\x1b[0m");
+  });
+
+  test("connecting/reconnecting connection states show a pending spinner glyph, never color alone (DH-0105)", () => {
+    const connectingRow = renderFrame(baseState({ connection: "connecting" }))[0] ?? "";
+    expect(connectingRow).toContain("\x1b[33m");
+    expect(connectingRow).toContain("connecting…");
+  });
+
+  // Shared expected-label table (DH-0105 ticket requirement): asserted here and in
+  // `src/web/client/format.test.ts` so a future edit to one surface's words without the
+  // other is caught as a test failure, not silent drift. Words match modulo each surface's
+  // own casing rule (DH-0100 §4: TUI/CLI lowercase, Web Title Case) and Web's trailing "…"
+  // convention on pending states.
+  const EXPECTED_CONNECTION_LABEL_WORDS: Record<string, string> = {
+    connecting: "connecting",
+    live: "live",
+    reconnecting: "reconnecting",
+    disconnected: "disconnected",
+  };
+
+  test("connection labels match the canonical vocabulary (docs/design/style-guide.md §1/§6)", () => {
+    for (const [status, word] of Object.entries(EXPECTED_CONNECTION_LABEL_WORDS)) {
+      const row = renderFrame(baseState({ connection: status as never }))[0] ?? "";
+      expect(row.toLowerCase()).toContain(word);
+    }
   });
 
   test("header shows a spinner next to the connection pill while the root agent is running (DH-0065)", () => {

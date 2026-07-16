@@ -157,7 +157,7 @@ button {
   margin-right: var(--space-1);
 }
 
-.connection-open {
+.connection-live {
   color: var(--status-done);
   border-color: var(--status-done);
 }
@@ -173,7 +173,7 @@ button {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-.connection-closed {
+.connection-disconnected {
   color: var(--danger);
   border-color: var(--danger);
 }

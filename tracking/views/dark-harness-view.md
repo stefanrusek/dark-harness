@@ -70,7 +70,6 @@ source: tracking/
 | [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | feature | stefan |
 | [DH-0103](../DH-0103-dh-help-styled-width-aware-visually-structured-output.md) | dh --help: styled, width-aware, visually structured output | feature | stefan |
 | [DH-0104](../DH-0104-unify-number-cost-elapsed-and-token-formatting-across-tui-web-and-cli.md) | Unify number, cost, elapsed, and token formatting across TUI, Web, and CLI | feature | stefan |
-| [DH-0105](../DH-0105-unify-connection-state-and-status-vocabulary-across-tui-and-web.md) | Unify connection-state and status vocabulary across TUI and Web | feature | stefan |
 
 ### implementing
 
@@ -93,6 +92,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0105](../DH-0105-unify-connection-state-and-status-vocabulary-across-tui-and-web.md) | Unify connection-state and status vocabulary across TUI and Web | done |
 | [DH-0102](../DH-0102-dh-doctor-migrate-to-the-canonical-pending-spinner-and-check-cross-verdict-glyphs.md) | dh doctor: migrate to the canonical pending spinner and check/cross verdict glyphs | done |
 | [DH-0101](../DH-0101-give-cli-command-output-a-real-visual-system-glyphs-hierarchy-color-liveness-beyond-dh-doctor.md) | Give CLI command output a real visual system (glyphs, hierarchy, color, liveness) beyond dh doctor | done |
 | [DH-0100](../DH-0100-adopt-one-canonical-agent-status-color-glyph-word-model-across-tui-web-and-cli.md) | Adopt one canonical agent-status color/glyph/word model across TUI, Web, and CLI | done |
@@ -107,4 +107,3 @@ source: tracking/
 | [DH-0090](../DH-0090-dh-init-s-scaffolded-config-has-no-api-key-region-placeholders-using-var-env-interpolation.md) | dh init's scaffolded config has no API-key/region placeholders using $(VAR) env interpolation | done |
 | [DH-0087](../DH-0087-create-github-issue-to-gauge-demand-for-mcp-oauth-support.md) | Create GitHub issue to gauge demand for MCP OAuth support | done |
 | [DH-0086](../DH-0086-create-github-issue-to-gauge-demand-for-model-provider-fallback-chains.md) | Create GitHub issue to gauge demand for model/provider fallback chains | done |
-| [DH-0085](../DH-0085-create-github-issue-to-gauge-demand-for-git-native-session-artifacts-and-replay-tooling.md) | Create GitHub issue to gauge demand for git-native session artifacts and replay tooling | done |

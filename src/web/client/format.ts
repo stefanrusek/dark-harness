@@ -25,11 +25,14 @@ export function agentStatusStyle(status: AgentStatus): StatusStyle {
   return STATUS_STYLES[status];
 }
 
+// DH-0105: canonical connection-state labels (docs/design/style-guide.md §1/§6), Title
+// Case per the Web casing rule (DH-0100, §4). Shared word/vocabulary with the TUI —
+// `EXPECTED_CONNECTION_LABEL_WORDS` in the test file asserts this table stays in sync.
 const CONNECTION_LABELS: Record<ConnectionStatus, string> = {
   connecting: "Connecting…",
-  open: "Live",
+  live: "Live",
   reconnecting: "Reconnecting…",
-  closed: "Disconnected",
+  disconnected: "Disconnected",
 };
 
 export function connectionStatusLabel(status: ConnectionStatus): string {

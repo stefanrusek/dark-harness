@@ -78,7 +78,11 @@ export interface AgentNode {
   statusSince: string;
 }
 
-export type ConnectionStatus = "connecting" | "open" | "reconnecting" | "closed";
+// DH-0105: canonical four-state connection vocabulary shared with the TUI
+// (docs/design/style-guide.md §1/§6) — "live" (was "open") and "disconnected" (was
+// "closed") are the renamed states; "connecting" and "reconnecting" already matched the
+// shared vocabulary.
+export type ConnectionStatus = "connecting" | "live" | "reconnecting" | "disconnected";
 
 export interface WebState {
   /** Insertion-ordered by first-seen; Map preserves insertion order in JS. */

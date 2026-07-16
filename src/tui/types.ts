@@ -10,7 +10,18 @@ import type {
 } from "../contracts/index.ts";
 import type { KeyEvent } from "./keys.ts";
 
-export type ConnectionStatus = "connecting" | "open" | "error" | "closed";
+// DH-0105: canonical four-state connection vocabulary shared with the Web client
+// (docs/design/style-guide.md §1/§6). Previously this TUI-only set was
+// "connecting" | "open" | "error" | "closed", with `error` firing transiently after every
+// failed reconnect attempt (the client always keeps retrying — see sse-client.ts) and
+// `closed` firing after every clean stream end (also always followed by a retry). Neither
+// was actually a terminal/fatal state; both were mid-retry blips that the Web's
+// `reconnecting` state already names correctly. `sse-client.ts` now distinguishes the
+// initial connect from a post-drop retry (mirroring the Web's `lastEventId`-presence check)
+// and only reports `disconnected` when the client actually stops trying (the loop exits on
+// abort), matching the Web's `closed` (now `disconnected`), which only fires from an
+// explicit `close()`.
+export type ConnectionStatus = "connecting" | "live" | "reconnecting" | "disconnected";
 
 export type ViewState =
   | { kind: "root" }

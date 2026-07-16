@@ -151,7 +151,7 @@ describe("connectEvents", () => {
     );
     expect(statuses).toEqual(["connecting"]);
     await flush();
-    expect(statuses).toEqual(["connecting", "open"]);
+    expect(statuses).toEqual(["connecting", "live"]);
   });
 
   test("parses events split across multiple stream chunks and forwards them in order", async () => {
@@ -253,7 +253,7 @@ describe("connectEvents", () => {
     await flush();
     h.streams[0]?.error(new Error("boom"));
     await flush();
-    expect(statuses).toEqual(["connecting", "open", "reconnecting"]);
+    expect(statuses).toEqual(["connecting", "live", "reconnecting"]);
   });
 
   test("a clean stream close (server ends the response) schedules a reconnect", async () => {
@@ -272,7 +272,7 @@ describe("connectEvents", () => {
     await flush();
     h.streams[0]?.close();
     await flush();
-    expect(statuses).toEqual(["connecting", "open", "reconnecting"]);
+    expect(statuses).toEqual(["connecting", "live", "reconnecting"]);
   });
 
   test("reconnecting after a drop resends Last-Event-ID from the highest id seen", async () => {
@@ -322,7 +322,7 @@ describe("connectEvents", () => {
     await flush();
     conn.close();
     await flush();
-    expect(statuses.at(-1)).toBe("closed");
+    expect(statuses.at(-1)).toBe("disconnected");
     expect(timers.fired).toHaveLength(0);
   });
 

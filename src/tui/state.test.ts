@@ -534,8 +534,8 @@ describe("reducer: command_error / resize / connection", () => {
   });
 
   test("connection updates connection status", () => {
-    const { state } = reducer(initialState(size()), { type: "connection", status: "open" });
-    expect(state.connection).toBe("open");
+    const { state } = reducer(initialState(size()), { type: "connection", status: "live" });
+    expect(state.connection).toBe("live");
   });
 
   test("reconnected sets a visible notice that history may be incomplete (DH-0024)", () => {

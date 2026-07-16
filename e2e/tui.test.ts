@@ -37,8 +37,10 @@ describe("local TUI (dh, no flags) under a real PTY", () => {
     await session.waitFor((screen) => screen.includes("Dark Harness"));
     await session.waitFor((screen) => screen.includes("Root Agent"));
     // SSE connects fast against a local server; confirm the connection pill leaves
-    // "connecting".
-    await session.waitFor((screen) => /—\s+(open|connecting)\b/.test(screen));
+    // "connecting" (DH-0105: canonical connection-state words are "live"/"connecting…"/
+    // "reconnecting…"/"disconnected" — match on "live" or "connecting" loosely enough to
+    // tolerate the pending-state spinner glyph and ellipsis prefixed/suffixed to the word).
+    await session.waitFor((screen) => /—\s+\S*\s*(live|connecting)/.test(screen));
 
     // Left-arrow with an empty input (HANDOFF.md §8) opens the agent tree view and issues a
     // real request_agent_tree round-trip — do this first, from a genuinely empty input.

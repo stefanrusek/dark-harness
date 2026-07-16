@@ -64,7 +64,11 @@ export async function runSseClient(options: SseClientOptions): Promise<void> {
   let consecutiveFailures = 0;
 
   while (!(options.signal?.aborted ?? false)) {
-    options.onConnectionChange?.("connecting");
+    // DH-0105: mirrors the Web client's `run()` (src/web/client/sse.ts) — `connecting` only
+    // for the very first attempt of the session (no `Last-Event-ID` seen yet); any attempt
+    // after a prior drop is `reconnecting`, matching the shared vocabulary
+    // (docs/design/style-guide.md §1/§6).
+    options.onConnectionChange?.(lastEventId !== null ? "reconnecting" : "connecting");
     try {
       await connectOnce(
         options,
@@ -80,10 +84,19 @@ export async function runSseClient(options: SseClientOptions): Promise<void> {
           consecutiveFailures = 0;
         },
       );
-      options.onConnectionChange?.("closed");
+      // The stream ended cleanly (server closed it, no exception) — this is not a fatal
+      // condition, the loop immediately retries below just like after a failed attempt, so
+      // it's reported the same way the Web client reports it: `reconnecting` (DH-0105; see
+      // the `ConnectionStatus` doc comment in types.ts for why this used to be a
+      // misleadingly-named terminal-sounding `closed`).
+      options.onConnectionChange?.("reconnecting");
     } catch {
       if (options.signal?.aborted) break;
-      options.onConnectionChange?.("error");
+      // DH-0105: a failed attempt always leads to another retry (this client never gives up
+      // on its own) — that's exactly what the shared `reconnecting` state means, not a fatal
+      // `error`. See the Web client's `scheduleReconnect`, which reports the same way
+      // unconditionally on every failure.
+      options.onConnectionChange?.("reconnecting");
       // Compute the wait using the failure streak *before* this one counts, so the very
       // first retry is jittered around the old fixed `base` delay rather than already
       // doubled — only the second and later consecutive failures actually back off further.
@@ -96,6 +109,11 @@ export async function runSseClient(options: SseClientOptions): Promise<void> {
     if (options.signal?.aborted) break;
     await delay(backoffDelayMs(reconnectDelayMs, consecutiveFailures, random));
   }
+  // DH-0105: the loop only exits via `signal.aborted` — the one genuine "given up" case,
+  // matching the Web client's `close()` (which explicitly reports `disconnected`). Report it
+  // here too so the TUI header doesn't freeze on a stale `reconnecting`/`live` label when the
+  // operator (or `app.ts`) deliberately tears the connection down.
+  options.onConnectionChange?.("disconnected");
 }
 
 async function connectOnce(
@@ -116,7 +134,7 @@ async function connectOnce(
     throw new Error(`SSE connection failed: HTTP ${response.status}`);
   }
   onOpen();
-  options.onConnectionChange?.("open");
+  options.onConnectionChange?.("live");
 
   const parser = new SseFrameParser();
   const reader = response.body.getReader();

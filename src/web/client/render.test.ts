@@ -243,10 +243,10 @@ describe("renderConnectionStatus", () => {
     expect(root.textContent).toBe("Connecting…");
     expect(root.className).toBe("connection-pill connection-connecting");
 
-    state = { ...state, connectionStatus: "open" };
+    state = { ...state, connectionStatus: "live" };
     renderConnectionStatus(root, state);
     expect(root.textContent).toBe("Live");
-    expect(root.className).toBe("connection-pill connection-open");
+    expect(root.className).toBe("connection-pill connection-live");
   });
 });
 

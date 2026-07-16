@@ -306,8 +306,8 @@ describe("state reducer", () => {
 describe("setConnectionStatus", () => {
   test("updates connectionStatus without touching other fields", () => {
     const state = createInitialState();
-    const next = setConnectionStatus(state, "open");
-    expect(next.connectionStatus).toBe("open");
+    const next = setConnectionStatus(state, "live");
+    expect(next.connectionStatus).toBe("live");
     expect(next.agents).toBe(state.agents);
   });
 });
