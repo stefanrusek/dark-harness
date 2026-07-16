@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0044
 type: feature
-status: refining
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["architect design pass in progress"]
+blocked_by: []
 created: 2026-07-15
 relations:
   depends_on: []
@@ -36,11 +36,248 @@ itself).
 ## Functional Requirements
 
 - **Owner decision (2026-07-15): full scope, both providers.** Switch both Anthropic
-  (`messages.create` streaming variant) and Bedrock (`ConverseStreamCommand`) adapters to
-  their streaming APIs; add an incremental SSE contract addition for partial output; update
-  both TUI and Web to render progressively as chunks arrive.
-- Touches `src/contracts/` (new incremental event shape) — per CLAUDE.md §6.2 this needs an
-  architect design pass before implementation, not a unilateral Core/Server contract edit.
+  (`messages.create` with `stream: true`) and Bedrock (`ConverseStreamCommand`) adapters to
+  their streaming APIs; emit `agent_output` SSE events incrementally as text arrives; both
+  TUI and Web render progressively as chunks arrive.
+- Streaming is **always on** — no config knob, no non-streaming fallback path in the built-in
+  adapters. One code path, one coverage surface; matches Claude Code's own behavior.
+- The JSONL log stays turn-granular: exactly one `message` log line per completed assistant
+  turn carrying the full text (plus one partial line on a mid-turn error/stop — see §D5). The
+  log never becomes chunked.
+- Tool-call semantics are unchanged: tools still execute only after the full assistant
+  message completes (`stopReason === "tool_use"`), exactly as today. Streaming affects
+  *display latency of text*, not turn structure.
+- Architect design pass (Fable, 2026-07-15) below **is** the CLAUDE.md §6.2 sign-off for the
+  two contract touches this ticket makes (§D1 doc-comment change in `src/contracts/events.ts`,
+  §D5 optional `partial` field in `src/contracts/log.ts`). No further architect round-trip
+  needed before implementation.
+
+## Design (architect pass — Fable, 2026-07-15)
+
+### D1. Contract: reuse `AgentOutputEvent`, no new event type
+
+**Decision: no new SSE event type.** The existing `AgentOutputEvent` already has exactly the
+right shape for incremental output — its payload field is literally named `chunk`, and **both
+clients already implement chunk accumulation**: TUI's `appendOutput` (src/tui/state.ts) and
+Web's `appendAssistantChunk` (src/web/client/state.ts) both extend the trailing assistant turn
+when consecutive `agent_output` events arrive with no intervening user turn. The wire contract
+was built for streaming; only the producer side emits once per turn today.
+
+The contract change is therefore a **semantics clarification, not a shape change**: update the
+doc comment on `AgentOutputEvent` in `src/contracts/events.ts` to state that a single
+assistant turn MAY be delivered as many `agent_output` events, in order, and that clients MUST
+accumulate consecutive chunks into one logical turn. Wire shape, version field, and event
+union are untouched.
+
+Why not `AgentOutputChunkEvent` / a `delta` variant:
+
+1. **Version-skew safety.** TUI's `handleSseEvent` switch has no default case — an old TUI
+   binary `--connect`-ed to a newer server receiving an unknown event type falls out of the
+   switch and returns `undefined`, crashing the reducer. Reusing the existing type means zero
+   risk to any deployed client. (Web tolerates unknown types via its `default:` case, but the
+   TUI does not.)
+2. **No turn-boundary marker is needed.** Merging consecutive assistant turns is *already*
+   today's client behavior (two back-to-back assistant turns with no user turn between them
+   merge under both reducers), so per-delta emission produces byte-identical rendered
+   transcripts. Resume via `Last-Event-ID` replays the buffered chunk sequence and
+   reconstructs the same text.
+3. **The final complete text still exists** where it matters — the JSONL `message` log line
+   (one per turn, full text) and `AgentLoopResult.finalOutput` are assembled from the
+   provider's complete result, not from the chunk stream.
+
+### D2. Provider adapter interface (`src/agent/providers/types.ts`)
+
+**Decision: optional callback parameter; keep the promise-of-complete-result return type.**
+
+```ts
+export interface ProviderStreamCallbacks {
+  /** Called zero or more times, in order, with incremental assistant *text* as the provider
+   * streams it. Advisory/display-only: the resolved ProviderCompletionResult remains the
+   * single source of truth for content, stopReason, and usage. Tool-use input deltas are
+   * never surfaced here. A provider that ignores this degrades gracefully to whole-turn
+   * output (the loop has a fallback — see D5). */
+  onTextDelta?: (text: string) => void;
+}
+
+export interface ModelProvider {
+  complete(
+    request: ProviderCompletionRequest,
+    signal?: AbortSignal,
+    callbacks?: ProviderStreamCallbacks,
+  ): Promise<ProviderCompletionResult>;
+}
+```
+
+Why a callback and not an async generator: `loop.ts` needs the *complete* result at the end of
+every turn regardless — the full `content` block array goes into `messages` history, `usage`
+feeds `token_usage`, `stopReason` drives the tool-use/self-report branch. With a generator,
+every consumer would have to re-implement content-block assembly (accumulate text deltas,
+buffer tool_use JSON, map stop reason, collect usage) just to rebuild what the adapter already
+knows. The callback keeps assembly inside the adapter where the SDK-shape knowledge lives,
+keeps `complete()`'s contract identical (same return type, same error taxonomy, same retry
+wrapper), and makes streaming a pure side-channel. It also mirrors the existing optional
+`signal` pattern: additive, third-party-adapter-compatible (an adapter that ignores
+`callbacks` still works).
+
+### D3. Anthropic adapter (`src/agent/providers/anthropic.ts`)
+
+Use raw streaming via `messages.create({ ...params, stream: true })`, which returns an async
+iterable of `Anthropic.RawMessageStreamEvent` — *not* the SDK's `messages.stream()` helper.
+Rationale: the raw iterable keeps `AnthropicClientLike` a minimal injectable slice (tests
+inject a fake async iterable; no MessageStream class to fake), and the accumulation we need is
+small and explicit — which the 100%-coverage gate wants anyway.
+
+`AnthropicClientLike` gains a streaming overload (the SDK's own `create` is overloaded on the
+`stream` param):
+
+```ts
+export interface AnthropicClientLike {
+  messages: {
+    create(
+      params: Anthropic.MessageCreateParamsStreaming,
+      options?: { signal?: AbortSignal },
+    ): Promise<AsyncIterable<Anthropic.RawMessageStreamEvent>>;
+  };
+}
+```
+
+Event mapping (the SDK emits, in order: `message_start` → per block
+{`content_block_start`, `content_block_delta`*, `content_block_stop`} → `message_delta` →
+`message_stop`):
+
+| Stream event | Adapter action |
+| --- | --- |
+| `message_start` | Read `message.usage` → `inputTokens`, `cacheReadTokens` (`cache_read_input_tokens`), `cacheWriteTokens` (`cache_creation_input_tokens`). |
+| `content_block_start`, block `type: "text"` | Open a text accumulator at that index. |
+| `content_block_start`, block `type: "tool_use"` | Open a tool_use accumulator (capture `id`, `name`), start an empty JSON string buffer. |
+| `content_block_delta`, delta `type: "text_delta"` | Append `delta.text` to the text accumulator **and** invoke `callbacks.onTextDelta(delta.text)`. |
+| `content_block_delta`, delta `type: "input_json_delta"` | Append `delta.partial_json` to the tool_use JSON buffer. **Not** surfaced via `onTextDelta`. |
+| `content_block_stop` | Finalize the block: text → `{type: "text", text}`; tool_use → `JSON.parse` the buffer (empty buffer parses as `{}`) → `{type: "tool_use", id, name, input}`. |
+| `message_delta` | `stop_reason` → `mapStopReason` (unchanged); `usage.output_tokens` → `outputTokens` (cumulative — take the last value seen). |
+| `message_stop` | Resolve `ProviderCompletionResult` from the accumulated blocks + usage. |
+
+Unknown block/delta types are skipped, mirroring today's `fromAnthropicContent` returning
+`null` for unknown blocks. `classifyAnthropicError` is reused unchanged — mid-stream failures
+surface as thrown errors from the iterator and carry the same status/APIConnectionError
+signals. Retry interaction: see D5.
+
+### D4. Bedrock adapter (`src/agent/providers/bedrock.ts`)
+
+Switch `ConverseCommand` → `ConverseStreamCommand`. The response carries a `stream` async
+iterable of `ConverseStreamOutput` union members. `BedrockClientLike.send` changes to accept
+`ConverseStreamCommand` and return `{ stream?: AsyncIterable<ConverseStreamOutput> }`.
+
+| Stream event | Adapter action |
+| --- | --- |
+| `messageStart` | (role only — ignore) |
+| `contentBlockStart` with `start.toolUse` | Open a tool_use accumulator at `contentBlockIndex` (capture `toolUseId`, `name`), empty JSON string buffer. |
+| `contentBlockDelta` with `delta.text` | Append to the text accumulator at that index **and** invoke `callbacks.onTextDelta(delta.text)`. |
+| `contentBlockDelta` with `delta.toolUse.input` | Append the partial-JSON string to that block's buffer. Not surfaced. |
+| `contentBlockStop` | Finalize the block (text as-is; tool_use → `JSON.parse` the buffer, empty → `{}`). |
+| `messageStop` | `stopReason` → `mapStopReason` (unchanged). |
+| `metadata` | `usage` → `inputTokens`/`outputTokens`/`cacheReadTokens`/`cacheWriteTokens` (same field names as today's non-streaming response). |
+| `internalServerException` / `modelStreamErrorException` / `throttlingException` / `validationException` (mid-stream error members / thrown during iteration) | Throw; classify via `classifyBedrockError` (unchanged — it keys on exception `name`). |
+
+Note Bedrock, unlike Anthropic, has no explicit block-start event for *text* blocks — a
+`contentBlockDelta` with `delta.text` at an unseen index implicitly opens the accumulator.
+
+### D5. Loop plumbing (`src/agent/loop.ts`)
+
+The loop passes an `onTextDelta` callback into `provider.complete()` and owns **all event
+policy** (adapters stay pure SDK-shape mappers):
+
+1. **Coalescing.** Raw SDK deltas can be per-token. The loop buffers deltas and flushes one
+   `agent_output` SSE event when *either* the buffer reaches **1 KiB** *or* **50 ms** have
+   elapsed since the first unflushed delta (timer via `setTimeout`, cleared on flush). This
+   caps the steady-state event rate at ~20 events/agent/second while keeping perceived
+   latency well under a frame. Constants exported (`STREAM_FLUSH_BYTES`,
+   `STREAM_FLUSH_INTERVAL_MS`) for tests.
+2. **Turn completion.** When `complete()` resolves: flush any buffered remainder, then emit
+   the single `message` JSONL log line with the **full** turn text from
+   `completion.content` (unchanged from today), set `finalText`, emit `token_usage`
+   event/log line (unchanged). The old whole-turn `agent_output` emission is **removed** —
+   except as fallback: if zero deltas were streamed for this turn but the completed text is
+   non-empty (a callback-ignoring provider), emit one whole-turn `agent_output` exactly as
+   today. This keeps third-party/test providers working with no behavior change.
+3. **Mid-turn error or stop with partial output.** If `complete()` rejects (or the signal
+   aborts mid-stream) after ≥1 delta was streamed, the loop first flushes the buffer, then
+   emits a `message` log line carrying the accumulated partial text with a new **optional
+   `partial: true` field** on `LogMessageEvent` (`src/contracts/log.ts`) — additive,
+   absent on all previously-written lines and on all complete turns; readers must tolerate
+   its absence. Then the existing paths run unchanged (`reportStopped` for aborts; rethrow
+   for errors). Without this line, text an operator *watched stream live* would be
+   unfindable in the durable log — a diagnostics gap ADR 0004 exists to prevent.
+4. **Ordering guarantee.** All buffered output is flushed before any subsequent `tool_call`
+   log line, `agent_status` event, or `token_usage` event for that turn — flush is
+   synchronous at turn completion, so no event for turn N+1 can precede turn N's last chunk.
+
+### D6. Retry × streaming (`withRetry` interaction)
+
+**Decision: retry only until first delta.** DH-0009's `withRetry` re-invokes the whole
+attempt; retrying after partial output has been streamed would duplicate text on screen and
+in the event buffer. Each adapter tracks `emittedAny` in the closure shared across attempts
+and gates the retry predicate: `(err) => !emittedAny && classify*(err).retryable`. Before the
+first delta (connection failures, 429s at request time, stream errors before any text) the
+existing retry/backoff behavior is fully preserved; after the first delta, any error is
+surfaced immediately as a non-retried `ProviderError`.
+
+### D7. Mid-stream failure UX
+
+**Decision: keep the partial output visible, add an error marker — never discard/rewind.**
+No retraction event exists in the contract and none is added. What arrived stays rendered in
+both clients; the failure is signaled through the existing channels — `agent_status:
+"failed"` (or `"stopped"`) drives the TUI status color / Web status badge, and the Web error
+banner/log fire exactly as for any other failure. This matches operator expectations (partial
+output is diagnostic signal, not garbage) and requires zero client changes.
+
+### D8. EventBuffer / DH-0012 interaction (flag, not resolved here)
+
+Streaming multiplies event *count* per turn (a 50 KiB assistant turn becomes ~50–1000 events
+depending on flush pattern) while total buffered *bytes* stay roughly flat (same text, plus
+~150 B of envelope per event — the coalescing floor of 1 KiB/event keeps envelope overhead
+under ~15%). Implications for DH-0012, to note on that ticket when implementing:
+
+- The **1000-event count cap** becomes the binding constraint and now represents far less
+  wall-clock history — a resume after even a brief disconnect during heavy streaming will hit
+  the `resync` gap path much more often. DH-0012's implementer should size the count cap with
+  this in mind (e.g. 5000) or lean on the byte cap as primary.
+- The **byte cap** recommendation (~10 MB) is essentially unaffected — chunked delivery of
+  the same text is byte-neutral modulo envelope overhead.
+- Nothing in this design blocks on DH-0012 or vice versa; land in either order.
+
+### D9. Client rendering
+
+**TUI (Mary).** No reducer or contract-handling change required — `appendOutput` already
+accumulates chunks correctly. The work is render scheduling: today app.ts redraws per action;
+with N agents streaming concurrently at ~20 events/s each, per-event full-frame redraw is
+wasteful. Add frame coalescing in app.ts: on state change, mark dirty and schedule a redraw
+at most every **33 ms** (~30 fps) — redraw immediately if ≥33 ms since last frame, else one
+pending `setTimeout` for the remainder. Pure app.ts concern; render.ts/state.ts stay pure and
+untouched (transcript trimming via `MAX_OUTPUT_CHARS` already handles unbounded growth).
+
+**Web (Susan).** No reducer change required — `appendAssistantChunk` accumulates, and
+`appendTranscript`'s fast path already appends a text node for grown turns instead of
+rebuilding. Two adjustments: (1) batch state→DOM updates with `requestAnimationFrame` —
+coalesce events arriving between frames into one `appendTranscript`/sidebar/header pass
+(sidebar + header currently fully rebuild per event, which is the actual per-event cost, not
+the transcript); (2) sanity-check the `aria-live="polite"` transcript region under chunked
+updates — polite live regions coalesce announcements, so this is expected to be fine, but
+verify with a screen reader rather than assume. Existing auto-scroll/jump-to-latest behavior
+applies unchanged.
+
+### D10. Domain assignment (dispatch independently; Core first, E2E last)
+
+| Domain | Owner | Work |
+| --- | --- | --- |
+| **Core** | Grace | `ProviderStreamCallbacks` + `ModelProvider.complete` third param (types.ts); Anthropic adapter streaming per D3; Bedrock adapter streaming per D4; loop.ts coalescing/fallback/partial-log per D5; retry gating per D6. Unit tests with fake async-iterable clients (both adapters), fake providers driving loop coalescing/ordering/error paths. |
+| **Server** | Radia | The two contract edits, pre-approved by this design: `AgentOutputEvent` doc-comment semantics update in `src/contracts/events.ts` (D1) and optional `partial?: true` on `LogMessageEvent` in `src/contracts/log.ts` (D5). No handler changes — the SSE path is event-agnostic. Add a note to DH-0012 re: D8 cap sizing. |
+| **TUI** | Mary | Frame-coalesced redraw in app.ts per D9 (33 ms). No state.ts/render.ts changes. |
+| **Web** | Susan | rAF batching of state→DOM updates; aria-live verification per D9. No state.ts reducer changes. |
+| **E2E** | Hedy | The mock Anthropic-compatible provider endpoint must serve **SSE streaming responses** (`stream: true` → `message_start`/`content_block_delta`/… event stream), since the adapters now always request streaming. Add an e2e asserting multiple `agent_output` events arrive for one long mock turn and the TUI/Web render the accumulated text. Sequenced after Core lands. |
+| Prompt | Iris | No work. |
+
+Suggested landing order: Server (contract edits are two-line, unblock everyone) → Core →
+TUI/Web in parallel → E2E.
 
 ## Notes
 
@@ -51,3 +288,10 @@ itself).
 > Owner decision (2026-07-15): full streaming for both providers, not Anthropic-only. Routed
 > to architect (Fable) for a design pass on the contract addition before dispatch, per
 > CLAUDE.md §6.2.
+
+> [!NOTE]
+> Architect design pass completed 2026-07-15 (Fable) — see Design sections above. Key call:
+> **no new SSE event type**; the existing `agent_output`/`chunk` contract already specifies
+> accumulation semantics and both clients already implement it, so the incremental change is
+> producer-side only plus two additive contract edits (doc comment + optional log field),
+> both signed off in this pass.
