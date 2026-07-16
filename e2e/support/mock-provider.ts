@@ -30,6 +30,11 @@ export interface MockTurn {
    * an upstream provider failure (429/500/etc) or a malformed response. Mutually exclusive
    * with the completion fields above. */
   error?: MockError;
+  /** DH-0060 liveness/heartbeat spike support: delay this turn's HTTP response by this many
+   * milliseconds before responding, simulating a long-running model call so a test can
+   * observe the TUI's per-agent elapsed/liveness indicator actually advance mid-turn rather
+   * than jumping straight from 0s to a completed reply. Ignored when `error` is set. */
+  delayMs?: number;
 }
 
 export interface MockError {
@@ -139,6 +144,9 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
           },
           { status },
         );
+      }
+      if (turn.delayMs !== undefined && turn.delayMs > 0) {
+        await Bun.sleep(turn.delayMs);
       }
       return Response.json(turnToMessage(turn));
     },

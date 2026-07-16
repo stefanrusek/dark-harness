@@ -16,8 +16,11 @@
 // Each --text becomes one scripted mock-model reply, consumed in order per exchange (the last
 // one repeats if the conversation goes longer). For tool calls / errors / token counts, pass
 // --turns <file.json> with an array of MockTurn objects (see e2e/support/mock-provider.ts)
-// instead. The script exits and cleans up when the tmux session ends or after --ttl seconds
-// (default 300), whichever comes first.
+// instead. Pass --delay-ms <n> to delay every --text reply by n milliseconds (liveness/
+// heartbeat scenarios — gives an operator a genuinely long-running turn to watch the elapsed
+// indicator advance during, instead of an effectively-instant mock reply). The script exits
+// and cleans up when the tmux session ends or after --ttl seconds (default 300), whichever
+// comes first.
 
 import { ensureBuilt } from "../../support/build.ts";
 import type { MockTurn } from "../../support/mock-provider.ts";
@@ -31,10 +34,22 @@ interface CliArgs {
   ttlSeconds: number;
   cols: number;
   rows: number;
+  /** DH-0060 liveness/heartbeat scenario support: delays every scripted --text reply by this
+   * many milliseconds (see e2e/support/mock-provider.ts's `MockTurn.delayMs`), so an operator
+   * driving the TUI by hand has a genuinely long-running turn to watch the elapsed/liveness
+   * indicator advance during, instead of an effectively-instant mock reply. */
+  delayMs: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { texts: [], turnsFile: null, ttlSeconds: 300, cols: 100, rows: 30 };
+  const args: CliArgs = {
+    texts: [],
+    turnsFile: null,
+    ttlSeconds: 300,
+    cols: 100,
+    rows: 30,
+    delayMs: 0,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
     const value = argv[i + 1];
@@ -57,6 +72,9 @@ function parseArgs(argv: string[]): CliArgs {
       case "--rows":
         args.rows = Number(value);
         break;
+      case "--delay-ms":
+        args.delayMs = Number(value);
+        break;
       default:
         throw new Error(`unrecognized argument ${JSON.stringify(flag)}`);
     }
@@ -70,9 +88,17 @@ async function loadTurns(args: CliArgs): Promise<MockTurn[]> {
     return (await Bun.file(args.turnsFile).json()) as MockTurn[];
   }
   if (args.texts.length > 0) {
-    return args.texts.map((text) => successTurn(text));
+    return args.texts.map((text) => ({
+      ...successTurn(text),
+      ...(args.delayMs > 0 ? { delayMs: args.delayMs } : {}),
+    }));
   }
-  return [successTurn("Scripted mock reply. (Pass --text or --turns to customize.)")];
+  return [
+    {
+      ...successTurn("Scripted mock reply. (Pass --text or --turns to customize.)"),
+      ...(args.delayMs > 0 ? { delayMs: args.delayMs } : {}),
+    },
+  ];
 }
 
 function tmuxSessionAlive(sessionName: string): boolean {

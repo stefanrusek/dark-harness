@@ -39,6 +39,11 @@ export interface TmuxSession {
   isProcessExited(): boolean;
   /** Polls `isProcessExited()` until it's true or `timeoutMs` elapses. */
   waitForExit(timeoutMs?: number): Promise<void>;
+  /** DH-0025 resize-behavior spike support: resizes the pane's underlying pseudo-terminal
+   * (`tmux resize-window -x/-y`), which delivers a real `SIGWINCH` to the wrapped process —
+   * same signal a real terminal emulator sends on a user resize. `dh`'s TUI (src/tui/app.ts)
+   * reacts to this exactly as it would in a real terminal. */
+  resize(cols: number, rows: number): void;
   kill(): void;
 }
 
@@ -137,6 +142,21 @@ export function startTmuxSession(command: string[], options: TmuxSessionOptions 
           throw new Error(`timed out after ${timeoutMs}ms waiting for tmux pane process to exit`);
         }
         await Bun.sleep(150);
+      }
+    },
+    resize(cols: number, rows: number) {
+      const result = run([
+        "tmux",
+        "resize-window",
+        "-t",
+        sessionName,
+        "-x",
+        String(cols),
+        "-y",
+        String(rows),
+      ]);
+      if (!result.ok) {
+        throw new Error(`tmux resize-window failed: ${result.stderr}`);
       }
     },
     kill() {

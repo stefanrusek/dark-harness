@@ -108,7 +108,27 @@ and whose stdout it interprets.
 | `spike-input-editing.ts` | DH-0026: Left×7 into typed text + mid-string insert, Home-prepend, End-append; the *sent transcript turn* is the ground-truth assertion | 2 |
 | `spike-ctrlc-exit-code.ts` | DH-0059: Ctrl+C on a waiting session → `session ended (exit 0)` frame → real process exit code 0 (echoed into the pane via an `sh -c` wrapper); also proves the cyan "waiting" status glyph (status-color Test Plan item) | 3 |
 | `spike-support.ts` | Shared boot (`bootLocalTui`) + check + `reportAndExit` report format — the module the implementing agent extends per scenario | — |
-| `interactive-boot.ts` | Agent-*driven* mode: stands up binary+mock provider+tmux, prints the session name and exact `tmux send-keys`/`capture-pane` commands, auto-cleans on session end or TTL. For scenarios that need judgment rather than fixed string asserts | — |
+| `interactive-boot.ts` | Agent-*driven* mode: stands up binary+mock provider+tmux, prints the session name and exact `tmux send-keys`/`capture-pane` commands, auto-cleans on session end or TTL. For scenarios that need judgment rather than fixed string asserts. Now also takes `--delay-ms <n>` to delay scripted replies (liveness/heartbeat scenarios) | — |
+
+**Round 2 (implementer pass, 2026-07-15/16 — closes out the remaining Test Plan items):**
+
+| Script | Test Plan items proven | Checks |
+| --- | --- | --- |
+| `spike-agent-tree-hierarchy.ts` | Agent tree renders a real parent/child spawn hierarchy (a genuine `Agent` tool_use turn, not a hand-built fixture — child entry indented one level deeper than root); also proves the green "done" status glyph (status-color Test Plan item, done half) | 4 |
+| `spike-task-failed-status.ts` | `TASK_FAILED` self-report reflected in the UI's final status marker — via a spawned sub-agent (the root can never reach "failed" while interactive, see the script's own header comment for why), red "failed" status glyph in the tree | 2 |
+| `spike-tree-scroll.ts` | DH-0027: tree view scrolls to keep the selection visible in a 16-entry tree squeezed into a 15-row pane — selection marker never disappears, root entry scrolls out of view as selection moves deep into the list | 3 |
+| `spike-log-download.ts` | Log download/export produces a valid file — per-agent JSONL (`application/x-ndjson`, valid header line) and full-session tar bundle (`application/x-tar`, non-empty). Driven directly over HTTP/SSE against a real `dh --server`, not through a TUI keystroke — **the console TUI has no keybinding for this command today** (only the web client exposes a download affordance); see the script's header comment | 6 |
+| `spike-wide-char.ts` | DH-0025 (wide-character half only — see Mode B below for the resize/flicker halves): CJK + emoji + combining-mark reply renders verbatim, frame stays at exactly the pane's row count (no corrupted/ragged frame) through the wide-char turn and a following plain-ASCII turn | 6 |
+| `spike-sse-reconnect.ts` | DH-0024: kills a real separately-running `dh --server` mid-session (`--connect` mode only — local mode has no independent server to kill), restarts a fresh one on the same port, confirms the client's connection status leaves "open", the "⚠ Reconnected — history may be incomplete." notice appears, and the pre-kill transcript turn is still visible exactly once (not lost, not duplicated) | 6 |
+
+All six ran twice consecutively against the real compiled binary — 27/27 checks green both runs — before being committed, same discipline as round 1's four spikes. `spike-agent-tree-hierarchy.ts`/`spike-task-failed-status.ts` needed one iteration each to fix an assertion that assumed the tree label showed the provider's model id (`(mock-model)`) rather than the `dh.json` model config name (`(sub)`) — fixed by reading the real captured pane instead of guessing, per this project's "actually run it" discipline.
+
+Two small support-module additions backing these: `MockTurn.delayMs` (`e2e/support/mock-provider.ts`) — delays a scripted turn's HTTP response, used by the liveness/heartbeat Mode B scenario below to create a genuinely slow turn instead of an effectively-instant mock reply; and `TmuxSession.resize()` (`e2e/support/tmux-pty.ts`) — issues a real `tmux resize-window`, delivering an actual `SIGWINCH` to the wrapped process, used by the resize/flicker Mode B scenario.
+
+**Two Test Plan items have no fixed-string-assertable script, by design** (per the ticket's own Mode B guidance) and are instead driven directly by the orchestrator (`run-all.ts`, below) as inline scenarios rather than separate `spike-*.ts` files:
+
+- **Liveness/heartbeat during a long turn**: a genuinely slow mock reply (`delayMs: 6000`) lets the orchestrator poll the tree view's per-agent elapsed counter (`[Ns]`) twice, ~3.5s apart, and confirm it actually advanced. This one *is* fully mechanical (no human judgment needed) and reports a normal PASS/FAIL, not a heuristic.
+- **DH-0025 resize/flicker**: two sub-claims in one Test Plan bullet. "Resizing rapidly doesn't corrupt" is mechanical (rapid `resize()` calls, checked for exact row count + title-bar integrity after each) and reports a normal PASS/FAIL. "No visible full-redraw flicker on the once-per-second idle tick" is genuinely a temporal visual judgment call a text capture can't fully settle — the orchestrator still captures repeatedly through an idle tick and checks the stable regions never go blank/garbled, but reports this half as `HEURISTIC-PASS`/`HEURISTIC-FAIL`, explicitly labeled as a mechanical proxy, not a substitute for a human actually looking at it.
 
 Run any spike: `bun e2e/spikes/tui/spike-<name>.ts` from the repo root. Exit code 0 = all
 checks passed, 1 = at least one failed. Stdout is a fixed machine-readable format:
@@ -287,6 +307,234 @@ A fresh haiku agent with no repo familiarity succeeds only if the prompt itself 
   speculation — a verification run that "fixes" something has silently become an
   implementation run.
 
+## Stamped Prompts (Round 2 — the six new scripted spikes)
+
+Every prompt below follows the Prompt Template above verbatim, mechanical rules unchanged;
+only the SCENARIO/RUN/expected-forbidden-strings slots vary.
+
+```text
+You are a TUI verification agent. You have no other context; everything you need is below.
+Do not modify any file. Your only job is to run one scenario and report the result.
+
+SCENARIO: Agent tree parent/child hierarchy — spawning a sub-agent via the real Agent tool
+must render it indented under its parent in the tree view, and the sub-agent's own status
+color (green "done" on success) must update correctly.
+
+SETUP (all commands from the repo root, ABSOLUTE_REPO_PATH):
+1. Check prerequisites: `bun --version` (need >= 1.3) and `tmux -V`. If either is missing,
+   STOP and report exactly: `BLOCKED: <tool> not installed`.
+2. If `node_modules/` is missing, run `bun install`.
+
+RUN:
+3. Execute: `bun e2e/spikes/tui/spike-agent-tree-hierarchy.ts` (builds the real binary, drives
+   it under a real tmux PTY, allow ~60s). Capture full stdout and the exit code.
+
+INTERPRET (mechanical rules — do not deviate):
+4. Exit code 0 AND a final `RESULT: PASS` line => PASSED. Anything else => FAILED. A missing
+   RESULT line is a FAIL, never a PASS.
+5. Sanity-check the evidence block yourself: it must contain `agent-root` and a second entry
+   ending in `(sub)` indented deeper than the root line. It must NOT show only one entry. If
+   your reading disagrees with the RESULT line, report FAIL.
+
+REPORT (your final message, exactly this shape):
+- First line: `PASS: agent-tree-hierarchy` / `FAIL: agent-tree-hierarchy` / `BLOCKED: <reason>`.
+- Every [PASS]/[FAIL] check line, verbatim; then the full evidence block, verbatim.
+- On failure: one sentence quoting the exact missing/forbidden string. No speculation, at
+  most one retry, no fixes.
+```
+
+```text
+You are a TUI verification agent. You have no other context; everything you need is below.
+Do not modify any file. Your only job is to run one scenario and report the result.
+
+SCENARIO: TASK_FAILED status marker — a sub-agent that self-reports the TASK_FAILED marker
+must show a terminal "failed" status in the tree view.
+
+SETUP (all commands from the repo root, ABSOLUTE_REPO_PATH):
+1. Check prerequisites: `bun --version` (need >= 1.3) and `tmux -V`. If either is missing,
+   STOP and report exactly: `BLOCKED: <tool> not installed`.
+2. If `node_modules/` is missing, run `bun install`.
+
+RUN:
+3. Execute: `bun e2e/spikes/tui/spike-task-failed-status.ts` (allow ~60s). Capture full
+   stdout and the exit code.
+
+INTERPRET (mechanical rules — do not deviate):
+4. Exit code 0 AND a final `RESULT: PASS` line => PASSED. Anything else => FAILED. A missing
+   RESULT line is a FAIL, never a PASS.
+5. Sanity-check the evidence: the raw-ANSI evidence block must contain a line with `(sub)`
+   preceded by a red-colored dot glyph (the escape sequence `\x1b[31m` immediately before it).
+   If your reading disagrees with the RESULT line, report FAIL.
+
+REPORT (your final message, exactly this shape):
+- First line: `PASS: task-failed-status` / `FAIL: task-failed-status` / `BLOCKED: <reason>`.
+- Every [PASS]/[FAIL] check line, verbatim; then the full evidence block, verbatim.
+- On failure: one sentence quoting the exact missing/forbidden string. No speculation, at
+  most one retry, no fixes.
+```
+
+```text
+You are a TUI verification agent. You have no other context; everything you need is below.
+Do not modify any file. Your only job is to run one scenario and report the result.
+
+SCENARIO: Tree-scroll-follows-selection (ticket DH-0027) — navigating a tree taller than the
+visible pane must keep the selected entry on screen, not scroll it off or leave the viewport
+pinned to the top.
+
+SETUP (all commands from the repo root, ABSOLUTE_REPO_PATH):
+1. Check prerequisites: `bun --version` (need >= 1.3) and `tmux -V`. If either is missing,
+   STOP and report exactly: `BLOCKED: <tool> not installed`.
+2. If `node_modules/` is missing, run `bun install`.
+
+RUN:
+3. Execute: `bun e2e/spikes/tui/spike-tree-scroll.ts` (allow ~60s). Capture full stdout and
+   the exit code.
+
+INTERPRET (mechanical rules — do not deviate):
+4. Exit code 0 AND a final `RESULT: PASS` line => PASSED. Anything else => FAILED. A missing
+   RESULT line is a FAIL, never a PASS.
+5. Sanity-check the evidence: the final captured pane must contain a line starting with
+   `> ` (the selection marker) and must NOT contain the literal text `agent-root` (proving the
+   viewport scrolled past the root entry as selection moved deep into the list). If your
+   reading disagrees with the RESULT line, report FAIL.
+
+REPORT (your final message, exactly this shape):
+- First line: `PASS: tree-scroll` / `FAIL: tree-scroll` / `BLOCKED: <reason>`.
+- Every [PASS]/[FAIL] check line, verbatim; then the full evidence block, verbatim.
+- On failure: one sentence quoting the exact missing/forbidden string. No speculation, at
+  most one retry, no fixes.
+```
+
+```text
+You are a TUI verification agent. You have no other context; everything you need is below.
+Do not modify any file. Your only job is to run one scenario and report the result.
+
+SCENARIO: Log download/export — the download_logs server command must return a valid
+per-agent JSONL file and a valid full-session tar bundle. (Not TUI-keystroke-driven: the
+console client has no keybinding for this today — see the script's header comment.)
+
+SETUP (all commands from the repo root, ABSOLUTE_REPO_PATH):
+1. Check prerequisites: `bun --version` (need >= 1.3). (No tmux dependency for this one — it
+   drives a real `dh --server` process directly over HTTP.) If missing, STOP and report
+   exactly: `BLOCKED: bun not installed`.
+2. If `node_modules/` is missing, run `bun install`.
+
+RUN:
+3. Execute: `bun e2e/spikes/tui/spike-log-download.ts` (allow ~30s). Capture full stdout and
+   the exit code.
+
+INTERPRET (mechanical rules — do not deviate):
+4. Exit code 0 AND a final `RESULT: PASS` line => PASSED. Anything else => FAILED. A missing
+   RESULT line is a FAIL, never a PASS.
+5. Sanity-check the evidence: it must show `-> 200` for both the per-agent and bundle
+   requests, `content-type=application/x-ndjson` for the first and
+   `content-type=application/x-tar` for the second, and `byteLength=` greater than 0. If your
+   reading disagrees with the RESULT line, report FAIL.
+
+REPORT (your final message, exactly this shape):
+- First line: `PASS: log-download` / `FAIL: log-download` / `BLOCKED: <reason>`.
+- Every [PASS]/[FAIL] check line, verbatim; then the full evidence block, verbatim.
+- On failure: one sentence quoting the exact missing/forbidden string. No speculation, at
+  most one retry, no fixes.
+```
+
+```text
+You are a TUI verification agent. You have no other context; everything you need is below.
+Do not modify any file. Your only job is to run one scenario and report the result.
+
+SCENARIO: Wide-character rendering (ticket DH-0025, wide-character half) — CJK text, emoji,
+and combining marks must render verbatim without corrupting the frame, and a plain-ASCII turn
+right after must still render correctly.
+
+SETUP (all commands from the repo root, ABSOLUTE_REPO_PATH):
+1. Check prerequisites: `bun --version` (need >= 1.3) and `tmux -V`. If either is missing,
+   STOP and report exactly: `BLOCKED: <tool> not installed`.
+2. If `node_modules/` is missing, run `bun install`.
+
+RUN:
+3. Execute: `bun e2e/spikes/tui/spike-wide-char.ts` (allow ~60s). Capture full stdout and the
+   exit code.
+
+INTERPRET (mechanical rules — do not deviate):
+4. Exit code 0 AND a final `RESULT: PASS` line => PASSED. Anything else => FAILED. A missing
+   RESULT line is a FAIL, never a PASS.
+5. Sanity-check the evidence: the pane must contain the literal text `宽字符测试`, `🎉`, and
+   `café` (note: real captures may show a trailing combining accent as an extra visual mark
+   over the final character — this is expected, not corruption), and later
+   `Plain ASCII follow-up received.`. If your reading disagrees with the RESULT line, report
+   FAIL.
+
+REPORT (your final message, exactly this shape):
+- First line: `PASS: wide-char` / `FAIL: wide-char` / `BLOCKED: <reason>`.
+- Every [PASS]/[FAIL] check line, verbatim; then the full evidence block, verbatim.
+- On failure: one sentence quoting the exact missing/forbidden string. No speculation, at
+  most one retry, no fixes.
+```
+
+```text
+You are a TUI verification agent. You have no other context; everything you need is below.
+Do not modify any file. Your only job is to run one scenario and report the result.
+
+SCENARIO: SSE reconnect (ticket DH-0024) — killing and restarting the server mid-session must
+show a visible reconnect notice in the connected client, without losing or duplicating
+already-rendered transcript content.
+
+SETUP (all commands from the repo root, ABSOLUTE_REPO_PATH):
+1. Check prerequisites: `bun --version` (need >= 1.3) and `tmux -V`. If either is missing,
+   STOP and report exactly: `BLOCKED: <tool> not installed`.
+2. If `node_modules/` is missing, run `bun install`.
+
+RUN:
+3. Execute: `bun e2e/spikes/tui/spike-sse-reconnect.ts` (allow ~60s — it spawns two separate
+   real server processes in sequence). Capture full stdout and the exit code.
+
+INTERPRET (mechanical rules — do not deviate):
+4. Exit code 0 AND a final `RESULT: PASS` line => PASSED. Anything else => FAILED. A missing
+   RESULT line is a FAIL, never a PASS.
+5. Sanity-check the evidence: the final pane must contain the literal text
+   `⚠ Reconnected — history may be incomplete.` and exactly one occurrence of
+   `Hello before the restart.`. If your reading disagrees with the RESULT line, report FAIL.
+
+REPORT (your final message, exactly this shape):
+- First line: `PASS: sse-reconnect` / `FAIL: sse-reconnect` / `BLOCKED: <reason>`.
+- Every [PASS]/[FAIL] check line, verbatim; then the full evidence block, verbatim.
+- On failure: one sentence quoting the exact missing/forbidden string. No speculation, at
+  most one retry, no fixes.
+```
+
+## Orchestrator (Round 2 — owner requirement: one comprehensive report)
+
+`e2e/spikes/tui/run-all.ts` is the orchestrating agent this ticket's Functional Requirements
+call for. `bun e2e/spikes/tui/run-all.ts [--out <path>]`:
+
+1. Runs every scripted spike above as a real subprocess, parses its `RESULT:`
+   line/exit code, and records a PASS/FAIL verdict + the full captured evidence for every
+   Test Plan item that spike proves (one spike can prove more than one item — each is listed
+   separately, per its own header comment).
+2. Drives the two Mode B scenarios itself (liveness/heartbeat, DH-0025 resize/flicker) as
+   inline TypeScript, using the same `e2e/support/` primitives every spike uses — no
+   sub-agent dispatch needed since these are still mechanically driveable steps, just without
+   a fixed pass/fail string contract for the flicker half (see the Spikes section above for
+   exactly which half is heuristic and why).
+3. Writes one Markdown report (default `e2e/spikes/tui/REPORT.md`, override with `--out`)
+   with a summary table (every Test Plan item + verdict) followed by one `<details>` section
+   per item containing the real captured pane text ("text screenshot") that produced the
+   verdict — collapsible so the file is skimmable but nothing is hidden.
+4. Exits 0 if every item is `PASS`/`HEURISTIC-PASS`/`OUT-OF-SCOPE`, 1 if anything is a real
+   `FAIL` (heuristic verdicts and out-of-scope items never fail the build — they're reported,
+   not gated).
+
+Verdict vocabulary the report uses: `PASS`/`FAIL` (fully mechanical, no ambiguity),
+`HEURISTIC-PASS`/`HEURISTIC-FAIL` (a best-effort mechanical proxy for a genuinely
+judgment-based item — explicitly labeled, a human should still eyeball the embedded evidence
+rather than trust the label alone), `OUT-OF-SCOPE` (the ticket itself excludes the item —
+DH-0044 not yet implemented, DH-0012 not visually verifiable in a short session).
+
+**Verified end-to-end** (2026-07-15/16, this round): ran twice consecutively against the real
+compiled binary. Both runs: 19/19 Test Plan items enumerated, 17 real PASS, 1 HEURISTIC-PASS,
+2 OUT-OF-SCOPE, 0 FAIL, exit code 0, no orphaned tmux sessions afterward (`tmux ls` reports no
+server running), report written both times (~1,100 lines, includes every captured pane).
+
 ## Notes
 
 > [!NOTE]
@@ -298,3 +546,24 @@ A fresh haiku agent with no repo familiarity succeeds only if the prompt itself 
 > request, Fable should write actual spike scripts (real, runnable prompt/harness examples)
 > and attach them to this ticket so the implementing agent has a proven pattern to extend,
 > not just a written plan.
+
+> [!NOTE]
+> **Round 2 (implementer pass, 2026-07-15/16 — Hedy, E2E domain lead) completed the
+> remaining Test Plan coverage.** Every item in the Test Plan is now enumerated with a real,
+> executed verdict except the two the ticket itself marks out-of-scope (DH-0044 not yet
+> implemented, DH-0012 not visually verifiable in a short session) — see the Spikes section's
+> Round 2 table and the Orchestrator section above for exactly what proves what. Six new
+> spike scripts, six new stamped prompts, one new orchestrator (`run-all.ts`) that runs
+> everything end-to-end and produces `e2e/spikes/tui/REPORT.md` — a single, standalone,
+> human-readable report enumerating every acceptance criterion by name with its verdict and
+> captured pane evidence, per the owner's Functional Requirements note. Ran the full
+> orchestrator twice consecutively against the real compiled binary before writing this note
+> (19/19 items enumerated, 17 PASS / 1 HEURISTIC-PASS / 2 OUT-OF-SCOPE / 0 FAIL both times, no
+> orphaned tmux sessions afterward). Status kept at `implementing` (not closed) — this may
+> still want a final coordinator/owner review of the report format and the two heuristic vs.
+> mechanical judgment calls (liveness/heartbeat vs. resize-flicker) before being marked done.
+>
+> Two small, well-justified additions to `e2e/support/` backing this round:
+> `MockTurn.delayMs` (mock-provider.ts) and `TmuxSession.resize()` (tmux-pty.ts) — both
+> documented in place, both exercised by the new spikes/orchestrator, no other file touched
+> outside `e2e/`.
