@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0089
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
@@ -30,32 +30,188 @@ Found while implementing DH-0065's TUI polish: the transcript can show sub-agent
   test`") in the transcript at the point the call occurs, not only after the fact via the
   JSONL log.
 
-## Functional Requirements
+## Design (Fable, architect-on-call, 2026-07-16 — signed per Constitution §6.2)
 
-- New SSE event type in `src/contracts/events.ts` (e.g. `ToolCallEvent`/`ToolResultEvent` —
-  exact shape is the architect's call) — additive, per ADR 0006's "extend minimally."
-- `src/agent/loop.ts` emits it at tool-call time (and possibly tool-result time), alongside
-  the existing JSONL log write (not replacing it).
-- TUI (`src/tui/render.ts`) and Web (`src/web/client/render.ts`) both consume it to show a
-  compact live indicator — reuse the styling/marker conventions DH-0065 already established
-  for sub-agent spawn markers where sensible.
+### D1. Event shapes (`src/contracts/events.ts`, additive — ADR 0002/0006 "extend minimally")
+
+Two new event types, named to match their JSONL log-line counterparts (`tool_call` /
+`tool_result` in `src/contracts/log.ts`) — precedent: `token_usage` already shares its name
+across both schemas. Call-start **and** call-result: start alone can't distinguish a
+long-running Bash call from a finished one, and result lets clients mark errors; the volume
+cost is negligible (see D3).
+
+```ts
+export interface ToolCallEvent extends SseEventBase {
+  type: "tool_call";
+  agentId: string;
+  /** Correlates with the matching tool_result event (same id as the JSONL line's toolUseId). */
+  toolUseId: string;
+  toolName: string;
+  /** Display-only, single-line, <= TOOL_INPUT_SUMMARY_MAX_CHARS (200) chars, "…"-suffixed
+   * when truncated. NEVER the full arguments — the JSONL log's tool_call line carries those
+   * (redacted per DH-0020); this field exists solely for a compact live indicator. Produced
+   * by src/agent/tool-summary.ts (Core) and secret-redacted server-side before it reaches
+   * the wire (see D4). Not parseable — clients must not attempt to reconstruct arguments. */
+  inputSummary: string;
+}
+
+export interface ToolResultEvent extends SseEventBase {
+  type: "tool_result";
+  agentId: string;
+  toolUseId: string;
+  /** Repeated from the tool_call event so clients that missed the call (resume gap) can
+   * still render something meaningful without a join. */
+  toolName: string;
+  isError: boolean;
+  /** Wall-clock duration of the execute() call. For run_in_background tools (Bash bg, Agent)
+   * this measures the synchronous spawn/dispatch, not background completion. */
+  durationMs: number;
+}
+```
+
+Both added to the `ServerSentEvent` union. Deliberately **no output content** on
+`tool_result`: outputs can be huge (whole-file Reads) and are the largest secret surface;
+a compact indicator only needs success/failure. Full output lives in the JSONL log, already
+redacted per DH-0020. No `version` bump — additive union members, per-event `version: 1`
+unchanged; the TUI's `KNOWN_TYPES` whitelist (`src/tui/sse-parser.ts`) means older clients
+drop unknown types gracefully, so compat holds in both directions.
+
+`inputSummary` production: new Core helper `summarizeToolInput(toolName, input)` in
+`src/agent/tool-summary.ts`, exporting `TOOL_INPUT_SUMMARY_MAX_CHARS = 200`. Heuristic:
+first present string value among the priority keys `["command", "file_path", "path", "url",
+"query", "prompt", "description", "name", "skill"]`; else the first string-valued property;
+else compact `JSON.stringify(input)`. Then collapse all whitespace runs to single spaces and
+truncate to 200 chars with a trailing `…`. The priority list is an internal heuristic Core
+may evolve without a contracts change — the wire contract only promises "single-line,
+display-only, <=200 chars".
+
+### D2. Emission point (`src/agent/loop.ts`, Core)
+
+Inside `runToolCalls()` (the per-toolUse loop), alongside — never replacing — the existing
+JSONL lines, following loop.ts's file-wide emitEvent-then-emitLog ordering convention:
+
+- **Before `tool.execute()`**: emit the `tool_call` SSE event immediately before the existing
+  `emitLog({type: "tool_call", ...})` (currently loop.ts:235–242). Capture
+  `const startedAt = Date.now()` here.
+- **After output/isError are determined** (covers both the unknown-tool branch and the normal
+  execute path): emit the `tool_result` SSE event with `durationMs: Date.now() - startedAt`,
+  immediately before the existing `emitLog({type: "tool_result", ...})` (currently
+  loop.ts:260–267).
+
+No other emission sites. Standalone `--instructions`/`--job` mode is unaffected (no `onEvent`
+sink wired — `emitEvent` is already a no-op there).
+
+### D3. Volume/throttling: none needed (argued)
+
+DH-0044's 1 KiB / 50 ms coalescing exists because text-delta streaming is a *continuous*
+firehose — hundreds of events/sec for the full duration of every completion, uncapped by
+anything. Tool-call events are structurally different:
+
+- They occur only inside `runToolCalls`, which awaits each tool **sequentially**; every event
+  pair is separated by at least one real tool execution (file IO, subprocess, network), and
+  every batch is separated by a full provider round-trip (hundreds of ms to seconds).
+- Worst realistic case — a turn with dozens of instant tool calls — is a one-off burst of
+  ~2 small events per call, self-limiting at the next model round-trip. Steady-state rate is
+  far below the ~20 events/agent/sec DH-0044's coalescing already deems acceptable.
+- Each event serializes to ≤ ~350 bytes (200-char summary + envelope), so `EventBuffer`'s
+  10 MB byte cap (DH-0012) is unaffected; count-cap consumption (2 per call) is modest and
+  already covered by DH-0044 §D8's note about raising the count cap for streaming. **No
+  EventBuffer resize needed for this ticket.**
+- Clients do O(1) work per event (append/update one marker), and both clients already absorb
+  bursts at the render layer (TUI ~30 fps frame-coalescing, Web rAF batching, per DH-0044 §D9).
+
+Decision: emit unconditionally, no coalescing, no throttling. If a pathological MCP tool ever
+spams, the failure mode is bounded (EventBuffer eviction shortens the resume window) — revisit
+then, not preemptively.
+
+### D4. Redaction (Server touch — this is the one thing beyond pass-through)
+
+DH-0020's `redactSecrets` (`src/server/redact.ts`) guards only the JSONL sink
+(`SessionLogger.append`); the live SSE stream was out of its scope because no SSE event
+carried tool arguments — this ticket changes that (an MCP tool call's arguments can carry an
+API key). Server therefore applies redaction at event intake: a small
+`sanitizeEvent(event, knownSecrets)` helper that, for `type === "tool_call"`, returns a copy
+with `inputSummary: redactSecrets(inputSummary, knownSecrets)` (identity for every other
+type), applied at **both** `agentLoop.onEvent` subscription sites in `src/server/server.ts`
+(EventBuffer intake, currently :124, and the live per-connection broadcast, currently :286)
+— or hoisted into one shared wrapper, Server's call.
+
+Accepted residual risk (documented, not fixed): Core truncates to 200 chars before Server
+redacts, so a secret straddling the truncation boundary loses exact-match known-secret
+redaction (pattern-based redaction still matches truncated prefixes of `sk-ant-…`-style
+keys). Acceptable because the wire posture is air-gapped plaintext by default (ADR 0003) and
+the durable record (JSONL) is fully redacted.
+
+### D5. Client consumption
+
+Shared rule for both clients: **suppress the generic marker for `toolName === "Agent"`** —
+DH-0065's richer spawn marker (driven by `agent_spawned`, showing model + description)
+already covers spawns, and rendering both would double-mark every spawn. Exception: an
+`Agent` `tool_result` with `isError: true` IS rendered (a failed spawn never fires
+`agent_spawned`, so the error would otherwise be invisible).
+
+**TUI (Mary — `src/tui/sse-parser.ts`, `state.ts`, `render.ts`):**
+
+- `sse-parser.ts`: add `"tool_call"`, `"tool_result"` to `KNOWN_TYPES`.
+- `state.ts`: on `tool_call`, append a tool-role turn via the existing `appendToolMarker`
+  path (DH-0065) with text `` `<toolName>: <inputSummary>` `` and record
+  `toolUseId → turn ref` in a per-agent pending map. On `tool_result`: if `isError`, append
+  a red `✗` suffix to that turn's text; on success leave the marker unchanged (no churn).
+  Remove from the map either way. Unknown `toolUseId` (resume gap): render a standalone
+  `` `<toolName> ✗` `` marker if `isError`, else drop.
+- `render.ts`: structurally unchanged — reuses DH-0065's tool-role branch exactly (first-row
+  glyph `⚙ `, whole row DIM/SGR-2, blank continuation gutter). Exact error-suffix SGR is
+  Mary's call (suggest `\x1b[31m✗`).
+
+**Web (Susan — `src/web/client/sse.ts`, `state.ts`, `render.ts`, `styles.css`):**
+
+- Add a `"tool"` turn kind (Web currently has none — no spawn marker either). State logic
+  mirrors the TUI's (pending map keyed by `toolUseId`, error suffix, Agent suppression rule).
+- `render.ts`: new `buildTurnElement` branch for the tool kind — a single compact
+  `.turn.turn-tool` row, no "You"/"Agent" role label: glyph `⚙` + `toolName:` +
+  summary, muted foreground, smaller font. Error adds class `turn-tool-error` and a `✗` in
+  the existing danger color.
+- Optional (Susan's call, not required by this ticket): drive a spawn marker from
+  `agent_spawned` through the same tool-turn kind, closing the TUI/Web asymmetry DH-0065 left.
+
+### D6. Domain assignment and sequencing
+
+1. **Core (Grace)** — first: the `src/contracts/events.ts` addition (architect-approved
+   here, exact shapes in D1), `src/agent/tool-summary.ts`, `loop.ts` emission (D2), unit
+   tests (events emitted for known + unknown tools, event/log adjacency, `durationMs`,
+   summary heuristic/single-lining/truncation).
+2. **Server (Radia)** — after Core: `sanitizeEvent` redaction wrapper (D4). No EventBuffer
+   resize (D3). Tests: a `tool_call` event carrying a configured secret arrives redacted on
+   both the replay and live paths.
+3. **TUI (Mary)** and **Web (Susan)** — in parallel, after Core lands (they only need the
+   contract types + a server emitting the events).
+4. **E2E (Hedy)** — follow-up scope, sequenced last: mock provider issues a `tool_use` turn;
+   assert the TUI shows a `⚙ Bash:` marker and the Web transcript grows a `.turn-tool` row.
 
 ## Assumptions
 
 - DH-0065's sub-agent-spawn marker (inferred from the existing `agent_spawned` event) is a
   reasonable stopgap for that one case and doesn't need to be redone once this lands — this
-  ticket is about the general case (any tool call), not a replacement for that.
+  ticket is about the general case (any tool call), not a replacement for that. (Confirmed
+  by the design: D5 keeps the spawn marker and suppresses the generic one for `Agent` calls.)
 
 ## Risks
 
-- Event volume: a busy agent can call many tools quickly; consider whether this needs the
+- ~~Event volume: a busy agent can call many tools quickly; consider whether this needs the
   same coalescing/throttling treatment DH-0044's streaming design already established for
-  `agent_output`, to avoid flooding the SSE stream.
+  `agent_output`.~~ **Resolved (D3): no throttling — tool-call volume is bounded by
+  sequential execution + provider round-trips, orders of magnitude below the text-delta
+  stream DH-0044's coalescing exists for.**
+- Truncation-boundary redaction gap: a secret straddling the 200-char summary truncation
+  loses exact-match redaction (patterns still catch key prefixes). Accepted, documented in
+  D4 — the JSONL durable record is fully redacted, and the default posture is air-gapped.
 
 ## Open Questions
 
-- Exact event shape/granularity (call-start only, or call-start + call-result; full
-  arguments or a truncated summary) — architect's call.
+- ~~Exact event shape/granularity (call-start only, or call-start + call-result; full
+  arguments or a truncated summary) — architect's call.~~ **Resolved: call-start + call-result
+  (`tool_call` / `tool_result`, D1); truncated display-only `inputSummary`, never full
+  arguments; no output content on results.**
 
 ## Notes
 
