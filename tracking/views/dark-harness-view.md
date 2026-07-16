@@ -42,6 +42,7 @@ source: tracking/
 | [DH-0068](../DH-0068-readme-hero-compelling-promo-screenshot-and-visual-identity-for-the-landing-page.md) | README hero: compelling promo screenshot and visual identity for the landing page | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut 🔒 | feature | stefan |
+| [DH-0107](../DH-0107-real-gemma-4-support-requires-a-new-provider-type-bedrock-mantle-openai-compatible-api.md) | Real Gemma 4 support requires a new provider type (Bedrock Mantle, OpenAI-compatible API) | feature | stefan |
 
 ### ready
 
@@ -68,7 +69,7 @@ source: tracking/
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
 | [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | feature | stefan |
-| [DH-0106](../DH-0106-gemma4-bedrock-default-model-hallucinates-tool-calls-instead-of-making-them.md) | gemma4 (Bedrock default model) hallucinates tool calls instead of making them | bug | stefan |
+| [DH-0106](../DH-0106-gemma4-bedrock-default-model-hallucinates-tool-calls-instead-of-making-them.md) | dh init's scaffolded "gemma4" is actually Gemma 3 (wrong model), and hallucinates tool calls | bug | stefan |
 
 ### implementing
 

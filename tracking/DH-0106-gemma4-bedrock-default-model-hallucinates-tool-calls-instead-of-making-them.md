@@ -15,11 +15,47 @@ implementation:
   - repo: dark-harness
 ---
 
-# DH-0106: gemma4 (Bedrock default model) hallucinates tool calls instead of making them
+# DH-0106: dh init's scaffolded "gemma4" is actually Gemma 3 (wrong model), and hallucinates tool calls
 
 ## Summary
 
-google.gemma-3-12b-it via Bedrock -- dh init's scaffolded defaultModel -- does not reliably make real tool calls. Live-tested session (.dh-logs/d2ab3344-...) shows the model responding to 'create 4 sub agents that each write a poem' with prose plus a fake fenced tool_code block (Agent("agent-1", ...) syntax) instead of ever emitting a real tool_use content block -- confirmed by zero tool_call/tool_result JSONL events in the whole session. When directly told 'did you actually use the calls or just tell me you would', the model apologized and repeated the identical fake-tool-call pattern, still never invoking a real tool. The Bedrock provider adapter (src/agent/providers/bedrock.ts) correctly sends toolConfig via the Converse API -- this is a model capability/reliability gap, not an adapter bug. DH-0096's own live verification only smoke-tested that the model responds to a Converse call, never that it can actually perform agentic tool use, which is a materially different and far more important bar for a harness whose entire premise is tool use. Silent and dangerous: the harness has no detection for 'assistant claimed a tool call in its text but no toolUse block was actually present in the response' -- an operator has to notice by reading the transcript carefully, exactly as the owner just did.
+**Root cause, confirmed 2026-07-16 by live investigation**: DH-0096's owner-requested "a
+working gemma4 bedrock config (the default)" meant real **Gemma 4** — but the model actually
+scaffolded as `dh init`'s `defaultModel` (`"gemma4": { provider: "bedrock", model:
+"google.gemma-3-12b-it" }`) is **Gemma 3**, a different model entirely. This was not a naming
+quirk: Gemma 4 (real, released by Google starting 2026-03-31, on Bedrock since 2026-06-10) is
+**not reachable via the standard Bedrock on-demand catalog or the Converse/Invoke APIs at
+all** — it's served only through a distinct AWS product/endpoint called **`bedrock-mantle`**
+(`https://bedrock-mantle.{region}.api.aws/openai/v1`), an OpenAI-compatible Chat
+Completions/Responses API authenticated with a **Bedrock long-term API key** (a bearer
+token), not the SigV4 credentials `dh`'s existing `"bedrock"` provider type uses. DH-0096's
+implementing agent apparently could not find a route to real Gemma 4 through the tooling it
+had (Bedrock's standard `ListFoundationModels`/Converse APIs, which never surface Gemma 4)
+and silently substituted the nearest same-vendor model (Gemma 3) without flagging the
+substitution — a real instance of exactly the DH-0092/DH-0106-class failure this project has
+hit before: a scaffolded default that looks plausible but is quietly wrong.
+
+**Separately, and regardless of which Gemma generation**: the Gemma 3 model that did get
+shipped does not reliably make real tool calls. Live-tested session
+(`.dh-logs/d2ab3344-.../agent-root.jsonl`) shows it responding to "create 4 sub agents that
+each write a poem" with prose plus a fake fenced `tool_code` block (`Agent("agent-1", ...)`
+pseudo-syntax) instead of ever emitting a real `tool_use` content block — confirmed by zero
+`tool_call`/`tool_result` JSONL events in the whole session. When told directly "did you
+actually use the calls or just tell me you would," the model apologized and repeated the
+identical fake pattern, still never invoking a real tool. The Bedrock provider adapter
+(`src/agent/providers/bedrock.ts`) correctly sends `toolConfig` via the Converse API — this
+is a model capability/reliability gap, not an adapter bug.
+
+Real Gemma 4 (per its AWS model card) explicitly supports "native function calling" designed
+for agentic workflows — a materially different, and likely reliable, capability compared to
+Gemma 3's observed hallucinated-tool-call behavior (with one caveat: Gemma 4's model card
+states parallel tool calls are *not* supported — one call per turn only).
+
+**This ticket now covers**: (1) fixing the immediate, safe-to-dispatch problem — `dh init`'s
+default should not be a model that hallucinates tool calls; (2) documenting that real Gemma 4
+support is a separate, bigger feature requiring a new provider type. **Real Gemma 4 support
+itself is split out to DH-0107** (new provider type = `src/contracts/` change, needs
+architect sign-off per CLAUDE.md §6 — not in scope here).
 
 ## User Stories
 
@@ -35,37 +71,34 @@ google.gemma-3-12b-it via Bedrock -- dh init's scaffolded defaultModel -- does n
 
 ## Functional Requirements
 
-- **Verify, live, whether `google.gemma-3-12b-it` via Bedrock Converse supports genuine
-  tool-calling at all**, and if so how reliably — this needs real testing against the actual
-  Bedrock endpoint (not assumed from docs), since AWS's Converse API is supposed to normalize
-  tool use across models but not every hosted model actually implements it. Check AWS's own
-  Bedrock model-capability documentation for `google.gemma-3-12b-it` specifically (tool
-  use / function calling support flag) as a starting point, then confirm empirically.
-- **If unsupported or unreliable**: `gemma4` must not remain `dh init`'s scaffolded
-  `options.defaultModel` — a first-run default that silently fails at the harness's core
-  premise (tool use) is worse than no default. Owner should decide the replacement (a
-  Claude-tier model already confirmed reliable this session is the safe fallback candidate,
-  e.g. `haiku-bedrock` or `haiku-anthropic` for cost, or keep a Claude tier as default and
-  keep `gemma4` in the menu as an explicitly "no tool-calling / chat-only" labeled entry).
-- **Consider a harness-level capability probe** (possibly folded into `dh doctor`): a
-  cheap real request that includes a trivial no-op tool and checks whether the model's
-  response actually contains a `tool_use`/`toolUse` content block, distinct from the existing
-  connectivity-only check. This would let `dh doctor` flag "connects, but doesn't support
-  tool use" as a distinct result from plain PASS, for any model an operator configures — not
-  just gemma4 — since this is a general Bedrock-model-menu risk (the OpenAI/open-weight
-  entries DH-0096 added may have the same gap, untested for this specific failure mode).
-- Whatever the fix, re-verify live against the real Bedrock API (per this session's
-  established discipline) before closing — this is exactly the class of finding a scaffolded
-  config can get wrong silently (see DH-0092's precedent: a plausible-looking but broken
-  default).
+- **Owner decision (2026-07-16): swap the default.** `dh init`'s `options.defaultModel` moves
+  off `gemma4`/Gemma 3 to a Claude tier already confirmed reliable this session (e.g.
+  `haiku-bedrock` or `haiku-anthropic` for cost) — a first-run default that silently
+  hallucinates tool calls is worse than no default.
+- The `gemma4` model entry can stay in the scaffolded model *menu* (it's a legitimate, real,
+  connectable model — `dh doctor` PASSes it), but must not be `options.defaultModel`, and
+  should be labeled/commented in the scaffold as chat-only / unreliable-for-agentic-tool-use
+  so an operator who deliberately picks it isn't surprised.
+- Also **add a harness-level capability probe** to `dh doctor`: alongside its existing
+  connectivity-only check, send one real request per model that includes a trivial no-op tool
+  and confirm the response actually contains a real `tool_use`/`toolUse` content block (not
+  just a 200 response). Flag any model that connects but never emits a real tool-use block as
+  a distinct result from plain PASS (e.g. `PASS (no tool-use)` or similar — exact wording is
+  an implementer call) — this generalizes past just gemma4/Gemma 3, since the other Bedrock
+  open-weight/OpenAI entries DH-0096 added are untested for this same failure mode.
+- Re-verify live against the real Bedrock API (per this session's established discipline)
+  before closing — this is exactly the class of finding a scaffolded config can get wrong
+  silently (see DH-0092's precedent: a plausible-looking but broken default).
 
 ## Assumptions
 
 - The Bedrock provider adapter itself (`src/agent/providers/bedrock.ts`) is not at fault —
   confirmed it correctly builds and sends `toolConfig` via `ConverseCommand`. This is a model
   capability/reliability issue, not a wire-format bug.
-- Scope is the *default model choice and any detection gap*, not a demand that every
-  Bedrock/open-weight model in DH-0096's menu support tool use — some may be legitimately
+- Real Gemma 4 support (a new provider type against `bedrock-mantle`) is explicitly out of
+  scope here — tracked separately as DH-0107.
+- Scope is the default model choice plus a general doctor capability probe, not a demand that
+  every Bedrock/open-weight model in DH-0096's menu support tool use — some may be legitimately
   chat-only, but if so they should be labeled as such, not risk being the default.
 
 ## Risks
@@ -79,10 +112,7 @@ google.gemma-3-12b-it via Bedrock -- dh init's scaffolded defaultModel -- does n
 
 ## Open Questions
 
-- Should the default model change, or should `dh doctor`/`dh init` instead print an explicit
-  warning next to any model known/found not to support tool use? Either could be right —
-  this is an owner call, not an implementer one, given it changes the shipped first-run
-  experience.
+(resolved 2026-07-16 — owner decision: swap the default per Functional Requirements above.)
 
 ## Notes
 
@@ -94,3 +124,19 @@ google.gemma-3-12b-it via Bedrock -- dh init's scaffolded defaultModel -- does n
 > agent-root.jsonl`. When told directly "did you actually use the calls or just tell me you
 > would," the model apologized and repeated the identical fake pattern verbatim, still never
 > making a real call. Session ended `stopped` with zero sub-agents ever spawned.
+
+> [!NOTE]
+> Follow-up investigation (2026-07-16) found the deeper root cause: the owner's original
+> DH-0096 request was for real **Gemma 4**, not Gemma 3. Real Gemma 4 is confirmed to exist
+> (Google, released starting 2026-03-31) and confirmed live on AWS Bedrock (since
+> 2026-06-10) — but *only* through a separate product/endpoint, `bedrock-mantle`
+> (`https://bedrock-mantle.{region}.api.aws/openai/v1`, OpenAI-compatible Chat
+> Completions/Responses API, authenticated via a Bedrock long-term API key, not SigV4).
+> `dh`'s standard Bedrock `ListFoundationModels`/Converse path never surfaces Gemma 4 at all,
+> which is presumably why DH-0096's implementing agent silently substituted Gemma 3 instead
+> of flagging that it couldn't find real Gemma 4 through the tooling it had. Empirically
+> confirmed live: `bedrock-mantle.us-east-1.api.aws` resolves to real AWS IPs and returns a
+> correctly-shaped `405 Method Not Allowed` (`Allow: POST,OPTIONS`) on the documented chat-
+> completions path. Real Gemma 4 support is tracked separately as **DH-0107** (new provider
+> type, contracts-level change, needs architect sign-off) — this ticket's scope is narrowed
+> to the immediate default-model fix plus a general `dh doctor` tool-use capability probe.
