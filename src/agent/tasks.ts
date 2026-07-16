@@ -339,6 +339,17 @@ export class TaskRegistry {
     return { delta: full.slice(previous), totalLength: full.length };
   }
 
+  /** DH-0071: how many chars of task `id`'s output `readerId` has not yet retrieved via
+   * outputSince() — a read-only peek that does NOT advance the reader's cursor. Monitor uses
+   * this so a status glance can never swallow a pending TaskOutput delta: the two methods
+   * read the same `readCursors` entry, but only outputSince() writes to it. */
+  unreadLength(id: string, readerId: string): number {
+    const task = this.require(id);
+    const total = task.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const previous = this.readCursors.get(id)?.get(readerId) ?? 0;
+    return total - previous;
+  }
+
   /** All tasks spawned (directly or transitively tracked) — used by the agent tree. */
   list(): TaskSnapshot[] {
     return [...this.tasks.keys()].map((id) => this.snapshot(id));

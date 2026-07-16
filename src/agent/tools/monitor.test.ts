@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { monitorTool } from "./monitor.ts";
+import { taskOutputTool } from "./task-output.ts";
 import { makeToolContext } from "./test-helpers.ts";
 
 describe("Monitor tool", () => {
@@ -138,5 +139,63 @@ describe("Monitor tool", () => {
     const ctx = makeToolContext();
     const result = await monitorTool.execute({ names: [1] }, ctx);
     expect(result.isError).toBe(true);
+  });
+
+  // DH-0071: unread-output count per status line, via a non-advancing peek.
+  describe("unread-output count (DH-0071)", () => {
+    test("reports the unread char count for a task with unread output", async () => {
+      const ctx = makeToolContext();
+      const taskId = ctx.tasks.start({
+        kind: "bash",
+        parentAgentId: ctx.agentId,
+        run: async (handle) => {
+          handle.append("hello world");
+        },
+      });
+      await ctx.tasks.awaitDone(taskId);
+      const result = await monitorTool.execute({ task_ids: [taskId] }, ctx);
+      expect(result.output).toContain("unread=11 chars");
+    });
+
+    test("reports unread=0 chars once nothing new has appeared", async () => {
+      const ctx = makeToolContext();
+      const taskId = ctx.tasks.start({
+        kind: "bash",
+        parentAgentId: ctx.agentId,
+        run: async () => {},
+      });
+      await ctx.tasks.awaitDone(taskId);
+      await monitorTool.execute({ task_ids: [taskId] }, ctx);
+      // Monitor's own peek must not have advanced anything (there was nothing to advance
+      // here since output is empty) — a second call should still show 0, not error.
+      const result = await monitorTool.execute({ task_ids: [taskId] }, ctx);
+      expect(result.output).toContain("unread=0 chars");
+    });
+
+    test("a Monitor glance never advances the cursor TaskOutput reads from", async () => {
+      const ctx = makeToolContext();
+      const taskId = ctx.tasks.start({
+        kind: "bash",
+        parentAgentId: ctx.agentId,
+        run: async (handle) => {
+          handle.append("hello world");
+        },
+      });
+      await ctx.tasks.awaitDone(taskId);
+
+      // Glance at Monitor (possibly more than once) before ever calling TaskOutput.
+      const first = await monitorTool.execute({ task_ids: [taskId] }, ctx);
+      expect(first.output).toContain("unread=11 chars");
+      const second = await monitorTool.execute({ task_ids: [taskId] }, ctx);
+      expect(second.output).toContain("unread=11 chars");
+
+      // TaskOutput must still see the full delta — Monitor's peek must not have consumed it.
+      const taskOutputResult = await taskOutputTool.execute({ task_id: taskId }, ctx);
+      expect(taskOutputResult.output).toContain("hello world");
+
+      // Now that TaskOutput has read it, Monitor should report nothing new.
+      const third = await monitorTool.execute({ task_ids: [taskId] }, ctx);
+      expect(third.output).toContain("unread=0 chars");
+    });
   });
 });

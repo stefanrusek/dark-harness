@@ -130,6 +130,66 @@ describe("TaskRegistry", () => {
     });
   });
 
+  describe("unreadLength (DH-0071: Monitor's non-advancing peek)", () => {
+    test("reports full output length before any read, then shrinks as outputSince advances", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: async (handle) => {
+          handle.append("hello");
+        },
+      });
+      await registry.awaitDone(id);
+
+      expect(registry.unreadLength(id, "reader-a")).toBe(5);
+      registry.outputSince(id, "reader-a");
+      expect(registry.unreadLength(id, "reader-a")).toBe(0);
+    });
+
+    test("does not advance the reader's cursor — a later outputSince still sees the full delta", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: async (handle) => {
+          handle.append("hello world");
+        },
+      });
+      await registry.awaitDone(id);
+
+      // Call unreadLength ("Monitor glance") several times — this must never consume the
+      // pending delta that a subsequent outputSince ("TaskOutput") is entitled to.
+      expect(registry.unreadLength(id, "reader-a")).toBe(11);
+      expect(registry.unreadLength(id, "reader-a")).toBe(11);
+
+      const { delta, totalLength } = registry.outputSince(id, "reader-a");
+      expect(delta).toBe("hello world");
+      expect(totalLength).toBe(11);
+    });
+
+    test("is per-reader, like outputSince's cursors", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: async (handle) => {
+          handle.append("hi");
+        },
+      });
+      await registry.awaitDone(id);
+
+      registry.outputSince(id, "reader-a");
+      expect(registry.unreadLength(id, "reader-a")).toBe(0);
+      expect(registry.unreadLength(id, "reader-b")).toBe(2);
+    });
+
+    test("throws TaskNotFoundError for an unknown id", () => {
+      const registry = new TaskRegistry();
+      expect(() => registry.unreadLength("bash-999", "reader-a")).toThrow(TaskNotFoundError);
+    });
+  });
+
   test("awaitDone on an unknown id throws TaskNotFoundError", async () => {
     const registry = new TaskRegistry();
     await expect(registry.awaitDone("bash-999")).rejects.toThrow(TaskNotFoundError);

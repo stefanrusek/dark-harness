@@ -13,8 +13,15 @@ import type { Tool, ToolContext, ToolResult } from "./types.ts";
 export const monitorTool: Tool = {
   name: "Monitor",
   description:
-    "Check the status of one or more background tasks or sub-agents, by task id (task_ids) " +
-    "and/or by the name (description) they were spawned with (names).",
+    "Check the current status of one or more background tasks or sub-agents by task id " +
+    "(task_ids) and/or by the name (description) they were spawned with (names). Returns " +
+    "one point-in-time status line per task (id, kind, status, model, description, and an " +
+    "unread-output count: how many chars of output you have not yet retrieved via " +
+    "TaskOutput). This is a snapshot poll, not a live stream, and it only reports on tasks " +
+    "already started by Bash or Agent — it does not take a command or start watchers. To " +
+    "read the new output itself, call TaskOutput (incremental by default). You never need " +
+    "to poll for completion: a finished background task pushes its completion notification " +
+    "into your conversation automatically.",
   inputSchema: {
     type: "object",
     properties: {
@@ -52,13 +59,23 @@ export const monitorTool: Tool = {
       };
     }
 
+    // DH-0071: unread count uses the non-advancing unreadLength() peek — never
+    // outputSince() — so a Monitor glance can never consume a pending TaskOutput delta.
+    const formatLine = (id: string): string => {
+      const snapshot = ctx.tasks.snapshot(id);
+      const unread = ctx.tasks.unreadLength(id, ctx.agentId);
+      return (
+        `${snapshot.id} [${snapshot.kind}] status=${snapshot.status}` +
+        `${snapshot.model ? ` model=${snapshot.model}` : ""}` +
+        `${snapshot.description ? ` description="${snapshot.description}"` : ""}` +
+        ` unread=${unread} chars`
+      );
+    };
+
     const lines: string[] = [];
     for (const id of (taskIds ?? []) as string[]) {
       try {
-        const snapshot = ctx.tasks.snapshot(id);
-        lines.push(
-          `${snapshot.id} [${snapshot.kind}] status=${snapshot.status}${snapshot.model ? ` model=${snapshot.model}` : ""}${snapshot.description ? ` description="${snapshot.description}"` : ""}`,
-        );
+        lines.push(formatLine(id));
       } catch (err) {
         if (!(err instanceof TaskNotFoundError)) throw err;
         lines.push(`${id}: not found`);
@@ -70,10 +87,7 @@ export const monitorTool: Tool = {
         lines.push(`name "${name}": ${resolution.error}`);
         continue;
       }
-      const snapshot = ctx.tasks.snapshot(resolution.id);
-      lines.push(
-        `${snapshot.id} [${snapshot.kind}] status=${snapshot.status}${snapshot.model ? ` model=${snapshot.model}` : ""}${snapshot.description ? ` description="${snapshot.description}"` : ""}`,
-      );
+      lines.push(formatLine(resolution.id));
     }
     return { output: lines.join("\n"), isError: false };
   },
