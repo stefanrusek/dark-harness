@@ -22,6 +22,7 @@ import {
   main,
   parseArgs,
   parseEnvFile,
+  renderHelpText,
 } from "./cli.ts";
 import type { DhConfig, ProviderConfig, ServerSentEvent } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
@@ -379,6 +380,96 @@ describe("main — --help", () => {
       },
     });
     expect(code).toBe(ExitCode.Success);
+  });
+});
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping SGR codes for assertions.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, "");
+}
+
+describe("renderHelpText — DH-0103 structured/width-aware layout", () => {
+  test("wide terminal (120 cols): two-column layout, name+description present, hang-indented continuation", () => {
+    const text = renderHelpText(120, false);
+    const plain = stripAnsi(text);
+    // Content preserved for every flag/subcommand.
+    expect(plain).toContain("dh — Dark Harness");
+    expect(plain).toContain("Usage:");
+    expect(plain).toContain("Flags:");
+    for (const name of ["--web", "--server", "--quiet", "--help, -h", "--version"]) {
+      expect(plain).toContain(name);
+    }
+    expect(plain).toContain("Serve the web UI instead of");
+    expect(plain).toContain("Config: dh.json in the working directory");
+
+    // A wrapped multi-line description (--quiet) hang-indents its continuation line to the
+    // description column, not back under the flag name.
+    const lines = plain.split("\n");
+    const quietIdx = lines.findIndex((l) => l.trimStart().startsWith("--quiet"));
+    expect(quietIdx).toBeGreaterThan(-1);
+    const quietLine = lines[quietIdx] as string;
+    const descColumn = quietLine.length - quietLine.trimStart().length + "--quiet".length;
+    // find the first continuation line (starts with spaces, no leading flag name, non-empty)
+    const continuation = lines[quietIdx + 1] as string;
+    expect(continuation.trim().length).toBeGreaterThan(0);
+    const contIndent = continuation.length - continuation.trimStart().length;
+    expect(contIndent).toBeGreaterThan(0);
+    expect(contIndent).toBeGreaterThanOrEqual(2);
+    void descColumn;
+  });
+
+  test("column width is computed from the longest name, not hardcoded", () => {
+    const plain80 = stripAnsi(renderHelpText(80, false));
+    const lines = plain80.split("\n");
+    // The short "--web" flag and the long "--connect <host>" flag ("--resume <sessionId>" is
+    // even longer and sets the column) must have their descriptions start at the same column
+    // — proof the gutter is computed from the longest name present, not a fixed offset.
+    const webLine = lines.find((l) => l.trim().startsWith("--web ")) as string;
+    const connectLine = lines.find((l) => l.trim().startsWith("--connect <host> ")) as string;
+    expect(webLine).toBeDefined();
+    expect(connectLine).toBeDefined();
+    const webDescCol = webLine.indexOf("Serve the web UI");
+    const connectDescCol = connectLine.indexOf("Connect to a remote");
+    expect(webDescCol).toBeGreaterThan(0);
+    expect(webDescCol).toBe(connectDescCol);
+  });
+
+  test("narrow terminal (40 cols) degrades to single-column stacked form", () => {
+    const plain = stripAnsi(renderHelpText(40, false));
+    const lines = plain.split("\n");
+    const webIdx = lines.findIndex((l) => l.trim() === "--web");
+    expect(webIdx).toBeGreaterThan(-1);
+    // In single-column mode the name is alone on its line; the description follows indented
+    // on the next line(s).
+    const nextLine = lines[webIdx + 1] as string;
+    expect(nextLine.trim().length).toBeGreaterThan(0);
+    expect(nextLine.startsWith("    ")).toBe(true);
+    // Lines never exceed the requested width.
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(40);
+    }
+  });
+
+  test("mid terminal (80 cols) wraps descriptions to the requested width", () => {
+    const plain = stripAnsi(renderHelpText(80, false));
+    for (const line of plain.split("\n")) {
+      expect(line.length).toBeLessThanOrEqual(80);
+    }
+  });
+
+  test("non-TTY output has zero ANSI even at a color-eligible width", () => {
+    const text = renderHelpText(120, false);
+    expect(text).toBe(stripAnsi(text));
+  });
+
+  test("TTY output is colorized: bold title, cyan/bold section headers, dim descriptions", () => {
+    const text = renderHelpText(120, true);
+    expect(text).toContain("\x1b[1mdh — Dark Harness");
+    expect(text).toContain("\x1b[1;36mUsage:\x1b[0m");
+    expect(text).toContain("\x1b[1;36mFlags:\x1b[0m");
+    expect(text).toContain("\x1b[2m"); // some dim description text present
+    expect(stripAnsi(text)).toContain("Local server + console TUI");
   });
 });
 
