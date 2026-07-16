@@ -8,6 +8,42 @@
 
 ## Memory
 
+### 2026-07-16 — DH-0106: dh init default off gemma4/Gemma 3, dh doctor tool-use probe
+
+Swapped `dh init`'s `SAMPLE_DH_JSON` (`options.defaultModel`) from `"gemma4"` to
+`"haiku-bedrock"` — the owner's live testing this session found Gemma 3 (what DH-0096
+actually scaffolded as "gemma4") connects fine but reliably hallucinates tool calls (fake
+fenced pseudo-syntax text, never a real `tool_use` block). Kept `gemma4` in the models menu
+per the ticket (it's real/connectable, just not agentic-safe as a default).
+
+Judgment call: the ticket asked for the `gemma4` menu entry to be "labeled/commented" as
+chat-only in the scaffold. `SAMPLE_DH_JSON` is emitted verbatim as `dh.json` — plain JSON,
+no comment syntax — so an inline `//` comment there would corrupt the very file `dh init`
+writes. Added the caveat as an extra `dh init` stdout line instead (same place the existing
+"trim the menu"/"us-east-1" caveats live), plus explanatory prose in README.md right after
+the sample block. Kept `SAMPLE_DH_JSON` and README's copy of it byte-for-byte identical per
+the existing doc comment's requirement — only the JSON content changed (defaultModel), no
+comments went into the JSON itself.
+
+Extended `dh doctor`/`--check`: after the existing one-token connectivity ping, a model that
+connects also gets a second cheap call offering one trivial no-op tool with an explicit
+instruction to call it; `provider.complete()`'s response is checked for a real `tool_use`
+content block. A model that connects but never produces one now reports as
+`PASS (no tool-use)` (own `DoctorResult.toolUse: boolean | undefined` field — undefined when
+connectivity itself failed, since there's no point probing a model that can't be reached) —
+distinct from a plain `PASS`, per the ticket's core requirement. Kept the verdict word green/
+✓ on the TTY path (it did pass connectivity) — the qualifier text is what carries the "but
+not agentic-capable" distinction, not a color change; a probe-call throw is treated the same
+as "no tool-use observed" rather than flipping the whole model to FAIL, since the model
+demonstrably answered the connectivity ping.
+
+Live-verified against real Bedrock credentials (`secrets.env`) with a trimmed two-model
+config: `haiku-bedrock` → plain `PASS` (real `tool_use` block observed); `gemma4` →
+`PASS (no tool-use)` — matching the exact bug this ticket exists to prevent operators from
+hitting by default. Full gates (`typecheck`/`lint`/`test:coverage`) all green; the two
+uncovered `cli.ts` lines the coverage report flags (793/797/801-ish, `listModels`/
+`switchModel`/`listSkills` thin delegations) are pre-existing and untouched by this change.
+
 ### 2026-07-15 — first round (resumed from a stopped instance's WIP)
 
 I came online in an existing worktree (`worktree-agent-a572554c3ba0257bf`) with substantial
