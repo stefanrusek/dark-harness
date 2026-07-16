@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["deferred (2026-07-15): sweep-sourced, no observed need"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -38,3 +38,6 @@ the live TUI/Web view.
 
 > [!NOTE]
 > Source: Competitive-differentiation sweep findings #17 and #18.
+
+> [!NOTE]
+> Deferred (owner decision, 2026-07-15) — sweep-sourced, no observed need for either half yet.
