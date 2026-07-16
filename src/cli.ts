@@ -23,6 +23,8 @@ import type {
   DhConfig,
   ExitCode as ExitCodeType,
   ProviderConfig,
+  SecurityConfig,
+  ServerSentEvent,
   SessionClientKind,
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
@@ -34,6 +36,7 @@ import {
   type DhServerOptions,
   SessionLogger,
   type Unsubscribe,
+  formatSessionList,
   formatSessionLogTree,
   pruneLogDirectories,
 } from "./server/index.ts";
@@ -75,6 +78,11 @@ export interface CliOptions {
    * `.dh-logs/<sessionId>` (walking any `resumedFrom` chain) instead of starting fresh. Null
    * when not resuming. */
   resume: string | null;
+  /** DH-0067: suppresses the per-agent-lifecycle-transition activity feed and SSE client
+   * connect/disconnect lines that `--server` mode now prints by default (see
+   * runInteractiveMode's activity-feed wiring). Does not affect the one-time startup block —
+   * that always prints regardless of `--quiet`. */
+  quiet: boolean;
 }
 
 const FLAGS_WITH_VALUES = new Set([
@@ -126,10 +134,15 @@ Usage:
   dh doctor                       Alias for --check.
   dh logs <sessionDir>             Print the agent tree (status/cost/duration) for a
                                    ".dh-logs/<sessionId>" directory — DH-0037.
+  dh logs                          List sessions under "./.dh-logs" (id, start time, agent
+                                   count) — DH-0067.
 
 Flags:
   --web                    Serve the web UI instead of (or alongside --connect) the console TUI.
   --server                 Run headless (no client attached).
+  --quiet                  Suppress the --server activity feed (agent lifecycle lines, SSE
+                           client connect/disconnect lines). The one-time startup block
+                           still prints regardless.
   --connect <host>         Connect to a remote dh --server instead of starting a local one.
   --port <n>               Listen port for --server, or target port for --connect (default 4000).
   --instructions <file>    Path to an instructions file; starts the root agent on it immediately.
@@ -161,6 +174,66 @@ export function formatVersionString(build: BuildInfo): string {
   return `dh ${build.version} (${inner})`;
 }
 
+/** DH-0067: `dh --server` binds every interface (no `hostname` option is ever threaded to
+ * `Bun.serve` — see DhServer.start()), so a plaintext, unauthenticated bind is reachable
+ * from anywhere on the network, not just localhost. ADR 0003's stance is "air-gapping is
+ * the primary posture, `security.token`/`security.tls` are opt-in" — this is the one moment
+ * an operator is actually looking at the terminal, so it says so once at startup rather than
+ * leaving it to a README they may never open. Returns undefined once either a bearer token
+ * or TLS is configured (either narrows the exposure this note exists to flag).
+ */
+export function buildStartupPostureNote(security: SecurityConfig | undefined): string | undefined {
+  if (security?.token || security?.tls) return undefined;
+  return "dh: plaintext HTTP, no auth — see README security posture.";
+}
+
+/**
+ * DH-0067: after startup, `--server` mode used to go completely silent through real agent
+ * activity — a message arrived, a root agent ran a full turn, and the terminal showed
+ * nothing at all; the only way to know anything happened was to already know where the
+ * JSONL logs lived. Formats one concise stdout line per agent lifecycle transition (spawn,
+ * status change, session end) — never full output, that stays the clients' and the JSONL
+ * logs' job (`--quiet` restores the old silence entirely, at the call site in
+ * runInteractiveMode). `token_usage` events accumulate silently per agent and surface only
+ * alongside that agent's next status-transition line — cumulative, not a line per turn,
+ * per the ticket's own "cheap and glanceable" resolution of its open question.
+ */
+export class ActivityFeed {
+  private readonly usage = new Map<string, { tokens: number; costUsd?: number }>();
+
+  /** Returns the line to print (without the `dh: ` prefix — the caller adds that), or
+   * undefined when this event produces no line of its own (`token_usage` accumulates
+   * silently; `resync` is a server-internal SSE-resume detail with nothing to report here). */
+  onEvent(event: ServerSentEvent): string | undefined {
+    const time = new Date(event.timestamp).toTimeString().slice(0, 8);
+    if (event.type === "token_usage") {
+      const state = this.usage.get(event.agentId) ?? { tokens: 0 };
+      state.tokens += event.inputTokens + event.outputTokens;
+      if (event.costUsd !== undefined) {
+        state.costUsd = (state.costUsd ?? 0) + event.costUsd;
+      }
+      this.usage.set(event.agentId, state);
+      return undefined;
+    }
+    if (event.type === "agent_spawned") {
+      const label = event.description ? `${event.agentId} (${event.description})` : event.agentId;
+      return `${time} ${label} spawned (${event.model})`;
+    }
+    if (event.type === "agent_status") {
+      const state = this.usage.get(event.agentId);
+      const usageSuffix =
+        state === undefined
+          ? ""
+          : ` — ${state.tokens.toLocaleString()} tok${state.costUsd !== undefined ? ` / $${state.costUsd.toFixed(4)}` : ""}`;
+      return `${time} ${event.agentId} ${event.status}${usageSuffix}`;
+    }
+    if (event.type === "session_ended") {
+      return `${time} session ended (exit code ${event.exitCode})`;
+    }
+    return undefined;
+  }
+}
+
 /** Parses argv (excluding the `bun`/script prefix — pass `process.argv.slice(2)`). Throws
  * CliUsageError on anything malformed; never exits or prints — that's main()'s job. */
 export function parseArgs(argv: string[]): CliOptions {
@@ -176,6 +249,7 @@ export function parseArgs(argv: string[]): CliOptions {
     check: false,
     dryRun: false,
     resume: null,
+    quiet: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -190,6 +264,10 @@ export function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--job") {
       options.job = true;
+      continue;
+    }
+    if (arg === "--quiet") {
+      options.quiet = true;
       continue;
     }
     if (arg === "--check") {
@@ -700,6 +778,7 @@ async function runInteractiveMode(
   systemPrompt: string,
   deps: CliDeps,
   resumeResult?: ResumeResult,
+  quiet = false,
 ): Promise<ExitCodeType> {
   const { io } = deps;
   try {
@@ -742,14 +821,37 @@ async function runInteractiveMode(
     // DH-0037: see createStandaloneRuntime's identical call above for the rationale.
     pruneLogDirectories(logsRoot, config.logRetention, Date.now(), sessionId);
     const logDir = join(logsRoot, sessionId);
+    // DH-0067: operators repeatedly ask "is my TUI even connected?" with nothing on either
+    // side to confirm — a dim one-liner per SSE connect/disconnect. `--quiet` suppresses it
+    // along with the agent activity feed below (the startup block itself always prints).
     const server = deps.createServer({
       agentLoop,
       sessionId,
       logDir,
       port: mode.kind === "server" ? mode.port : 0,
       ...(config.security ? { security: config.security } : {}),
+      ...(quiet
+        ? {}
+        : {
+            onClientConnect: (addr: string) => io.stdout(`dh: client connected from ${addr}`),
+            onClientDisconnect: (addr: string) => io.stdout(`dh: client disconnected from ${addr}`),
+          }),
     });
     const boundPort = server.start();
+
+    // DH-0067: `--server` mode used to print exactly one line at startup and then nothing,
+    // ever, through real agent activity — the only way to know anything happened was to
+    // already know where the JSONL logs lived. One concise stdout line per agent lifecycle
+    // transition; never full output (that stays the clients'/JSONL logs' job). Scoped to
+    // `--server` specifically — local/web/connect modes already have a real client (TUI or
+    // web UI) providing their own moment-to-moment feedback.
+    if (mode.kind === "server" && !quiet) {
+      const feed = new ActivityFeed();
+      agentLoop.onEvent((event) => {
+        const line = feed.onEvent(event);
+        if (line !== undefined) io.stdout(`dh: ${line}`);
+      });
+    }
 
     // DH-0038: an interactive session doesn't wait for the operator's first message to start
     // the root the way a fresh session does (no operator has attached yet when this runs) —
@@ -773,7 +875,12 @@ async function runInteractiveMode(
     const uninstallSignals = deps.installSignalHandlers((signal) => {
       if (shuttingDown) return;
       shuttingDown = true;
-      io.stderr(`dh: received ${signal}; shutting down session ${sessionId}...`);
+      // DH-0067 fix: this used to go through io.stderr, which in a typical terminal/`docker
+      // logs` viewer renders red — indistinguishable at a glance from an actual failure. A
+      // clean SIGTERM/SIGINT shutdown is an ordinary lifecycle event, not a fault; printing
+      // it via stdout (rather than inventing an ANSI-styling layer just to force a neutral
+      // color on stderr) keeps it looking like what it is.
+      io.stdout(`dh: received ${signal}; shutting down session ${sessionId}...`);
       try {
         agentLoop.stopAgent(ROOT_AGENT_ID);
       } catch {
@@ -798,7 +905,20 @@ async function runInteractiveMode(
     });
 
     if (mode.kind === "server") {
+      // DH-0067: this exact line — including the "listening on port" substring — is grepped
+      // by e2e's `waitForStdout` helpers (dh-process.ts and multiple spike scripts); it stays
+      // byte-stable, with the new startup context appended as additional lines rather than
+      // folded into it.
       io.stdout(`dh: headless server listening on port ${boundPort} (session ${sessionId}).`);
+      // DH-0067: `DhServer` never passes a `hostname` to `Bun.serve()` (see server.ts), so
+      // this is always bound to every interface, not just loopback — worth spelling out
+      // explicitly since that's exactly the fact the posture note below depends on.
+      io.stdout(
+        `dh: ${formatVersionString(BUILD_INFO)} — bound to 0.0.0.0:${boundPort} — logs: ${logDir}`,
+      );
+      io.stdout(`dh: connect with: dh --connect <host> --port ${boundPort}`);
+      const posture = buildStartupPostureNote(config.security);
+      if (posture) io.stdout(posture);
       return ExitCode.Success;
     }
 
@@ -809,7 +929,11 @@ async function runInteractiveMode(
         targetBaseUrl: baseUrl,
         ...(config.security?.token ? { token: config.security.token } : {}),
       });
+      // DH-0067: this exact "web UI ready at <url>." line is grepped by e2e (web.test.ts,
+      // connect-web.test.ts, several spikes) — stays byte-stable; the log-directory line is
+      // new and appended after it.
       io.stdout(`dh: web UI ready at ${webHandle.url}.`);
+      io.stdout(`dh: logs: ${logDir}`);
       return ExitCode.Success;
     }
 
@@ -886,18 +1010,57 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
  * loop, so a broken credential/model-access problem surfaces before an operator commits to a
  * real (possibly costly, possibly unattended) run.
  */
+interface DoctorResult {
+  modelName: string;
+  ok: boolean;
+  detail: string;
+}
+
+const DOCTOR_PASS_COLOR = "\x1b[32m";
+const DOCTOR_FAIL_COLOR = "\x1b[31m";
+const DOCTOR_RESET = "\x1b[0m";
+
+/** DH-0067: unaligned `PASS <name> (provider "...")` lines with no summary read as a raw
+ * dump, not a report an operator could paste into an incident/status update. Pads every
+ * model name to the widest one in this run (so the `PASS`/`FAIL` word and the following
+ * detail line up in a column) and colorizes the verdict word on a TTY — same gate as `dh
+ * logs`' status colorization, same reasoning (a piped/redirected run stays plain text). */
+export function formatDoctorReport(results: DoctorResult[], color: boolean): string[] {
+  const nameWidth = Math.max(0, ...results.map((r) => r.modelName.length));
+  const lines = results.map((r) => {
+    const verdict = r.ok ? "PASS" : "FAIL";
+    const coloredVerdict = color
+      ? `${r.ok ? DOCTOR_PASS_COLOR : DOCTOR_FAIL_COLOR}${verdict}${DOCTOR_RESET}`
+      : verdict;
+    // A detail starting with ":" (the "no provider named..." case) reads as
+    // "<name>: <message>", not "<name> : <message>" — every other detail ("(provider ...)")
+    // gets a space before it as usual.
+    const separator = r.detail.startsWith(":") ? "" : " ";
+    return `${coloredVerdict} ${r.modelName.padEnd(nameWidth)}${separator}${r.detail}`;
+  });
+  const passCount = results.filter((r) => r.ok).length;
+  const failCount = results.length - passCount;
+  lines.push(
+    `${results.length} model${results.length === 1 ? "" : "s"}: ${passCount} pass, ${failCount} fail`,
+  );
+  return lines;
+}
+
 async function runDoctor(config: DhConfig, deps: CliDeps): Promise<ExitCodeType> {
   const { io } = deps;
   const providersByName = new Map(config.provider.map((p) => [p.name, p]));
-  let anyFailed = false;
+  const results: DoctorResult[] = [];
 
   for (const model of config.models) {
     const providerConfig = providersByName.get(model.provider);
     if (!providerConfig) {
       // Shouldn't happen post-validateConfig (models reference known providers), but a
       // provider-agnostic guard costs nothing and keeps this loop crash-free either way.
-      io.stdout(`FAIL ${model.name}: no provider named "${model.provider}" in config`);
-      anyFailed = true;
+      results.push({
+        modelName: model.name,
+        ok: false,
+        detail: `: no provider named "${model.provider}" in config`,
+      });
       continue;
     }
     try {
@@ -909,16 +1072,25 @@ async function runDoctor(config: DhConfig, deps: CliDeps): Promise<ExitCodeType>
         tools: [],
         maxTokens: 1,
       });
-      io.stdout(`PASS ${model.name} (provider "${providerConfig.name}")`);
+      results.push({
+        modelName: model.name,
+        ok: true,
+        detail: `(provider "${providerConfig.name}")`,
+      });
     } catch (err) {
-      io.stdout(
-        `FAIL ${model.name} (provider "${providerConfig.name}"): ${(err as Error).message}`,
-      );
-      anyFailed = true;
+      results.push({
+        modelName: model.name,
+        ok: false,
+        detail: `(provider "${providerConfig.name}"): ${(err as Error).message}`,
+      });
     }
   }
 
-  const code = anyFailed ? ExitCode.HarnessError : ExitCode.Success;
+  for (const line of formatDoctorReport(results, process.stdout.isTTY === true)) {
+    io.stdout(line);
+  }
+
+  const code = results.every((r) => r.ok) ? ExitCode.Success : ExitCode.HarnessError;
   io.exit(code);
   return code;
 }
@@ -977,11 +1149,23 @@ export async function main(
   // handled first, before flag parsing and `dh.json` loading, same as --help/--version.
   if (argv[0] === "logs") {
     const sessionDir = argv[1];
+    // DH-0067: no argument used to be a usage error, forcing the operator to `ls .dh-logs`
+    // and copy a UUID by hand. Lists every session directory under the default
+    // "./.dh-logs" root instead.
     if (sessionDir === undefined) {
-      return fail(io, "usage: dh logs <sessionDir>");
+      try {
+        io.stdout(formatSessionList(join(process.cwd(), ".dh-logs")));
+      } catch (err) {
+        return fail(io, (err as Error).message);
+      }
+      io.exit(ExitCode.Success);
+      return ExitCode.Success;
     }
     try {
-      io.stdout(formatSessionLogTree(sessionDir));
+      // DH-0067: colorize status words the same way the TUI does, gated on a real TTY (a
+      // piped/redirected `dh logs` — e.g. into a file for a bug report — stays plain text,
+      // same convention as `dh doctor`'s PASS/FAIL colorization below).
+      io.stdout(formatSessionLogTree(sessionDir, { color: process.stdout.isTTY === true }));
     } catch (err) {
       return fail(io, (err as Error).message);
     }
@@ -1090,7 +1274,7 @@ export async function main(
   }
 
   if (options.instructions === null) {
-    return runInteractiveMode(mode, config, systemPrompt, deps, resumeResult);
+    return runInteractiveMode(mode, config, systemPrompt, deps, resumeResult, options.quiet);
   }
 
   // Standalone dark-factory path: deliberately bypasses Server/TUI/Web entirely, even in
@@ -1142,7 +1326,10 @@ export async function main(
   let interrupted = false;
   const uninstallSignals = deps.installSignalHandlers((signal) => {
     interrupted = true;
-    io.stderr(`dh: received ${signal}; stopping the root agent...`);
+    // DH-0067 fix: same reasoning as the interactive-mode SIGTERM/SIGINT notice — this is a
+    // normal lifecycle event, not a failure, so it goes to stdout rather than the
+    // error-red-in-most-terminals stderr stream.
+    io.stdout(`dh: received ${signal}; stopping the root agent...`);
     runtime.stopRoot();
   });
 
@@ -1178,10 +1365,15 @@ export async function main(
     // output prints, then a silent, contextless session starts with no indication the
     // conversation didn't just continue. Say so explicitly. Full crash-recovery/session-
     // resume design is separately handled by the architect; out of scope here.
-    io.stderr(
+    //
+    // DH-0067 fix: moved from io.stderr to io.stdout — this is a normal lifecycle
+    // transition, not an error, and used to render in the same alarming red as a real
+    // failure in a typical terminal/`docker logs` viewer (same reasoning as the SIGTERM
+    // notice above).
+    io.stdout(
       "dh: job complete; starting a new interactive session (prior context is not preserved)",
     );
-    return runInteractiveMode(mode, config, systemPrompt, deps);
+    return runInteractiveMode(mode, config, systemPrompt, deps, undefined, options.quiet);
   }
 
   const code = result.success ? ExitCode.Success : ExitCode.TaskFailure;

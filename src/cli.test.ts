@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { ModelProvider } from "./agent/providers/types.ts";
 import { ROOT_AGENT_ID } from "./agent/runtime.ts";
 import {
+  ActivityFeed,
   AgentRuntimeLoopAdapter,
   type CliDeps,
   type CliIo,
@@ -15,7 +16,9 @@ import {
   type DhServerLike,
   SAMPLE_DH_JSON,
   type WebUiHandleLike,
+  buildStartupPostureNote,
   composeMode,
+  formatDoctorReport,
   formatVersionString,
   main,
   parseArgs,
@@ -117,6 +120,7 @@ describe("parseArgs", () => {
       check: false,
       dryRun: false,
       resume: null,
+      quiet: false,
     });
   });
 
@@ -139,6 +143,7 @@ describe("parseArgs", () => {
       "--dry-run",
       "--resume",
       "abc123",
+      "--quiet",
     ]);
     expect(options).toEqual({
       web: true,
@@ -152,6 +157,7 @@ describe("parseArgs", () => {
       check: true,
       dryRun: true,
       resume: "abc123",
+      quiet: true,
     });
   });
 
@@ -270,16 +276,66 @@ describe("main — dh logs <sessionDir>", () => {
     }
   });
 
-  test("fails with a usage message when no sessionDir is given", async () => {
-    const io = fakeIo();
-    const code = await main(["logs"], {
-      io,
-      loadConfig: async () => {
-        throw new Error("dh logs must not load config");
-      },
-    });
-    expect(code).toBe(ExitCode.HarnessError);
-    expect(io.stderrLines[0]).toContain("usage: dh logs <sessionDir>");
+  // DH-0067: `dh logs` with no argument used to be a usage error, forcing the operator to
+  // `ls .dh-logs` and copy a UUID by hand. It now lists sessions under `./.dh-logs` instead
+  // — real filesystem, driven from a temp cwd (same `process.chdir` pattern the existing
+  // "writes a real per-agent JSONL log" test above uses) so this isn't at the mercy of
+  // whatever `.dh-logs` happens to already exist in the real working directory.
+  test("no sessionDir lists sessions under ./.dh-logs instead of failing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dh-cli-logs-list-"));
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const logsRoot = join(dir, ".dh-logs");
+      const sessionDir = join(logsRoot, "session-1");
+      await Bun.write(
+        join(sessionDir, "agent-root.jsonl"),
+        `${JSON.stringify({
+          version: 1,
+          type: "header",
+          sessionId: "session-1",
+          agentId: "agent-root",
+          parentAgentId: null,
+          spawnedAt: "2026-01-01T00:00:00.000Z",
+          model: "sonnet",
+          instructionsSummary: "x",
+          client: "server",
+        })}\n`,
+      );
+      const io = fakeIo();
+      const code = await main(["logs"], {
+        io,
+        loadConfig: async () => {
+          throw new Error("dh logs must not load config");
+        },
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.stdoutLines[0]).toContain("session-1");
+      expect(io.stdoutLines[0]).toContain("agents=1");
+    } finally {
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("no sessionDir and no .dh-logs directory at all fails cleanly", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dh-cli-logs-empty-"));
+    const originalCwd = process.cwd();
+    process.chdir(dir); // a fresh temp dir with no ".dh-logs" subdirectory at all.
+    try {
+      const io = fakeIo();
+      const code = await main(["logs"], {
+        io,
+        loadConfig: async () => {
+          throw new Error("dh logs must not load config");
+        },
+      });
+      expect(code).toBe(ExitCode.HarnessError);
+      expect(io.stderrLines[0]).toContain("cannot read logs directory");
+    } finally {
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("fails cleanly when the session directory doesn't exist", async () => {
@@ -535,7 +591,9 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     capturedOnSignal?.("SIGTERM");
     expect(stopAgentCalled).toBe(true);
     expect(serverStopCalled).toBe(true);
-    expect(io.stderrLines.some((l) => l.includes("SIGTERM"))).toBe(true);
+    // DH-0067: lifecycle notices (SIGTERM) print via stdout now, not stderr — a clean
+    // shutdown shouldn't render red/alarming in a typical terminal or `docker logs`.
+    expect(io.stdoutLines.some((l) => l.includes("SIGTERM"))).toBe(true);
     expect(io.exitCodes).toContain(ExitCode.Success);
   });
 
@@ -880,7 +938,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     // DH-0038: the operator gets an explicit message that this is a fresh session, not a
     // continuation of the job that just ran.
     expect(
-      io.stderrLines.some((l) =>
+      io.stdoutLines.some((l) =>
         l.includes("starting a new interactive session (prior context is not preserved)"),
       ),
     ).toBe(true);
@@ -951,7 +1009,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     });
     expect(stopRootCalled).toBe(true);
     expect(code).toBe(ExitCode.HarnessError);
-    expect(io.stderrLines.some((l) => l.includes("SIGTERM"))).toBe(true);
+    expect(io.stdoutLines.some((l) => l.includes("SIGTERM"))).toBe(true);
     expect(io.stdoutLines).toContain("partial work");
   });
 });
@@ -1479,7 +1537,7 @@ describe("main — default io wired to console/process.exit", () => {
       signalsReceived += 1;
       expect(signalsReceived).toBe(1);
       expect(stopAgentCalled).toBe(true);
-      expect(io.stderrLines.filter((l) => l.includes("SIGTERM"))).toHaveLength(1);
+      expect(io.stdoutLines.filter((l) => l.includes("SIGTERM"))).toHaveLength(1);
     } finally {
       process.on = originalOn;
       process.off = originalOff;
@@ -2146,7 +2204,10 @@ describe("main — dh doctor / --check", () => {
         }),
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines).toEqual(['PASS sonnet (provider "anthropic")']);
+    expect(io.stdoutLines).toEqual([
+      'PASS sonnet (provider "anthropic")',
+      "1 model: 1 pass, 0 fail",
+    ]);
     expect(calls).toEqual([{ model: "sonnet-5", maxTokens: 1, tools: [] }]);
   });
 
@@ -2157,7 +2218,10 @@ describe("main — dh doctor / --check", () => {
       createProvider: () => fakeModelProvider(),
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines).toEqual(['PASS sonnet (provider "anthropic")']);
+    expect(io.stdoutLines).toEqual([
+      'PASS sonnet (provider "anthropic")',
+      "1 model: 1 pass, 0 fail",
+    ]);
   });
 
   test("dh doctor still honors --config", async () => {
@@ -2187,7 +2251,10 @@ describe("main — dh doctor / --check", () => {
         }),
     });
     expect(code).toBe(ExitCode.HarnessError);
-    expect(io.stdoutLines).toEqual(['FAIL sonnet (provider "anthropic"): 401 unauthorized']);
+    expect(io.stdoutLines).toEqual([
+      'FAIL sonnet (provider "anthropic"): 401 unauthorized',
+      "1 model: 0 pass, 1 fail",
+    ]);
   });
 
   test("reports FAIL per model without throwing when a model references an unknown provider", async () => {
@@ -2202,7 +2269,10 @@ describe("main — dh doctor / --check", () => {
       createProvider: () => fakeModelProvider(),
     });
     expect(code).toBe(ExitCode.HarnessError);
-    expect(io.stdoutLines).toEqual(['FAIL sonnet: no provider named "ghost" in config']);
+    expect(io.stdoutLines).toEqual([
+      'FAIL sonnet: no provider named "ghost" in config',
+      "1 model: 0 pass, 1 fail",
+    ]);
   });
 
   test("never enters the interactive agent loop", async () => {
@@ -2310,5 +2380,308 @@ describe("loadConfig — DH-0035 missing-file error message", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("buildStartupPostureNote (DH-0067)", () => {
+  test("no security config at all: plaintext/no-auth note", () => {
+    expect(buildStartupPostureNote(undefined)).toBe(
+      "dh: plaintext HTTP, no auth — see README security posture.",
+    );
+  });
+
+  test("security config with neither token nor tls: same note", () => {
+    expect(buildStartupPostureNote({})).toBe(
+      "dh: plaintext HTTP, no auth — see README security posture.",
+    );
+  });
+
+  test("a bearer token configured: no note", () => {
+    expect(buildStartupPostureNote({ token: "shh" })).toBeUndefined();
+  });
+
+  test("TLS configured: no note", () => {
+    expect(buildStartupPostureNote({ tls: { cert: "cert.pem", key: "key.pem" } })).toBeUndefined();
+  });
+});
+
+describe("ActivityFeed (DH-0067)", () => {
+  const TS = "2026-07-16T12:04:11.000Z";
+
+  test("token_usage accumulates silently — no line produced", () => {
+    const feed = new ActivityFeed();
+    const line = feed.onEvent({
+      version: 1,
+      id: "1",
+      timestamp: TS,
+      type: "token_usage",
+      agentId: "agent-root",
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsd: 0.01,
+    });
+    expect(line).toBeUndefined();
+  });
+
+  test("agent_spawned with a description includes it; without, just the id", () => {
+    const feed = new ActivityFeed();
+    expect(
+      feed.onEvent({
+        version: 1,
+        id: "1",
+        timestamp: TS,
+        type: "agent_spawned",
+        agentId: "agent-1",
+        parentAgentId: "agent-root",
+        model: "sonnet",
+        description: "run the tests",
+      }),
+    ).toBe("12:04:11 agent-1 (run the tests) spawned (sonnet)");
+
+    expect(
+      feed.onEvent({
+        version: 1,
+        id: "2",
+        timestamp: TS,
+        type: "agent_spawned",
+        agentId: "agent-root",
+        parentAgentId: null,
+        model: "sonnet",
+      }),
+    ).toBe("12:04:11 agent-root spawned (sonnet)");
+  });
+
+  test("agent_status with no prior token_usage has no usage suffix", () => {
+    const feed = new ActivityFeed();
+    expect(
+      feed.onEvent({
+        version: 1,
+        id: "1",
+        timestamp: TS,
+        type: "agent_status",
+        agentId: "agent-root",
+        status: "running",
+      }),
+    ).toBe("12:04:11 agent-root running");
+  });
+
+  test("agent_status after token_usage shows cumulative tokens and cost", () => {
+    const feed = new ActivityFeed();
+    feed.onEvent({
+      version: 1,
+      id: "1",
+      timestamp: TS,
+      type: "token_usage",
+      agentId: "agent-root",
+      inputTokens: 1000,
+      outputTokens: 204,
+      costUsd: 0.0213,
+    });
+    expect(
+      feed.onEvent({
+        version: 1,
+        id: "2",
+        timestamp: TS,
+        type: "agent_status",
+        agentId: "agent-root",
+        status: "waiting",
+      }),
+    ).toBe("12:04:11 agent-root waiting — 1,204 tok / $0.0213");
+  });
+
+  test("agent_status after token_usage with no costUsd shows tokens only", () => {
+    const feed = new ActivityFeed();
+    feed.onEvent({
+      version: 1,
+      id: "1",
+      timestamp: TS,
+      type: "token_usage",
+      agentId: "agent-root",
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+    expect(
+      feed.onEvent({
+        version: 1,
+        id: "2",
+        timestamp: TS,
+        type: "agent_status",
+        agentId: "agent-root",
+        status: "done",
+      }),
+    ).toBe("12:04:11 agent-root done — 15 tok");
+  });
+
+  test("session_ended reports the exit code", () => {
+    const feed = new ActivityFeed();
+    expect(
+      feed.onEvent({ version: 1, id: "1", timestamp: TS, type: "session_ended", exitCode: 0 }),
+    ).toBe("12:04:11 session ended (exit code 0)");
+  });
+
+  test("resync (server-internal SSE-resume detail) produces no line", () => {
+    const feed = new ActivityFeed();
+    expect(feed.onEvent({ version: 1, id: "1", timestamp: TS, type: "resync" })).toBeUndefined();
+  });
+});
+
+describe("formatDoctorReport (DH-0067)", () => {
+  test("plain (non-TTY) output, no color codes", () => {
+    const lines = formatDoctorReport(
+      [{ modelName: "sonnet", ok: true, detail: '(provider "anthropic")' }],
+      false,
+    );
+    expect(lines).toEqual(['PASS sonnet (provider "anthropic")', "1 model: 1 pass, 0 fail"]);
+  });
+
+  test("color: true wraps PASS in green and FAIL in red", () => {
+    const lines = formatDoctorReport(
+      [
+        { modelName: "sonnet", ok: true, detail: '(provider "anthropic")' },
+        { modelName: "gemma4", ok: false, detail: '(provider "bedrock"): boom' },
+      ],
+      true,
+    );
+    expect(lines[0]).toBe('\x1b[32mPASS\x1b[0m sonnet (provider "anthropic")');
+    expect(lines[1]).toBe('\x1b[31mFAIL\x1b[0m gemma4 (provider "bedrock"): boom');
+    expect(lines[2]).toBe("2 models: 1 pass, 1 fail");
+  });
+
+  test("aligns model names to the widest one in the run", () => {
+    const lines = formatDoctorReport(
+      [
+        { modelName: "s", ok: true, detail: "x" },
+        { modelName: "longer-name", ok: true, detail: "y" },
+      ],
+      false,
+    );
+    expect(lines[0]).toBe("PASS s           x");
+    expect(lines[1]).toBe("PASS longer-name y");
+  });
+
+  test("zero results: summary line still prints, singular 'model'", () => {
+    expect(formatDoctorReport([], false)).toEqual(["0 models: 0 pass, 0 fail"]);
+    expect(formatDoctorReport([{ modelName: "a", ok: true, detail: "x" }], false).at(-1)).toBe(
+      "1 model: 1 pass, 0 fail",
+    );
+  });
+});
+
+describe("main — --server startup block (DH-0067)", () => {
+  test("default (plaintext, no auth): posture note, version/logs line, and connect hint all print after the byte-stable listening line", async () => {
+    const io = fakeIo();
+    const code = await main(["--server"], {
+      ...interactiveOverrides(io),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines[0]).toMatch(/^dh: headless server listening on port \d+/);
+    expect(io.stdoutLines[1]).toMatch(
+      /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 0\.0\.0\.0:\d+ — logs: .*\.dh-logs/,
+    );
+    expect(io.stdoutLines[2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
+    expect(io.stdoutLines[3]).toBe("dh: plaintext HTTP, no auth — see README security posture.");
+  });
+
+  test("a configured bearer token suppresses the posture note", async () => {
+    const io = fakeIo();
+    const code = await main(["--server"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { token: "shh" } }),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines.some((l) => l.includes("plaintext HTTP"))).toBe(false);
+  });
+
+  test("local --web mode prints the log directory line after the byte-stable 'web UI ready at' line", async () => {
+    const io = fakeIo();
+    const code = await main(["--web"], {
+      ...interactiveOverrides(io),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(io.stdoutLines[0]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
+    expect(io.stdoutLines[1]).toMatch(/^dh: logs: .*\.dh-logs/);
+  });
+});
+
+describe("main — --server activity feed and client connect/disconnect lines (DH-0067)", () => {
+  test("by default, agent lifecycle events print an activity-feed line to stdout", async () => {
+    const io = fakeIo();
+    let capturedListener: ((event: ServerSentEvent) => void) | undefined;
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          onEvent: (listener) => {
+            capturedListener = listener;
+            return () => {};
+          },
+        }),
+    });
+    expect(capturedListener).toBeDefined();
+    capturedListener?.({
+      version: 1,
+      id: "1",
+      timestamp: "2026-07-16T12:00:00.000Z",
+      type: "agent_status",
+      agentId: "agent-root",
+      status: "running",
+    });
+    expect(io.stdoutLines.some((l) => l.includes("agent-root running"))).toBe(true);
+  });
+
+  test("--quiet suppresses the activity feed subscription entirely", async () => {
+    const io = fakeIo();
+    let onEventCallCount = 0;
+    await main(["--server", "--quiet"], {
+      ...interactiveOverrides(io),
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          onEvent: () => {
+            onEventCallCount += 1;
+            return () => {};
+          },
+        }),
+    });
+    // The fake DhServer in interactiveOverrides never itself calls onEvent, so any call at
+    // all here must have come from the --server activity-feed subscription this test is
+    // asserting is skipped under --quiet.
+    expect(onEventCallCount).toBe(0);
+  });
+
+  test("by default, createServer receives onClientConnect/onClientDisconnect callbacks that print stdout lines", async () => {
+    const io = fakeIo();
+    let captured: {
+      onClientConnect?: (addr: string) => void;
+      onClientDisconnect?: (addr: string) => void;
+    } = {};
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        captured = options;
+        return fakeServer();
+      },
+    });
+    expect(captured.onClientConnect).toBeDefined();
+    expect(captured.onClientDisconnect).toBeDefined();
+    captured.onClientConnect?.("127.0.0.1");
+    captured.onClientDisconnect?.("127.0.0.1");
+    expect(io.stdoutLines.some((l) => l.includes("client connected from 127.0.0.1"))).toBe(true);
+    expect(io.stdoutLines.some((l) => l.includes("client disconnected from 127.0.0.1"))).toBe(true);
+  });
+
+  test("--quiet omits onClientConnect/onClientDisconnect from the createServer options entirely", async () => {
+    const io = fakeIo();
+    let sawConnectKey = true;
+    let sawDisconnectKey = true;
+    await main(["--server", "--quiet"], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        sawConnectKey = "onClientConnect" in options;
+        sawDisconnectKey = "onClientDisconnect" in options;
+        return fakeServer();
+      },
+    });
+    expect(sawConnectKey).toBe(false);
+    expect(sawDisconnectKey).toBe(false);
   });
 });
