@@ -31,8 +31,16 @@ export interface AgentSpawnedEvent extends SseEventBase {
 export interface TokenUsageEvent extends SseEventBase {
   type: "token_usage";
   agentId: string;
+  /** Per-turn delta, not a running/cumulative total: one event is emitted per provider
+   * completion call, sourced directly from that call's own `usage` field (the Anthropic/
+   * Bedrock APIs never report conversation-wide cumulative usage). Clients must accumulate
+   * (sum) these across events to get a running per-agent total — see DH-0028, which found
+   * the TUI doing the wrong thing (replacing instead of summing) while the Web client already
+   * summed correctly. */
   inputTokens: number;
+  /** See {@link TokenUsageEvent.inputTokens} — same per-turn-delta semantics. */
   outputTokens: number;
+  /** See {@link TokenUsageEvent.inputTokens} — same per-turn-delta semantics, when present. */
   costUsd?: number;
 }
 
