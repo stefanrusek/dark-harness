@@ -71,3 +71,16 @@ Real Claude Code's Agent tool supports an 'isolation' mode of 'worktree', creati
 > Claude Code prompted by the owner following DH-0069. Relates to DH-0069 in that both
 > concern the `Agent` tool's parameter surface, but this is a distinct, separate parameter
 > (isolation) from that ticket's `description` finding.
+
+> [!NOTE]
+> Concrete real-world motivation (2026-07-16, owner-confirmed): during this very coordinator
+> session, several dispatched sub-agents were assigned a stale/broken git worktree and fell
+> back to working directly in the shared checkout — at least one caused a real collision
+> (a concurrent `git reset` clobbered another agent's in-progress merge). Root cause per the
+> DH-0070 cwd investigation: real Claude Code's Bash tool has no persistent cwd at all — every
+> call resets to a fixed base directory, so an agent has to re-prefix `cd <intended-dir> &&`
+> on every single command to reliably stay scoped to "its" directory. A confused or
+> corner-cutting agent that doesn't do this will silently act on the base directory instead —
+> exactly the failure mode observed. Worktree isolation (this ticket) would have prevented the
+> collision structurally rather than relying on every dispatched agent perfectly discipline
+> its own `cd` prefixing.
