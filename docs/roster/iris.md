@@ -179,3 +179,22 @@ untouched by this round's changes.
 Gates: `typecheck`, `lint`, `test:coverage` all pass (809/809 tests, 100% coverage retained
 across `src/prompt/`). `e2e` not run this round — unrelated to scope, same pre-existing
 sandbox gaps (no `tmux`/chromium) as prior rounds.
+
+### 2026-07-15 — DH-0056 (Output format / Markdown contract)
+
+Added a new "## Output format" section to `REQUIRED_CONTRACT` in `src/prompt/system-prompt.ts`,
+placed between the `TASK_FAILED` bullet and `## Logging` per Fable's D6 design — same
+DH-0018 rationale (survives a custom `systemPrompt` override, since clients parse Markdown
+unconditionally regardless of any operator persona prompt). Used the wording suggested in
+the ticket verbatim. Added matching assertions to `system-prompt.test.ts` (default-prompt
+inclusion, `REQUIRED_CONTRACT`'s own content, and an override-still-gets-it case), plus a
+short README note (new paragraph after the JSONL-logging paragraph in "Tools, skills, and
+sub-agents") that agent output renders as Markdown in both TUI and Web clients. This is
+Prompt's whole piece of DH-0056 — the shared `src/markdown/` parser (Mary), TUI renderer
+(Mary), Web renderer (Susan), and E2E hostile-bytes coverage (Hedy) are separate,
+independent pieces per the ticket's D7 sequencing table; nothing here depends on them
+landing first.
+
+Gates: `typecheck`, `lint`, `test:coverage` all pass (957/957 tests, 100% coverage retained
+project-wide, including `src/prompt/`). `e2e` not run — unrelated to scope, same
+pre-existing sandbox gaps as prior rounds.
