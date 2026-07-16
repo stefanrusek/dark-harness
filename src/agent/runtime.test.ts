@@ -302,6 +302,30 @@ describe("AgentRuntime", () => {
     expect(a.sessionId.length).toBeGreaterThan(0);
   });
 
+  // DH-0012 (tracking/DH-0012-unbounded-memory-growth-across-harness.md): AgentRuntime
+  // threads config.limits.completedRetention into its TaskRegistry's eviction cap.
+  test("config.limits.completedRetention threads into the runtime's TaskRegistry eviction cap", async () => {
+    const runtime = newAgentRuntime({
+      config: baseConfig({ limits: { completedRetention: 1 } }),
+      systemPrompt: "sp",
+    });
+    const first = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: ROOT_AGENT_ID,
+      run: async () => {},
+    });
+    await runtime.tasks.awaitDone(first);
+    const second = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: ROOT_AGENT_ID,
+      run: async () => {},
+    });
+    await runtime.tasks.awaitDone(second);
+    // Cap of 1 — the first task is evicted once the second one also completes.
+    expect(runtime.tasks.trySnapshot(first)).toBeUndefined();
+    expect(runtime.tasks.snapshot(second).status).toBe("done");
+  });
+
   test("sessionId honors an explicit override", () => {
     const runtime = newAgentRuntime({
       config: baseConfig(),

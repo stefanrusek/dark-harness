@@ -223,4 +223,120 @@ describe("TaskRegistry", () => {
     await registry.awaitDone(id);
     expect(registry.trySnapshot(id)).toEqual(registry.snapshot(id));
   });
+
+  // DH-0012 (tracking/DH-0012-unbounded-memory-growth-across-harness.md): fixed-count cap on
+  // terminal/completed tasks (and their read cursors), oldest evicted first — the default cap
+  // is 50, but the constructor accepts an explicit override so these tests don't need to spin
+  // up 51 tasks.
+  describe("DH-0012: completed-task retention cap", () => {
+    test("evicts the oldest terminal task once the cap is exceeded", async () => {
+      const registry = new TaskRegistry(undefined, 2);
+      const a = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      await registry.awaitDone(a);
+      const b = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      await registry.awaitDone(b);
+      // Cap of 2 not yet exceeded — both still present.
+      expect(
+        registry
+          .list()
+          .map((t) => t.id)
+          .sort(),
+      ).toEqual([a, b].sort());
+
+      const c = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      await registry.awaitDone(c);
+      // A third completion exceeds the cap of 2 — the oldest (a) is evicted.
+      expect(registry.trySnapshot(a)).toBeUndefined();
+      expect(
+        registry
+          .list()
+          .map((t) => t.id)
+          .sort(),
+      ).toEqual([b, c].sort());
+    });
+
+    test("never evicts an active (non-terminal) task regardless of count", async () => {
+      const registry = new TaskRegistry(undefined, 1);
+      const active = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: () => new Promise(() => {}),
+      });
+      for (let i = 0; i < 3; i += 1) {
+        const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+        await registry.awaitDone(id);
+      }
+      // The still-running task survives even though 3 terminal tasks have cycled through a
+      // retention cap of 1.
+      expect(registry.snapshot(active).status).toBe("running");
+    });
+
+    test("evicting a task also drops its per-reader read cursors", async () => {
+      const registry = new TaskRegistry(undefined, 1);
+      const a = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: async (handle) => {
+          handle.append("hello");
+        },
+      });
+      await registry.awaitDone(a);
+      registry.outputSince(a, "reader-a");
+
+      const b = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      await registry.awaitDone(b);
+
+      // `a` has been evicted (cap of 1, `b` is newer) — its read cursor is gone too, so a
+      // fresh outputSince() call for it is a brand new task id, not a stale cursor lookup.
+      expect(() => registry.outputSince(a, "reader-a")).toThrow(TaskNotFoundError);
+    });
+
+    test("defaults to DEFAULT_COMPLETED_RETENTION (50) when no override is given", async () => {
+      const registry = new TaskRegistry();
+      const ids: string[] = [];
+      for (let i = 0; i < 50; i += 1) {
+        const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+        await registry.awaitDone(id);
+        ids.push(id);
+      }
+      // Exactly at the default cap — nothing evicted yet.
+      expect(registry.list()).toHaveLength(50);
+
+      const oneMore = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      await registry.awaitDone(oneMore);
+      // The 51st completion evicts the very first task.
+      const firstId = ids[0];
+      expect(firstId).toBeDefined();
+      expect(registry.trySnapshot(firstId as string)).toBeUndefined();
+      expect(registry.list()).toHaveLength(50);
+    });
+
+    test("a stopped task counts toward the cap and can itself be evicted", async () => {
+      const registry = new TaskRegistry(undefined, 1);
+      const stopped = registry.start({
+        kind: "bash",
+        parentAgentId: "root",
+        run: () => new Promise(() => {}),
+      });
+      registry.stop(stopped);
+      expect(registry.snapshot(stopped).status).toBe("stopped");
+
+      const next = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      await registry.awaitDone(next);
+
+      expect(registry.trySnapshot(stopped)).toBeUndefined();
+      expect(registry.list().map((t) => t.id)).toEqual([next]);
+    });
+
+    test("onSettled still fires for a background task that gets evicted immediately (retention 0)", async () => {
+      const settled: unknown[] = [];
+      const registry = new TaskRegistry((snapshot) => settled.push(snapshot), 0);
+      const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      await registry.awaitDone(id);
+      expect(settled).toHaveLength(1);
+      expect((settled[0] as { id: string }).id).toBe(id);
+      // Evicted immediately since the cap is 0.
+      expect(registry.trySnapshot(id)).toBeUndefined();
+    });
+  });
 });

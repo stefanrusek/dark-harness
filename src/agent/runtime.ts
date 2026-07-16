@@ -125,7 +125,9 @@ export class AgentRuntime {
   // Round 12 (docs/handoffs/core.md): wired to handleTaskSettled() so every *background*
   // Bash/Agent task's completion pushes a notification into its parent's conversation — see
   // that method's doc comment for the full design, including the orphaned-grandchild case.
-  readonly tasks = new TaskRegistry((snapshot) => this.handleTaskSettled(snapshot));
+  // DH-0012: retention cap threaded from config.limits.completedRetention (constructor body,
+  // not a field initializer, since it needs `options` — see constructor below).
+  readonly tasks: TaskRegistry;
   private readonly config: DhConfig;
   private readonly systemPrompt: string;
   private readonly cwd: string;
@@ -185,6 +187,15 @@ export class AgentRuntime {
     this.onLogLine = options.onLogLine;
     this.interactive = options.interactive ?? false;
     this.client = options.client;
+    // DH-0012: wired to handleTaskSettled() so every *background* Bash/Agent task's
+    // completion pushes a notification into its parent's conversation — see that method's
+    // doc comment for the full design, including the orphaned-grandchild case. Retention cap
+    // comes from config.limits.completedRetention (TaskRegistry defaults to
+    // DEFAULT_COMPLETED_RETENTION when omitted).
+    this.tasks = new TaskRegistry(
+      (snapshot) => this.handleTaskSettled(snapshot),
+      this.config.limits?.completedRetention,
+    );
   }
 
   /** DH-0013: records a `token_usage` event's contribution to the session-wide cumulative

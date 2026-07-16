@@ -465,4 +465,41 @@ describe("validateConfig — rejections", () => {
       ),
     ).toThrow(/models\[0\].outputPricePerMToken must be a non-negative number/);
   });
+
+  // DH-0012 (tracking/DH-0012-unbounded-memory-growth-across-harness.md): the `limits`
+  // config block controlling fixed-count eviction caps.
+  test("DH-0012: accepts limits.completedRetention", () => {
+    const config = validateConfig(baseConfig({ limits: { completedRetention: 100 } }));
+    expect(config.limits?.completedRetention).toBe(100);
+  });
+
+  test("DH-0012: limits is omitted (not defaulted) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.limits).toBeUndefined();
+  });
+
+  test("DH-0012: rejects a non-positive-integer limits.completedRetention", () => {
+    expect(() => validateConfig(baseConfig({ limits: { completedRetention: 0 } }))).toThrow(
+      /limits.completedRetention must be a positive integer/,
+    );
+    expect(() => validateConfig(baseConfig({ limits: { completedRetention: 1.5 } }))).toThrow(
+      /limits.completedRetention must be a positive integer/,
+    );
+  });
+
+  test("DH-0012: rejects a non-object limits", () => {
+    expect(() => validateConfig(baseConfig({ limits: "fifty" }))).toThrow(
+      /limits must be an object/,
+    );
+  });
+
+  test("DH-0012: rejects an unknown key inside limits", () => {
+    expect(() =>
+      validateConfig(baseConfig({ limits: { completedRetention: 10, maxThings: 5 } })),
+    ).toThrow(/limits has unknown key "maxThings"/);
+  });
+
+  test("DH-0012: rejects an unknown top-level config key mentioning limits in the error", () => {
+    expect(() => validateConfig(baseConfig({ limitz: {} }))).toThrow(/unknown config key "limitz"/);
+  });
 });

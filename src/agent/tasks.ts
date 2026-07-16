@@ -98,6 +98,11 @@ export class TaskFinishedError extends Error {
   }
 }
 
+/** DH-0012 (tracking/DH-0012-unbounded-memory-growth-across-harness.md): default cap on
+ * terminal/completed tasks retained before the oldest are evicted, when `dh.json`'s
+ * `limits.completedRetention` is omitted. */
+export const DEFAULT_COMPLETED_RETENTION = 50;
+
 export class TaskRegistry {
   private tasks = new Map<string, InternalTask>();
   private counter = 0;
@@ -108,12 +113,48 @@ export class TaskRegistry {
   // tool contract limits polling to one caller, and a second reader (e.g. a sibling sub-agent
   // also watching the same background Bash task) should still see its own "what's new to me."
   private readCursors = new Map<string, Map<string, number>>();
+  // DH-0012: FIFO of task ids that have reached a terminal status ("done" | "failed" |
+  // "stopped"), in the order they terminated — the eviction queue. `terminalIds` guards
+  // against double-counting a task that could otherwise be noted terminal twice (e.g.
+  // stop() sets "stopped" synchronously, then the aborted run's rejection settles through
+  // the same .catch() branch that would otherwise re-note it).
+  private completedOrder: string[] = [];
+  private terminalIds = new Set<string>();
 
   /** Round 12 (docs/handoffs/core.md): fired once, after a *background* task's `run` has
    * settled (success or failure), with its final snapshot — the hook AgentRuntime uses to
    * push a completion notification into the parent agent's conversation. Foreground tasks
-   * (background: false) never fire this — see StartTaskParams.background's doc comment. */
-  constructor(private readonly onSettled?: (snapshot: TaskSnapshot) => void) {}
+   * (background: false) never fire this — see StartTaskParams.background's doc comment.
+   *
+   * DH-0012: `completedRetention` (default `DEFAULT_COMPLETED_RETENTION`) bounds how many
+   * terminal tasks (and their captured output `chunks`/read cursors) this registry keeps —
+   * oldest evicted first, active (non-terminal) tasks never evicted regardless of count. */
+  constructor(
+    private readonly onSettled?: (snapshot: TaskSnapshot) => void,
+    private readonly completedRetention: number = DEFAULT_COMPLETED_RETENTION,
+  ) {}
+
+  /** DH-0012: records a task's transition to a terminal status in eviction order, then evicts
+   * the oldest terminal entries (task + its read cursors) beyond `completedRetention`. Called
+   * exactly once per task, at each of the three places a task becomes terminal (the success
+   * path, the failure path, and stop()) — `terminalIds` makes a duplicate call a no-op so a
+   * task already evicted (or already queued) is never double-counted or re-added. */
+  private noteTerminal(id: string): void {
+    if (this.terminalIds.has(id)) return;
+    // Already evicted (e.g. stop() queued it once under a tiny retention cap, and a later
+    // branch above calls noteTerminal again) — don't resurrect a phantom entry in the
+    // eviction queue for a task no longer in `tasks`.
+    if (!this.tasks.has(id)) return;
+    this.terminalIds.add(id);
+    this.completedOrder.push(id);
+    while (this.completedOrder.length > this.completedRetention) {
+      const oldest = this.completedOrder.shift();
+      if (oldest === undefined) break;
+      this.tasks.delete(oldest);
+      this.readCursors.delete(oldest);
+      this.terminalIds.delete(oldest);
+    }
+  }
 
   private nextId(kind: TaskKind): string {
     this.counter += 1;
@@ -152,6 +193,12 @@ export class TaskRegistry {
       },
     };
 
+    // DH-0012: captured by the two branches below, right when task.status/error/finishedAt
+    // are finalized but before noteTerminal() could ever evict this task (possible with a
+    // very small completedRetention, e.g. 0) — so the final .then()'s onSettled call always
+    // gets the real final snapshot, never an eviction-induced "already gone" gap.
+    let finalSnapshot: TaskSnapshot | undefined;
+
     task.done = params
       .run(handle)
       .then(() => {
@@ -159,6 +206,10 @@ export class TaskRegistry {
           task.status = "done";
         }
         task.finishedAt = new Date().toISOString();
+        finalSnapshot = this.snapshot(id);
+        // task.status is terminal one way or another by this point (freshly "done", or
+        // already "stopped" if stop() raced this branch) — queue it for eviction.
+        this.noteTerminal(id);
       })
       .catch((err: unknown) => {
         // Round 13: stop() already set status to "stopped" (and finishedAt) synchronously
@@ -170,13 +221,17 @@ export class TaskRegistry {
           task.error = err instanceof Error ? err.message : String(err);
           task.finishedAt = new Date().toISOString();
         }
+        finalSnapshot = this.snapshot(id);
+        // Terminal either way ("failed" just set above, or "stopped" already set) — queue it
+        // for eviction (noteTerminal is a no-op if stop() already queued this id).
+        this.noteTerminal(id);
       })
       .then(() => {
         // Round 12: fires after the branches above have settled task.status/error/finishedAt,
         // regardless of which branch ran (the .catch above never rethrows) — so this always
         // observes the final snapshot, not a mid-settle one.
-        if (task.background) {
-          this.onSettled?.(this.snapshot(id));
+        if (task.background && finalSnapshot) {
+          this.onSettled?.(finalSnapshot);
         }
       });
 
@@ -243,6 +298,9 @@ export class TaskRegistry {
     task.controller.abort();
     task.status = "stopped";
     task.finishedAt = new Date().toISOString();
+    // DH-0012: queue for eviction now — the async .then/.catch chain will also call
+    // noteTerminal(id) once the aborted run's promise settles, but that's a no-op by then.
+    this.noteTerminal(id);
   }
 
   /** Round 13 (docs/handoffs/core.md): refuses (TaskFinishedError) once the task has reached

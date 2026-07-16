@@ -764,3 +764,53 @@ retry bugs above were actually found and verified fixed), `build-stamp.test.ts`,
 `bedrock-provider.test.ts`, `server-protocol.test.ts` all pass; `security.test.ts` has the
 same one pre-existing timeout failure prior rounds already flagged (confirmed via `git stash`
 to predate this round too).
+
+### 2026-07-15 — DH-0012 (TaskRegistry retention cap) + DH-0020 wiring check
+
+Landed my piece of DH-0012: `TaskRegistry` (`src/agent/tasks.ts`) now caps terminal
+(done/failed/stopped) entries at a fixed count — `DEFAULT_COMPLETED_RETENTION = 50` — evicting
+the oldest terminal entry (from both the task `Map` and the per-task `readCursors` Map) once
+exceeded; active/non-terminal tasks are never evicted regardless of count, per the owner's
+locked decision in the ticket. New `dh.json` knob: `limits.completedRetention` (contracts:
+`src/contracts/config.ts`'s new `LimitsConfig`; validated in `src/config/validate.ts` with the
+same "positive integer when present" pattern as the existing `options.max*` budgets).
+`AgentRuntime` (`src/agent/runtime.ts`) threads `config.limits?.completedRetention` into its
+`TaskRegistry` — I had to move `tasks` from a field initializer to constructor-body
+assignment to reach `this.config` there (a plain field initializer can't cleanly depend on
+another field being set first, since initializer order isn't guaranteed relative to
+constructor-body statements when both apply to state derived from `options`).
+
+**Judgment call worth flagging**: the natural implementation point for "queue a task for
+eviction" is exactly where `.then()`/`.catch()` set `task.status` terminal — but the *third*
+chained `.then()` that fires `onSettled` used to look the snapshot up *after* that point, so
+under a pathologically small retention (e.g. 0, which I added a test for) the task could
+already be evicted by the time `onSettled` tried to read it, silently dropping the
+completion-notification callback AgentRuntime depends on. Fixed by capturing the snapshot
+into a local (`finalSnapshot`) at the moment status is finalized, before eviction can touch
+it, and passing that captured value to `onSettled` regardless of whether the entry survives.
+Also added a `this.tasks.has(id)` guard inside `noteTerminal()` so a task already evicted (via
+`stop()`'s synchronous call under a tiny cap) can't get a phantom second entry pushed into the
+eviction queue when the async completion chain calls `noteTerminal()` again afterward.
+
+**DH-0020 (JSONL logger secrets redaction)**: my assigned piece is a ~3-line `cli.ts` wiring
+follow-through once Server's Radia lands `src/server/redact.ts` (`collectConfigSecrets` +
+`SessionLogger`'s new `knownSecrets` param). Checked before starting DH-0012 and again just
+before finishing: `src/server/redact.ts` does not exist on this branch yet (confirmed via
+`find` and `git log --all -- '**/redact.ts'`). Per the ticket's own sequencing note
+("Coordinator sequences Server first") and my brief's explicit permission to skip if the file
+isn't there yet, I did not add speculative wiring against a module that doesn't exist —
+someone (me, resumed, or another Core instance) needs to pick this back up once Radia's
+`redact.ts` lands.
+
+**Gates:** typecheck/lint clean. `bun run test:coverage`: 968 pass, 0 fail; every file this
+round touched (`tasks.ts`, `runtime.ts`, `validate.ts`, `config.ts`) at 100%/100%. `bun run
+e2e`: same pre-existing sandbox gaps as before (no `tmux`, no headless Chromium at
+`/opt/pw-browsers/chromium`) plus the same one pre-existing `security.test.ts` timeout other
+rounds have already flagged — none of these touch anything this round changed; 25/30 e2e
+tests that could run did pass.
+
+Also had to fast-forward this round's worktree from a stale base commit (it had branched
+before `claude/coordinator-onboarding-kab9ls` picked up all the merged domain work) up to the
+branch's current tip before any of the files referenced in my brief even existed on disk —
+worth a note in case another fresh worktree shows the same symptom (empty-looking repo,
+`origin/main` far behind local `main`/the working branch).
