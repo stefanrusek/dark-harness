@@ -1475,3 +1475,40 @@ headless-Chromium-unavailable-in-sandbox failures every prior round has footnote
 tiny ref with no `src/` tree — had to fetch and hard-reset to
 `claude/coordinator-onboarding-kab9ls` (clean working tree, so safe) before real source
 existed to edit. Same flag as every prior round; worth fixing at the provisioning layer.
+
+### 2026-07-16 — DH-0098 (dh init's stdout message: one unreadable wall of text)
+
+Small, precisely-scoped formatting-only fix, worked directly in the shared checkout (no
+worktree this time, per the coordinator's own instruction — task was small and uncontended).
+`runInit` in `src/cli.ts` had one giant template-literal `io.stdout(...)` call with no line
+breaks at all, so it rendered as an unbroken line regardless of terminal width. Split it into
+five separate `io.stdout(...)` calls, each one topic (what was written; the model menu is
+broad, trim it; `dh doctor`/`--check` probes credentials; Bedrock ids are `us-east-1`-verified;
+edit + run `dh` to start) — matched the file's existing convention of several short single-line
+`io.stdout()` calls (e.g. the `--server`/`--web` startup block a few hundred lines down) rather
+than embedding `\n`s in one call, since that's what every other multi-fact stdout block in this
+file already does. No content changed, only where the line breaks fall.
+
+**No test needed updating in the end.** The ticket predicted `cli.test.ts` had an assertion on
+the exact message string; on inspection the only relevant assertion (`writes the sample config
+to the default path and exits 0`) only checks `io.stdoutLines[0]` via `.toContain(target)` —
+true both before and after, since the first line (`dh: wrote a starter config to
+${targetPath}.`) still contains the path. Confirmed by grepping for `wrote a starter config`/
+`models list is a menu` across the test file before assuming I needed to touch it — didn't
+find a broader exact-string assertion, so I left the test file untouched rather than making an
+unrequested edit to a passing test.
+
+**Gates:** typecheck/lint clean (lint needed one `biome check --write` pass to reformat a
+multi-line `io.stdout(...)` call biome preferred single-line — mechanical, not a content
+change). `bun run test:coverage`: 1697 pass, 0 fail; `src/cli.ts` shows 3 uncovered lines
+(554/558/562) but those are `AgentRuntimeLoopAdapter.listModels`/`switchModel`/`listSkills`
+thin-delegation methods unrelated to this change (pre-existing, confirmed by reading the
+surrounding code — not something my diff touched).
+
+**Live-verified with the real compiled binary**, per this identity's standing habit: `bun run
+build` then `./dist/dh init` in a fresh scratch directory (`/tmp/dh-init-scratch`) — output is
+now five distinct lines, each a complete, readable thought, no more single-wall-of-text.
+
+Committed in two small, single-purpose commits (fix; ticket close) rather than one, since the
+close is a tracking-file-only change with no code coupling to the fix commit. Closed DH-0098
+(`transition.py DH-0098 closed --resolution done`).
