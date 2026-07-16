@@ -86,8 +86,17 @@ try {
   const lines = pane.split("\n");
   const rootLine = lines.find((l) => l.includes("agent-root"));
   const childLine = lines.find((l) => l.includes("Say hi as sub-agent"));
-  const rootIndent = rootLine ? (rootLine.match(/^\s*/)?.[0].length ?? 0) : -1;
-  const childIndent = childLine ? (childLine.match(/^\s*/)?.[0].length ?? 0) : -1;
+  // DH-0065: nesting depth is now shown with tree connectors ("├─ "/"└─ ", matching `dh
+  // logs`), not plain repeated ASCII spaces — a leading-whitespace-only regex no longer
+  // grows with depth (the connector glyphs are non-whitespace). Measure depth instead by the
+  // ANSI-stripped column position of the "●" status glyph, which the connector prefix still
+  // pushes further right for a deeper entry.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping real ESC bytes is the point
+  const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+  const glyphColumn = (line: string | undefined): number =>
+    line ? stripAnsi(line).indexOf("●") : -1;
+  const rootIndent = glyphColumn(rootLine);
+  const childIndent = glyphColumn(childLine);
 
   // Poll for the green "done" glyph on the (sub) entry — a plain terminal-status color check
   // to close out the Test Plan's "per-agent status shows the correct label/color" item.
