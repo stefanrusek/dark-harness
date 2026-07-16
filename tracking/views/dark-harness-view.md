@@ -48,7 +48,6 @@ source: tracking/
 | [DH-0023](../DH-0023-web-ui-token-leak-cors-csp-clickjacking.md) | Web UI CORS/Host-header/CSP/clickjacking hardening | bug | stefan |
 | [DH-0025](../DH-0025-tui-terminal-safety-and-rendering-correctness.md) | TUI wide-character/resize/redraw rendering bugs | bug | stefan |
 | [DH-0028](../DH-0028-tui-missing-token-cost-display-and-usage-accounting-mismatch.md) | TUI never displays token/cost data it already tracks, and TUI vs. Web disagree on whether `token_usage` is a delta or a running total | bug | stefan |
-| [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
 | [DH-0040](../DH-0040-bash-env-secrets-exposure-and-provider-error-redaction.md) | Bash tool's full-environment inheritance and unredacted provider error messages are undocumented secrets-exposure vectors | bug | stefan |
 | [DH-0044](../DH-0044-no-streaming-partial-output.md) | No streaming of partial model output — `agent_output` events only fire once per completed turn | feature | stefan |
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | feature | stefan |
@@ -64,6 +63,7 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0035](../DH-0035-first-run-friction-no-init-doctor-dry-run.md) | No `dh init`/`dh doctor`/`--dry-run`, and cold error messages give a first-time operator no path forward | feature | stefan |
 | [DH-0037](../DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md) | No log rotation/disk-growth caps, no structured final run-summary artifact, and no log-analysis tooling | feature | stefan |
+| [DH-0038](../DH-0038-no-crash-recovery-or-session-resume.md) | No crash-recovery/session-resume across a process restart, and a completed standalone job silently starts a fresh, disconnected interactive session | feature | stefan |
 
 ## Recently Closed
 
