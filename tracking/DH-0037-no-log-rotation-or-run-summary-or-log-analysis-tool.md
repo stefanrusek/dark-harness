@@ -59,3 +59,11 @@ answering "what did it cost, where is it stuck, did it loop" today can only do s
 > DH-0050's Core round lands, reusing its field shapes rather than inventing a parallel one.
 > Log rotation and the `dh logs` analysis tool are independent of that sequencing and can
 > start immediately.
+
+> [!NOTE]
+> Coordinator audit (2026-07-16): confirmed log rotation (`src/server/log-retention.ts`) and
+> the `dh logs` analysis tool (`src/server/log-analysis.ts`, `src/cli.ts`'s `logs` subcommand)
+> are both fully implemented and shipped. `summary.json` remains unimplemented, still blocked
+> on DH-0050 (`job_result`/`ReportOutcome`), which is itself still `status: ready`. Ticket
+> correctly stays `implementing` — 2 of 3 user stories done, third genuinely blocked, not
+> forgotten.
