@@ -30,6 +30,7 @@ import type {
   SkillInfo,
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
+import { loadSystemPrompt } from "./prompt/system-prompt.ts";
 import {
   type AgentLoopEventListener,
   type AgentLoopHandle,
@@ -46,13 +47,6 @@ import { startTui as startTuiClient } from "./tui/index.ts";
 import { serveWebUi as serveWebUiClient } from "./web/server.ts";
 
 export const DEFAULT_PORT = 4000;
-
-/** Placeholder until the Prompt domain lands `src/prompt/`'s built-in system prompt
- * (docs/handoffs/core.md §4: "accept any string for now"). Overridable via
- * `dh.json`'s `systemPrompt` path either way. */
-export const DEFAULT_SYSTEM_PROMPT =
-  "You are Dark Harness (dh), an autonomous coding agent. " +
-  "TODO(prompt domain): replace this placeholder with the real built-in system prompt.";
 
 export class CliUsageError extends Error {
   constructor(message: string) {
@@ -430,17 +424,6 @@ export function parseEnvFile(content: string): Record<string, string> {
     result[key] = value;
   }
   return result;
-}
-
-async function loadSystemPrompt(config: DhConfig): Promise<string> {
-  if (!config.systemPrompt) {
-    return DEFAULT_SYSTEM_PROMPT;
-  }
-  const file = Bun.file(config.systemPrompt);
-  if (!(await file.exists())) {
-    throw new ConfigError(`systemPrompt file not found: ${config.systemPrompt}`);
-  }
-  return file.text();
 }
 
 /**

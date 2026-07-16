@@ -1420,3 +1420,58 @@ from a stale/tiny ref (only `HANDOFF.md`/`LICENSE`/`METHODOLOGY.md`, no `src/` t
 — had to `git merge claude/coordinator-onboarding-kab9ls` (fast-forwarded cleanly) before any
 real source existed to edit. Same flag as prior rounds; worth fixing at the provisioning
 layer.
+
+### 2026-07-16 — DH-0097: wire in the real built-in system prompt (urgent fix)
+
+Critical bug: `src/cli.ts` had its own local `DEFAULT_SYSTEM_PROMPT` placeholder string and
+local `loadSystemPrompt(config)` that returned it whenever `dh.json` had no `systemPrompt`
+override — the common/default case. Meanwhile `src/prompt/system-prompt.ts` had the real
+`buildDefaultSystemPrompt`/`loadSystemPrompt` (Iris's `REQUIRED_CONTRACT` with the
+`TASK_FAILED` marker, DH-0056's Markdown discipline, skills enumeration, DH-0094's self-info
+section) that `cli.ts` never called. So every session run without an explicit
+`systemPrompt` override — i.e. virtually all real usage — got the placeholder, silently
+dropping all of the session's prompt-engineering work.
+
+Fix: deleted `cli.ts`'s local `DEFAULT_SYSTEM_PROMPT` const and local `loadSystemPrompt`
+function; imported the real `loadSystemPrompt` from `./prompt/system-prompt.ts` directly and
+used it as `defaultDeps().loadSystemPrompt` (same call site, same `(config: DhConfig) =>
+Promise<string>` signature — true drop-in). One behavior change worth flagging: the real
+`loadSystemPrompt` doesn't throw a `ConfigError` with a custom "systemPrompt file not found"
+message when the configured file is missing — it just lets `Bun.file().text()`'s raw ENOENT
+propagate. Still caught by `main()`'s existing generic `catch (err) { return fail(io,
+(err as Error).message) }` and still exits `HarnessError`, just with a plainer message
+(now contains the file path, not "not found"); updated the test accordingly rather than
+re-adding a custom error path, since the exit-code contract (§4.5) is unaffected.
+
+Updated three `cli.test.ts` cases that asserted on the placeholder's real behavior: the
+"falls back when unset" case now compares against `buildDefaultSystemPrompt(TEST_CONFIG)`
+instead of the removed constant; the "reads configured file" case now expects
+`REQUIRED_CONTRACT` appended (the real `loadSystemPrompt`'s documented behavior — an
+operator's override can't silently drop the `TASK_FAILED` contract); the "missing file"
+case now checks the message contains the file path rather than the old custom string.
+
+**Verified live, not just via unit tests** (this bug is exactly the kind unit tests miss —
+mocked `loadSystemPrompt` deps in most other tests would never have caught it): built the
+real binary (`bun run build`), ran it against the real Anthropic API with a real
+`ANTHROPIC_API_KEY` from this repo's `secrets.env` (`--env secrets.env --config dh.json
+--instructions <file> --job`), two ways:
+1. A trivial task ("reply with exactly: hello world") — confirmed the binary runs and
+   responds normally end to end.
+2. A task engineered to be impossible ("divide by zero... report failure per your
+   instructions") — the model's response ended in the literal `TASK_FAILED` marker and the
+   process exited code `1`. This is direct proof the real `REQUIRED_CONTRACT` (which is the
+   only place that instruction exists — the placeholder never mentioned `TASK_FAILED` at
+   all) is actually reaching the model in the compiled binary, not just in test mocks.
+
+Gates: `typecheck` clean. `lint` clean. `test:coverage`: 1669 pass, 0 fail;
+`src/cli.ts` line coverage 92.00% (92.21% before the change — pre-existing gap, confirmed by
+diffing against a `git stash` baseline; no new uncovered lines introduced).
+`src/prompt/system-prompt.ts` remains 100%. `e2e`: 30/32 pass, same pre-existing
+headless-Chromium-unavailable-in-sandbox failures every prior round has footnoted (`web.test.ts`,
+`connect-web.test.ts`), unrelated to this change. Closed DH-0097
+(`transition.py DH-0097 closed --resolution done`).
+
+**Worktree note (repeat, still true):** this round's assigned worktree was again a stale
+tiny ref with no `src/` tree — had to fetch and hard-reset to
+`claude/coordinator-onboarding-kab9ls` (clean working tree, so safe) before real source
+existed to edit. Same flag as every prior round; worth fixing at the provisioning layer.

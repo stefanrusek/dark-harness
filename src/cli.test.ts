@@ -12,7 +12,6 @@ import {
   type CliIo,
   CliUsageError,
   DEFAULT_PORT,
-  DEFAULT_SYSTEM_PROMPT,
   type DhServerLike,
   SAMPLE_DH_JSON,
   type WebUiHandleLike,
@@ -26,6 +25,7 @@ import {
 } from "./cli.ts";
 import type { DhConfig, ProviderConfig, ServerSentEvent } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
+import { REQUIRED_CONTRACT, buildDefaultSystemPrompt } from "./prompt/system-prompt.ts";
 import { DhServer, waitForExitCode } from "./server/index.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
 
@@ -1320,7 +1320,7 @@ describe("main — real filesystem-backed default deps", () => {
     expect(io.stderrLines[0]).toContain("instructions file not found");
   });
 
-  test("the real loadSystemPrompt dep falls back to DEFAULT_SYSTEM_PROMPT when unset", async () => {
+  test("the real loadSystemPrompt dep falls back to the real built-in prompt when unset", async () => {
     const io = fakeIo();
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "go");
@@ -1334,7 +1334,7 @@ describe("main — real filesystem-backed default deps", () => {
       io,
       installSignalHandlers: fakeInstallSignalHandlers(),
     });
-    expect(received).toBe(DEFAULT_SYSTEM_PROMPT);
+    expect(received).toBe(await buildDefaultSystemPrompt(TEST_CONFIG));
   });
 
   test("the real loadSystemPrompt dep reads the configured systemPrompt file", async () => {
@@ -1353,7 +1353,7 @@ describe("main — real filesystem-backed default deps", () => {
       io,
       installSignalHandlers: fakeInstallSignalHandlers(),
     });
-    expect(received).toBe("custom system prompt");
+    expect(received).toBe(`custom system prompt\n\n${REQUIRED_CONTRACT}`);
   });
 
   test("the real loadSystemPrompt dep reports a clear error when the configured file is missing", async () => {
@@ -1364,7 +1364,7 @@ describe("main — real filesystem-backed default deps", () => {
       installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(code).toBe(ExitCode.HarnessError);
-    expect(io.stderrLines[0]).toContain("systemPrompt file not found");
+    expect(io.stderrLines[0]).toContain("nope.md");
   });
 
   test("the real createRuntime dep constructs an AgentRuntime and surfaces a real connection failure", async () => {
