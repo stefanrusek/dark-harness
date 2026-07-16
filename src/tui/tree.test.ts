@@ -11,12 +11,12 @@ describe("flattenTree", () => {
     expect(flattenTree([])).toEqual([]);
   });
 
-  test("flattens a flat list of roots at depth 0", () => {
+  test("flattens a flat list of roots at depth 0, with no connector prefix", () => {
     const a = node("a");
     const b = node("b");
     expect(flattenTree([a, b])).toEqual([
-      { node: a, depth: 0 },
-      { node: b, depth: 0 },
+      { node: a, depth: 0, prefix: "" },
+      { node: b, depth: 0, prefix: "" },
     ]);
   });
 
@@ -33,5 +33,22 @@ describe("flattenTree", () => {
     const tree = [node("a", [node("a1")]), node("b", [node("b1")])];
     const result = flattenTree(tree);
     expect(result.map((entry) => entry.node.agentId)).toEqual(["a", "a1", "b", "b1"]);
+  });
+
+  test("a single child of a depth-0 root gets a '└─ ' connector (last/only sibling)", () => {
+    const tree = [node("a", [node("a1")])];
+    const result = flattenTree(tree);
+    expect(result.map((entry) => entry.prefix)).toEqual(["", "└─ "]);
+  });
+
+  test("a non-last child gets '├─ ' and its descendants continue with a '│  ' bar", () => {
+    const tree = [node("a", [node("a1", [node("a1a")]), node("a2")])];
+    const result = flattenTree(tree);
+    expect(result.map((entry) => `${entry.node.agentId}:${entry.prefix}`)).toEqual([
+      "a:",
+      "a1:├─ ",
+      "a1a:│  └─ ",
+      "a2:└─ ",
+    ]);
   });
 });

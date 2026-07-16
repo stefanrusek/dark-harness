@@ -21,7 +21,11 @@ import { successTurn } from "../../support/mock-provider.ts";
 import type { SpikeCheck } from "./spike-support.ts";
 import { bootLocalTui, expectContains, expectTrue, reportAndExit } from "./spike-support.ts";
 
-const WAITING_GLYPH = "\x1b[36m●\x1b[39m agent-root"; // cyan status dot (●) = "waiting"
+// Cyan status dot (●) = "waiting" (src/tui/render.ts STATUS_COLOR). DH-0065 inserted a
+// colored status word ("waiting") between the glyph and the agentId label, so the glyph no
+// longer sits directly adjacent to "agent-root" — check the glyph and the label as two
+// separate substrings of the same raw capture rather than one concatenated string.
+const WAITING_GLYPH = "\x1b[36m●\x1b[39m"; // cyan status dot (●) = "waiting"
 
 const { session, stop } = await bootLocalTui([successTurn("Stop-test reply.")], {
   wrapCommand: (binaryPath) => ["sh", "-c", `"${binaryPath}"; echo "SPIKE-EXIT:$?"; sleep 60`],
@@ -44,7 +48,8 @@ try {
   let sawWaitingGlyph = false;
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
-    if (session.captureRaw().includes(WAITING_GLYPH)) {
+    const raw = session.captureRaw();
+    if (raw.includes(WAITING_GLYPH) && raw.includes("agent-root")) {
       sawWaitingGlyph = true;
       break;
     }

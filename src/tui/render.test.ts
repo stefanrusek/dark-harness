@@ -179,6 +179,37 @@ describe("renderFrame", () => {
     expect(rows[0]).toContain("open");
   });
 
+  test("header styles the app name bold and colors the connection pill per status (DH-0065)", () => {
+    const openRow = renderFrame(baseState({ connection: "open" }))[0] ?? "";
+    const errorRow = renderFrame(baseState({ connection: "error" }))[0] ?? "";
+    const closedRow = renderFrame(baseState({ connection: "closed" }))[0] ?? "";
+    expect(openRow).toContain("\x1b[1mDark Harness\x1b[0m");
+    expect(openRow).toContain("\x1b[32mopen\x1b[0m");
+    expect(errorRow).toContain("\x1b[31merror\x1b[0m");
+    expect(closedRow).toContain("\x1b[90mclosed\x1b[0m");
+  });
+
+  test("header shows a spinner next to the connection pill while the root agent is running (DH-0065)", () => {
+    let state = baseState({ now: 0 });
+    state.agents.set("root", agentInfo({ status: "running" }));
+    state = { ...state, rootAgentId: "root" };
+    const row = renderFrame(state)[0] ?? "";
+    expect(row).toContain("working…");
+  });
+
+  test("header shows no spinner when the root agent is not running", () => {
+    let state = baseState();
+    state.agents.set("root", agentInfo({ status: "waiting" }));
+    state = { ...state, rootAgentId: "root" };
+    const row = renderFrame(state)[0] ?? "";
+    expect(row).not.toContain("working…");
+  });
+
+  test("root view's default key hint is dimmed", () => {
+    const rows = renderFrame(baseState());
+    expect(rows.some((row) => row.includes("\x1b[2m[Enter] send"))).toBe(true);
+  });
+
   test("header shows session-ended info once the session has ended", () => {
     const rows = renderFrame(baseState({ sessionEnded: { exitCode: 1 } }));
     expect(rows[0]).toContain("session ended (exit 1)");
@@ -192,7 +223,11 @@ describe("renderFrame", () => {
 
   test("tree view lists agents with a selection marker and hint", () => {
     const tree = [treeNode("a"), treeNode("b", { status: "failed" })];
-    const state = baseState({ view: { kind: "tree", selectedIndex: 1 }, tree });
+    const state = baseState({
+      size: { rows: 10, cols: 60 },
+      view: { kind: "tree", selectedIndex: 1 },
+      tree,
+    });
     const rows = renderFrame(state);
     const joined = rows.join("\n");
     expect(joined).toContain("a (sonnet)");
@@ -207,7 +242,11 @@ describe("renderFrame", () => {
   // got one (the root agent, or a pre-DH-0069 logged session).
   test("tree view prefers an agent's description over agentId (model) when present", () => {
     const tree = [treeNode("a", { description: "Fix flaky retry test" })];
-    const state = baseState({ view: { kind: "tree", selectedIndex: 0 }, tree });
+    const state = baseState({
+      size: { rows: 10, cols: 60 },
+      view: { kind: "tree", selectedIndex: 0 },
+      tree,
+    });
     const rows = renderFrame(state);
     const joined = rows.join("\n");
     expect(joined).toContain("Fix flaky retry test");
@@ -216,9 +255,15 @@ describe("renderFrame", () => {
 
   test("tree view nests children with indentation", () => {
     const tree = [treeNode("a", { children: [treeNode("a1")] })];
-    const state = baseState({ view: { kind: "tree", selectedIndex: 0 }, tree });
+    const state = baseState({
+      size: { rows: 10, cols: 60 },
+      view: { kind: "tree", selectedIndex: 0 },
+      tree,
+    });
     const rows = renderFrame(state);
     expect(rows.some((row) => row.includes("a1 (sonnet)"))).toBe(true);
+    // DH-0065: nested entries carry a tree connector, not just a plain indent.
+    expect(rows.some((row) => row.includes("└─ ") && row.includes("a1 (sonnet)"))).toBe(true);
   });
 
   test("tree view scrolls to keep a selection below the fold visible (DH-0027)", () => {
@@ -238,7 +283,7 @@ describe("renderFrame", () => {
   test("tree view scrolls up to follow a selection moved back above the fold (DH-0027)", () => {
     const tree = Array.from({ length: 20 }, (_, i) => treeNode(`agent-${i}`));
     const state = baseState({
-      size: { rows: 10, cols: 40 },
+      size: { rows: 10, cols: 60 },
       view: { kind: "tree", selectedIndex: 0 },
       tree,
     });
@@ -251,7 +296,7 @@ describe("renderFrame", () => {
   test("tree view shows the full tree without scrolling when it fits the viewport", () => {
     const tree = [treeNode("a"), treeNode("b")];
     const state = baseState({
-      size: { rows: 10, cols: 40 },
+      size: { rows: 10, cols: 60 },
       view: { kind: "tree", selectedIndex: 0 },
       tree,
     });
@@ -307,16 +352,39 @@ describe("renderFrame", () => {
     expect(joined).toContain("Last event: 12s ago");
   });
 
-  test("tree view shows elapsed time since last event per agent", () => {
+  test("tree view shows elapsed time in current status for an active agent", () => {
     const tree = [treeNode("a")];
     const state = baseState({
+      size: { rows: 10, cols: 60 },
       view: { kind: "tree", selectedIndex: 0 },
       tree,
       now: 30_000,
     });
-    state.agents.set("a", agentInfo({ agentId: "a", lastEventAt: 5_000 }));
+    // DH-0065: elapsed uses statusSince ("time in current status"), not lastEventAt.
+    state.agents.set(
+      "a",
+      agentInfo({ agentId: "a", status: "running", statusSince: 5_000, lastEventAt: 20_000 }),
+    );
     const rows = renderFrame(state);
     expect(rows.join("\n")).toContain("[25s]");
+  });
+
+  test("tree view omits the elapsed marker entirely for a terminal (done) agent (DH-0065)", () => {
+    const tree = [treeNode("a", { status: "done" })];
+    const state = baseState({
+      size: { rows: 10, cols: 60 },
+      view: { kind: "tree", selectedIndex: 0 },
+      tree,
+      now: 30_000,
+    });
+    state.agents.set(
+      "a",
+      agentInfo({ agentId: "a", status: "done", statusSince: 5_000, lastEventAt: 5_000 }),
+    );
+    const rows = renderFrame(state);
+    const row = rows.find((r) => r.includes("a (sonnet)"));
+    expect(row).toBeDefined();
+    expect(row).not.toMatch(/\[\d+(s|m\d\ds|h\d\dm)\]/);
   });
 
   test("tree view omits the elapsed marker for an agent not yet known client-side", () => {
@@ -355,9 +423,10 @@ describe("renderFrame", () => {
     });
     state = { ...state, rootAgentId: "root" };
     const rows = renderFrame(state);
-    const joined = rows.join("\n");
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping real ESC bytes is the point
+    const joined = rows.join("\n").replace(/\x1b\[[0-9;]*m/g, "");
     expect(joined).toContain("> hello there");
-    expect(joined).toContain("hi, how can I help?");
+    expect(joined).toContain("● hi, how can I help?");
   });
 
   test("multiple back-to-back assistant turns render as visually separate turns", () => {
@@ -378,21 +447,51 @@ describe("renderFrame", () => {
 });
 
 describe("renderTranscript", () => {
-  test("renders a single turn as its wrapped text with no separator", () => {
-    expect(renderTranscript([assistantTurn("hello")], 40)).toEqual(["hello"]);
+  test("renders a single turn as its wrapped, marker-prefixed text with no separator", () => {
+    expect(renderTranscript([assistantTurn("hello")], 40)).toEqual(["\x1b[36m●\x1b[0m hello"]);
   });
 
-  test("user turns are prefixed with the input-prompt marker", () => {
-    expect(renderTranscript([{ role: "user", text: "hi" }], 40)).toEqual(["> hi"]);
+  test("user turns are prefixed with the bold-yellow '>' marker", () => {
+    expect(renderTranscript([{ role: "user", text: "hi" }], 40)).toEqual(["\x1b[1;33m>\x1b[0m hi"]);
   });
 
-  test("assistant turns are not prefixed", () => {
-    expect(renderTranscript([assistantTurn("hi")], 40)).toEqual(["hi"]);
+  test("assistant turns are prefixed with the cyan '●' marker", () => {
+    expect(renderTranscript([assistantTurn("hi")], 40)).toEqual(["\x1b[36m●\x1b[0m hi"]);
+  });
+
+  test("user vs. agent markers use visibly different SGR codes", () => {
+    const lines = renderTranscript([{ role: "user", text: "hi" }, assistantTurn("yo")], 40);
+    expect(lines[0]).toContain("\x1b[1;33m");
+    expect(lines[2]).toContain("\x1b[36m");
+  });
+
+  test("wrapped continuation rows get a blank gutter, not a repeated marker", () => {
+    const lines = renderTranscript([{ role: "user", text: "a b c d e f g h" }], 5);
+    expect(lines[0]?.startsWith("\x1b[1;33m>\x1b[0m ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines.slice(1)) {
+      expect(line.startsWith("\x1b[")).toBe(false);
+      expect(line.startsWith("  ")).toBe(true);
+    }
   });
 
   test("inserts exactly one blank separator line between consecutive turns", () => {
     const lines = renderTranscript([{ role: "user", text: "hi" }, assistantTurn("hello back")], 40);
-    expect(lines).toEqual(["> hi", "", "hello back"]);
+    expect(lines).toEqual(["\x1b[1;33m>\x1b[0m hi", "", "\x1b[36m●\x1b[0m hello back"]);
+  });
+
+  test("tool turns render as a dim '⚙ ' marker, subordinate to real turns", () => {
+    const lines = renderTranscript([{ role: "tool", text: 'Agent(sonnet): "Fix flaky test"' }], 40);
+    expect(lines).toEqual(['\x1b[2m⚙ Agent(sonnet): "Fix flaky test"\x1b[0m']);
+  });
+
+  test("a wrapped tool turn's continuation row uses the blank gutter, not a repeated marker", () => {
+    const lines = renderTranscript([{ role: "tool", text: "a b c d e f g h" }], 5);
+    expect(lines[0]?.startsWith("\x1b[2m⚙ ")).toBe(true);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines.slice(1)) {
+      expect(line.startsWith(`${"\x1b[2m"}  `)).toBe(true);
+    }
   });
 
   test("an empty transcript renders no lines", () => {

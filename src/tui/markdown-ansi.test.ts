@@ -76,6 +76,21 @@ describe("renderMarkdownRows — visible content", () => {
     expect(rows.some((r) => r.includes("\x1b[1"))).toBe(true);
   });
 
+  test("an h2+ heading is styled distinctly from inline bold body text (DH-0065)", () => {
+    const h2Rows = renderMarkdownRows(parseMarkdown("## Section"), 40);
+    const boldRows = renderMarkdownRows(parseMarkdown("**Section**"), 40);
+    expect(h2Rows[0]).not.toBe(boldRows[0]);
+    expect(h2Rows[0]).toContain("36m"); // cyan code present, distinguishing it from plain bold
+  });
+
+  test("h1 keeps its own bold+underline treatment, distinct from an h2", () => {
+    const h1Rows = renderMarkdownRows(parseMarkdown("# Title"), 40);
+    const h2Rows = renderMarkdownRows(parseMarkdown("## Title"), 40);
+    expect(h1Rows[0]).not.toBe(h2Rows[0]);
+    expect(h1Rows[0]).toContain("\x1b[1;4m"); // bold+underline, only on h1
+    expect(h2Rows[0]).not.toContain("4m");
+  });
+
   test("strong/emphasis/strike/code text content survives stripping ANSI", () => {
     const rows = renderMarkdownRows(parseMarkdown("**bold** *em* ~~gone~~ `code`"), 80);
     const plain = rows.map(stripAnsi).join("\n");
@@ -185,6 +200,48 @@ describe("renderMarkdownRows — wrapping", () => {
       // Each row should be at most 10 visual columns (5 double-width chars).
       expect([...stripAnsi(row)].length).toBeLessThanOrEqual(5);
     }
+  });
+
+  test("wraps prose at word boundaries, not mid-word (DH-0065)", () => {
+    const rows = renderMarkdownRows(parseMarkdown("hello world foo"), 7);
+    expect(rows.map(stripAnsi)).toEqual(["hello", "world", "foo"]);
+  });
+
+  test("a trailing space that would overflow the row breaks before the next word", () => {
+    // "abc" exactly fills width 3; the following space alone would overflow to 4, so the
+    // break happens before it rather than emitting a dangling trailing space.
+    const rows = renderMarkdownRows(parseMarkdown("abc def"), 3);
+    expect(rows.map(stripAnsi)).toEqual(["abc", "def"]);
+  });
+
+  test("word-boundary wrapping still hard-breaks a single word wider than the row", () => {
+    const rows = renderMarkdownRows(parseMarkdown("supercalifragilistic"), 6);
+    expect(rows.map(stripAnsi)).toEqual(["superc", "alifra", "gilist", "ic"]);
+  });
+
+  test("word-boundary wrapping applies within a styled (bold) span too", () => {
+    const rows = renderMarkdownRows(parseMarkdown("**hello world foo**"), 7);
+    expect(rows.map(stripAnsi)).toEqual(["hello", "world", "foo"]);
+  });
+
+  test("a word right after a hard-broken word keeps its separating space (DH-0065 regression)", () => {
+    // Regression: the hard-break branch's internal flushRow() left a stale "just wrapped"
+    // flag that wrongly ate the next token's leading space, gluing words together
+    // (e.g. "exercise" + "word" -> "exerciseword").
+    const text =
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa exercise word wrapping";
+    const rows = renderMarkdownRows(parseMarkdown(text), 60);
+    expect(rows.map(stripAnsi)).toEqual([
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "exercise word wrapping",
+    ]);
+  });
+
+  test("a word right after an ordinary wrap-flush keeps its separating space (DH-0065 regression)", () => {
+    // Regression: the same stale "just wrapped" flag leaked out of the plain (non-hard-break)
+    // overflow flush too, gluing "bbb" and "cc" into "bbbcc".
+    const rows = renderMarkdownRows(parseMarkdown("aaa bbb cc"), 5);
+    expect(rows.map(stripAnsi)).toEqual(["aaa", "bbb", "cc"]);
   });
 });
 
