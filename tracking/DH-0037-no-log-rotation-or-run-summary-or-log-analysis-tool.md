@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0037
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
@@ -51,3 +51,11 @@ answering "what did it cost, where is it stuck, did it loop" today can only do s
 
 > [!NOTE]
 > Source: dark-factory ops audit findings #7, #12, #13.
+
+> [!NOTE]
+> Owner decision (2026-07-15): queue now. **Sequencing note:** this ticket's `summary.json`
+> story overlaps with DH-0050's already-designed `job_result`/`ReportOutcome` mechanism (see
+> that ticket's architect design) — implement this ticket's `summary.json` piece *after*
+> DH-0050's Core round lands, reusing its field shapes rather than inventing a parallel one.
+> Log rotation and the `dh logs` analysis tool are independent of that sequencing and can
+> start immediately.
