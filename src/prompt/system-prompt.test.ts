@@ -91,6 +91,9 @@ describe("buildDefaultSystemPrompt", () => {
     expect(prompt).toContain("SendMessage");
     expect(prompt).toContain("TaskStop");
     expect(prompt).toMatch(/unattended/);
+    expect(prompt).toContain("## Output format");
+    expect(prompt).toMatch(/rendered as Markdown by every Dark Harness client/);
+    expect(prompt).toContain("stripped before rendering");
     expect(prompt).toContain("## Available skills");
     expect(prompt).toContain("- **cli-tools**:");
     expect(prompt).toContain("- **custom-skill**: a project-specific skill");
@@ -138,5 +141,20 @@ describe("loadSystemPrompt", () => {
   test("REQUIRED_CONTRACT carries the TASK_FAILED marker and the logging notice on its own", () => {
     expect(REQUIRED_CONTRACT).toContain("TASK_FAILED");
     expect(REQUIRED_CONTRACT).toMatch(/logged\s+automatically/);
+  });
+
+  test("REQUIRED_CONTRACT carries the Output format Markdown instruction, unconditionally appended", () => {
+    expect(REQUIRED_CONTRACT).toContain("## Output format");
+    expect(REQUIRED_CONTRACT).toMatch(/rendered as Markdown by every Dark Harness client/);
+    expect(REQUIRED_CONTRACT).toContain("stripped before rendering");
+  });
+
+  test("override still gets the Output format contract appended", async () => {
+    const overridePath = join(root, "custom-prompt2.txt");
+    await writeFile(overridePath, "You are a custom agent.");
+
+    const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }));
+
+    expect(prompt).toContain("## Output format");
   });
 });

@@ -290,6 +290,11 @@ Every session is logged automatically: one JSONL file per agent, resumable and d
 with enough in each file's header line to reconstruct the full agent tree without parsing
 event bodies. Agents never call a logging tool — their output *is* the log.
 
+Agent output is always Markdown: the built-in system prompt instructs every model to write
+plain-text output as Markdown, and both the console TUI and the web UI render it as such
+(headings, bold/italic, inline code, fenced code blocks, lists, blockquotes, links) rather
+than showing raw Markdown syntax or passing through raw escape sequences.
+
 ## Further documentation
 
 - [TUI keybindings reference](docs/tui-keybindings.md)

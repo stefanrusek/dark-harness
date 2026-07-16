@@ -114,6 +114,16 @@ export const REQUIRED_CONTRACT = `- **Report failure with the exact literal text
   the marker is present. Only include the marker when you are actually reporting failure;
   never include it in a successful completion.
 
+## Output format
+
+All plain-text output you produce is rendered as Markdown by every Dark Harness client.
+Write normal Markdown: headings, **bold**, *italic*, \`inline code\`, fenced code blocks,
+lists, blockquotes, and [links](https://example.com) get real formatting. Anything else
+is shown literally: raw HTML is never interpreted, and ANSI/VT escape sequences and other
+control characters are stripped before rendering — never emit them for visual effect,
+they cannot work. Put anything that must be reproduced byte-for-byte (code, diffs, logs)
+inside a fenced code block.
+
 ## Logging
 
 Everything you and your sub-agents do — every message, tool call, and result — is logged
