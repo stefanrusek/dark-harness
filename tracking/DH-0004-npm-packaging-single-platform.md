@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0004
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["owner triage: packaging-shape decision needed before dispatch"]
+blocked_by: []
 created: 2026-07-15
 relations:
   depends_on: []
@@ -52,8 +52,21 @@ owner-facing packaging-shape decision before real implementation work can start.
   downloader hitting the GitHub Release assets — which shape fits this project? This is the
   decision blocking the ticket.
 
+## Functional Requirements (packaging shape)
+
+- **Owner decision (2026-07-15): `optionalDependencies` packages, esbuild/swc-style.** One
+  tiny per-platform npm package per released target (5 targets), the main `dark-harness`
+  package lists them all as `optionalDependencies`; npm/bun installs only the one matching
+  the current platform. No postinstall script, no network fetch at install time — works
+  offline/behind registry mirrors, consistent with this project's air-gapped-friendly
+  posture (CLAUDE.md §4.3). Rejected the postinstall-downloader alternative for that reason.
+
 ## Notes
 
 > [!NOTE]
 > Not urgent for local/dev use (build-from-source and the GitHub Release binaries both work
 > fine today) — only the `npm i`/`bunx` distribution path is narrowed.
+
+> [!NOTE]
+> Owner decision (2026-07-15): packaging shape resolved (see Functional Requirements above);
+> ready for CI/Release to implement.
