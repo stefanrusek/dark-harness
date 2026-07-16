@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: ["owner triage: needs input before dispatch (ticket-triage-workflow bucket B)"]
+blocked_by: ["deferred (owner decision 2026-07-15): sweep-sourced idea, not a real requested need"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -37,3 +37,8 @@ leaves no automatic way to roll back its file changes short of the operator's ow
 
 > [!NOTE]
 > Source: Competitive-differentiation sweep finding #7.
+
+> [!NOTE]
+> Owner decision (2026-07-15): deferred in full. This was a gap-analysis-sourced idea, not
+> something the owner has ever wanted or asked for — no real need behind it. Not queuing
+> design or implementation work; revisit only if a real operator need for rollback surfaces.

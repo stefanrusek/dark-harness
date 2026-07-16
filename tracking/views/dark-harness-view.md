@@ -18,7 +18,7 @@ source: tracking/
 | [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) | owner triage: needs input before dispatch (ticket-triage-workflow bucket B) |
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance | deferred (owner decision 2026-07-15): no incident behind this, revisit near real release cut |
 | [DH-0044](../DH-0044-no-streaming-partial-output.md) | No streaming of partial model output — `agent_output` events only fire once per completed turn | architect design pass in progress |
-| [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback | owner triage: needs input before dispatch (ticket-triage-workflow bucket B) |
+| [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback | deferred (owner decision 2026-07-15): sweep-sourced idea, not a real requested need |
 | [DH-0050](../DH-0050-no-structured-final-output-or-headless-json-progress.md) | No structured final-result convention beyond the `TASK_FAILED` text marker, and no machine-readable progress stream for `--job` | owner triage: needs input before dispatch (ticket-triage-workflow bucket B) |
 
 ## Board
