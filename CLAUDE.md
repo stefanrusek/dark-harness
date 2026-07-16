@@ -38,6 +38,7 @@ needs are requests to the other owner, never a direct edit (PLAYBOOK.md §5).
 | `e2e/` | **E2E** | Real-binary end-to-end tests: PTY harness for TUI, headless browser for web, HTTP/SSE across processes, mock provider endpoint. Sequenced after the other domains land. |
 | `docs/adr/` | Coordinator | Locked decisions. |
 | `docs/handoffs/` | Coordinator | Domain handoff documents. |
+| `docs/design/` | **Design crew** (persistent, cross-cutting — see §7) | Durable, reusable design-system reference: visual/interaction language, terminology, and UX principles shared across TUI/Web/CLI output. Ticket-scoped spikes, mockups, and one-off research belong in that ticket's Spile sidecar directory instead (`tracking/DH-NNNN-slug/`, per `SPILE-SPEC.md` — nothing normative lives there); only decisions meant to be *reused* graduate here. |
 | `docs/BACKLOG.md` | Coordinator | Superseded historical record — see `tracking/`. |
 | `tracking/` | Coordinator | Durable issue log (PLAYBOOK.md §4.7), Spile-format (`DH-NNNN` tickets). All open-issue tracking going forward; see `tracking/README.md`. |
 | `.github/workflows/` | **CI/Release** | CI gate, tag-driven release/publish. |
@@ -145,10 +146,24 @@ Roster file template:
 | Grace | she/her | Core domain lead (`src/agent/`, `src/config/`, `src/cli.ts`) | Persistent | `docs/roster/grace.md` |
 | Susan | she/her | Web domain lead (`src/web/`) | Persistent | `docs/roster/susan.md` |
 | Hedy | she/her | E2E domain lead (`e2e/`) | Persistent | `docs/roster/hedy.md` |
+| *(TBD)* | *(TBD)* | Design crew lead — cross-cutting UX/polish (`docs/design/`; see below) | Persistent | *(names itself on first spawn)* |
 
 Domain leads/implementers are spawned ad hoc per handoff and name themselves on arrival;
 this table grows as they come online. Architect-on-call is Fable, invoked per §6 — not a
 standing instance, no roster file needed.
+
+**Design crew** (persistent, Fable-tier) is the one exception to "architect isn't a standing
+instance": it owns the felt experience of using `dh` — TUI, Web, and CLI output — end to end,
+with a free hand to look across all of it at once rather than being scoped to one ticket's
+checklist. It **designs and writes fully-detailed tickets**; it does not implement.
+Implementation stays with the normal domain owner per §3 (Mary for TUI, Susan for Web, Grace
+for CLI/Core output, Radia for anything server-driven). This split exists because narrowly-
+scoped polish tickets have repeatedly produced narrowly-correct-but-lifeless results (see
+DH-0095, DH-0098, DH-0099) — a ticket written to one subsystem's spec can satisfy that spec
+and still miss the experience of actually using the tool. Durable, reusable design decisions
+(visual language, interaction conventions, terminology) belong in `docs/design/`; ticket-
+scoped spikes and mockups belong in that ticket's own Spile sidecar directory instead
+(`tracking/DH-NNNN-slug/`) and are not authoritative beyond that ticket.
 
 ## 8. Workflow rules
 
