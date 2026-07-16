@@ -5,7 +5,7 @@ type: feature
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["deferred (2026-07-15): reactive retry sufficient so far"]
 created: 2026-07-15
 relations:
   depends_on: []
@@ -40,3 +40,7 @@ reactively rather than the harness avoiding proactively.
 > Source: Competitive-differentiation sweep finding #15. Complements **DH-0009** (retry/backoff for
 > when a rate limit is hit) — this ticket is about avoiding triggering it in the first place under
 > heavy sub-agent fan-out.
+
+> [!NOTE]
+> Deferred (owner decision, 2026-07-15): DH-0009's reactive retry/backoff has been sufficient
+> in practice, no observed 429 storms. Revisit if real throttling pain surfaces.
