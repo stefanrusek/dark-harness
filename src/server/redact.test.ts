@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { DhConfig } from "../contracts/index.ts";
-import { collectConfigSecrets, redactSecrets } from "./redact.ts";
+import type { DhConfig, ServerSentEvent } from "../contracts/index.ts";
+import { collectConfigSecrets, redactSecrets, sanitizeEvent } from "./redact.ts";
 
 describe("redactSecrets — known-value (exact match)", () => {
   test("redacts an exact known secret occurrence", () => {
@@ -140,5 +140,62 @@ describe("collectConfigSecrets", () => {
 
   test("returns an empty array when config holds no secrets", () => {
     expect(collectConfigSecrets(config())).toEqual([]);
+  });
+});
+
+describe("sanitizeEvent", () => {
+  const base = { version: 1 as const, id: "1", timestamp: "2026-07-16T00:00:00.000Z" };
+
+  test("redacts inputSummary on a tool_call event carrying a known secret", () => {
+    const event: ServerSentEvent = {
+      ...base,
+      type: "tool_call",
+      agentId: "a1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      inputSummary: "curl -H mysecretvalue123",
+    };
+    const result = sanitizeEvent(event, ["mysecretvalue123"]);
+    expect(result).not.toBe(event);
+    expect(result).toEqual({
+      ...event,
+      inputSummary: "curl -H [REDACTED:config-secret]",
+    });
+  });
+
+  test("redacts pattern-matched secrets in inputSummary even with no known secrets", () => {
+    const event: ServerSentEvent = {
+      ...base,
+      type: "tool_call",
+      agentId: "a1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      inputSummary: "curl -H sk-ant-api03-abcdefghij1234567890",
+    };
+    const result = sanitizeEvent(event);
+    expect(result).toEqual({ ...event, inputSummary: "curl -H [REDACTED:anthropic-key]" });
+  });
+
+  test("passes non-tool_call event types through unchanged (identity)", () => {
+    const event: ServerSentEvent = {
+      ...base,
+      type: "agent_output",
+      agentId: "a1",
+      chunk: "mysecretvalue123",
+    };
+    expect(sanitizeEvent(event, ["mysecretvalue123"])).toBe(event);
+  });
+
+  test("passes a tool_result event through unchanged (no inputSummary field to redact)", () => {
+    const event: ServerSentEvent = {
+      ...base,
+      type: "tool_result",
+      agentId: "a1",
+      toolUseId: "t1",
+      toolName: "Bash",
+      isError: false,
+      durationMs: 12,
+    };
+    expect(sanitizeEvent(event, ["mysecretvalue123"])).toBe(event);
   });
 });

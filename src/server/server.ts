@@ -15,6 +15,7 @@ import { isAuthorized } from "./auth.ts";
 import { handleCommand } from "./commands.ts";
 import { EventBuffer } from "./event-buffer.ts";
 import { SessionLogger } from "./logger.ts";
+import { sanitizeEvent } from "./redact.ts";
 import { formatSseEvent } from "./sse.ts";
 
 const DEFAULT_PORT = 4000;
@@ -99,6 +100,10 @@ export class DhServer {
   private readonly heartbeatIntervalMs: number;
   private readonly onClientConnect: ((remoteAddress: string) => void) | undefined;
   private readonly onClientDisconnect: ((remoteAddress: string) => void) | undefined;
+  /** DH-0089 D4: same known-secret list threaded to `SessionLogger` (DH-0020), also applied
+   * to live SSE events via `sanitizeEvent` at both `agentLoop.onEvent` subscription sites
+   * below — the resume buffer's intake and the live per-connection broadcast. */
+  private readonly knownSecrets: readonly string[];
   private bunServer: ReturnType<typeof Bun.serve> | undefined;
   private unsubscribeEvent: (() => void) | undefined;
   private unsubscribeLog: (() => void) | undefined;
@@ -114,6 +119,7 @@ export class DhServer {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.onClientConnect = options.onClientConnect;
     this.onClientDisconnect = options.onClientDisconnect;
+    this.knownSecrets = options.knownSecrets ?? [];
   }
 
   /** Starts listening and returns the bound port (useful when `port: 0` is requested). */
@@ -121,7 +127,9 @@ export class DhServer {
     // Global subscriptions, independent of any single SSE connection: buffer every event
     // for resume, and persist every log line as a side effect (ADR 0005 — agents never
     // call a logging tool themselves).
-    this.unsubscribeEvent = this.agentLoop.onEvent((event) => this.eventBuffer.push(event));
+    this.unsubscribeEvent = this.agentLoop.onEvent((event) =>
+      this.eventBuffer.push(sanitizeEvent(event, this.knownSecrets)),
+    );
     this.unsubscribeLog = this.agentLoop.onLog((agentId, line) =>
       this.logger.append(agentId, line),
     );
@@ -284,7 +292,7 @@ export class DhServer {
           safeEnqueue(encoder.encode(formatSseEvent(event)));
         }
         unsubscribe = this.agentLoop.onEvent((event: ServerSentEvent) => {
-          safeEnqueue(encoder.encode(formatSseEvent(event)));
+          safeEnqueue(encoder.encode(formatSseEvent(sanitizeEvent(event, this.knownSecrets))));
         });
         // Periodic keep-alive so idle connections don't get dropped (see Round 2 notes on
         // DEFAULT_HEARTBEAT_INTERVAL_MS above). A comment line — no `id:` field — so it
