@@ -34,21 +34,90 @@ export interface WebUiHandle {
   stop(): void;
 }
 
+// DH-0023: clickjacking defense-in-depth on the served UI itself — no live XSS sink exists
+// today (the client only ever writes via textContent/createTextNode), but the page this
+// serves is the thing an attacker would actually want to iframe for a UI-redress attack, so
+// the headers belong here, not just on the API responses in src/server/server.ts.
+// `frame-ancestors 'none'` is the modern CSP directive; `X-Frame-Options: DENY` covers
+// browsers that only honor the legacy header.
+const CLICKJACKING_HEADERS: Record<string, string> = {
+  "x-frame-options": "DENY",
+  "content-security-policy": "frame-ancestors 'none'",
+};
+
+function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(CLICKJACKING_HEADERS)) {
+    headers.set(key, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+// Judgment call (DH-0023): Bun's HTML-bundle rendering (module/asset discovery, hashing,
+// inlining for a compiled binary) only happens through its own route-matching machinery —
+// passing `indexHtml` as a route value is the *only* documented way to get it, and there is
+// no public API to invoke that rendering directly and get back a plain `Response` to attach
+// headers to (confirmed: wrapping it in `new Response(indexHtml)` serializes to the literal
+// string "[object HTMLBundle]", not the page). A throwaway loopback-only inner server exists
+// purely to make Bun do that rendering once; the resulting bytes (with our security headers
+// layered on) are cached and reused for every real request afterward — a one-time cost per
+// process, not per request. Skipped when `development` is on (HMR should reflect live edits,
+// so this renders fresh — and un-cached — every time in that mode).
+// biome-ignore lint/suspicious/noExplicitAny: see the cast note inside render() below
+let cachedIndexResponse: Promise<any> | undefined;
+
+async function renderIndex(development: boolean): Promise<Response> {
+  const render = async () => {
+    const inner = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: { "/": indexHtml } });
+    try {
+      // Cast away the ambient `fetch`/`Response`/`Headers` types here: this file is
+      // typechecked both under its own DOM-enabled program (src/web/tsconfig.json) *and*,
+      // transitively (via whatever root-owned file imports `serveWebUi`, e.g. `src/cli.ts`),
+      // under the root program's DOM-less one — see src/web/tsconfig.json's own comment on
+      // this exact split. `bun-types` itself resolves `Response`/`Headers` differently
+      // depending on whether `lib.dom` is present in that pass, so a value that's valid
+      // under one program's types is a mismatch under the other's; this loopback
+      // self-request's actual runtime shape (status/headers/arrayBuffer) doesn't depend on
+      // either program's opinion of it. `any` all the way through this function is the
+      // pragmatic way to satisfy both `tsc` invocations at once — the surrounding functions
+      // still narrow back to the real `Response` type at their boundaries.
+      // biome-ignore lint/suspicious/noExplicitAny: see comment above
+      const rendered: any = await fetch(`http://127.0.0.1:${inner.port}/`);
+      const body = await rendered.arrayBuffer();
+      const headers: Record<string, string> = {};
+      rendered.headers.forEach((value: string, key: string) => {
+        headers[key] = value;
+      });
+      return withSecurityHeaders(new Response(body, { status: rendered.status, headers }));
+    } finally {
+      inner.stop(true);
+    }
+  };
+  if (development) return render();
+  if (!cachedIndexResponse) cachedIndexResponse = render();
+  return (await cachedIndexResponse).clone();
+}
+
 export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
   const config: WebConfigResponse = options.token
     ? { baseUrl: options.targetBaseUrl, token: options.token }
     : { baseUrl: options.targetBaseUrl };
+  const development = options.development ?? false;
 
   const server = Bun.serve({
     port: options.port,
     ...(options.hostname ? { hostname: options.hostname } : {}),
-    development: options.development ?? false,
+    development,
     routes: {
-      "/": indexHtml,
-      [WEB_CONFIG_PATH]: () => Response.json(config),
+      "/": () => renderIndex(development),
+      [WEB_CONFIG_PATH]: () => withSecurityHeaders(Response.json(config)),
     },
     fetch() {
-      return new Response("Not Found", { status: 404 });
+      return withSecurityHeaders(new Response("Not Found", { status: 404 }));
     },
   });
 

@@ -150,7 +150,6 @@ describe("DhServer", () => {
     const port = server.start();
     const res = await fetch(`http://localhost:${port}/nope`);
     expect(res.status).toBe(404);
-    expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 
   test("OPTIONS is answered with CORS headers and no auth required", async () => {
@@ -165,6 +164,106 @@ describe("DhServer", () => {
     const res = await fetch(`http://localhost:${port}/api/commands`, { method: "OPTIONS" });
     expect(res.status).toBe(204);
     expect(res.headers.get("access-control-allow-methods")).toContain("POST");
+  });
+
+  describe("DH-0023: CORS is not a blanket wildcard", () => {
+    test("POST /api/commands: an Origin header is echoed back, not '*'", async () => {
+      loop.setAgentTree([]);
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { Origin: "http://localhost:5173" },
+        body: JSON.stringify({ type: "request_agent_tree" }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+      expect(res.headers.get("access-control-allow-origin")).not.toBe("*");
+      expect(res.headers.get("vary")).toBe("Origin");
+    });
+
+    test("a different Origin is echoed back as itself, not a fixed constant", async () => {
+      loop.setAgentTree([]);
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/api/commands`, {
+        method: "POST",
+        headers: { Origin: "http://localhost:9999" },
+        body: JSON.stringify({ type: "request_agent_tree" }),
+      });
+      expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:9999");
+    });
+
+    test("no Origin header means no access-control-allow-origin header at all", async () => {
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    });
+  });
+
+  describe("DH-0023: clickjacking headers", () => {
+    test("X-Frame-Options and CSP frame-ancestors are present on every response", async () => {
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/`);
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    });
+
+    test("present even on a 404", async () => {
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      const res = await fetch(`http://localhost:${port}/nope`);
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    });
+  });
+
+  describe("DH-0023: Host header validation guards against DNS rebinding", () => {
+    test("a spoofed Host header is rejected with 421, before auth is even checked", async () => {
+      server = new DhServer({
+        agentLoop: loop,
+        sessionId: "s1",
+        logDir: dir,
+        port: 0,
+        security: { token: "secret-token" },
+      });
+      const port = server.start();
+      const res = await fetch(`http://127.0.0.1:${port}/`, {
+        headers: { Host: "evil.example" },
+      });
+      expect(res.status).toBe(421);
+    });
+
+    test("localhost and 127.0.0.1 Host headers are accepted", async () => {
+      server = new DhServer({ agentLoop: loop, sessionId: "s1", logDir: dir, port: 0 });
+      const port = server.start();
+      const viaLocalhost = await fetch(`http://127.0.0.1:${port}/`, {
+        headers: { Host: `localhost:${port}` },
+      });
+      expect(viaLocalhost.status).toBe(200);
+      const viaLoopbackIp = await fetch(`http://127.0.0.1:${port}/`, {
+        headers: { Host: `127.0.0.1:${port}` },
+      });
+      expect(viaLoopbackIp.status).toBe(200);
+    });
+
+    test("a configured security.hostname is also accepted as a valid Host", async () => {
+      server = new DhServer({
+        agentLoop: loop,
+        sessionId: "s1",
+        logDir: dir,
+        port: 0,
+        security: { hostname: "127.0.0.1" },
+      });
+      const port = server.start();
+      const res = await fetch(`http://127.0.0.1:${port}/`, {
+        headers: { Host: `127.0.0.1:${port}` },
+      });
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("POST /api/commands", () => {

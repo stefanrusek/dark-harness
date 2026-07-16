@@ -52,6 +52,29 @@ describe("serveWebUi", () => {
     }
   });
 
+  describe("DH-0023: clickjacking headers", () => {
+    test("X-Frame-Options and CSP frame-ancestors are present on the served page", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
+      const res = await fetch(handle.url);
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    });
+
+    test("present on the config endpoint too", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
+      const res = await fetch(new URL(WEB_CONFIG_PATH, handle.url));
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    });
+
+    test("present on a 404", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
+      const res = await fetch(new URL("/does-not-exist", handle.url));
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+    });
+  });
+
   describe("DH-0022: opt-in bind address", () => {
     test("with hostname unset (default), still reachable on loopback (unchanged behavior)", async () => {
       handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });

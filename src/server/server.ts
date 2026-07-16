@@ -35,24 +35,67 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000;
 // fast enough and the connection is closed rather than left to buffer unboundedly.
 const MAX_NEGATIVE_DESIRED_SIZE = -50;
 
-// Permissive CORS: `dh --connect <host> --web` runs the web UI as a separate local
-// process/origin talking to a remote `--server` (ADR 0003), so cross-origin browser
-// requests are the expected common case, not an edge case. This relaxes only the
-// browser's same-origin policy — it grants no capability a non-browser client (curl, the
-// console TUI) didn't already have, so it does not touch the ADR 0004 security posture
-// (bearer token / TLS remain the actual admission controls). `*` is safe here because the
-// protocol never relies on cookies/credentialed requests.
-const CORS_HEADERS: Record<string, string> = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "Authorization, Content-Type, Last-Event-ID",
-  // Cross-origin fetch() can't read a response header unless it's explicitly exposed — the
-  // web UI needs Content-Disposition to name downloaded log files correctly (ADR 0003: the
-  // web UI and dh server are different origins even in local --web mode). Found by the E2E
-  // domain's real cross-origin browser test; see docs/handoffs/e2e.md's status log.
-  "access-control-expose-headers": "Content-Disposition",
-  "access-control-max-age": "86400",
+// DH-0023: `dh --connect <host> --web` runs the web UI as a separate local process/origin
+// talking to a remote `--server` (ADR 0003), so cross-origin browser requests are the
+// expected common case, not an edge case — and the web UI's own port isn't known to this
+// server ahead of time, so a static single-origin allowlist isn't workable. Rather than a
+// blanket `*` (flagged by security review as indistinguishable from "any page, anywhere,
+// can drive this session"), reflect back the specific requesting `Origin` when present:
+// behaviorally this still admits any origin (the real admission control is the bearer
+// token / TLS per ADR 0004, unchanged), but it is no longer the literal wildcard string,
+// keeps `Vary: Origin` honest for caches, and — unlike `*` — is meaningfully pinnable in a
+// regression test (echoed value must match the request's actual `Origin`, not a constant).
+function corsHeaders(origin: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "Authorization, Content-Type, Last-Event-ID",
+    // Cross-origin fetch() can't read a response header unless it's explicitly exposed — the
+    // web UI needs Content-Disposition to name downloaded log files correctly (ADR 0003: the
+    // web UI and dh server are different origins even in local --web mode). Found by the E2E
+    // domain's real cross-origin browser test; see docs/handoffs/e2e.md's status log.
+    "access-control-expose-headers": "Content-Disposition",
+    "access-control-max-age": "86400",
+  };
+  if (origin) {
+    headers["access-control-allow-origin"] = origin;
+    headers.vary = "Origin";
+  }
+  return headers;
+}
+
+// DH-0023: clickjacking defense-in-depth. No live XSS sink exists today (all rendering in
+// the web client uses textContent/createTextNode), but a malicious page could still iframe
+// one of this server's plain-text/JSON responses and attempt UI-redress tricks against
+// whatever renders on top of it. Both headers say the same thing in old- and new-browser
+// dialects; `frame-ancestors 'none'` is the modern CSP directive, `X-Frame-Options: DENY`
+// covers browsers that only honor the legacy header.
+const CLICKJACKING_HEADERS: Record<string, string> = {
+  "x-frame-options": "DENY",
+  "content-security-policy": "frame-ancestors 'none'",
 };
+
+/** DH-0023: DNS-rebinding guard. A page on an attacker-controlled domain whose DNS answer
+ * flips to a loopback address mid-session can still get the victim's browser to issue
+ * requests that carry the attacker's original `Host` header — CORS/Origin checks alone
+ * don't catch this, since the browser considers it a same-origin request to "evil.example".
+ * Every legitimate caller of this server (the CLI's own `--web`/`--connect` client, curl,
+ * an operator's browser hitting the bare API port directly) addresses it by loopback name/
+ * IP or by whatever `security.hostname` was explicitly opted into — never by an arbitrary
+ * third-party domain name. Anything else is rejected before it reaches routing/auth. */
+function isAllowedHost(
+  hostHeader: string | null,
+  port: number,
+  hostname: string | undefined,
+): boolean {
+  if (!hostHeader) return false;
+  const host = hostHeader.toLowerCase();
+  const bareNames = new Set(["localhost", "127.0.0.1", "[::1]"]);
+  if (hostname) bareNames.add(hostname.toLowerCase());
+  for (const bare of bareNames) {
+    if (host === bare || host === `${bare}:${port}`) return true;
+  }
+  return false;
+}
 
 export interface DhServerOptions {
   agentLoop: AgentLoopHandle;
@@ -172,22 +215,33 @@ export class DhServer {
   }
 
   private async handleFetch(req: Request, server: ReturnType<typeof Bun.serve>): Promise<Response> {
+    const cors = corsHeaders(req.headers.get("Origin"));
+    const headers = { ...cors, ...CLICKJACKING_HEADERS };
+
+    // Host validation runs before anything else, including auth: a rebinding attempt is
+    // targeting a different logical host than any it's authorized to reach, regardless of
+    // whether it happens to also carry a valid token.
+    const boundPort = (this.bunServer?.port as number | undefined) ?? this.requestedPort;
+    if (!isAllowedHost(req.headers.get("Host"), boundPort, this.security?.hostname)) {
+      return new Response(null, { status: 421, headers });
+    }
+
     if (req.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers });
     }
 
     if (!isAuthorized(req.headers.get("Authorization"), this.security?.token)) {
-      return new Response(null, { status: 401, headers: CORS_HEADERS });
+      return new Response(null, { status: 401, headers });
     }
 
     const url = new URL(req.url);
 
     if (url.pathname === EVENTS_PATH && req.method === "GET") {
-      return this.handleSse(req, server);
+      return this.handleSse(req, server, headers);
     }
 
     if (url.pathname === COMMANDS_PATH && req.method === "POST") {
-      return this.handleCommandRequest(req);
+      return this.handleCommandRequest(req, headers);
     }
 
     // DH-0067: `GET /` (curl, a load balancer health probe, a confused browser hitting the
@@ -200,14 +254,18 @@ export class DhServer {
     if (url.pathname === "/" && req.method === "GET") {
       return new Response(
         `dh server ${BUILD_INFO.version}; API at ${EVENTS_PATH} / ${COMMANDS_PATH}; the web UI is client-served — run: dh --connect <host> --web\n`,
-        { status: 200, headers: { ...CORS_HEADERS, "content-type": "text/plain; charset=utf-8" } },
+        { status: 200, headers: { ...headers, "content-type": "text/plain; charset=utf-8" } },
       );
     }
 
-    return new Response(null, { status: 404, headers: CORS_HEADERS });
+    return new Response(null, { status: 404, headers });
   }
 
-  private handleSse(req: Request, server: ReturnType<typeof Bun.serve>): Response {
+  private handleSse(
+    req: Request,
+    server: ReturnType<typeof Bun.serve>,
+    headers: Record<string, string>,
+  ): Response {
     // Bun.serve() closes a connection after 10s of inactivity by default (its own
     // `idleTimeout`, independent of and *shorter than* our SSE heartbeat interval below) —
     // "inactivity" includes a streamed response that hasn't written bytes in that window,
@@ -310,7 +368,7 @@ export class DhServer {
     return new Response(stream, {
       status: 200,
       headers: {
-        ...CORS_HEADERS,
+        ...headers,
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         connection: "keep-alive",
@@ -331,15 +389,15 @@ export class DhServer {
     };
   }
 
-  private async handleCommandRequest(req: Request): Promise<Response> {
+  private async handleCommandRequest(
+    req: Request,
+    headers: Record<string, string>,
+  ): Promise<Response> {
     let parsed: unknown;
     try {
       parsed = await req.json();
     } catch {
-      return Response.json(
-        { ok: false, error: "invalid JSON body" },
-        { status: 400, headers: CORS_HEADERS },
-      );
+      return Response.json({ ok: false, error: "invalid JSON body" }, { status: 400, headers });
     }
 
     const result = await handleCommand(parsed as ClientCommand, {
@@ -349,13 +407,13 @@ export class DhServer {
     });
 
     if (result.kind === "json") {
-      return Response.json(result.body, { status: result.status, headers: CORS_HEADERS });
+      return Response.json(result.body, { status: result.status, headers });
     }
 
     return new Response(result.body, {
       status: result.status,
       headers: {
-        ...CORS_HEADERS,
+        ...headers,
         "content-type": result.contentType,
         "content-disposition": `attachment; filename="${result.filename}"`,
       },

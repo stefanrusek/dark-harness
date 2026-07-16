@@ -553,3 +553,48 @@ round), `app.ts` 100% lines, `commands.ts` 100%/100%.
 Open thread for a future round: same as Mary's — E2E (Hedy) still needs the real-browser
 `/model` picker + skill-invocation assertions once headless Chromium is available in this
 sandbox (or CI).
+
+### 2026-07-16 — DH-0023: CORS/Host/CSP hardening (joint round with Radia/Server)
+
+Implemented DH-0023's web-surface hardening jointly across `src/server/server.ts` (Radia's
+domain — the actual mutating `POST /api/commands` CORS surface) and `src/web/server.ts`
+(mine — the served page/config endpoint). Owner green-lit via Slack; DH-0022 confirmed
+merged first.
+
+- **CORS:** replaced the literal `*` in `src/server/server.ts` with per-request Origin
+  reflection (`corsHeaders(origin)` — sets `Access-Control-Allow-Origin: <echoed origin>` +
+  `Vary: Origin` only when an `Origin` header is present). Judgment call: a fixed allowlisted
+  origin isn't workable here because `--connect <host> --web` runs the web UI as a separate
+  local process on a port this server can't know ahead of time (documented inline) — so this
+  keeps the *behavior* permissive (bearer token/TLS remain the real admission control, per
+  ADR 0003/0004, unchanged) while dropping the literal wildcard string a security review
+  flagged, and makes the header pinnable in a test (echoed value, not a constant).
+- **Host validation:** `isAllowedHost()` in `src/server/server.ts` rejects with 421 before
+  auth/routing runs unless `Host` is `localhost`/`127.0.0.1`/`[::1]` (with/without the bound
+  port) or the configured `security.hostname`. This is the actual DNS-rebinding guard — CORS/
+  Origin checks alone don't catch a rebound page, since the browser still calls it same-origin.
+- **Clickjacking headers:** `X-Frame-Options: DENY` + `Content-Security-Policy:
+  frame-ancestors 'none'` added to every response in both `src/server/server.ts` and
+  `src/web/server.ts`.
+- **Judgment call worth flagging:** `src/web/server.ts` serves `/` via Bun's native
+  `HTMLBundle` route value (`indexHtml`), which is the *only* documented way to get Bun to
+  bundle the client's JS/CSS — there's no public API to render it to a plain `Response` you
+  can attach headers to (confirmed: wrapping it in `new Response(indexHtml)` just serializes
+  `"[object HTMLBundle]"`, breaking the existing "serves the bundled index page" test).
+  Worked around it with a throwaway loopback-only inner `Bun.serve` that renders the real
+  bundle once via a loopback self-fetch, cached and reused (skipped/uncached only when
+  `development: true`, so HMR still reflects live edits). This also collided with the known
+  root-vs-web tsconfig split (see `src/web/tsconfig.json`'s own comment) — `fetch()`'s
+  `Response`/`Headers` resolve to different declaration merges depending on whether the DOM
+  lib is loaded, and `src/cli.ts` importing `serveWebUi` pulls this file transitively into
+  the DOM-less root `tsc` program regardless of the root `exclude`. Resolved by keeping the
+  self-render's intermediate values untyped (`any`) rather than fighting the two conflicting
+  ambient `Response` shapes — documented inline; worth a note to Grace/Core if another domain
+  hits the same transitive-import gotcha.
+- Added tests pinning all of the above (`src/server/server.test.ts`,
+  `src/web/server.test.ts`) per the ticket's own Functional Requirements. `bun run
+  typecheck`/`lint`/`test:coverage` all clean, 100% coverage on both changed files. Verified
+  live against the real compiled binary (`bun run build`, `dh --server`/`dh --web` + curl):
+  Origin reflected (not `*`), spoofed `Host: evil.example` rejected with 421, valid loopback
+  Host accepted, `X-Frame-Options`/CSP present on every response including the web UI's own
+  page and `/dh-config.json`. Closed DH-0023 via spile-ops after live verification.
