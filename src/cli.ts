@@ -18,6 +18,7 @@ import { AgentRuntime, type AgentRuntimeOptions, ROOT_AGENT_ID } from "./agent/r
 import { BUILD_INFO } from "./config/build-info.ts";
 import { ConfigError, DEFAULT_CONFIG_PATH, loadConfig } from "./config/index.ts";
 import type {
+  AgentStatus,
   AgentTreeNode,
   BuildInfo,
   DhConfig,
@@ -44,6 +45,11 @@ import {
   pruneLogDirectories,
 } from "./server/index.ts";
 import { startTui as startTuiClient } from "./tui/index.ts";
+// DH-0101: reuse Web's short-id formatter for the activity feed rather than forking the
+// logic (ticket's explicit ask) — pure, DOM-free (only a type-only import of its own), and
+// Web's client bundle is already part of this binary's dependency graph via serveWebUiClient
+// below, so this adds no new runtime surface.
+import { shortAgentId } from "./web/client/format.ts";
 import { serveWebUi as serveWebUiClient } from "./web/server.ts";
 
 export const DEFAULT_PORT = 4000;
@@ -204,6 +210,69 @@ export function formatVersionString(build: BuildInfo): string {
   return `dh ${build.version} (${inner})`;
 }
 
+// ---------------------------------------------------------------------------------------
+// DH-0101: shared CLI styling helpers — docs/design/style-guide.md §1 (status colors),
+// §1.1 (liveness), §2.2/§2.3 (SGR palette), §3 (glyphs), §5 (CLI conventions). Every
+// TTY-gated color/glyph across init/doctor/server-startup/activity-feed goes through this
+// one small block instead of each surface reinventing green/red/dim/✓/✗ — this generalizes
+// what DH-0099 first did just for `dh doctor` (whose own DOCTOR_* constants below now alias
+// these instead of duplicating the literals).
+//
+// Judgment call: the ticket's §5 text ("verdict glyphs (TTY-gated, color per §1)") reads as
+// ambiguous about whether the TTY gate covers just the *color* or the glyph too. This module
+// gates both together — off a TTY, every helper below returns "" (no glyph, no SGR) — which
+// matches doctor's existing non-TTY behavior (plain "PASS"/"FAIL" words, no unicode at all)
+// and is the safer choice for the ticket's own stated risk (piping into a log aggregator
+// must stay byte-plain; some aggregators mis-handle non-ASCII as readily as raw SGR bytes).
+const CLI_GREEN = "\x1b[32m";
+const CLI_RED = "\x1b[31m";
+const CLI_YELLOW = "\x1b[33m";
+const CLI_DIM = "\x1b[2m";
+const CLI_BOLD = "\x1b[1m";
+const CLI_RESET = "\x1b[0m";
+
+// Canonical status→SGR map (style-guide §1/§2.3). Kept as its own literal rather than
+// imported, matching the existing DH-0100 pattern where src/server/log-analysis.ts and
+// src/tui/render.ts each already keep an independent copy of the same five-entry map — the
+// canonical source of truth is the style-guide table, not any one file.
+const CLI_STATUS_COLOR: Record<AgentStatus, string> = {
+  running: "\x1b[34m",
+  waiting: "\x1b[33m",
+  done: "\x1b[32m",
+  failed: "\x1b[31m",
+  stopped: "\x1b[35m",
+};
+
+function cliColorize(text: string, code: string, tty: boolean): string {
+  return tty ? `${code}${text}${CLI_RESET}` : text;
+}
+
+/** `✓ ` (green, TTY-only) prefix for a success headline; `""` off-TTY. */
+function cliSuccessGlyph(tty: boolean): string {
+  return tty ? `${CLI_GREEN}✓${CLI_RESET} ` : "";
+}
+
+/** `⚠ ` (yellow, TTY-only) prefix for a caution/posture note; `""` off-TTY. */
+function cliCautionGlyph(tty: boolean): string {
+  return tty ? `${CLI_YELLOW}⚠${CLI_RESET} ` : "";
+}
+
+/** Status-colored `●` (TTY-only) for an activity-feed lifecycle line; `""` off-TTY (the
+ * status word itself still appears in the line — never color-only, per style-guide §1). */
+function cliStatusDot(status: AgentStatus, tty: boolean): string {
+  return tty ? `${CLI_STATUS_COLOR[status]}●${CLI_RESET} ` : "";
+}
+
+/** Dims text (TTY-only) — indented supporting detail/caveats, timestamps. */
+function cliDim(text: string, tty: boolean): string {
+  return cliColorize(text, CLI_DIM, tty);
+}
+
+/** Bolds text (TTY-only) — light emphasis (`--version`'s app name). */
+function cliBold(text: string, tty: boolean): string {
+  return cliColorize(text, CLI_BOLD, tty);
+}
+
 /** DH-0067: `dh --server` binds every interface (no `hostname` option is ever threaded to
  * `Bun.serve` — see DhServer.start()), so a plaintext, unauthenticated bind is reachable
  * from anywhere on the network, not just localhost. ADR 0003's stance is "air-gapping is
@@ -233,9 +302,15 @@ export class ActivityFeed {
 
   /** Returns the line to print (without the `dh: ` prefix — the caller adds that), or
    * undefined when this event produces no line of its own (`token_usage` accumulates
-   * silently; `resync` is a server-internal SSE-resume detail with nothing to report here). */
-  onEvent(event: ServerSentEvent): string | undefined {
-    const time = new Date(event.timestamp).toTimeString().slice(0, 8);
+   * silently; `resync` is a server-internal SSE-resume detail with nothing to report here).
+   *
+   * DH-0101: short agent id (never the full 36-char UUID — style-guide §4; the full id stays
+   * traceable in the JSONL logs) and a dim timestamp on every line; `agent_status` lines also
+   * get a status-colored `●` matching the canonical five-status palette (style-guide §1). Both
+   * TTY-gated via `tty` (default false — matches ActivityFeed's existing call site passing an
+   * explicit flag; tests exercising the plain-text contract need no changes). */
+  onEvent(event: ServerSentEvent, tty = false): string | undefined {
+    const time = cliDim(new Date(event.timestamp).toTimeString().slice(0, 8), tty);
     if (event.type === "token_usage") {
       const state = this.usage.get(event.agentId) ?? { tokens: 0 };
       state.tokens += event.inputTokens + event.outputTokens;
@@ -246,7 +321,8 @@ export class ActivityFeed {
       return undefined;
     }
     if (event.type === "agent_spawned") {
-      const label = event.description ? `${event.agentId} (${event.description})` : event.agentId;
+      const id = shortAgentId(event.agentId);
+      const label = event.description ? `${id} (${event.description})` : id;
       return `${time} ${label} spawned (${event.model})`;
     }
     if (event.type === "agent_status") {
@@ -255,7 +331,8 @@ export class ActivityFeed {
         state === undefined
           ? ""
           : ` — ${state.tokens.toLocaleString()} tok${state.costUsd !== undefined ? ` / $${state.costUsd.toFixed(4)}` : ""}`;
-      return `${time} ${event.agentId} ${event.status}${usageSuffix}`;
+      const dot = cliStatusDot(event.status, tty);
+      return `${time} ${dot}${shortAgentId(event.agentId)} ${event.status}${usageSuffix}`;
     }
     if (event.type === "session_ended") {
       return `${time} session ended (exit code ${event.exitCode})`;
@@ -829,7 +906,13 @@ async function runInteractiveMode(
           targetBaseUrl,
           ...(config.security?.token ? { token: config.security.token } : {}),
         });
-        io.stdout(`dh: web UI ready at ${handle.url} (connected to ${targetBaseUrl}).`);
+        // DH-0101: glyph wraps around the grepped "web UI ready at <url>" substring, never
+        // rewrites it — the color/glyph sit before "web" and the reset lands before the URL
+        // so `\S+` captures in e2e regexes (web.test.ts, connect-web.test.ts, spikes) stay
+        // exactly the plain URL, no embedded ANSI.
+        io.stdout(
+          `dh: ${cliSuccessGlyph(process.stdout.isTTY === true)}web UI ready at ${handle.url} (connected to ${targetBaseUrl}).`,
+        );
         return ExitCode.Success;
       }
       await deps.startTui(targetBaseUrl, config.security?.token);
@@ -885,8 +968,9 @@ async function runInteractiveMode(
     // web UI) providing their own moment-to-moment feedback.
     if (mode.kind === "server" && !quiet) {
       const feed = new ActivityFeed();
+      const feedTty = process.stdout.isTTY === true;
       agentLoop.onEvent((event) => {
-        const line = feed.onEvent(event);
+        const line = feed.onEvent(event, feedTty);
         if (line !== undefined) io.stdout(`dh: ${line}`);
       });
     }
@@ -943,20 +1027,28 @@ async function runInteractiveMode(
     });
 
     if (mode.kind === "server") {
-      // DH-0067: this exact line — including the "listening on port" substring — is grepped
-      // by e2e's `waitForStdout` helpers (dh-process.ts and multiple spike scripts); it stays
-      // byte-stable, with the new startup context appended as additional lines rather than
-      // folded into it.
-      io.stdout(`dh: headless server listening on port ${boundPort} (session ${sessionId}).`);
+      const panelTty = process.stdout.isTTY === true;
+      // DH-0067/DH-0101: this exact line — including the "listening on port" substring — is
+      // grepped by e2e's `waitForStdout` helpers (dh-process.ts and multiple spike scripts);
+      // it stays byte-stable. The DH-0101 styling only wraps around it (a colored headline
+      // glyph before "headless", nothing between/inside the grepped words), never rewrites
+      // it — verified against every e2e grep site before landing this (search performed:
+      // `grep -rn "listening on port" e2e/`).
+      io.stdout(
+        `dh: ${cliSuccessGlyph(panelTty)}headless server listening on port ${boundPort} (session ${sessionId}).`,
+      );
       // DH-0067: `DhServer` never passes a `hostname` to `Bun.serve()` (see server.ts), so
       // this is always bound to every interface, not just loopback — worth spelling out
       // explicitly since that's exactly the fact the posture note below depends on.
       io.stdout(
-        `dh: ${formatVersionString(BUILD_INFO)} — bound to 0.0.0.0:${boundPort} — logs: ${logDir}`,
+        `dh: ${cliBold(formatVersionString(BUILD_INFO), panelTty)} — bound to 0.0.0.0:${boundPort} — logs: ${logDir}`,
       );
       io.stdout(`dh: connect with: dh --connect <host> --port ${boundPort}`);
       const posture = buildStartupPostureNote(config.security);
-      if (posture) io.stdout(posture);
+      // DH-0101: caution-marked (⚠, yellow/dim) rather than just another sentence in the
+      // stack, per style-guide §5's "startup blocks read as a panel" convention — the glyph
+      // is prepended after the existing "dh: " prefix, the note's own text is untouched.
+      if (posture) io.stdout(`dh: ${cliCautionGlyph(panelTty)}${posture.replace(/^dh: /, "")}`);
       return ExitCode.Success;
     }
 
@@ -967,10 +1059,12 @@ async function runInteractiveMode(
         targetBaseUrl: baseUrl,
         ...(config.security?.token ? { token: config.security.token } : {}),
       });
-      // DH-0067: this exact "web UI ready at <url>." line is grepped by e2e (web.test.ts,
-      // connect-web.test.ts, several spikes) — stays byte-stable; the log-directory line is
-      // new and appended after it.
-      io.stdout(`dh: web UI ready at ${webHandle.url}.`);
+      // DH-0067/DH-0101: this exact "web UI ready at <url>." line is grepped by e2e
+      // (web.test.ts, connect-web.test.ts, several spikes) — stays byte-stable; styling only
+      // wraps the "dh: " prefix, never the substring itself.
+      io.stdout(
+        `dh: ${cliSuccessGlyph(process.stdout.isTTY === true)}web UI ready at ${webHandle.url}.`,
+      );
       io.stdout(`dh: logs: ${logDir}`);
       return ExitCode.Success;
     }
@@ -1035,15 +1129,25 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
     return fail(io, `failed to write ${targetPath}: ${(err as Error).message}`);
   }
 
-  io.stdout(`dh: wrote a starter config to ${targetPath}.`);
+  // DH-0101: success headline (✓, TTY-gated) + indented dim caveats + a set-off next-step
+  // callout, per style-guide §5's "result headline, detail, next step" shape — replaces the
+  // prior five equal `dh:` lines. Terse next-step wording per the ticket's own recommendation
+  // (Open Questions: "keep terse").
+  const initTty = process.stdout.isTTY === true;
+  io.stdout(`dh: ${cliSuccessGlyph(initTty)}wrote a starter config to ${targetPath}.`);
   io.stdout(
-    `dh: the models list is a menu covering every Claude tier on both anthropic and bedrock, plus a few Bedrock OpenAI and open-weight models — trim it down to the ones you'll actually use.`,
+    cliDim(
+      `dh:   the models list is a menu covering every Claude tier on both anthropic and bedrock, plus a few Bedrock OpenAI and open-weight models — trim it down to the ones you'll actually use.`,
+      initTty,
+    ),
   );
-  io.stdout(`dh: run "dh doctor" or "dh --check" to probe every configured model's credentials.`);
   io.stdout(
-    `dh: Bedrock model/inference-profile ids are verified for the us-east-1 region; re-verify if you're on a different region.`,
+    cliDim(
+      `dh:   Bedrock model/inference-profile ids are verified for the us-east-1 region; re-verify if you're on a different region.`,
+      initTty,
+    ),
   );
-  io.stdout(`dh: edit the config to add your API key/model, then run "dh" to start.`);
+  io.stdout(`dh: Next: run "dh doctor" to probe credentials, then "dh" to start.`);
   io.exit(ExitCode.Success);
   return ExitCode.Success;
 }
@@ -1060,10 +1164,12 @@ interface DoctorResult {
   detail: string;
 }
 
-const DOCTOR_PASS_COLOR = "\x1b[32m";
-const DOCTOR_FAIL_COLOR = "\x1b[31m";
-const DOCTOR_PENDING_COLOR = "\x1b[2m"; // dim — distinguishes "still checking" from a verdict
-const DOCTOR_RESET = "\x1b[0m";
+// DH-0101: aliases onto the shared CLI styling constants above (was its own copy) — dim
+// still distinguishes "still checking" from a resolved verdict, per style-guide §1.1.
+const DOCTOR_PASS_COLOR = CLI_GREEN;
+const DOCTOR_FAIL_COLOR = CLI_RED;
+const DOCTOR_PENDING_COLOR = CLI_DIM;
+const DOCTOR_RESET = CLI_RESET;
 
 /** Formats one resolved (pass/fail) row — shared by `formatDoctorReport` (the non-TTY /
  * final-summary path) and `runDoctor`'s TTY live-update path, so both agree on alignment and
@@ -1214,8 +1320,7 @@ async function runDryRun(
   }
 
   io.stdout(
-    "dh: dry run OK — config, instructions file, and provider client construction all " +
-      "validated. No model was called.",
+    `dh: ${cliSuccessGlyph(process.stdout.isTTY === true)}dry run OK — config, instructions file, and provider client construction all validated. No model was called.`,
   );
   io.exit(ExitCode.Success);
   return ExitCode.Success;
@@ -1266,7 +1371,12 @@ export async function main(
   }
 
   if (argv.includes("--version")) {
-    io.stdout(formatVersionString(BUILD_INFO));
+    // DH-0101: light emphasis (bold app name) on a TTY; formatVersionString itself stays a
+    // pure plain-text formatter (other call sites/tests depend on that), so the bolding is
+    // applied here, at the print site, only to the leading "dh" app-name token.
+    const versionString = formatVersionString(BUILD_INFO);
+    const tty = process.stdout.isTTY === true;
+    io.stdout(tty ? versionString.replace(/^dh/, cliBold("dh", true)) : versionString);
     io.exit(ExitCode.Success);
     return ExitCode.Success;
   }

@@ -395,6 +395,31 @@ describe("main — --version", () => {
     expect(io.exitCodes).toEqual([ExitCode.Success]);
     expect(io.stdoutLines[0]).toMatch(/^dh \d+\.\d+\.\d+ \(/);
   });
+
+  // DH-0101: light emphasis (bold "dh") on a TTY.
+  test("TTY: the leading app name is bolded", async () => {
+    const isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    try {
+      const io = fakeIo();
+      const code = await main(["--version"], {
+        io,
+        loadConfig: async () => {
+          throw new Error("--version must not load config");
+        },
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.stdoutLines[0]).toStartWith("\x1b[1mdh\x1b[0m ");
+      expect(io.stdoutLines[0]).toMatch(/\d+\.\d+\.\d+ \(/);
+    } finally {
+      if (isTTYDescriptor) {
+        Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
+      } else {
+        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
+        delete (process.stdout as { isTTY?: boolean }).isTTY;
+      }
+    }
+  });
 });
 
 describe("formatVersionString", () => {
@@ -2254,6 +2279,40 @@ describe("main — dh init", () => {
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stderrLines[0]).toContain("failed to write dh.json: disk full");
   });
+
+  // DH-0101: success headline (✓) + indented dim caveats + a set-off next-step callout, TTY
+  // only — off-TTY (every test above) keeps the same plain `dh: ` lines.
+  describe("TTY styling (DH-0101)", () => {
+    let isTTYDescriptor: PropertyDescriptor | undefined;
+
+    beforeEach(() => {
+      isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    });
+
+    afterEach(() => {
+      if (isTTYDescriptor) {
+        Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
+      } else {
+        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
+        delete (process.stdout as { isTTY?: boolean }).isTTY;
+      }
+    });
+
+    test("success headline gets a green ✓, caveats are dimmed, next step is a distinct callout", async () => {
+      const io = fakeIo();
+      const target = join(dir, "dh.json");
+      const code = await main(["init", "--config", target], { io });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.stdoutLines[0]).toBe(`dh: \x1b[32m✓\x1b[0m wrote a starter config to ${target}.`);
+      expect(io.stdoutLines[1]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[2]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[2]).toEndWith("\x1b[0m");
+      expect(io.stdoutLines[3]).toBe(
+        'dh: Next: run "dh doctor" to probe credentials, then "dh" to start.',
+      );
+    });
+  });
 });
 
 describe("main — dh doctor / --check", () => {
@@ -2468,6 +2527,28 @@ describe("main — --dry-run", () => {
     expect(io.stdoutLines[0]).toContain("dry run OK");
   });
 
+  // DH-0101: ✓ glyph on TTY success.
+  test("TTY: success line leads with a green ✓", async () => {
+    const isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    try {
+      const io = fakeIo();
+      const code = await main(["--dry-run"], {
+        ...baseOverrides(io),
+        createProvider: () => fakeModelProvider(),
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.stdoutLines[0]).toStartWith("dh: \x1b[32m✓\x1b[0m dry run OK");
+    } finally {
+      if (isTTYDescriptor) {
+        Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
+      } else {
+        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
+        delete (process.stdout as { isTTY?: boolean }).isTTY;
+      }
+    }
+  });
+
   test("also validates the instructions file when --instructions is given", async () => {
     const io = fakeIo();
     const code = await main(["--dry-run", "--instructions", "plan.md"], {
@@ -2677,6 +2758,74 @@ describe("ActivityFeed (DH-0067)", () => {
     const feed = new ActivityFeed();
     expect(feed.onEvent({ version: 1, id: "1", timestamp: TS, type: "resync" })).toBeUndefined();
   });
+
+  // DH-0101: TTY-gated short id + status-colored dot + dim timestamp. Explicit `tty: true`
+  // argument, no process.stdout monkeypatching needed since ActivityFeed's caller threads the
+  // gate in as a parameter rather than reading process.stdout.isTTY itself.
+  describe("tty styling (DH-0101)", () => {
+    test("agent_spawned: long id shortened, timestamp dimmed", () => {
+      const feed = new ActivityFeed();
+      expect(
+        feed.onEvent(
+          {
+            version: 1,
+            id: "1",
+            timestamp: TS,
+            type: "agent_spawned",
+            agentId: "0123456789abcdef",
+            parentAgentId: "agent-root",
+            model: "sonnet",
+          },
+          true,
+        ),
+      ).toBe("\x1b[2m12:04:11\x1b[0m 01234567… spawned (sonnet)");
+    });
+
+    test("agent_status: status-colored dot precedes the shortened id, per status", () => {
+      const feed = new ActivityFeed();
+      expect(
+        feed.onEvent(
+          {
+            version: 1,
+            id: "1",
+            timestamp: TS,
+            type: "agent_status",
+            agentId: "0123456789abcdef",
+            status: "running",
+          },
+          true,
+        ),
+      ).toBe("\x1b[2m12:04:11\x1b[0m \x1b[34m●\x1b[0m 01234567… running");
+
+      expect(
+        feed.onEvent(
+          {
+            version: 1,
+            id: "2",
+            timestamp: TS,
+            type: "agent_status",
+            agentId: "agent-root",
+            status: "stopped",
+          },
+          true,
+        ),
+      ).toBe("\x1b[2m12:04:11\x1b[0m \x1b[35m●\x1b[0m agent-root stopped");
+    });
+
+    test("tty: false (the default) matches the plain non-TTY output exactly", () => {
+      const feed = new ActivityFeed();
+      expect(
+        feed.onEvent({
+          version: 1,
+          id: "1",
+          timestamp: TS,
+          type: "agent_status",
+          agentId: "agent-root",
+          status: "running",
+        }),
+      ).toBe("12:04:11 agent-root running");
+    });
+  });
 });
 
 describe("formatDoctorReport (DH-0067)", () => {
@@ -2754,6 +2903,68 @@ describe("main — --server startup block (DH-0067)", () => {
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines[0]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
     expect(io.stdoutLines[1]).toMatch(/^dh: logs: .*\.dh-logs/);
+  });
+
+  // DH-0101: on a TTY, styling wraps around the two e2e-grepped substrings without breaking
+  // them — verified here at the unit level (in addition to the real e2e run against the
+  // compiled binary) via a regex anchored on the exact byte-stable substrings.
+  describe("TTY styling wraps, never rewrites, the byte-stable substrings (DH-0101)", () => {
+    let isTTYDescriptor: PropertyDescriptor | undefined;
+
+    beforeEach(() => {
+      isTTYDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+    });
+
+    afterEach(() => {
+      if (isTTYDescriptor) {
+        Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
+      } else {
+        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
+        delete (process.stdout as { isTTY?: boolean }).isTTY;
+      }
+    });
+
+    test("--server: headless line keeps its exact substring; version bolded; posture caution-marked", async () => {
+      const io = fakeIo();
+      const code = await main(["--server"], {
+        ...interactiveOverrides(io),
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.stdoutLines[0]).toContain("headless server listening on port");
+      expect(io.stdoutLines[0]).toStartWith(
+        "dh: \x1b[32m✓\x1b[0m headless server listening on port ",
+      );
+      expect(io.stdoutLines[1]).toStartWith("dh: \x1b[1mdh ");
+      expect(io.stdoutLines[1]).toContain("\x1b[0m — bound to");
+      expect(io.stdoutLines[3]).toStartWith("dh: \x1b[33m⚠\x1b[0m plaintext HTTP, no auth");
+    });
+
+    test("--web: 'web UI ready at <url>' substring survives styling intact, URL uncolored", async () => {
+      const io = fakeIo();
+      const code = await main(["--web"], {
+        ...interactiveOverrides(io),
+      });
+      expect(code).toBe(ExitCode.Success);
+      const line = io.stdoutLines[0] ?? "";
+      expect(line).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
+      expect(line).toEndWith(".");
+      // Everything between "ready at " and the trailing "." is the captured URL e2e's own
+      // regex feeds straight into `fetch()` — it must be free of embedded ANSI.
+      const url = line.slice(line.indexOf("ready at ") + "ready at ".length, -1);
+      expect(url).toStartWith("http://localhost:");
+      expect(url).not.toContain("\x1b");
+    });
+
+    test("--connect --web: 'web UI ready at <url>' substring survives styling intact", async () => {
+      const io = fakeIo();
+      const code = await main(["--connect", "example.com", "--web"], {
+        ...interactiveOverrides(io),
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.stdoutLines[0]).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
+      expect(io.stdoutLines[0]).toContain(" (connected to ");
+    });
   });
 });
 
