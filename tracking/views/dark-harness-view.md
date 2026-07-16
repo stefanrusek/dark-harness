@@ -24,6 +24,7 @@ source: tracking/
 | [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | status: verifying |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | deferred (2026-07-16): GitHub issue #7 created to gauge demand |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut | waiting on a real release/binary to exist before this can be written accurately |
+| [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) | architect design pass in progress |
 
 ## Board
 
@@ -42,6 +43,12 @@ source: tracking/
 | [DH-0068](../DH-0068-readme-hero-compelling-promo-screenshot-and-visual-identity-for-the-landing-page.md) | README hero: compelling promo screenshot and visual identity for the landing page | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut 🔒 | feature | stefan |
+
+### refining
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0093](../DH-0093-no-slash-command-system-in-tui-web-model-switching-skill-invocation-help-clear.md) | No slash-command system in TUI/Web (model switching, skill invocation, help/clear) 🔒 | feature | stefan |
 
 ### ready
 
@@ -67,6 +74,8 @@ source: tracking/
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
 | [DH-0071](../DH-0071-monitor-tool-is-a-status-snapshot-poll-not-a-live-event-stream-like-claude-code-s-monitor.md) | Monitor tool is a status-snapshot poll, not a live event stream like Claude Code's Monitor | bug | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
+| [DH-0094](../DH-0094-agent-has-no-self-awareness-of-its-own-dh-build-current-model-or-other-available-models.md) | Agent has no self-awareness of its own dh build, current model, or other available models | feature | stefan |
+| [DH-0095](../DH-0095-tui-chrome-padding-looks-unchanged-despite-dh-0065-closing-as-fully-done.md) | TUI chrome/padding looks unchanged despite DH-0065 closing as fully done | bug | stefan |
 
 ### implementing
 
