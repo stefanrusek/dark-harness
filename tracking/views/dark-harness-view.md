@@ -39,7 +39,6 @@ source: tracking/
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 | [DH-0065](../DH-0065-tui-visual-polish-inline-style-bleed-word-wrap-transcript-identity-liveness.md) | TUI visual polish: inline style bleed, word wrap, transcript identity, liveness | feature | stefan |
 | [DH-0066](../DH-0066-web-ui-visual-polish-markdown-surface-styling-sidebar-hierarchy-transcript-details.md) | Web UI visual polish: Markdown surface styling, sidebar hierarchy, transcript details | feature | stefan |
-| [DH-0067](../DH-0067-server-mode-operator-ux-startup-summary-runtime-activity-feed-cli-output-polish.md) | Server-mode operator UX: startup summary, runtime activity feed, CLI output polish | feature | stefan |
 | [DH-0068](../DH-0068-readme-hero-compelling-promo-screenshot-and-visual-identity-for-the-landing-page.md) | README hero: compelling promo screenshot and visual identity for the landing page | feature | stefan |
 | [DH-0074](../DH-0074-no-webfetch-websearch-equivalent-tool-for-an-autonomous-coding-agent-to-look-up-docs-or-errors-online.md) | No WebFetch/WebSearch-equivalent tool for an autonomous coding agent to look up docs or errors online | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | feature | stefan |
@@ -105,6 +104,6 @@ source: tracking/
 | [DH-0073](../DH-0073-read-tool-has-no-jupyter-notebook-or-pdf-awareness-and-there-is-no-notebookedit-equivalent.md) | Read tool has no Jupyter-notebook awareness, and there is no NotebookEdit equivalent | done |
 | [DH-0072](../DH-0072-grep-tool-likely-missing-context-line-flags-multiline-mode-and-file-type-filter-that-real-claude-code-s-grep-supports.md) | Grep tool likely missing context-line flags, multiline mode, and file-type filter that real Claude Code's Grep supports | done |
 | [DH-0069](../DH-0069-agent-tool-s-description-should-be-required-and-the-tree-ui-should-actually-use-it.md) | Agent tool's description should be required, and the tree UI should actually use it | done |
+| [DH-0067](../DH-0067-server-mode-operator-ux-startup-summary-runtime-activity-feed-cli-output-polish.md) | Server-mode operator UX: startup summary, runtime activity feed, CLI output polish | done |
 | [DH-0064](../DH-0064-e2e-web-test-ts-and-connect-web-test-ts-assert-a-stale-agent-output-selector.md) | e2e/web.test.ts and connect-web.test.ts assert a stale .agent-output selector | done |
 | [DH-0063](../DH-0063-spile-ops-skill-id-based-ticket-resolution-rename-on-retitle-tool.md) | spile-ops skill: ID-based ticket resolution + rename-on-retitle tool | done |
-| [DH-0062](../DH-0062-e2e-web-test-ts-session-ended-assertions-stale-vs-interactive-waiting-semantics.md) | e2e/web.test.ts session-ended assertions stale vs interactive waiting semantics | done |
