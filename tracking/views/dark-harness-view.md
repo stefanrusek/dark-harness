@@ -64,6 +64,7 @@ source: tracking/
 | [DH-0005](../DH-0005-npm-token-secret.md) | `NPM_TOKEN` repository secret not yet set | feature | stefan |
 | [DH-0022](../DH-0022-default-server-bind-address-not-loopback.md) | Add a `dh.json` field to configure the server/web bind address (default unchanged) | feature | stefan |
 | [DH-0023](../DH-0023-web-ui-token-leak-cors-csp-clickjacking.md) | Web UI CORS/Host-header/CSP/clickjacking hardening | bug | stefan |
+| [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 
 ### implementing
 
