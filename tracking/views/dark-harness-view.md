@@ -13,6 +13,7 @@ source: tracking/
 
 | ID | Title | Blocked by |
 | --- | --- | --- |
+| [DH-0002](../DH-0002-full-mcp-client-support.md) | Full MCP client support (transport discovery) | architect design pass in progress |
 | [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) | owner triage: needs input before dispatch (ticket-triage-workflow bucket B) |
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance | deferred (owner decision 2026-07-15): no incident behind this, revisit near real release cut |
 | [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback | deferred (owner decision 2026-07-15): sweep-sourced idea, not a real requested need |
@@ -23,7 +24,6 @@ source: tracking/
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
-| [DH-0002](../DH-0002-full-mcp-client-support.md) | Full MCP client support (transport discovery) | feature | stefan |
 | [DH-0010](../DH-0010-no-context-window-compaction-or-cache-control.md) | No context-window compaction/token-budget handling, and no prompt caching (`cache_control`) 🔒 | feature | stefan |
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance 🔒 | feature | stefan |
 | [DH-0035](../DH-0035-first-run-friction-no-init-doctor-dry-run.md) | No `dh init`/`dh doctor`/`--dry-run`, and cold error messages give a first-time operator no path forward | feature | stefan |
@@ -39,6 +39,12 @@ source: tracking/
 | [DH-0052](../DH-0052-windows-console-support-unverified.md) | Windows console/TUI support is unverified — no Windows-specific console-mode handling found, and no Windows execution anywhere in CI | bug | stefan |
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | feature | stefan |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
+
+### refining
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0002](../DH-0002-full-mcp-client-support.md) | Full MCP client support (transport discovery) 🔒 | feature | stefan |
 
 ### ready
 
