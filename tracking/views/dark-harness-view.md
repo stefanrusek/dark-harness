@@ -16,7 +16,6 @@ source: tracking/
 | [DH-0031](../DH-0031-supply-chain-hardening-gaps.md) | GitHub Actions supply-chain hardening gaps — actions pinned by tag, no artifact signing, no npm provenance | deferred (owner decision 2026-07-15): no incident behind this, revisit near real release cut |
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | architect design pass in progress |
 | [DH-0047](../DH-0047-no-checkpointing-or-rewind-of-file-edits.md) | No checkpointing/rewind of file edits — an off-the-rails unattended run has no automatic rollback | deferred (owner decision 2026-07-15): sweep-sourced idea, not a real requested need |
-| [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | architect design pass in progress |
 
 ## Board
 
@@ -39,7 +38,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support 🔒 | feature | stefan |
-| [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop 🔒 | bug | stefan |
 
 ### ready
 
@@ -64,6 +62,7 @@ source: tracking/
 | [DH-0055](../DH-0055-dh-doesn-t-read-a-project-s-claude-md-into-the-system-prompt.md) | dh doesn't read a project's CLAUDE.md into the system prompt | feature | stefan |
 | [DH-0056](../DH-0056-render-agent-output-as-markdown-not-raw-escape-passthrough-tui-web.md) | Render agent output as Markdown, not raw escape passthrough (TUI+Web) | feature | stefan |
 | [DH-0058](../DH-0058-tui-e2e-tests-hang-on-sse-reconnect-banner-never-reach-session-ended.md) | TUI e2e tests hang on SSE-reconnect banner, never reach session-ended | bug | stefan |
+| [DH-0059](../DH-0059-interactive-root-agent-never-reaches-session-ended-without-an-explicit-stop.md) | Interactive root agent never reaches session_ended without an explicit stop | bug | stefan |
 
 ### implementing
 
