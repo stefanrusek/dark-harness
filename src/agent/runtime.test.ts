@@ -8,7 +8,9 @@
 // loop -> tool dispatch without ever touching the network.
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { realpathSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type AgentTreeNode,
@@ -583,6 +585,56 @@ describe("AgentRuntime", () => {
     // Compare via realpath: on macOS, /tmp is a symlink to /private/tmp, and a shell's
     // `pwd` (no -L) resolves to the physical path, so the literal "/tmp" would not match.
     expect(typeof output === "string" ? output.trim() : "").toBe(realpathSync("/tmp"));
+  });
+
+  test("DH-0070: each concurrently-spawned sub-agent sees its own agent's cwd, not " +
+    "another agent's or the process's — per-agent cwd is captured at spawn time, not read " +
+    "from one shared runtime-wide field", async () => {
+    const dirA = realpathSync("/tmp");
+    const dirB = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-b-")));
+    const { logLines: logLinesA, onLogLine: onLogLineA } = collectors();
+    const { logLines: logLinesB, onLogLine: onLogLineB } = collectors();
+    const runtimeA = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      cwd: dirA,
+      onLogLine: onLogLineA,
+    });
+    const runtimeB = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      cwd: dirB,
+      onLogLine: onLogLineB,
+    });
+    // Two sub-agents, each spawned from a *different* runtime instance (so their own root
+    // cwds genuinely diverge), run concurrently — proving neither the process's own cwd nor
+    // one runtime's cwd leaks into the other's sub-agent, and that a real process.cwd()
+    // change (below) doesn't silently become either agent's effective cwd.
+    const originalProcessCwd = process.cwd();
+    process.chdir(tmpdir());
+    try {
+      const [taskIdA, taskIdB] = [
+        runtimeA.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
+        runtimeB.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
+      ];
+      await Promise.all([runtimeA.tasks.awaitDone(taskIdA), runtimeB.tasks.awaitDone(taskIdB)]);
+    } finally {
+      process.chdir(originalProcessCwd);
+    }
+
+    const pwdOutput = (lines: LogLine[]) => {
+      const toolResult = lines.find((l) => l.type === "tool_result");
+      const output = toolResult && toolResult.type === "tool_result" ? toolResult.output : "";
+      return typeof output === "string" ? output.trim() : "";
+    };
+    expect(pwdOutput(logLinesA)).toBe(dirA);
+    expect(pwdOutput(logLinesB)).toBe(dirB);
+    // Neither sub-agent ever saw the process's own (temporarily-changed) cwd, nor the
+    // sibling runtime's cwd.
+    expect(pwdOutput(logLinesA)).not.toBe(dirB);
+    expect(pwdOutput(logLinesB)).not.toBe(dirA);
+    expect(pwdOutput(logLinesA)).not.toBe(tmpdir());
+    expect(pwdOutput(logLinesB)).not.toBe(tmpdir());
   });
 
   test("an explicit tools option restricts the tool map away from ALL_TOOLS", async () => {

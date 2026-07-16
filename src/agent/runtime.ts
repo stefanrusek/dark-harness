@@ -191,6 +191,17 @@ export class AgentRuntime {
    * *live* agent's own depth (to compute its children's), so a stale entry for an already-
    * finished agent is harmless, just unused. */
   private readonly agentDepth = new Map<string, number>([[ROOT_AGENT_ID, 0]]);
+  /** DH-0070: agentId -> that agent's own cwd, captured once at spawn time from the spawning
+   * agent's own entry in this same map (root's own entry is seeded in the constructor from
+   * `this.cwd`). Replaces a single process-wide `this.cwd` read by every agent's
+   * ToolContext — each agent gets its own fixed value, inherited from its parent at spawn
+   * time, the same "own everything else" precedent as `agentDepth` above. Never evicted, same
+   * rationale as `agentDepth`. This ticket does not add cross-call `cd` persistence (see
+   * tracking/DH-0070) — an agent's entry here never changes after it's set, so every Bash
+   * call for that agent still resolves against the same fixed value, exactly as before this
+   * fix; the only change is that value is no longer read from one field shared by every agent
+   * in the runtime. */
+  private readonly agentCwd = new Map<string, string>();
   private liveAgentCount = 0;
   private budgetTripped = false;
 
@@ -198,6 +209,9 @@ export class AgentRuntime {
     this.config = options.config;
     this.systemPrompt = options.systemPrompt;
     this.cwd = options.cwd ?? process.cwd();
+    // DH-0070: root's own per-agent cwd entry — everything else (spawnAgent) inherits
+    // transitively from here via the same map, never from `this.cwd` directly.
+    this.agentCwd.set(ROOT_AGENT_ID, this.cwd);
     this.sessionId = options.sessionId ?? randomUUID();
     this.toolMap = buildToolMap(options.tools ?? ALL_TOOLS);
     // DH-0002: constructed and connected here, not lazily on first ToolSearch call — eager
@@ -326,7 +340,12 @@ export class AgentRuntime {
     // object's own field and the searchDeferredTools closure below).
     const activatedTools = new Set<string>();
     return {
-      cwd: this.cwd,
+      // DH-0070: this agent's own fixed cwd, captured at spawn time (root: constructor;
+      // sub-agent: spawnAgent() below) — never a single shared/process-wide value. The
+      // fallback to `this.cwd` only guards a defensive/unreachable case (an agentId with no
+      // recorded entry, e.g. a future caller of buildToolContext that bypasses runRoot()/
+      // spawnAgent()); every real call site seeds this map before buildToolContext runs.
+      cwd: this.agentCwd.get(agentId) ?? this.cwd,
       runInBackgroundDefault: this.config.options.runInBackgroundDefault ?? true,
       agentId,
       config: this.config,
@@ -442,6 +461,12 @@ export class AgentRuntime {
     const provider = this.providerFor(model);
     const agentId = `agent-${randomUUID()}`;
     this.agentDepth.set(agentId, depth);
+    // DH-0070: inherit the spawning agent's own cwd at spawn time — not the runtime's
+    // process-wide `this.cwd` — so a sub-agent spawned from a sub-agent (grandchild) would
+    // inherit its immediate parent's cwd, not the root's, if those ever diverged. Falls back
+    // to `this.cwd` only if the parent somehow has no recorded entry (defensive; every real
+    // parent — root or sub-agent — always has one by the time it can spawn anything).
+    this.agentCwd.set(agentId, this.agentCwd.get(parentAgentId) ?? this.cwd);
     this.liveAgentCount += 1;
 
     return this.tasks.start({
