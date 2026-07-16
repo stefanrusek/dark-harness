@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0003
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
@@ -59,3 +59,8 @@ its own design pass.
 > Current (correct, but partial) behavior: `SendMessage` to a finished task now returns a
 > clear error naming it as already finished, rather than silently losing the message. That
 > is the fix that already shipped; this ticket is the fuller "actually resume it" behavior.
+
+> [!NOTE]
+> Owner decision (2026-07-15): queue for implementation now — matches real Claude Code
+> semantics HANDOFF.md requires mirroring. Core's call on the open question (does
+> `failed`/`stopped` resume differ from `done`) and on exact TaskRegistry/loop wiring.
