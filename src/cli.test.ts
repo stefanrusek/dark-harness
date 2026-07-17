@@ -1073,6 +1073,28 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     });
     expect(receivedClient).toBe("server");
   });
+
+  // DH-0116: --server mode's AgentRuntime used to generate its own internal sessionId,
+  // independently of the outer session/logDir this module uses for DhServer's logger — so
+  // every log header AgentRuntime wrote didn't match the directory it landed in. The
+  // sessionId createAgentLoop receives must be the SAME one stamped into the "session ..."
+  // startup line (and thus the same one DhServer/logDir use).
+  test("--server passes the same sessionId to createAgentLoop that it reports as its own session", async () => {
+    const io = fakeIo();
+    let receivedSessionId: string | undefined;
+    const code = await main(["--server"], {
+      ...interactiveOverrides(io),
+      createAgentLoop: (_config, _systemPrompt, _client, sessionId) => {
+        receivedSessionId = sessionId;
+        return fakeAgentLoop();
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    const startupLine = io.stdoutLines.find((line) => line.includes("headless server listening"));
+    expect(startupLine).toBeDefined();
+    const match = startupLine?.match(/\(session ([^)]+)\)/);
+    expect(match?.[1]).toBe(receivedSessionId);
+  });
 });
 
 describe("main — standalone --instructions path (bypasses Server/TUI/Web entirely)", () => {
@@ -1486,7 +1508,7 @@ describe("main — --resume <sessionId> (DH-0038)", () => {
         resumedFromSessionId: "s1",
         lostAgents: [],
       }),
-      createAgentLoop: (_config, _systemPrompt, _client, resume) => {
+      createAgentLoop: (_config, _systemPrompt, _client, _sessionId, resume) => {
         receivedResume = resume;
         return fakeAgentLoop({
           sendMessage: (agentId, message) => {

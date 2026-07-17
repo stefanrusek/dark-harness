@@ -723,12 +723,21 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
     config: DhConfig;
     systemPrompt: string;
     client: SessionClientKind;
+    // DH-0116: runMode() generates this once and uses it as the logDir/DhServer sessionId
+    // too — passed through so AgentRuntime stamps the SAME id into every log header it
+    // writes, instead of defaulting to a fresh randomUUID() of its own that would mismatch
+    // the directory those headers land in (breaking --resume's header/directory consistency
+    // check, resume.ts's loadHop). Optional here only so unit tests constructing this
+    // adapter directly (not through runMode()) don't all need an unused id — AgentRuntime's
+    // own randomUUID() fallback covers that case, same as before this fix.
+    sessionId?: string;
     resume?: AgentRuntimeOptions["resume"];
   }) {
     this.runtime = new AgentRuntime({
       config: options.config,
       systemPrompt: options.systemPrompt,
       client: options.client,
+      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
       // Round 5 (docs/handoffs/core.md status log): every interactive session — server/TUI/
       // Web, root and sub-agents alike — pauses instead of ending on a non-tool-use turn.
       // The standalone `--instructions`/`--job` path (defaultDeps().createRuntime) never sets
@@ -915,6 +924,11 @@ export interface CliDeps {
     config: DhConfig,
     systemPrompt: string,
     client: SessionClientKind,
+    // DH-0116: authoritative sessionId, sourced from the same id the caller uses for
+    // logDir/the server's own advertised session — see AgentRuntimeLoopAdapter's doc
+    // comment for why this must be threaded through rather than left to AgentRuntime's
+    // own default.
+    sessionId: string,
     resume?: AgentRuntimeOptions["resume"],
   ) => AgentLoopHandle & { close?: () => Promise<void> };
   createServer: (options: DhServerOptions) => DhServerLike;
@@ -1002,8 +1016,14 @@ function defaultDeps(): CliDeps {
     // `client` param maps from), so the value passed here is intentionally unused.
     createRuntime: (config, systemPrompt, _client, resume, onEvent) =>
       createStandaloneRuntime(config, systemPrompt, resume, onEvent),
-    createAgentLoop: (config, systemPrompt, client, resume) =>
-      new AgentRuntimeLoopAdapter({ config, systemPrompt, client, ...(resume ? { resume } : {}) }),
+    createAgentLoop: (config, systemPrompt, client, sessionId, resume) =>
+      new AgentRuntimeLoopAdapter({
+        config,
+        systemPrompt,
+        client,
+        sessionId,
+        ...(resume ? { resume } : {}),
+      }),
     createServer: (options) => new DhServer(options),
     startTui: (baseUrl, token, opts) => startTuiClient(baseUrl, token, opts),
     serveWebUi: (options) => serveWebUiClient(options),
@@ -1139,10 +1159,22 @@ async function runInteractiveMode(
     // depending on which client attaches to the DhServer this process also starts.
     const clientKind: SessionClientKind =
       mode.kind === "server" ? "server" : mode.web ? "web" : "tui";
+    // DH-0116: sessionId is generated once, here, and is authoritative — it's what
+    // determines logDir/the server's own advertised sessionId below, so it must be the same
+    // id AgentRuntime stamps into every log header it writes (via createAgentLoop), not an
+    // independently-generated one. Previously AgentRuntime generated its own internal
+    // sessionId, so log headers in --server mode didn't match the directory they were
+    // written into, breaking --resume's header/directory consistency check (resume.ts).
+    const sessionId = randomUUID();
+    const logsRoot = join(process.cwd(), ".dh-logs");
+    // DH-0037: see createStandaloneRuntime's identical call above for the rationale.
+    pruneLogDirectories(logsRoot, config.logRetention, Date.now(), sessionId);
+    const logDir = join(logsRoot, sessionId);
     const agentLoop = deps.createAgentLoop(
       config,
       systemPrompt,
       clientKind,
+      sessionId,
       resumeResult
         ? {
             messages: resumeResult.messages,
@@ -1151,11 +1183,6 @@ async function runInteractiveMode(
           }
         : undefined,
     );
-    const sessionId = randomUUID();
-    const logsRoot = join(process.cwd(), ".dh-logs");
-    // DH-0037: see createStandaloneRuntime's identical call above for the rationale.
-    pruneLogDirectories(logsRoot, config.logRetention, Date.now(), sessionId);
-    const logDir = join(logsRoot, sessionId);
     // DH-0067: operators repeatedly ask "is my TUI even connected?" with nothing on either
     // side to confirm — a dim one-liner per SSE connect/disconnect. `--quiet` suppresses it
     // along with the agent activity feed below (the startup block itself always prints).

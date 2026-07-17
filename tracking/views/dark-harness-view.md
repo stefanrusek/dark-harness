@@ -35,6 +35,7 @@ source: tracking/
 | [DH-0111](../DH-0111-dh-connect-web-malforms-the-target-url-http-http-localhost.md) | dh --connect --web malforms the target URL (http://http://localhost...) | status: verifying |
 | [DH-0112](../DH-0112-e2e-support-mock-provider-ts-never-updated-for-dh-0044-s-mandatory-streaming-real-turns-hang-past-agent-status.md) | e2e/support/mock-provider.ts never updated for DH-0044's mandatory streaming -- real turns hang past agent_status | status: verifying |
 | [DH-0113](../DH-0113-coordinator-gate-checks-should-be-a-checked-in-sub-agent-prompt-not-run-inline.md) | Coordinator gate checks should be a checked-in sub-agent prompt, not run inline | status: verifying |
+| [DH-0116](../DH-0116-server-mode-s-agentruntime-sessionid-mismatches-the-outer-logdir-cli-ts-uses.md) | --server mode's AgentRuntime sessionId mismatches the outer logDir cli.ts uses | status: verifying |
 
 ## Board
 
@@ -54,7 +55,6 @@ source: tracking/
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut 🔒 | feature | stefan |
 | [DH-0109](../DH-0109-missing-markdown-features-gfm-table-rendering-and-other-explicitly-out-of-scope-constructs.md) | Missing Markdown features: GFM table rendering (and other explicitly-out-of-scope constructs) | feature | stefan |
-| [DH-0116](../DH-0116-server-mode-s-agentruntime-sessionid-mismatches-the-outer-logdir-cli-ts-uses.md) | --server mode's AgentRuntime sessionId mismatches the outer logDir cli.ts uses | bug | stefan |
 
 ### ready
 
@@ -83,6 +83,7 @@ source: tracking/
 | [DH-0111](../DH-0111-dh-connect-web-malforms-the-target-url-http-http-localhost.md) | dh --connect --web malforms the target URL (http://http://localhost...) | bug | stefan |
 | [DH-0112](../DH-0112-e2e-support-mock-provider-ts-never-updated-for-dh-0044-s-mandatory-streaming-real-turns-hang-past-agent-status.md) | e2e/support/mock-provider.ts never updated for DH-0044's mandatory streaming -- real turns hang past agent_status | bug | stefan |
 | [DH-0113](../DH-0113-coordinator-gate-checks-should-be-a-checked-in-sub-agent-prompt-not-run-inline.md) | Coordinator gate checks should be a checked-in sub-agent prompt, not run inline | feature | stefan |
+| [DH-0116](../DH-0116-server-mode-s-agentruntime-sessionid-mismatches-the-outer-logdir-cli-ts-uses.md) | --server mode's AgentRuntime sessionId mismatches the outer logDir cli.ts uses | bug | stefan |
 
 ## Recently Closed
 
