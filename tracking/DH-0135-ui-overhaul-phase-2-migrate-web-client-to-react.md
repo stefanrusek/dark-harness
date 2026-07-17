@@ -148,3 +148,74 @@ Updated by Muriel (design crew) 2026-07-17 per the owner's request for a felt-ex
   pre-existing on the base branch (confirmed via `git stash` diff), not introduced here;
   `bun run e2e` 33 pass / 5 fail, same 5 failures reproduce identically on the base branch
   (sandbox tmux/PTY limitation per DH-0134's own note, not this ticket).
+
+### 2026-07-17 — rest of the migration: sidebar, transcript, header, model picker, banners
+
+- Migrated every remaining `render.ts` function to a React component under
+  `src/web/client/components/`: `Sidebar`, `ConnectionPill`, `SessionSummary`,
+  `AgentHeaderPanel` (named to avoid colliding with the reserved `<AppHeader>` slot),
+  `Transcript`, `JumpToLatestButton`, `ErrorBanner`, `GapBanner`, `ErrorLogPanel`,
+  `ModelPicker`, plus a `MarkdownContent` wrapper that reuses `markdown-dom.ts` (content
+  logic, unmodified) via a ref'd `useEffect`. All composed under a new top-level `App`
+  component alongside the already-migrated `Composer`/`AppHeader`. `render.ts` and
+  `render.test.ts` are deleted; `app.ts` now owns only the SSE subscription plus a single
+  `react-dom` root render of `<App>` (one root, not per-slot) — no `document.createElement`/
+  `textContent` DOM-mount code remains in `app.ts`.
+- Status/connection color+glyph+word rendering (`Sidebar`, `AgentHeaderPanel`,
+  `ConnectionPill`) now imports DH-0137's `STATUS_TOKENS`/`CONNECTION_TOKENS` instead of a
+  locally-declared map, per this ticket's sidebar-token story.
+- `Transcript` folds in DH-0127 (each turn is a keyed row; React's reconciliation keeps an
+  unchanged turn's DOM node identity across an unrelated re-render — proven by
+  `Transcript.test.tsx`'s rerender-based tests) and DH-0129 (an effect scrolls to bottom only
+  when the region was already near-bottom before new content arrived, otherwise reveals the
+  jump-to-latest button — proven by the "reveals the jump-to-latest button when new content
+  arrives while scrolled away from the bottom" case). **DH-0130's render-side story is not
+  proven this round**: `state.ts` does not yet derive a terminal-status marker `Turn` for an
+  agent reaching `done`/`failed`/`stopped`, and this ticket's own scope keeps `state.ts`
+  as-is — so there is nothing for `Transcript` to render yet. Render-side plumbing for that
+  marker (once state.ts grows it) is a small follow-up, not a structural gap.
+- `biome.json` gained a scoped override (`src/web/client/components/**/*.tsx`) disabling
+  `lint/a11y/useSemanticElements` — that rule wants literal `<select>`/`<option>`/`<dialog>`
+  in place of the project's existing custom ARIA-role widget pattern (`role="listbox"`/
+  `"option"`/`"dialog"` on styled `<div>`s), which is what `render.ts` already did and what
+  the style guide's picker/tree conventions assume; not a blanket a11y opt-out (every other
+  a11y rule, e.g. `useKeyWithClickEvents`, stayed enforced and drove real fixes in
+  `ModelPicker`).
+- `app.test.ts` is updated in place, not rewritten — same DOM-level integration harness
+  (fake SSE stream + fetch double via `createTestDom`), same assertions, since the class
+  names/DOM shape the old imperative `render.ts` produced were deliberately preserved in the
+  new JSX. A handful of assertions gained an `await flush()`: a single `react-dom` root
+  commit is one macrotask behind construction/state updates under happy-dom's scheduler
+  (confirmed via a standalone repro — `root.innerHTML` is empty synchronously after
+  `createRoot().render()`, populated only after a `setTimeout(0)` tick), unlike the old
+  code's synchronous `document.createElement` mutation. This is a real, disclosed behavioral
+  change, not a test relaxation — state updates (local echo, `applyEvent`) are still
+  synchronous; only the DOM commit moved.
+- Added RTL component tests for every new component file (`Sidebar.test.tsx`,
+  `ConnectionPill.test.tsx`, `SessionSummary.test.tsx`, `AgentHeaderPanel.test.tsx`,
+  `Transcript.test.tsx`, `ErrorBanner.test.tsx`, `GapBanner.test.tsx`,
+  `ErrorLogPanel.test.tsx`, `JumpToLatestButton.test.tsx`, `ModelPicker.test.tsx`,
+  `MarkdownContent.test.tsx`, `App.test.tsx`) — `render.test.ts`'s coverage is ported, not
+  dropped.
+- User Stories → tests (this round; composer/`<AppHeader>` stories already covered per the
+  prior entry): sidebar-token story → `Sidebar.test.tsx`/`AgentHeaderPanel.test.tsx`/
+  `ConnectionPill.test.tsx` plus `biome.json`'s `useSemanticElements` override note above
+  (no `Record<AgentStatus,`-shaped literal exists in any new component file — confirmed by
+  inspection, no dedicated grep test added this round); DH-0127/DH-0129 → both
+  `Transcript.test.tsx` cases named above; DH-0130 → **not proven**, see above; `state.ts`
+  unchanged → `bun test src/web/client/state.test.ts` passes with zero edits to that file.
+- Gates: `bun run typecheck` clean; `bun run lint` clean on every touched/new file (a few
+  pre-existing unrelated failures in `.claude/skills/forked-subagent/`,
+  `src/agent/providers/openai-compatible.ts`, and `src/web/client/markdown-dom.test.ts`
+  reproduce identically on the base branch, confirmed via `git stash`); `bun test src/web`
+  322 pass / 0 fail; `bun run test:coverage` (full suite) 2131 pass / 0 fail on a clean run —
+  one `src/agent/runtime.test.ts` failure was observed on an earlier run
+  ("a real background Bash task's completion is proactively delivered...") but reproduces on
+  the unmodified base branch too and passed both in isolation and on a full-suite retry:
+  pre-existing flake in a Core-owned file, not this ticket. `bun run e2e` not re-run this
+  round (no `e2e/` files touched), per the dispatch instructions.
+- Status left at `implementing`, not `verifying`: the DH-0130 render-side story is not
+  provable yet (state.ts doesn't derive the marker this round covers), so not every User
+  Story in this ticket has a passing test naming it per CLAUDE.md §9. Everything else —
+  sidebar/transcript/header/model-picker/banners migration, DH-0127/DH-0129, the
+  `<AppHeader>` slot, `state.ts` unchanged — is fully implemented and proven.
