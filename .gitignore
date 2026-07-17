@@ -19,3 +19,6 @@ secrets.env
 !.claude/skills/
 # Except project-local skills, which are committed process tooling (see tracking/DH-0008).
 __pycache__/
+
+# Local dh.json (operator's own model/provider config for manual testing) — never committed.
+/dh.json
