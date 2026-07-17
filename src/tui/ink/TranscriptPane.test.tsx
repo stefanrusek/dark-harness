@@ -62,10 +62,24 @@ describe("TranscriptPane", () => {
         transcript: [],
         cols: 40,
         height: 3,
-        emptyText: "Waiting for root agent to start…",
+        emptyText: "Type a message below to get started.",
       }),
     );
-    expect(lastFrame()).toContain("Waiting for root agent to start…");
+    expect(lastFrame()).toContain("Type a message below to get started.");
+  });
+
+  test("DH-0124: multi-line empty text renders one row per '\\n'-separated line", () => {
+    const { lastFrame } = render(
+      React.createElement(TranscriptPane, {
+        transcript: [],
+        cols: 40,
+        height: 3,
+        emptyText: "[ dh ]\ndh 0.1.0 (abc123)",
+      }),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[ dh ]");
+    expect(frame).toContain("dh 0.1.0 (abc123)");
   });
 
   test("DH-0126: windows to only the last `height` rows when content overflows the viewport", () => {

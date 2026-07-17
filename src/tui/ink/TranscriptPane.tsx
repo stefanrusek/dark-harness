@@ -74,6 +74,8 @@ export interface TranscriptPaneProps {
   transcript: Turn[];
   cols: number;
   height: number;
+  /** DH-0124: may contain "\n" to render a multi-line empty state (e.g. RootView's
+   * header + friendly first-message prompt); split into one row per line. */
   emptyText: string;
   /** DH-0126: wheel-scroll trigger, wired up by whichever view (root/agent) currently mounts
    * this pane — see app.ts/mouse.ts for where the raw SGR events are parsed. Optional so
@@ -88,7 +90,8 @@ export function TranscriptPane({
   emptyText,
   scrollBus,
 }: TranscriptPaneProps) {
-  const lines = transcript.length === 0 ? [emptyText] : renderTranscript(transcript, cols);
+  const lines =
+    transcript.length === 0 ? emptyText.split("\n") : renderTranscript(transcript, cols);
   const [offset, setOffset] = useState(() => toBottom(lines.length, height).offset);
 
   // Re-subscribe each render so the listener closes over the current lines/height — a scroll
