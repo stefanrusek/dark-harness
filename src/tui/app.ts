@@ -118,6 +118,16 @@ export async function startTui(
   token?: string,
   opts: StartTuiOptions = {},
 ): Promise<void> {
+  // DH-0145: yoga-layout (an ink dependency) loads its WASM binary via a top-level await in
+  // its own entry module, and ink's DOM layer calls `Yoga.Node.create()` synchronously inside
+  // `mountInk()` below. Whether that WASM load has settled by the time `mountInk()` reaches it
+  // depends on file-execution-order luck, not anything under our control — an explicit `await
+  // import(...)` here forces this async function to wait for the whole ink/yoga-layout module
+  // graph to fully resolve before any later line in this function can call `mountInk()`
+  // synchronously. This is the one call site every caller (production `src/cli.ts` and every
+  // TUI test) goes through, so fixing it here covers both without duplicating the warmup.
+  await import("./ink/mount.ts");
+
   const resolved: TuiIO = { ...defaultIO(), ...opts.io };
   const { stdin, stdout, fetchImpl } = resolved;
   const authHeaders: Record<string, string> | undefined = token
