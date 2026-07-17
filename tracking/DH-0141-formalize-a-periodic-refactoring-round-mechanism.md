@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0141
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -88,3 +88,52 @@ prompt template implementers will wire the hook to point at:
 Functional Requirements are implementer-actionable. Did not touch
 implementation (hook script, install script) per this pass's design-only
 scope; that is Core's (Grace's) pickup.
+
+### 2026-07-17 -- Core implementation
+
+Built `scripts/hooks/post-commit` (POSIX `sh`, executable) implementing the
+commit-counting semantics exactly as specified: `git log --grep='^Refactoring-Round:
+DH-[0-9]\+' -1 --format=%H` to find the last sentinel commit, `git rev-list --count
+<sha>..HEAD` from there (or `git rev-list --count HEAD` for the zero-sentinel
+bootstrap case), threshold as `DH_REFACTOR_THRESHOLD` (default `15`, read once into a
+single variable). Banner (matching the ticket's suggested format) prints to stderr
+only when count >= threshold; silent below threshold. The hook cannot block a commit
+(fires post-commit, per the ticket's accepted risk) and always exits 0.
+
+Built `scripts/install-git-hooks.sh`: copies (not symlinks) `scripts/hooks/post-commit`
+into `.git/hooks/post-commit` and chmods it executable. Refuses to run (prints a
+message to stderr, exits 0, no-op) when `git rev-parse --git-dir` resolves to a
+different absolute path than `git rev-parse --git-common-dir` -- the signal that the
+current checkout is a linked worktree rather than the main one, per the ticket's
+guidance.
+
+Testing (CLAUDE.md section 9 -- each User Story bullet mapped to an actual test, not
+prose):
+- `scripts/hooks/post-commit.test.ts` -- spawns real throwaway git repos in a temp dir
+  via Bun subprocess, installs the hook, and drives real `git commit` invocations to
+  exercise it end-to-end (not just eyeballed): silence below threshold with the
+  zero-sentinel case, banner fires and contains count/threshold/prompt-path/trailer-
+  syntax once the zero-sentinel count meets threshold, commit still succeeds (exit 0)
+  when the banner fires, counter resets after a `Refactoring-Round:` trailer commit and
+  re-accumulates from zero, threshold defaults to 15 when the env var is unset, and a
+  burst of commits jumping straight past the threshold in one step still fires with the
+  correct exact count (covers the "several worktrees merge in a row" User Story).
+- `scripts/install-git-hooks.test.ts` -- spawns real git repos (and a real
+  `git worktree add`) via Bun subprocess: installer copies the hook file byte-for-byte
+  and makes it executable, copies rather than symlinks, refuses to run inside a linked
+  worktree (exits 0, stderr mentions "worktree", neither the worktree's nor the main
+  checkout's `.git/hooks/post-commit` gets written), and the installed hook actually
+  fires on a real commit in the main checkout end-to-end.
+- Both suites live under `scripts/` (not `src/`, so outside the `bun test src`
+  100%-coverage gate scope per CLAUDE.md section 5) but are checked in and run via
+  `bun test scripts` -- 10/10 passing.
+
+Gates run: `bun run typecheck` (clean), `bun run lint` (clean for these new files --
+remaining lint failures are pre-existing, in untouched files under
+`.claude/skills/forked-subagent/` and `src/`, confirmed via `git status` showing them
+unmodified), `bun run test:coverage` (2172/2172 passing, 100% coverage maintained,
+these two files not part of that gate's scope), `bun run e2e` (36/38 passing; the 2
+failures are in `e2e/web.test.ts` and `e2e/connect-web.test.ts`, both pre-existing
+status-badge-casing failures unrelated to and untouched by this change).
+
+Moving to `verifying`.
