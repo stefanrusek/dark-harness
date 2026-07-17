@@ -4,9 +4,15 @@
 // the real `AnthropicProvider` adapter (unmodified) drive the whole e2e suite deterministically
 // and for free — no real Anthropic API key or network egress involved.
 //
-// Only the one endpoint the SDK actually calls (`POST /v1/messages`, non-streaming) is
-// implemented — that is all `AnthropicProvider.complete()` uses (see anthropic.ts's
-// `client.messages.create(...)` call, `stream` is never set true).
+// The one endpoint the SDK actually calls (`POST /v1/messages`) is implemented. Since DH-0044,
+// `AnthropicProvider.complete()` always requests `stream: true`, so successful turns are served
+// as a real `text/event-stream` SSE body (`message_start`/`content_block_start`/
+// `content_block_delta`/`content_block_stop`/`message_delta`/`message_stop`) instead of a single
+// non-streaming JSON blob — mirroring the `sseMessageResponse()` helper already built for this
+// same DH-0044 fix in `src/agent/runtime.test.ts`/`src/cli.test.ts` and the SDK-level
+// `streamOf()` helper in `src/agent/providers/anthropic.test.ts`. Error-injection turns
+// (DH-0033) are unaffected — the real Anthropic API still returns a plain non-streaming error
+// body for non-200 responses regardless of the request's `stream` flag.
 
 import { randomUUID } from "node:crypto";
 
@@ -74,34 +80,75 @@ export interface MockAnthropicProvider {
   stop(): void;
 }
 
-function turnToMessage(turn: MockTurn) {
-  const content: Record<string, unknown>[] = [];
-  if (turn.text !== undefined && turn.text.length > 0) {
-    content.push({ type: "text", text: turn.text });
-  }
-  for (const call of turn.toolCalls ?? []) {
-    content.push({
-      type: "tool_use",
-      id: call.id ?? `toolu_${randomUUID()}`,
-      name: call.name,
-      input: call.input,
-    });
-  }
+/** Builds a fake Anthropic-shaped SSE streaming HTTP response (`text/event-stream`, one
+ * `event:`/`data:` pair per raw stream event) for a scripted `MockTurn` — the same event
+ * shape `AnthropicProvider.complete()` now always requests (DH-0044) and the same
+ * construction pattern as `sseMessageResponse()` in `src/agent/runtime.test.ts`/
+ * `src/cli.test.ts` and `streamOf()` in `src/agent/providers/anthropic.test.ts`. */
+function turnToStreamResponse(turn: MockTurn): Response {
   const stopReason =
     turn.stopReason ?? ((turn.toolCalls?.length ?? 0) > 0 ? "tool_use" : "end_turn");
-  return {
-    id: `msg_${randomUUID()}`,
-    type: "message",
-    role: "assistant",
-    model: "mock-model",
-    content,
-    stop_reason: stopReason,
-    stop_sequence: null,
-    usage: {
-      input_tokens: turn.inputTokens ?? 10,
-      output_tokens: turn.outputTokens ?? 10,
+  const inputTokens = turn.inputTokens ?? 10;
+  const outputTokens = turn.outputTokens ?? 10;
+
+  const events: { type: string; [key: string]: unknown }[] = [
+    {
+      type: "message_start",
+      message: {
+        id: `msg_${randomUUID()}`,
+        type: "message",
+        role: "assistant",
+        model: "mock-model",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: inputTokens, output_tokens: 0 },
+      },
     },
-  };
+  ];
+
+  let index = 0;
+  if (turn.text !== undefined && turn.text.length > 0) {
+    events.push({
+      type: "content_block_start",
+      index,
+      content_block: { type: "text", text: "", citations: null },
+    });
+    events.push({
+      type: "content_block_delta",
+      index,
+      delta: { type: "text_delta", text: turn.text },
+    });
+    events.push({ type: "content_block_stop", index });
+    index += 1;
+  }
+  for (const call of turn.toolCalls ?? []) {
+    const id = call.id ?? `toolu_${randomUUID()}`;
+    events.push({
+      type: "content_block_start",
+      index,
+      content_block: { type: "tool_use", id, name: call.name, input: {} },
+    });
+    events.push({
+      type: "content_block_delta",
+      index,
+      delta: { type: "input_json_delta", partial_json: JSON.stringify(call.input ?? {}) },
+    });
+    events.push({ type: "content_block_stop", index });
+    index += 1;
+  }
+
+  events.push({
+    type: "message_delta",
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: outputTokens },
+  });
+  events.push({ type: "message_stop" });
+
+  const body = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+  return new Response(body, {
+    headers: { "content-type": "text/event-stream" },
+  });
 }
 
 /**
@@ -132,6 +179,18 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
       if (turn.error) {
         const { status, body: errBody, rawBody } = turn.error;
         if (rawBody !== undefined) {
+          if (status === 200) {
+            // A 200 with a garbled body (DH-0033's "provider returned garbage" case) is a
+            // streaming response as far as the SDK is concerned (stream: true was requested,
+            // per DH-0044) — sending it as a bare non-SSE body would just look like an empty,
+            // eventless stream and complete "successfully" with no content. Wrap it as a
+            // malformed `data:` line instead, so the SDK's SSE decoder hits real garbage
+            // mid-stream and throws, same as a genuinely corrupted upstream stream would.
+            return new Response(`event: content_block_delta\ndata: ${rawBody}\n\n`, {
+              status,
+              headers: { "content-type": "text/event-stream" },
+            });
+          }
           return new Response(rawBody, {
             status,
             headers: { "content-type": "application/json" },
@@ -148,7 +207,7 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
       if (turn.delayMs !== undefined && turn.delayMs > 0) {
         await Bun.sleep(turn.delayMs);
       }
-      return Response.json(turnToMessage(turn));
+      return turnToStreamResponse(turn);
     },
   });
 
