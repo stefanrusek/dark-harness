@@ -663,6 +663,33 @@ describe("AgentRuntime", () => {
     await expect(runtime.runRoot("please just answer")).rejects.toThrow(ConfigModelError);
   });
 
+  // DH-0131: this is the "root agent failed to start" class of failure — resolveModel()/
+  // providerFor() throwing synchronously before the loop ever runs. Confirmed live gap: this
+  // used to only emit a `session_ended` ServerSentEvent (from a later catch block that didn't
+  // even cover this synchronous-throw call site) — no `status_change` log line, no
+  // `agent_status` SSE event at all. Fixed in runtime.ts's runRoot() by wrapping model/
+  // provider resolution in the same try/catch as the loop itself.
+  test("runRoot emits a status_change:failed log line and an agent_status:failed event when model resolution fails before the loop starts", async () => {
+    const logLines: LogLine[] = [];
+    const events: ServerSentEvent[] = [];
+    const runtime = newAgentRuntime({
+      config: baseConfig({
+        provider: [{ name: "someone-else", type: "anthropic" }],
+      }),
+      systemPrompt: "sp",
+      onLogLine: (_agentId, line) => logLines.push(line),
+      onEvent: (event) => events.push(event),
+    });
+    await expect(runtime.runRoot("please just answer")).rejects.toThrow(ConfigModelError);
+    expect(logLines.some((l) => l.type === "status_change" && l.status === "failed")).toBe(true);
+    expect(
+      events.some(
+        (e) => e.type === "agent_status" && e.agentId === ROOT_AGENT_ID && e.status === "failed",
+      ),
+    ).toBe(true);
+    expect(events.some((e) => e.type === "session_ended")).toBe(true);
+  });
+
   test("providerFor caches and reuses the same provider instance across calls", async () => {
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     const first = await runtime.runRoot("please just answer");

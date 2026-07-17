@@ -2189,8 +2189,10 @@ describe("AgentRuntimeLoopAdapter", () => {
         client: "tui",
       });
       const loggedLines: string[] = [];
+      const statusChangeLines: string[] = [];
       adapter.onLog((_agentId, line) => {
         if (line.type === "message") loggedLines.push(line.content);
+        if (line.type === "status_change") statusChangeLines.push(line.status);
       });
       adapter.sendMessage(ROOT_AGENT_ID, "hello"); // lazily starts the root; the crash is async
       for (let i = 0; i < 3; i += 1) {
@@ -2200,10 +2202,42 @@ describe("AgentRuntimeLoopAdapter", () => {
       // DH-0017 fix: the real error reason reaches the log instead of being discarded — this
       // used to be `.catch(() => { ...only a synthetic agent_status... })`, silently dropping
       // the actual Error entirely, so an operator saw only an opaque "failed" with zero detail.
-      expect(loggedLines.some((l) => l.includes("Root agent failed to start"))).toBe(true);
+      // DH-0131: this crash happens mid-run (inside runAgentLoop(), after the loop already
+      // started), which AgentRuntime.runRoot() now distinguishes from a pre-loop
+      // resolveModel()/providerFor() failure via "Root agent failed:" vs. "Root agent failed
+      // to start:" — see runtime.ts's two catch blocks.
+      expect(loggedLines.some((l) => l.includes("Root agent failed"))).toBe(true);
+      // DH-0131: the whole point of the fix — a "failed" agent_status transition must always
+      // reach the JSONL log as a structured status_change line, not just a plain message and
+      // a transient SSE event (which getAgentTree()'s "failed" assertion above already
+      // covered, and would have kept passing even with the gap this ticket fixes).
+      expect(statusChangeLines).toContain("failed");
     } finally {
       unauthorizedServer.stop(true);
     }
+  });
+
+  test("DH-0131: a root agent that fails to start (unknown model in config) emits a structured status_change:failed log line, not just a message", async () => {
+    const adapter = new AgentRuntimeLoopAdapter({
+      config: {
+        options: { defaultModel: "does-not-exist" },
+        models: [],
+        provider: [],
+      },
+      systemPrompt: "sp",
+      client: "tui",
+    });
+    const loggedLines: string[] = [];
+    const statusChangeLines: string[] = [];
+    adapter.onLog((_agentId, line) => {
+      if (line.type === "message") loggedLines.push(line.content);
+      if (line.type === "status_change") statusChangeLines.push(line.status);
+    });
+    adapter.sendMessage(ROOT_AGENT_ID, "hello"); // lazily starts the root; resolveModel() throws synchronously inside the fire-and-forget .catch()
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(adapter.getAgentTree()[0]?.status).toBe("failed");
+    expect(loggedLines.some((l) => l.includes("Root agent failed to start"))).toBe(true);
+    expect(statusChangeLines).toContain("failed");
   });
 
   test("sendMessage on a non-root agentId delegates to the task registry", () => {

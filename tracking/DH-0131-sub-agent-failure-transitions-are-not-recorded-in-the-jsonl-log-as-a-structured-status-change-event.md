@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0131
 type: bug
-status: draft
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -38,3 +38,49 @@ Found during live manual testing 2026-07-17 while investigating the owner's fail
 ## Open Questions
 
 ## Notes
+
+### 2026-07-17 — investigation and fix (Core)
+
+Investigated every place an agent can reach a failed/stopped terminal state:
+
+- `src/agent/loop.ts`: `reportStopped()`, the `TASK_FAILED`/self-report failure path, and the
+  interactive waiting/running transitions all already pair their `agent_status` SSE event
+  with a `status_change` JSONL log line — no gap found there.
+- `src/agent/runtime.ts` `spawnAgent()`/`tasks.ts`: sub-agent failures route through
+  `loop.ts`'s own `emitLog`, already covered.
+- `src/agent/runtime.ts` `runRoot()`: two real gaps found, both harness-error paths that
+  bypass `loop.ts` entirely (so `loop.ts`'s own paired emission never runs):
+  1. `resolveModel()`/`providerFor()` throwing synchronously before the loop starts (bad/
+     unknown model or provider name in config) — previously sat entirely outside
+     `runRoot()`'s try/catch, so nothing but a synthetic `agent_status` SSE event
+     (constructed ad hoc by `src/cli.ts`'s interactive-mode caller) and a plain `"message"`
+     log line (never a structured `status_change`) ever recorded this failure. This is the
+     exact case seen live ("Root agent failed to start: ..." logged only as a role:system
+     message). The standalone `--instructions`/`--job` path had zero handling for this at
+     all — not even a message line.
+  2. `runAgentLoop()` itself throwing mid-run (a harness error after the loop's header line
+     was already written) — `runRoot()`'s existing catch block emitted only `session_ended`,
+     never a `status_change` log line or `agent_status` SSE event.
+
+Fix: widened `runRoot()`'s try/catch to cover model/provider resolution too, and both catch
+blocks now emit the same message + `status_change:"failed"` log lines and
+`agent_status:"failed"` SSE event (mirroring `loop.ts`'s own paired-emission convention)
+before rethrowing. This makes `AgentRuntime` itself the single, authoritative place this is
+handled for every caller (interactive TUI/Web/server AND the standalone `--job` path), so
+removed the now-redundant hand-rolled duplicate logging `src/cli.ts`'s
+`AgentRuntimeLoopAdapter.sendMessage()` used to construct itself (would have double-logged
+once `runtime.ts` started emitting this on its own).
+
+Tests added/extended (proving each fixed path, per CLAUDE.md §9):
+- `src/agent/runtime.test.ts`: "runRoot emits a status_change:failed log line and an
+  agent_status:failed event when model resolution fails before the loop starts".
+- `src/cli.test.ts`: "DH-0131: a root agent that fails to start (unknown model in config)
+  emits a structured status_change:failed log line, not just a message"; plus a
+  `status_change` assertion added to the existing "real provider crash" mid-run test.
+
+Gates run: `bun run typecheck` (pass); `bun run lint` on touched files (clean — repo-wide
+lint has 11 pre-existing unrelated errors); `bun test src --coverage` (2112 pass, 0 fail;
+changed lines in `src/cli.ts` and `src/agent/runtime.ts` fully covered); `bun run e2e` (13
+pre-existing failures reproduced identically on unmodified `main` — tmux-pane-not-found
+sandbox issue plus 2 provider-callCount-off-by-one flakes — confirmed via `git stash`,
+unrelated to this change).
