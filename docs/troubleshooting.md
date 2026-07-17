@@ -25,14 +25,16 @@ mechanism.
   the port matches (`--port` on both sides, default `4000`).
 - `dh` speaks plaintext HTTP by default — if you've since enabled `security.tls` on the
   server, `--connect` needs the matching scheme/cert trust; see the
-  [security section](../README.md#optional-bearer-token--tls).
+  [security section](../README.md#security-bearer-token--tls).
 - If `security.token` is set on the server, the connecting client's own `dh.json` must supply
   the same token — a mismatch or missing token is a bare `401`.
 
 ## Bedrock gives "invalid model" or "access denied"
 
 Almost always an AWS-account/region issue, not a `dh.json` problem — see the
-[Bedrock setup notes](../README.md#aws-bedrock-setup): Bedrock model ids are region- and
+[Bedrock provider notes](../README.md#provider-types) (full detail in
+[docs/CONFIGURATION.md](../docs/CONFIGURATION.md#type-bedrock--aws-bedrock-bedrock-runtime)):
+Bedrock model ids are region- and
 account-specific, and a syntactically valid id can be legacy or not enabled for that
 account/region. Check model access in the Bedrock console for the exact region configured.
 

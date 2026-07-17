@@ -29,7 +29,7 @@ HTTP servers are supported in the config schema.
 
 `dh` spawns `command args...` as a subprocess and talks MCP over its stdio. Add `env` for a
 server that needs its own environment variables (combine with `$(VAR)` interpolation to keep
-secrets out of `dh.json` itself — see the [`--env` workflow](../README.md#keeping-secrets-out-of-dhjson---env-file)):
+secrets out of `dh.json` itself — see the [`--env` workflow](../docs/CONFIGURATION.md#keeping-secrets-out-of-dhjson---env-file)):
 
 ```json
 {
