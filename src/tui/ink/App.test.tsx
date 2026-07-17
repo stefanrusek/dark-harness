@@ -23,14 +23,14 @@ describe("App", () => {
     expect(source.indexOf("<Header")).toBeLessThan(source.indexOf("<StatusRow"));
   });
 
-  test("root view: reserved <Header>/<StatusRow> slots render zero rows — frame height matches terminal rows exactly", () => {
+  test("root view: <Header> renders zero rows, <StatusRow> renders its one line — frame height matches terminal rows exactly", () => {
     const state = rootState();
     const { lastFrame } = render(React.createElement(App, { state }));
     const rows = (lastFrame() ?? "").split("\n");
     expect(rows.length).toBe(state.size.rows);
   });
 
-  test("tree view: reserved slots still contribute zero rows", () => {
+  test("tree view: <Header> still contributes zero rows, layout still fits the frame exactly", () => {
     let state = rootState();
     state = reducer(state, {
       type: "tree_response",
