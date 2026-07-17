@@ -5,7 +5,7 @@ type: bug
 status: draft
 owner: stefan
 resolution:
-blocked_by: []
+blocked_by: ["blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward"]
 created: 2026-07-17
 relations:
   depends_on: []
