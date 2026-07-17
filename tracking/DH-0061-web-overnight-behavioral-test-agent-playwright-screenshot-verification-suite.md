@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0061
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -132,6 +132,24 @@ Build a haiku-sub-agent-runnable test plan + prompt set that drives the real com
 > selector that no longer exists post-DH-0056 (see the fact recorded above the Orchestrator
 > section). Leaving `status: implementing` rather than closing — this may still want a final
 > coordinator/architect review pass before DH-0061 is considered fully done.
+
+> [!NOTE]
+> 2026-07-17 (verifying → closed): Re-ran the full `e2e/spikes/web/run-all.ts` suite after
+> DH-0112's mock-provider streaming fix landed. Two spikes still failed on first re-run, both
+> pre-existing bugs unrelated to DH-0112's own scope: (1) `spike-liveness.ts` shipped its own
+> hand-rolled inline mock server that returned a single non-streaming JSON body — the exact
+> same DH-0044/DH-0112 root cause, just in a spike file DH-0112 never touched; fixed by
+> switching it to `startMockAnthropicProvider`'s existing `delayMs` support (already built
+> for this spike, per its own doc comment) instead of a bespoke `Bun.serve` handler. (2)
+> `spike-headers.ts` asserted `access-control-allow-origin === "*"` without ever sending an
+> `Origin` header, which never matched `src/server/server.ts`'s actual (and unit-tested,
+> `src/server/server.test.ts`) contract of echoing back the request's own `Origin` — fixed
+> the spike to send an `Origin` header and assert it's echoed. Both fixes are confined to
+> `e2e/spikes/web/`, no product code changed. Re-ran twice after the fix:
+> `RESULT: PASS (9/9 spikes fully passed)` both times. All Test Plan items are now green
+> except DH-0012 (still explicitly out of scope, unit-test covered) — DH-0044 streaming is
+> now implemented and exercised by every spike. `bun run typecheck` and `bun run lint` clean
+> on the changed files. Closing as done.
 
 ## Spikes
 
