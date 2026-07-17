@@ -7,8 +7,9 @@
 // the exact list of lines left to E2E.
 
 import { sendCommand } from "./http-client.ts";
+import type { InkMount } from "./ink/mount.ts";
+import { mountInk } from "./ink/mount.ts";
 import { parseKeys } from "./keys.ts";
-import { frameToAnsi, renderFrame } from "./render.ts";
 import { runSseClient } from "./sse-client.ts";
 import { initialState, reducer } from "./state.ts";
 import type { Action, Effect, TuiState } from "./types.ts";
@@ -31,12 +32,19 @@ export interface StdinLike {
   setRawMode?(mode: boolean): unknown;
   resume?(): unknown;
   pause?(): unknown;
+  off?(event: string, listener: (...args: unknown[]) => void): unknown;
+  removeListener?(event: string, listener: (...args: unknown[]) => void): unknown;
   removeAllListeners?(event?: string): unknown;
 }
 
 export interface StdoutLike {
   write(data: string): unknown;
   on?(event: "resize", listener: () => void): unknown;
+  // DH-0136: Ink's own resize-listener cleanup (`Ink#unmount`) calls `stdout.off(...)`, on
+  // top of this file's pre-existing `removeAllListeners()` teardown — declared here so a
+  // fake stdout used in tests satisfies both.
+  off?(event: "resize", listener: () => void): unknown;
+  removeListener?(event: "resize", listener: () => void): unknown;
   removeAllListeners?(event?: string): unknown;
   columns?: number;
   rows?: number;
@@ -117,21 +125,29 @@ export async function startTui(
     { ownsServer: opts.ownsServer ?? false },
   );
 
+  // DH-0136: Ink owns the actual terminal write now (its own internal diffing supersedes the
+  // old `frameToAnsi`/byte-identical-frame dedup previously here — see render.ts's header
+  // comment for what's now Ink-only vs. still-shared pure render logic). No component in the
+  // tree calls Ink's `useInput`/`usePaste`, so mounting does not touch stdin raw-mode — that
+  // stays owned by this file's own `stdin.on("data", ...)` wiring below, unchanged.
+
   return new Promise<void>((resolve) => {
     const abortController = new AbortController();
 
-    // DH-0025: skip the write entirely when the rendered frame hasn't actually changed since
-    // the last draw — the once-per-second liveness tick previously forced a full clear-and-
-    // rewrite unconditionally, which is wasteful and can flicker over a high-latency
-    // connection even though nothing visible changed (elapsed-time labels round to whole
-    // seconds, so most ticks produce byte-identical frames).
-    let lastFrame: string | null = null;
+    // Mounted just below, right after the alt-screen/cursor/bracketed-paste escape sequences
+    // are written — so that write is always the first thing on the wire, matching this
+    // module's pre-Ink behavior (Ink's own initial render write happens the moment it's
+    // mounted, so mounting it any earlier than this would race ahead of the alt-screen
+    // sequence). Every reference to `inkInstance` below (in `draw`, `cleanup`, etc.) only
+    // actually runs after that mount line executes.
+    // Declared here (ahead of `draw`/`cleanup`, which close over it) and assigned later,
+    // after the alt-screen write below — `const` can't express "declared now, initialized a
+    // few lines down".
+    // biome-ignore lint/style/useConst: see comment above.
+    let inkInstance: InkMount;
 
     function draw(): void {
-      const frame = frameToAnsi(renderFrame(state));
-      if (frame === lastFrame) return;
-      lastFrame = frame;
-      stdout.write(frame);
+      inkInstance.rerender(state);
     }
 
     // DH-0044 D9: frame-coalesced redraw. Streaming turns can dispatch actions at a high
@@ -241,6 +257,7 @@ export async function startTui(
       if (resizeDebounceTimer !== undefined) clearTimeout(resizeDebounceTimer);
       if (pendingDrawTimer !== undefined) clearTimeout(pendingDrawTimer);
       abortController.abort();
+      inkInstance.unmount();
       stdout.write(BRACKETED_PASTE_DISABLE + SHOW_CURSOR + ALT_SCREEN_EXIT);
       stdin.setRawMode?.(false);
       stdin.pause?.();
@@ -249,6 +266,7 @@ export async function startTui(
     }
 
     stdout.write(ALT_SCREEN_ENTER + HIDE_CURSOR + BRACKETED_PASTE_ENABLE);
+    inkInstance = mountInk(state, stdout, stdin);
     stdin.setRawMode?.(true);
     stdin.setEncoding?.("utf8");
     stdin.resume?.();

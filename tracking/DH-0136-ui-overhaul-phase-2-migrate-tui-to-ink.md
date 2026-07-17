@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0136
 type: feature
-status: ready
+status: implementing
 owner: stefan
 resolution:
 blocked_by: ["blocked on DH-0133a (Core toolchain) landing first"]
@@ -87,3 +87,62 @@ Per Fable's DH-0133 design (2026-07-17): migrate src/tui/render.ts's ANSI string
 ## Notes
 
 Updated by Muriel (design crew) 2026-07-17 per the owner's request for a felt-experience design pass on DH-0133 before implementation starts. See `docs/design/style-guide.md` SS1/1.2/2.3 (status/connection tokens), SS3 (glyph vocabulary — tree connectors, spinner), and SS5/SS6 (panel/liveness conventions informing `<Header>`/`<StatusRow>` placement). Companion ticket: DH-0137 (shared design-token module), DH-0135 (this ticket's Web counterpart). Does not touch DH-0126 itself (separate ticket, separate owner call per DH-0133) beyond consuming its output.
+
+### 2026-07-17 — root view/composer migrated to Ink; agent tree/transcript pane still open (Mary)
+
+Ticket stays `implementing`, not `verifying`: this round covers the first User Story
+(root view/composer migrated to Ink) plus the `<Header>`/`<StatusRow>` reserved-slot stories
+and the status/connection design-tokens story. The agent tree, transcript pane, DH-0126
+scroll-viewport remainder, and DH-0130 marker-display stories are still open — a later round
+under this same ticket needs to finish them before this can move to `verifying`.
+
+- Migrated `src/tui/app.ts`'s render/write path from `render.ts`'s `frameToAnsi`/
+  `stdout.write` to Ink: new `src/tui/ink/App.tsx` (root component), `Composer.tsx` (root
+  view's input box, first Ink-migrated view per the ticket's own ordering), `Header.tsx` and
+  `StatusRow.tsx` (reserved slots, render zero rows until DH-0122/DH-0124 and DH-0125
+  respectively land), `mount.ts` (Ink `render()`/`rerender()`/`unmount()` wiring, kept
+  separate from `app.ts` so its own `StdinLike`/`StdoutLike` stay decoupled from Ink's real
+  stream types).
+- Agent tree / agent-detail / model-picker views are **not yet componentized** — they still
+  render through `render.ts`'s existing pure `TuiState -> string[]` functions
+  (`renderTree`/`renderAgent`/`renderPicker`, now exported), consumed as plain `<Text>` rows
+  inside `App.tsx`. Accepted interim state per the ticket's own migration-order plan
+  (root/composer first, tree next, transcript+scroll-viewport last) — deferred to a
+  follow-up round, not silently dropped.
+- DH-0126's scroll-viewport module, DH-0130's terminal-status marker display, and the
+  `useInput`/`usePaste` input-handling migration are **not done this round** —
+  `app.ts`'s existing `keys.ts`-based raw stdin parsing/dispatch is unchanged; only the
+  output/write side moved to Ink.
+- `render.ts`'s `STATUS_COLOR`/`CONNECTION_COLOR`/`CONNECTION_LABEL` maps deleted;
+  `colorizeStatus` and `headerRows` now source color/glyph/word from DH-0137's
+  `src/design-tokens.ts` (`STATUS_TOKENS`/`CONNECTION_TOKENS`) directly, ahead of the
+  tree/agent-tree components' own migration.
+- Root `tsconfig.json` now enables `jsx` (`react-jsx`) — required because `src/cli.ts` ->
+  `src/tui/index.ts` -> `app.ts` statically reaches `src/tui/ink/App.tsx`, and
+  `bun build --compile` cannot bundle a non-literal/dynamic import (verified empirically: an
+  earlier attempt to dodge jsx-enablement via a type-erased dynamic `import()` silently
+  produced a compiled binary that threw `Cannot find module` at startup — reverted). Fixed
+  the resulting DOM-lib collision directly in `e2e/spikes/web/spike-reconnect.ts` (2-line
+  fix, its playwright `evaluate()` callback param now explicitly typed) rather than avoiding
+  jsx-enablement, since avoiding it turned out not to be possible once a real `.tsx` file is
+  unavoidably part of the root program's import graph.
+- Tests: new `src/tui/ink/{App,Composer,Header,StatusRow}.test.tsx` (ink-testing-library)
+  covering: Header/StatusRow render zero rows and don't change frame height; Composer
+  preserves in-progress typed text across a background tick (`state.now` advancing) per the
+  ticket's first User Story; App's reserved-slot composition order (grep-based source check,
+  since null-rendering components leave no fiber-tree trace `lastFrame()` can assert on).
+  `src/tui/app.test.ts`'s `flush()` helper's coalesced-redraw wait bumped 40ms -> 100ms
+  (Ink's own internal render scheduling adds a second throttle layer on top of `app.ts`'s
+  existing `FRAME_INTERVAL_MS` one; 40ms was intermittently too tight once Ink owned the
+  actual write — confirmed flaky ~1/3 runs before the bump, stable across 7+ repeated
+  full-suite runs after).
+- Gates run: `bun run typecheck` (clean), lint scoped to changed files (clean; `bun run
+  lint` has 11 pre-existing failures in unrelated files, confirmed present on `main` before
+  this round, not touched), `bun run test:coverage` (2119 pass / 0 fail, 100% coverage on
+  all new `src/tui/ink/*.ts(x)` files), `bun run e2e` (33 pass / 5 fail — the 5 failures are
+  pre-existing off-by-one provider-callCount flakes in `--job`/Bedrock/server-protocol tests
+  unrelated to the TUI, confirmed identically failing on `main` before this round via `git
+  stash`). The tmux-PTY-based TUI e2e tests (markdown-rendering, slash-commands) that were
+  failing mid-round (compiled binary crashing at startup on
+  `Cannot find module './ink/mount.ts'`, the dynamic-import bug described above) now pass
+  after the static-import fix.

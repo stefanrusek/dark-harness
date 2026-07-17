@@ -63,7 +63,15 @@ try {
 
   const gapBannerHiddenBefore = await page
     .locator(".gap-banner")
-    .evaluate((el) => el.classList.contains("hidden"));
+    // DH-0136: this program has no `dom` lib (root tsconfig deliberately stays ESNext-only),
+    // so `Element` here is playwright's own minimal ambient type, not lib.dom's — it doesn't
+    // carry `classList`. Runs in a real browser via playwright's `evaluate()`, where the real
+    // DOM API is always present regardless of this program's `lib` setting.
+    .evaluate((el: Element) =>
+      (el as unknown as { classList: { contains(name: string): boolean } }).classList.contains(
+        "hidden",
+      ),
+    );
   report.check(
     "gap banner starts hidden (no reconnect has happened yet)",
     gapBannerHiddenBefore,
@@ -105,7 +113,15 @@ try {
   );
   const gapBannerHiddenAfter = await page
     .locator(".gap-banner")
-    .evaluate((el) => el.classList.contains("hidden"));
+    // DH-0136: this program has no `dom` lib (root tsconfig deliberately stays ESNext-only),
+    // so `Element` here is playwright's own minimal ambient type, not lib.dom's — it doesn't
+    // carry `classList`. Runs in a real browser via playwright's `evaluate()`, where the real
+    // DOM API is always present regardless of this program's `lib` setting.
+    .evaluate((el: Element) =>
+      (el as unknown as { classList: { contains(name: string): boolean } }).classList.contains(
+        "hidden",
+      ),
+    );
   report.check(
     "gap banner becomes visible once the server restarts and the client reconnects",
     !gapBannerHiddenAfter,
