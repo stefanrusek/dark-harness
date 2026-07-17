@@ -43,9 +43,11 @@ import {
   type DhServerOptions,
   SessionLogger,
   type Unsubscribe,
+  buildSessionSummary,
   formatSessionList,
   formatSessionLogTree,
   pruneLogDirectories,
+  writeSessionSummary,
 } from "./server/index.ts";
 import { SPINNER_FRAMES, SPINNER_FRAME_MS } from "./terminal.ts";
 import { startTui as startTuiClient } from "./tui/index.ts";
@@ -892,7 +894,16 @@ export interface CliDeps {
      * NDJSON stream can write every `ServerSentEvent` as it happens; omitted (as before this
      * ticket) on every non-`--json` standalone run. */
     onEvent?: (event: ServerSentEvent) => void,
-  ) => Pick<AgentRuntime, "runRoot" | "stopRoot"> & { close?: () => Promise<void> };
+  ) => Pick<AgentRuntime, "runRoot" | "stopRoot"> & {
+    close?: () => Promise<void>;
+    /** DH-0037 (`summary.json`): the real `createStandaloneRuntime` dep's `AgentRuntime`
+     * always carries its own `sessionId` — this is only optional here so the many
+     * hand-written fakes in cli.test.ts that stub `createRuntime` without a session/log
+     * directory (they don't exercise `summary.json`) don't all need updating just to satisfy
+     * the type. Absent, `summary.json` writing is skipped (see `runInstructionsMode`).
+     */
+    sessionId?: string;
+  };
   /** Used by every interactive mode (server/local/connect). `resume` (DH-0038): same shape
    * and purpose as `createRuntime`'s. DH-0002: the returned handle's optional `close()` —
    * present on the real `AgentRuntimeLoopAdapter` (delegates to its `AgentRuntime.close()`,
@@ -1868,19 +1879,23 @@ export async function main(
   // self-report outcome to describe at all, so neither emits a job_result line; a downstream
   // parser reading the NDJSON stream sees it end with no terminal line, same signal a piped
   // process getting killed already gives any NDJSON consumer.
-  const emitJobResult = () => {
+  // DH-0037 (`summary.json`): built unconditionally (not just under `--json`) so it can also
+  // back `summary.json`'s fields — the `--json`-gated NDJSON line and the on-disk summary
+  // file are two independent ways to read the exact same terminal facts about the run, not
+  // two different sources of truth for them.
+  const buildJobResultLine = (): JobResultLine => ({
+    version: 1,
+    type: "job_result",
+    timestamp: new Date().toISOString(),
+    success: result.success,
+    exitCode: result.success ? ExitCode.Success : ExitCode.TaskFailure,
+    reportedBy: result.reportedBy ?? (result.success ? "clean-end" : "text-marker"),
+    turns: result.turns,
+    finalOutput: result.finalOutput,
+    ...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
+  });
+  const emitJobResult = (line: JobResultLine) => {
     if (!onJsonEvent) return;
-    const line: JobResultLine = {
-      version: 1,
-      type: "job_result",
-      timestamp: new Date().toISOString(),
-      success: result.success,
-      exitCode: result.success ? ExitCode.Success : ExitCode.TaskFailure,
-      reportedBy: result.reportedBy ?? (result.success ? "clean-end" : "text-marker"),
-      turns: result.turns,
-      finalOutput: result.finalOutput,
-      ...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
-    };
     io.stdout(JSON.stringify(line));
   };
 
@@ -1918,7 +1933,24 @@ export async function main(
     return runInteractiveMode(mode, config, systemPrompt, deps, undefined, options.quiet);
   }
 
-  emitJobResult();
+  const jobResultLine = buildJobResultLine();
+  // DH-0037: `summary.json` — written into the finished session's own log directory,
+  // alongside its per-agent JSONL, once the run has genuinely completed (not on interrupt or
+  // crash, both of which return above before reaching here). Best-effort: `runtime.sessionId`
+  // is only absent for cli.test.ts's hand-written fakes that don't model a real session/log
+  // directory at all (see the `CliDeps.createRuntime` doc comment) — a real run always has
+  // one. A write failure (disk full, permissions) is reported but doesn't change the run's
+  // own success/exit code, matching `runtime.close()`'s same best-effort treatment above.
+  if (runtime.sessionId !== undefined) {
+    const logDir = join(process.cwd(), ".dh-logs", runtime.sessionId);
+    try {
+      const summary = buildSessionSummary(runtime.sessionId, logDir, jobResultLine);
+      writeSessionSummary(logDir, summary);
+    } catch (err) {
+      io.stderr(`dh: failed to write summary.json: ${(err as Error).message}`);
+    }
+  }
+  emitJobResult(jobResultLine);
   const code = result.success ? ExitCode.Success : ExitCode.TaskFailure;
   io.exit(code);
   return code;
