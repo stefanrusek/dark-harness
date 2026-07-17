@@ -63,6 +63,12 @@ source: tracking/
 | [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker 🔒 | bug | stefan |
 | [DH-0132](../DH-0132-adopt-a-convention-of-writing-acceptance-tests-as-prompts-run-via-dh-job-for-real-end-to-end-verification.md) | Adopt a convention of writing acceptance tests as prompts run via dh --job for real end-to-end verification | feature | stefan |
 
+### implementing
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0138](../DH-0138-web-ui-flexbox-layout-broken-after-dh-0135-react-migration-main-content-squeezed-into-sidebar-column.md) | Web UI flexbox layout broken after DH-0135 React migration -- main content squeezed into sidebar column | bug | stefan |
+
 ### verifying
 
 | ID | Title | Type | Owner |
