@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0136
 type: feature
-status: implementing
+status: verifying
 owner: stefan
 resolution:
 blocked_by: ["blocked on DH-0133a (Core toolchain) landing first"]
@@ -95,6 +95,85 @@ Ticket stays `implementing`, not `verifying`: this round covers the first User S
 and the status/connection design-tokens story. The agent tree, transcript pane, DH-0126
 scroll-viewport remainder, and DH-0130 marker-display stories are still open — a later round
 under this same ticket needs to finish them before this can move to `verifying`.
+
+### 2026-07-17 — agent tree, transcript pane, DH-0126 scroll-viewport, DH-0130 marker all landed; every render.ts function now an Ink component (Mary)
+
+Every remaining User Story is done and test-proven; `render.ts`/`render.test.ts` are deleted.
+`app.ts` now owns only the SSE subscription, raw-mode/alt-screen lifecycle, and Ink mount —
+the render layer is 100% Ink components.
+
+- **Agent tree**: `src/tui/ink/AgentTree.tsx`, ported from `renderTree` (selection-centering
+  scroll math included verbatim). Proven by `AgentTree.test.tsx`.
+- **Transcript pane / DH-0126 scroll-viewport remainder**: `src/tui/scroll-viewport.ts` is a
+  direct port of privateer's `src/ui/scroll-viewport.ts` shape (`clampOffset`/`visibleSlice`/
+  `scrollBy`/`toTop`/`toBottom`/`atBottom`), 100%-covered independently of Ink
+  (`scroll-viewport.test.ts`). `src/tui/ink/TranscriptPane.tsx` consumes it, windowing via
+  `<Box height={N} overflow="hidden">` around the pre-sliced visible rows, and implements the
+  DH-0129-equivalent "auto-scroll to reveal new content only when already at the bottom"
+  behavior — offset is owned as local component state (not the `TuiState` reducer), matching
+  privateer's "controller stores just the offset" split. Proven by `TranscriptPane.test.tsx`
+  (windowing, auto-scroll-when-at-bottom, no-force-scroll-when-scrolled-up-and-viewport-shrinks).
+  **Caveat, stated honestly per this round's own instructions**: the actual scroll *trigger*
+  (mouse wheel / a scroll keybinding) is not wired — per DH-0133's explicit scoping, that's
+  DH-0126's own separate ticket (SGR mouse parsing, dual-stdin-listener wiring, leaked-input
+  guard), still open as its own item. This ticket's job was the windowing/rendering half
+  ("consumes whatever offset DH-0126's fix produces") and that half is complete and tested
+  against a directly-set offset; DH-0126 landing is what will make scrolling operable by an
+  actual operator.
+  - Reducer-side: unaffected, as required by this ticket's own User Story — `state.ts` has zero
+    scroll-related changes; scroll offset never entered `TuiState`.
+- **DH-0130 marker**: this ticket also had to build DH-0130's reducer-side derivation (found
+  not yet implemented — DH-0130 itself is still `draft` with placeholder User Stories), since
+  the ticket's own Functional Requirements/User Story #5 call for both halves landing here.
+  `state.ts`'s `agent_status` handler now appends a `"tool"`-role marker tagged with
+  `terminalStatus` on a genuine transition into done/failed/stopped (not on a re-send of the
+  same status), and `TranscriptPane.tsx` renders it via `STATUS_TOKENS`' glyph/color/word
+  instead of the generic dim `⚙` tool-marker styling. Proven by three new `state.test.ts` cases
+  plus a `TranscriptPane.test.tsx` case. DH-0130 itself should probably be closed-by-supersession
+  now that both its TUI-side stories are actually done here (Web's side is still open, per its
+  own ticket) — flagging for the coordinator rather than closing it myself, since DH-0130 isn't
+  this ticket and I don't own its status.
+- **Full render.ts elimination**: `headerRows`→`TitleBar.tsx`, `renderAgent`→`AgentView.tsx`,
+  `renderPicker`→`PickerView.tsx`, `renderRoot`→`RootView.tsx` (composes `TranscriptPane` +
+  the already-migrated `Composer`), plus a `tokens.ts` module for the pure ANSI/formatting
+  helpers (`colorizeStatus`, `formatTokenCost`, `sessionTokenTotals`, `CURSOR_MARKER`, etc.)
+  that don't need JSX. `render.ts`/`render.test.ts` (689 lines) deleted outright — every
+  meaningful assertion ported into the new per-component `*.test.tsx` files (not silently
+  dropped; see the file list below).
+- **Status/connection tokens**: `TranscriptPane.tsx`'s terminal-status marker is the one new
+  status-colored surface this round adds, and it sources color/glyph/word from
+  `STATUS_TOKENS` directly — no new `Record<AgentStatus, ...>` literal introduced (verified by
+  `design-tokens.test.ts`'s existing drift-guard regression test, whose `render.ts` allowlist
+  entry was removed since that file no longer exists).
+- **Input handling**: deliberately NOT changed this round — `app.ts` still uses `keys.ts`'s raw
+  `stdin.on("data", ...)` parsing/dispatch, not Ink's `useInput`/`usePaste`. This ticket's own
+  Notes/Risks scope the mouse/key input-parsing migration to DH-0126 as separate work; none of
+  this ticket's User Stories require switching input mechanisms, only the render layer having
+  something legitimate to consume. Flagging explicitly since the Functional Requirements
+  section mentions `useInput`/`usePaste` as a general direction — that's still true in
+  principle, but not exercised by anything this ticket's User Stories actually require, so it
+  was left alone to keep this round's diff scoped to the render layer per the ticket's own
+  migration-order plan.
+- New/changed test files: `AgentTree.test.tsx`, `AgentView.test.tsx`, `PickerView.test.tsx`,
+  `TitleBar.test.tsx`, `TranscriptPane.test.tsx`, `tokens.test.ts`, `scroll-viewport.test.ts`,
+  plus `state.test.ts` (DH-0130 cases) and `App.test.tsx` (one assertion updated to match
+  `<Composer>` now living inside `RootView.tsx` rather than inlined in `App.tsx`).
+- Gates run: `bun run typecheck` (clean), `bun run lint` (clean on every touched file; the
+  pre-existing unrelated failures — `.claude/skills/forked-subagent/**`,
+  `src/agent/providers/openai-compatible.*`, `src/web/client/markdown-dom.test.ts` — confirmed
+  present and untouched, same set as noted in the prior round), `bun run test:coverage` (2129
+  pass / 0 fail, 100% coverage on every new/changed file under `src/tui/**` — the two
+  pre-existing sub-100% lines reported, `src/tui/state.ts:403` and the `src/markdown/*`
+  fixture-coverage gaps, are untouched by this round's diff), `bun run e2e` (38 pass / 0 fail,
+  including the real-PTY tmux-driven `e2e/tui.test.ts` against the freshly `bun run build`-
+  compiled binary — boots, renders the alt-screen shell, opens the agent tree, sends a real
+  message end-to-end through a mock provider, and exits cleanly on Ctrl+C). `bun run build`
+  verified clean (no repeat of the prior round's dynamic-import compile bug — everything here
+  is static imports, same convention already established).
+
+Status moved to `verifying`: every User Story in this ticket, including the DH-0126 scrolling
+story (windowing/rendering half, as scoped), is now implemented and test-proven end to end
+against the real compiled binary.
 
 - Migrated `src/tui/app.ts`'s render/write path from `render.ts`'s `frameToAnsi`/
   `stdout.write` to Ink: new `src/tui/ink/App.tsx` (root component), `Composer.tsx` (root
