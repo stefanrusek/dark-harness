@@ -211,14 +211,41 @@ export async function startMockBedrockProvider(
   };
 }
 
-/** Shorthand for the common case: one final plain-text completion, no tool calls. */
+/** Shorthand for the common case: one final plain-text completion, no tool calls. Use only
+ * for interactive (server/TUI/Web) scripted turns — see `mock-provider.ts`'s identical
+ * caveat. For non-interactive (`--job`/sub-agent) turns, use `jobSuccessTurn` instead. */
 export function successTurn(text: string): MockBedrockTurn {
   return { text, stopReason: "end_turn" };
 }
 
-/** A self-reported-failure completion per loop.ts's `TASK_FAILED_MARKER` convention. */
+/** A self-reported-failure completion per loop.ts's `TASK_FAILED_MARKER` convention. Same
+ * interactive-only caveat as `successTurn` — use `jobTaskFailedTurn` for non-interactive
+ * runs. */
 export function taskFailedTurn(text = "Could not complete the task. TASK_FAILED"): MockBedrockTurn {
   return { text, stopReason: "end_turn" };
+}
+
+/** DH-0115: non-interactive (`--job`/sub-agent) equivalent of `successTurn` — emits an
+ * authoritative `ReportOutcome(status: "success")` tool call alongside the text so the turn
+ * resolves in exactly one provider call (DH-0050 tier 1), instead of triggering the harness's
+ * missed-call nudge turn. Do not use for interactive scripted turns. */
+export function jobSuccessTurn(text: string): MockBedrockTurn {
+  return {
+    text,
+    toolCalls: [{ name: "ReportOutcome", input: { status: "success", summary: text } }],
+    stopReason: "tool_use",
+  };
+}
+
+/** Non-interactive equivalent of `taskFailedTurn` — same rationale as `jobSuccessTurn`. */
+export function jobTaskFailedTurn(
+  text = "Could not complete the task. TASK_FAILED",
+): MockBedrockTurn {
+  return {
+    text,
+    toolCalls: [{ name: "ReportOutcome", input: { status: "failure", summary: text } }],
+    stopReason: "tool_use",
+  };
 }
 
 /** Dummy static AWS credentials — enough for the SDK to sign requests locally; the mock
