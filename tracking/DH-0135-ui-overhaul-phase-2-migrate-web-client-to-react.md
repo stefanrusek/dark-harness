@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0135
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: ["blocked on DH-0133a (Core toolchain) landing first"]
@@ -78,3 +78,73 @@ Per Fable's DH-0133 design (2026-07-17): migrate src/web/client/render.ts's manu
 ## Notes
 
 Updated by Muriel (design crew) 2026-07-17 per the owner's request for a felt-experience design pass on DH-0133 before implementation starts. See `docs/design/style-guide.md` SS1/1.2/2.3 (status/connection tokens) and SS5 (CLI/panel conventions, informing the `<AppHeader>` layout position). Companion ticket: DH-0137 (shared design-token module), DH-0136 (this ticket's TUI counterpart).
+
+### 2026-07-17 — composer + `<AppHeader>` slot implemented, ready for verification
+
+- Migrated the composer (`renderComposer` in `render.ts`) to a real React component,
+  `src/web/client/components/Composer.tsx`. Sidebar/transcript/header/model-picker remain on
+  the old imperative `render.ts` code, per the ticket's section-by-section plan — composer
+  first, other sections in follow-up tickets. `Composer` uses an uncontrolled (ref-based)
+  `<textarea>`, matching the old imperative behavior byte-for-byte (`.value` read on submit,
+  cleared after send) rather than a controlled `value`/`onChange` pair, which kept the
+  existing DOM-level integration tests (`app.test.ts`) valid with only one addition (a
+  `.focus()` call before a synthetic `keydown`, needed because React's `ChangeEventPlugin`
+  tracks `keydown` against whichever element last received a real `focus` event — ambient
+  under a real browser, not implied by a raw `dispatchEvent` in a test harness).
+- React's reconciliation (same component/position across `renderAll()` passes) structurally
+  closes the DH-0117 focus/text-loss bug — no more hand-written
+  `container.dataset.composerRendered` idempotency guard. Added a direct DH-0117 regression
+  test (`Composer.test.tsx` + an end-to-end `app.test.ts` case) asserting focus and unsent
+  text survive an unrelated SSE event and the liveness tick, and an integration test
+  asserting the composer's React root mounts exactly once (no duplicate/missing DOM nodes)
+  across several old-renderer full-section rebuilds.
+- Added the reserved `<AppHeader>` slot (`src/web/client/components/AppHeader.tsx`,
+  `AppHeaderProps` with `agentState`/`dhConfig` typed `unknown | null`, renders `null`),
+  mounted at the top of the page via a new `appHeaderSlot` container in `buildShell`
+  (`render.ts`), above the sidebar/main row. `AppHeader` and `Composer` are each mounted via
+  their own `react-dom` root in `app.ts` (not yet unified under one top-level `<App>` tree,
+  since sidebar/transcript/header are still old-renderer DOM this round) — full composition
+  follows naturally once those sections migrate in their own tickets.
+- `src/web/tsconfig.json` gained `"jsx": "react-jsx"` (mirrors `src/tui/tsconfig.json`'s
+  existing isolated-program pattern from DH-0134).
+- Cross-cutting test-infra fix, discovered while landing this: `bun test src` (no
+  `--parallel=1`) doesn't strictly serialize test files — with 90+ files in this suite,
+  some files' async test bodies run concurrently in the same process. Registering
+  `globalThis.window`/`document` per-test (toggled on/off) was observable by an unrelated
+  test elsewhere mid-run, tripping the Anthropic SDK's `isRunningInBrowser()` check
+  (`src/agent/providers/anthropic.ts`, Core-owned, not touched) in 3 unrelated tests.
+  Fixed by registering `window`/`document`/`HTMLElement` once, permanently, at first
+  `test-dom.ts` import (each test still gets its own isolated happy-dom `Window`/`root`
+  threaded through explicitly — only the *ambient* globals are shared) and overriding
+  `navigator` to `undefined` permanently alongside them (Bun always provides a real
+  `navigator`; that's the one leg of Anthropic's three-way check this fix needs to
+  neutralize). Also added `--parallel=1` to `package.json`'s `test`/`test:coverage` scripts
+  as defense in depth — confirmed necessary and sufficient on its own, kept alongside the
+  above for belt-and-suspenders. Flagging for Core/coordinator visibility since this touches
+  `package.json`'s shared scripts, not just `src/web/`.
+- `state.ts` untouched, beyond what DH-0130 already unblocked separately (not touched this
+  round either — out of scope for the composer/header slice).
+- User Stories → tests: story 1 (composer bullet 1, focus/text preserved) →
+  `Composer.test.tsx` "DH-0117 regression..." + `app.test.ts` "DH-0135: the composer's focus
+  and unsent text survive..."; story 1 (bullet 2, mixed old/new tree renders correctly) →
+  `app.test.ts` "DH-0135: the React-mounted composer mounts exactly once..."; story 2
+  (`<AppHeader>` slot exists, renders `null`, no layout shift) → `AppHeader.test.tsx` both
+  cases + `render.test.ts`'s `buildShell` assertions on `.app-header-slot`; story 2 (bullet
+  3, DH-0122 needs zero diff to `App`'s composition) → satisfied by construction
+  (`AppHeaderProps` defined now, `AppHeader` mounted independently — no test can prove a
+  future ticket's diff size, noted as a design commitment rather than a test); story 5
+  (`state.ts` unchanged) → `bun test src/web/client/state.test.ts` passes with zero edits to
+  that file, confirmed as part of this round's gate run.
+  Sidebar-token story (STATUS_TOKENS import) and the transcript/DH-0127/DH-0129/DH-0130
+  stories are explicitly **not** in this round's scope — composer + `<AppHeader>` slot only,
+  per the ticket's own section-by-section plan. Left for the sidebar/transcript follow-up
+  tickets.
+- Gates run: `bun run typecheck` clean (root + `src/web` + `src/tui` programs);
+  `bun run lint` clean on all touched/new files (pre-existing unrelated errors in
+  `.claude/skills/forked-subagent/` and `src/agent/providers/openai-compatible.ts` are
+  untouched, confirmed present on the base branch too); `bun run test:coverage` 2114 pass /
+  0 fail, 100% coverage on `Composer.tsx`/`AppHeader.tsx`/`test-dom.ts`; `render.ts`'s
+  89.66%-funcs/100%-lines gap on `app.ts` and 96.88%/99.13% gap on `render.ts` are both
+  pre-existing on the base branch (confirmed via `git stash` diff), not introduced here;
+  `bun run e2e` 33 pass / 5 fail, same 5 failures reproduce identically on the base branch
+  (sandbox tmux/PTY limitation per DH-0134's own note, not this ticket).

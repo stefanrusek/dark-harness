@@ -45,6 +45,9 @@ export interface AppCallbacks {
 }
 
 export interface ShellRefs {
+  /** DH-0135: reserved top-of-page mount point for the React `<AppHeader>` slot (see
+   *  components/AppHeader.tsx) — mounted above the sidebar/main row per style-guide.md §5. */
+  appHeaderSlot: HTMLElement;
   sidebar: HTMLElement;
   connectionPill: HTMLElement;
   sessionSummary: HTMLElement;
@@ -52,6 +55,9 @@ export interface ShellRefs {
   output: HTMLElement;
   scrollRegion: HTMLElement;
   jumpToLatest: HTMLElement;
+  /** DH-0135: mount point for the React `<Composer>` component (see
+   *  components/Composer.tsx) — owned/rendered by AppView via a `react-dom` root, not by
+   *  this module's imperative render functions. */
   composer: HTMLElement;
   errorBanner: HTMLElement;
   /** DH-0024: dismissible "reconnected — history may be incomplete" banner. */
@@ -69,6 +75,11 @@ export interface ShellRefs {
 export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
   root.textContent = "";
   root.className = "dh-app";
+
+  // DH-0135: reserved React-mounted header slot, above the sidebar/main row. Renders
+  // nothing until DH-0122 fills it in — see components/AppHeader.tsx.
+  const appHeaderSlot = el(doc, "div", "app-header-slot");
+  root.appendChild(appHeaderSlot);
 
   const sidebarPane = el(doc, "nav", "sidebar");
   const brand = el(doc, "div", "brand");
@@ -150,6 +161,7 @@ export function buildShell(doc: Document, root: HTMLElement): ShellRefs {
   root.appendChild(modelPicker);
 
   return {
+    appHeaderSlot,
     sidebar,
     connectionPill,
     sessionSummary,
@@ -649,68 +661,6 @@ export function appendTranscript(
     turnCount: transcript.length,
     lastTurnTextLength: transcript.at(-1)?.text.length ?? 0,
   };
-}
-
-/**
- * Renders the root-agent message composer, or nothing when a non-root agent is selected.
- *
- * Idempotent by design: `renderAll()` runs on every SSE event and on a 1s liveness tick, so a
- * naive unconditional rebuild here would tear down and recreate the `<textarea>` every second
- * -- destroying focus and any unsent typed text out from under the user constantly. Once the
- * composer is built for the current "is a root agent selected" mode, subsequent calls are a
- * no-op; it only rebuilds on an actual show/hide transition.
- */
-export function renderComposer(
-  doc: Document,
-  container: HTMLElement,
-  state: WebState,
-  onSend: (message: string) => void,
-): void {
-  const agent = selectedAgent(state);
-  const shouldShow = Boolean(agent && isRoot(state, agent.agentId));
-
-  if (!shouldShow) {
-    if (container.dataset.composerRendered) {
-      container.textContent = "";
-      delete container.dataset.composerRendered;
-    }
-    return;
-  }
-
-  if (container.dataset.composerRendered === "true") {
-    return;
-  }
-
-  container.textContent = "";
-  const form = el(doc, "form", "composer");
-  const textarea = el(doc, "textarea", "composer-input");
-  textarea.placeholder = "Message the root agent… (Enter to send, Shift+Enter for newline)";
-  textarea.rows = 2;
-  form.appendChild(textarea);
-
-  const sendBtn = el(doc, "button", "btn btn-primary composer-send");
-  sendBtn.type = "submit";
-  sendBtn.textContent = "Send";
-  form.appendChild(sendBtn);
-
-  const submit = (evt?: Event) => {
-    evt?.preventDefault();
-    const value = textarea.value.trim();
-    if (!value) return;
-    onSend(value);
-    textarea.value = "";
-  };
-
-  form.addEventListener("submit", submit);
-  textarea.addEventListener("keydown", (evt: KeyboardEvent) => {
-    if (evt.key === "Enter" && !evt.shiftKey) {
-      evt.preventDefault();
-      submit();
-    }
-  });
-
-  container.appendChild(form);
-  container.dataset.composerRendered = "true";
 }
 
 /**
