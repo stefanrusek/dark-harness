@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0145
 type: bug
-status: refining
+status: ready
 owner: stefan
 resolution:
 blocked_by: []

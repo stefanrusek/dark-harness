@@ -37,7 +37,6 @@ source: tracking/
 | [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink | blocked on DH-0133a (Core toolchain) landing first |
 | [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | status: verifying |
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | status: verifying |
-| [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: refining |
 
 ## Board
 
@@ -61,7 +60,7 @@ source: tracking/
 | [DH-0143](../DH-0143-web-commands-should-autocomplete.md) | Web: / commands should autocomplete | feature | stefan |
 | [DH-0144](../DH-0144-all-recognized-skills-should-be-accessible-as-commands.md) | All recognized skills should be accessible as / commands | feature | stefan |
 
-### refining
+### ready
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
