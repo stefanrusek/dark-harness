@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0133
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
@@ -23,18 +23,107 @@ Owner decision 2026-07-17, HIGH PRIORITY: migrate both UIs onto a real rendering
 
 ## User Stories
 
-### As a TODO, I want TODO
+### As Susan (Web domain lead), I want the Web client's render layer expressed as React components over the existing `WebState` reducer, so that section re-renders diff against previous output instead of rebuilding DOM nodes wholesale
 
-- Given TODO, when TODO, then TODO.
+- Given the composer has focus and unsent text, when an unrelated SSE event or the 1s liveness tick fires, then the composer's focus and text are preserved (regression guard for DH-0117), proven by a React Testing Library test that types into the composer, fires an unrelated state update, and asserts focus/value are unchanged.
+- Given a transcript section whose content hasn't changed, when a sibling section (e.g. sidebar) re-renders, then the unchanged section's DOM nodes are not replaced, proven by a test asserting DOM node identity (`===`) is preserved across a re-render triggered by an unrelated state change (regression guard for DH-0127's flicker complaint).
+- Given the existing `state.ts` reducer and its ~850-line test suite, when the render layer is replaced, then `state.ts` itself requires no behavioral changes and its existing tests continue to pass unmodified, proven by `bun test src/web/client/state.test.ts` passing with zero edits to that test file.
+
+### As Mary (TUI domain lead), I want the TUI's render layer expressed as Ink components over the existing `TuiState` reducer, so that the agent tree, transcript, and composer re-render without full-frame ANSI string rebuilds and without losing input state
+
+- Given the TUI is in alt-screen mode with a live-updating agent tree, when an `agent_status` event arrives for one agent, then only the tree row(s) affected repaint (Ink's own diffing), proven by an ink-testing-library test asserting `lastFrame()` output changes only in the expected row region, or by an equivalent frame-diff assertion.
+- Given the composer has in-progress typed text, when a background tick (spinner/elapsed-time liveness) fires, then the typed text is preserved, proven by a test analogous to the Web regression guard above.
+- Given the existing `state.ts`/`types.ts` reducer and its ~1400-line test suite, when the render layer is replaced, then the reducer requires no behavioral changes beyond what DH-0126's mouse-input fix independently requires, proven by `bun test src/tui/state.test.ts` passing with at most the DH-0126-attributable diff.
+
+### As the coordinator (Ada), I want confirmation of whether this migration touches `src/contracts/`, so that I know whether a second architect sign-off round is needed before any implementation dispatches
+
+- Given this design pass, when it is complete, then the ticket states explicitly whether `src/contracts/` changes are required, proven by the "Contracts impact" section below (verdict: no changes required for the migration itself).
 
 ## Functional Requirements
 
-- TODO
+- Web: introduce React (`react` + `react-dom`) as the Web client's rendering layer, replacing `src/web/client/render.ts`'s manual DOM manipulation. `state.ts`, `sse.ts`, `commands.ts`, `download.ts`, `slash-commands.ts`, `format.ts`, `markdown-dom.ts` (content, not DOM-mount mechanics) are reused as-is; only the render/mount layer changes.
+- TUI: introduce Ink (`ink` + `react`) as the TUI's rendering layer, replacing `src/tui/render.ts`'s ANSI string-array building and `app.ts`'s manual `frameToAnsi`/`stdout.write` frame loop. `state.ts`, `sse-client.ts`, `http-client.ts`, `keys.ts` (event parsing, not necessarily raw-mode wiring), `markdown-ansi.ts` (content logic), `width.ts` reused as-is; Ink's own input/raw-mode handling (`useInput`, `useStdin`) supersedes `app.ts`'s manual stdin listener but the *parsing* logic in `keys.ts` can likely be adapted rather than discarded.
+- Core: extend the `bun build --compile` pipeline (`scripts/build.ts`) to bundle React and Ink into the compiled binary; verify binary size and startup time stay acceptable (React/Ink add real weight to a single-binary CLI tool — this needs a concrete measurement, not an assumption).
+- No changes to `src/contracts/` (see verdict below) as part of this migration.
+- DH-0126's mouse-tracking-vs-keystroke disambiguation (enabling/disabling terminal mouse-tracking mode, parsing SGR mouse sequences) is terminal-protocol-level work, independent of whether the render layer is hand-rolled ANSI or Ink — it must be solved either way and is not resolved by adopting Ink (Ink has no built-in mouse/scroll support; see Notes).
 
 ## Assumptions
 
+- The owner's motivation (design crew ergonomics, future work quality) is about the render/component layer, not about the wire protocol — confirmed by re-reading DH-0133's summary and the current `state.ts`/`render.ts` split in both UIs, which already cleanly separates "what happened" (reducer) from "how it looks" (render). This split predates this ticket (Round 4/5 work per both files' header comments) and needs no rework.
+- `bun build --compile` can bundle React/Ink successfully (both are pure-JS/no native deps at runtime) — not yet verified empirically; flagged as the first concrete risk for Core to de-risk before Web/TUI implementation proceeds far.
+- ink-testing-library and React Testing Library (or an equivalent jsdom-free harness compatible with `bun test`) are viable replacements for the current hand-rolled fake-DOM (`test-dom.ts`) and frame-string assertions — not yet spiked; first task for whoever picks up Web/TUI phase 1.
+
 ## Risks
+
+- **Binary size/startup regression**: React + Ink + their transitive deps add real weight to a project whose entire pitch is "single compiled binary." Needs measurement before commit, not assumption.
+- **Test rewrite cost is large, not incidental**: `render.test.ts` is 1038 lines (Web) / 689 lines (TUI), and `app.test.ts` is 954/790 lines — these encode a lot of accumulated regression coverage (DH-0065, DH-0089, DH-0095, DH-0100, DH-0104, DH-0105, DH-0117 fixes, etc.) that must survive the migration as equivalent component-level assertions, not be silently dropped. This is the single biggest effort driver, larger than writing the new components themselves.
+- **Ink does not solve DH-0126 structurally**, unlike the Web vdom bugs (DH-0117/DH-0127) which React *does* structurally prevent. If the owner's expectation is "Ink will also fix the mouse-scroll bug," that expectation needs correcting now, before it's read into the ticket as one of Ink's benefits.
+- **Framework churn precedent**: CLAUDE.md's stack section has been deliberately framework-free to date (§2: "Bun... TypeScript throughout... single package"). This ticket is the first framework dependency for either UI and should update CLAUDE.md §2/§3 once implementation lands (Core's `scripts/build.ts` entry already covers build tooling; Web/TUI rows should note the new rendering dependency).
 
 ## Open Questions
 
+- None blocking dispatch of the Core toolchain-verification step. Component-boundary decisions (exactly how `render.ts` splits into components) are left to Susan/Mary as normal domain-lead judgment, not pre-specified here.
+
 ## Notes
+
+### Framework choice confirmation
+
+**Web -> React: confirmed, straightforward fit.** The current bug class (DH-0117: `renderAll()` unconditionally rebuilding the composer's DOM node on every SSE event and every 1s liveness tick, destroying focus and in-progress typed text; DH-0127: the same full-section-rebuild pattern causing visible flicker with no focus-loss symptom to surface it) is exactly the class of bug a real vdom keyed-reconciliation renderer prevents structurally, not just by patching each instance as found (DH-0117's fix was described as "an idempotency guard" — a patch, not a structural fix). React is the obvious, boring, correct choice here; no real alternative was seriously in tension (Preact would work too but buys nothing over React for a project with no bundle-size-for-browser-download constraint — this ships to `localhost`/LAN operators, not the public web).
+
+**TUI -> Ink: confirmed, with caveats the owner should hear explicitly, not just infer from "yes."**
+
+Checked against this project's specific TUI needs:
+- *Alt-screen mode*: supported natively (`ink`'s `Box`/render loop plus standard `\x1b[?1049h/l` sequences, which `app.ts` already manages and can continue to manage around Ink's render — Ink doesn't fight this).
+- *Live-updating agent tree sidebar*: fits Ink's model well — a tree of `Box`/`Text` components re-rendering off `TuiState` via a top-level `<App state={state}>` is a natural mapping from the current `flattenTree`/`renderRoot` structure.
+- *Scrollable(-ish, currently broken per DH-0126) history/transcript pane*: Ink has **no built-in scrolling primitive** and, per Ink's own maintainers (GitHub issue #263, unresolved), no first-class "full-screen app with scrollback" story — this is a known, long-standing gap, not something this migration should assume away. The current TUI's `renderFrame`-based fixed-height rendering already implements windowing manually; that logic (which rows are visible, scroll offset) has to be re-implemented as component state either way, just in JSX instead of string-array building. **Net: Ink doesn't make this easier, but it doesn't make it harder either** — it's orthogonal work.
+- *Text input with keybindings*: Ink's `useInput` hook is a reasonable replacement for the current manual `stdin.on('data')` + `keys.ts` parsing, and Ink 7's rewritten input handling (per the Ink 7 release notes) added `usePaste` for proper bracketed-paste handling — matching a concern `app.ts` already has to handle manually today (`BRACKETED_PASTE_ENABLE`/`DISABLE`). This is a net simplification, not a regression.
+- *Mouse-scroll-vs-text-input conflict (literally DH-0126)*: **Ink has no built-in mouse/scroll-wheel support in core.** A third-party addon (`ink-mouse`) exists but is not part of Ink itself and its maturity wasn't verified beyond existing. The actual fix DH-0126 needs — enabling/disabling terminal mouse-tracking mode and parsing SGR mouse escape sequences so scroll-wheel input isn't echoed as keystrokes into the composer — is **terminal-protocol-level work that sits below any rendering framework**, identical in scope whether the render layer is hand-rolled ANSI or Ink components. Migrating to Ink does not resolve DH-0126's root cause and should not be presented to the owner as doing so.
+- *Maintenance/ecosystem health*: Ink is actively maintained (v7.1.0 at time of research, recent release cadence), used in production by real CLI tools (e.g. Claude Code's own kind of TUI space), reasonable confidence it won't be an orphaned dependency.
+
+**Verdict: Ink is the right choice** — it structurally improves re-render correctness for the tree/transcript/composer (the same class of win React gives Web) and simplifies input/paste handling, but it does **not** by itself fix DH-0126's scroll bug or give free scrollback — both remain custom work post-migration, same as pre-migration. No better-fitting alternative surfaced (raw `blessed`/`neo-blessed` was considered and rejected: older, not React-based, wouldn't deliver the owner's actual stated motivation of "makes the designer's job easier" via component reuse/JSX, which is the whole point of choosing a React-family renderer for both UIs).
+
+### Migration strategy: incremental, render-layer-only, reducer preserved
+
+Both UIs already have exactly the split this migration wants to exploit: a pure `state.ts` reducer (`ServerSentEvent -> WebState`/`TuiState`, no DOM/terminal access, 100%-covered) feeding a pure render function (`WebState -> DOM ops` / `TuiState -> string[]`). This is not incidental — it's the product of DH-0044's streaming work and the general "pure core, thin I/O shell" convention both `render.ts` header comments call out explicitly. **Recommendation: keep the reducer as-is on both sides; replace only the render layer and the I/O shell that mounts it.**
+
+Concretely, per domain:
+- **Web (Susan)**: `state.ts` untouched. New React components read `WebState` (via a top-level subscription/context, or simple prop-drilling from an `app.tsx` that owns the SSE subscription exactly where `app.ts` does today) and render JSX instead of calling `createElement`/`textContent`. Migrate section by section (composer first — it's the one with the proven bug — then sidebar, transcript, header) so each PR is independently gate-able rather than one massive rewrite.
+- **TUI (Mary)**: same pattern. `state.ts`/`types.ts` untouched (modulo whatever DH-0126 independently requires in the reducer for mouse-vs-keystroke state, which is unrelated to the render swap). New Ink components replace `render.ts`'s functions one view at a time (root view/composer first, then agent tree, then transcript pane) with `app.ts` slimming down to: own the SSE subscription and raw-mode/alt-screen lifecycle, hand `TuiState` to Ink's root component.
+
+This avoids a big-bang rewrite, keeps the well-tested reducer's ~850/~1400 lines of coverage valid throughout, and lets both domains land value incrementally (each migrated section is independently a net improvement) rather than a long single branch that either UI runs on the old renderer until 100% done.
+
+**Big-bang rejected** because: (1) the reducers are large, well-tested, and not the source of the actual pain — rewriting them alongside the render layer multiplies risk for no reason; (2) incremental lets DH-0127's flicker fix land (as a byproduct of migrating the affected section) well before the whole Web client is done, rather than making the owner wait for total completion to see any benefit.
+
+### Contracts impact: NO changes required
+
+`src/contracts/events.ts` (SSE schema) and `src/contracts/log.ts` (JSONL schema) are consumed identically by the new render layer as by the old one — the reducer's input contract doesn't change, only what consumes the reducer's *output* changes. Verdict: **no**, this migration does not touch `src/contracts/`, and does not need a second architect sign-off round under CLAUDE.md §6 trigger 2. (DH-0130 separately floats a possible new per-agent-terminal-status event — that is that ticket's own, unrelated question, not part of this migration's scope; it should route through its own §6 check if and when it actually proposes a contracts change, independent of this decision.)
+
+### Ownership/sequencing
+
+Cross-domain (Mary=TUI, Susan=Web) but not tightly coupled — React and Ink components aren't code-shareable (different renderers, different host environments), so there's no meaningful shared component library to build first. The one shared thing worth landing first is **toolchain, not components**:
+
+1. **Core (Grace), first, small**: add React/Ink to the build (`scripts/build.ts`, `package.json`), verify `bun build --compile` bundles them cleanly, measure resulting binary size/startup delta against current binaries, pick and verify a component-testing approach compatible with `bun test` (React Testing Library for Web; ink-testing-library for TUI). This is a short, mostly-mechanical round but it's a hard prerequisite — nobody should write React/Ink components against an unverified build pipeline.
+2. **Web (Susan) and TUI (Mary), in parallel after (1) lands**: no ordering dependency between them — they touch disjoint files. Each proceeds section-by-section per the migration strategy above.
+3. **Design crew (Muriel)**: no new artifact needed before either migration starts — the existing `docs/design/style-guide.md` (status colors, connection vocabulary, cost/token formatting per DH-0100/0104/0105) is renderer-agnostic prose/constants (`src/format.ts` is already shared, framework-independent) and both React and Ink components should keep importing from it exactly as today's render.ts files do. Muriel's crew is downstream of this landing (as the ticket's own rationale says), not a prerequisite for it.
+
+### Effort estimate
+
+Not a single implementer round — this needs decomposition into its own tracking tickets before dispatch, given: `render.ts` is 808 (Web)/463 (TUI) lines, `app.ts` is 517 (Web)/302 (TUI) lines, and their paired test files are 1038+954 (Web) / 689+790 (TUI) lines respectively — the test-rewrite is the dominant cost (see Risks). Recommend the coordinator mint three sub-tickets via spile-ops once this design is accepted:
+
+- **DH-0133a (Core/Grace)**: toolchain integration + measurement (React+Ink in `bun build --compile`, testing-library spike). Roughly one implementer round.
+- **DH-0133b (Web/Susan)**: React migration of `render.ts`/`app.ts`, section by section. Multiple implementer dispatches under Susan (composer, sidebar, transcript, header, model picker) — a multi-round domain-lead effort, not a single ticket-sized task.
+- **DH-0133c (TUI/Mary)**: Ink migration of `render.ts`/`app.ts`, section by section (root/composer, agent tree, transcript pane). Similarly multi-round under Mary.
+
+This ticket (DH-0133) itself should stay open as the design/decision record and parent; -a/-b/-c carry the actual implementation work.
+
+### Explicit unblock recommendation for the 7 blocked tickets
+
+- **DH-0122** (app header, shared logic spanning Prompt+TUI+Web+Core): stays blocked. It explicitly needs shared header-building logic rendered in both UIs — building it against the current hand-rolled renderers means redoing it as components immediately after. Wait for DH-0133b/c.
+- **DH-0124** (TUI empty-state message, depends on DH-0122): stays blocked, transitively via DH-0122.
+- **DH-0125** (TUI status row under input): stays blocked — this is new render-layer content in the exact area (composer/input region) migrating first under DH-0133c; implementing it now under the old ANSI renderer is pure throwaway work.
+- **DH-0126** (TUI mouse-scroll-into-input bug, owner-flagged HUGE/urgent): **recommend splitting.** The urgent half — stop scroll-wheel escape sequences from being echoed into the composer as garbage keystrokes — is terminal-protocol input-parsing work in `keys.ts`/`app.ts`'s stdin handling, independent of the render framework (confirmed above: Ink doesn't solve this either). That half can and should be fixed now, under the current architecture, given the owner's "HUGE problem" framing — it's not render-layer work and won't be thrown away. The second half — implementing actual scrollable-transcript UI — is render-layer work that belongs in DH-0133c alongside the transcript-pane migration. Recommend the coordinator split DH-0126 into an urgent input-parsing fix (dispatch now) and a deferred scrolling-UI remainder (fold into DH-0133c).
+- **DH-0127** (Web flicker/no-vdom): this ticket's entire ask — "add diffing so unchanged sections don't repaint" — **is** the React migration. Recommend closing DH-0127 as superseded by DH-0133b rather than tracking it separately; its acceptance criteria should migrate into DH-0133b's own User Stories (already reflected above: the "unchanged DOM nodes preserved" story is DH-0127's ask verbatim).
+- **DH-0129** (Web auto-scroll-at-bottom-only-when-already-at-bottom): mostly reducer/state logic (tracking scroll position, deciding whether to force-scroll on new content), which per the migration strategy survives into the React version essentially unchanged — low risk of being thrown away. Could reasonably be unblocked now. However, its *trigger point* (when to call scrollIntoView) lives in the render/mount layer that's about to move to React's effect model (`useEffect` on transcript update), so implementing it against `renderAll()`'s current imperative DOM code means re-homing that trigger during DH-0133b anyway. Recommend **stays blocked**, folded into DH-0133b's transcript-section work rather than done twice — but flag this as the closest call of the seven; if the owner wants it sooner, it's the safest one to unblock early.
+- **DH-0130** (per-agent terminal-status transcript marker, TUI+Web, confirmed above no contracts change needed): the derivation logic (when an agent hits a terminal status, synthesize a transcript marker) is reducer-level and framework-agnostic — safe to build in `state.ts` on both sides now without waste. The render-side addition (actually displaying the marker) is small but touches the exact transcript-rendering code moving under DH-0133b/c. Recommend **stays blocked as a whole ticket** to avoid split work and a half-landed feature, but note for whichever domain lead picks up DH-0133b/c that the reducer-side logic is unblocked/uncontroversial and can be written first within that ticket's own scope.
+
+Net: of the seven, six stay blocked as recommended by the original ticket; DH-0126 is recommended for a split (urgent protocol fix now, scrolling UI deferred); DH-0127 is recommended for closure-by-supersession rather than continuing as a separate ticket.
