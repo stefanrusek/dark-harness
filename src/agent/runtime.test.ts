@@ -1031,11 +1031,23 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     // A bash-kind task, spawned directly against the registry (as the Bash tool would for a
     // run_in_background call) — must NOT appear in the tree (Round 2 judgment call: the
-    // tree is agent-kind only).
-    runtime.tasks.start({ kind: "bash", parentAgentId: ROOT_AGENT_ID, run: async () => {} });
+    // tree is agent-kind only). `background: false` on both tasks below: this test is only
+    // about tree structure/bash-vs-agent filtering, not completion notifications; since
+    // DH-0140, a *background* completion notification reaching an unstarted root now lazily
+    // (re)starts it (deliverOrResumeAgent()), which would give this root a real
+    // "running"/"done" status and break the "waiting" assertion further down. `background:
+    // false` never fires that notification path at all (see StartTaskParams.background's own
+    // doc comment).
+    runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: ROOT_AGENT_ID,
+      background: false,
+      run: async () => {},
+    });
     const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
       model: "test-model",
       prompt: "child instruction",
+      background: false,
     });
     await runtime.tasks.awaitDone(childTaskId);
     // The tree reflects the task registry's current state regardless of whether runRoot()
@@ -2083,49 +2095,113 @@ describe("AgentRuntime — Round 12: proactive push notification on background t
     ).toBe(true);
   });
 
-  test("orphaned grandchild: if the parent has already finished, the notification is not lost — it's recorded as a system log line instead", async () => {
+  // DH-0140: a grandchild whose parent has already finished used to have its completion
+  // notification dropped (log-only, "could NOT be delivered live"). handleTaskSettled() now
+  // routes through the same resume-capable path sendMessage()/DH-0003 uses, so the finished
+  // parent is resumed with the notification as its next instruction instead.
+  test("orphaned grandchild: if the parent has already finished, the notification resumes it instead of being lost", async () => {
+    let logsRoot: string | undefined;
+    try {
+      logsRoot = mkdtempSync(join(tmpdir(), "dh-logs-runtime-orphaned-grandchild-"));
+      const sessionId = "session-orphaned-grandchild";
+      const logger = new SessionLogger(join(logsRoot, sessionId));
+      const { logLines, onLogLine } = collectors();
+      const runtime = newAgentRuntime({
+        config: baseConfig(),
+        systemPrompt: "sp",
+        sessionId,
+        logsRoot,
+        onLogLine: (agentId, line) => {
+          logger.append(agentId, line);
+          onLogLine(agentId, line);
+        },
+      });
+
+      // A real sub-agent (spawnAgent(), so it has a real JSONL log to resume from), which
+      // itself finishes before its own background grandchild does — the exact edge case the
+      // handoff raised directly.
+      const parentId = runtime.spawnAgent(ROOT_AGENT_ID, {
+        model: "test-model",
+        prompt: "child instruction",
+      });
+      await runtime.tasks.awaitDone(parentId);
+      expect(runtime.tasks.snapshot(parentId).status).toBe("done");
+
+      const childId = runtime.tasks.start({
+        kind: "bash",
+        parentAgentId: parentId,
+        background: true,
+        run: async () => {},
+      });
+      await runtime.tasks.awaitDone(childId);
+
+      // The parent (same task id) is live again, resumed with the notification as its next
+      // instruction — not the old "could NOT be delivered live" drop.
+      expect(runtime.tasks.trySnapshot(parentId)?.status).not.toBe("done");
+      const notice = logLines.find(
+        (l) =>
+          l.type === "message" &&
+          l.role === "system" &&
+          l.content.includes("Background Bash task") &&
+          l.content.includes("delivered via resume"),
+      );
+      expect(notice).toBeDefined();
+
+      await runtime.tasks.awaitDone(parentId);
+    } finally {
+      if (logsRoot) rmSync(logsRoot, { recursive: true, force: true });
+    }
+  });
+
+  // DH-0140: a completion notification arriving for the root before/after it has ever run
+  // used to be silently dropped ("could NOT be delivered live"). handleTaskSettled() now
+  // lazily (re)starts the root with the notification as its instruction, mirroring
+  // invokeSkill()'s own root-lazy-start convention.
+  test("a background task's completion lazily (re)starts a root that hasn't started yet, instead of being dropped", async () => {
     const { logLines, onLogLine } = collectors();
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
-    const delivered: string[] = [];
 
-    const parentId = runtime.tasks.start({
-      kind: "agent",
-      parentAgentId: ROOT_AGENT_ID,
-      background: true,
-      run: async (handle) => {
-        handle.registerSendMessage((message) => delivered.push(message));
-      },
-    });
-    // The parent's own turn (and its whole loop) ends before its grandchild does — the
-    // exact edge case the handoff raised directly.
-    await runtime.tasks.awaitDone(parentId);
-    expect(runtime.tasks.snapshot(parentId).status).toBe("done");
+    expect(runtime.rootHasStarted).toBe(false);
 
     const childId = runtime.tasks.start({
       kind: "bash",
-      parentAgentId: parentId,
+      parentAgentId: ROOT_AGENT_ID,
       background: true,
       run: async () => {},
     });
     await runtime.tasks.awaitDone(childId);
 
-    expect(delivered).toEqual([]); // never delivered live — parent wasn't listening anymore
+    expect(runtime.rootHasStarted).toBe(true);
     const notice = logLines.find(
       (l) =>
-        l.type === "message" &&
-        l.role === "system" &&
-        l.content.includes("Background Bash task") &&
-        l.content.includes("NOT be delivered live"),
+        l.type === "message" && l.role === "system" && l.content.includes("Background Bash task"),
     );
     expect(notice).toBeDefined();
     if (notice?.type === "message") {
-      expect(notice.content).toContain("orphaned or already finished");
+      expect(notice.content).toContain("delivered via resume");
     }
+
+    // Let the lazily-started root's own turn actually finish before the test ends, so it
+    // doesn't leak an in-flight fetch/timer into the next test. Root loop invocations never
+    // emit "status_change" log lines (that's a sub-agent-only marker — see loop.ts's
+    // `isSubAgent` guard); getAgentTree()'s rootStatus is what actually reflects it.
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && runtime.getAgentTree()[0]?.status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(runtime.getAgentTree()[0]?.status).not.toBe("running");
   });
 
-  test("a background task's completion is not falsely delivered to a root that hasn't started yet, even though rootStatus defaults to 'waiting'", async () => {
+  // DH-0140 User Story: a late child notification arriving after the root's own session has
+  // already concluded resumes it, exactly as the not-yet-started case above does — not
+  // silently dropped.
+  test("a background task's completion resumes the root after its own session has already concluded", async () => {
     const { logLines, onLogLine } = collectors();
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+
+    await runtime.runRoot("root done please");
+    expect(runtime.rootHasStarted).toBe(true);
+    expect(runtime.getAgentTree()[0]?.status).not.toBe("running");
 
     const childId = runtime.tasks.start({
       kind: "bash",
@@ -2141,8 +2217,16 @@ describe("AgentRuntime — Round 12: proactive push notification on background t
     );
     expect(notice).toBeDefined();
     if (notice?.type === "message") {
-      expect(notice.content).toContain("NOT be delivered live");
+      expect(notice.content).toContain("delivered via resume");
     }
+
+    // Let the resumed root's own turn actually finish before the test ends (see the previous
+    // test's comment on why rootStatus, not a "status_change" log line, is the right signal).
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline && runtime.getAgentTree()[0]?.status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(runtime.getAgentTree()[0]?.status).not.toBe("running");
   });
 
   test("a foreground (background: false) task's completion never fires a completion notification", async () => {

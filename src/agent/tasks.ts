@@ -355,6 +355,22 @@ export class TaskRegistry {
     return [...this.tasks.keys()].map((id) => this.snapshot(id));
   }
 
+  /** DH-0140: does `parentAgentId` have any of its own directly-spawned tasks (agent- or
+   * bash-kind alike) still in a non-terminal (`running`/`waiting`) status right now? A plain
+   * filter over `list()` — tasks are never evicted (see `clearTerminal()`'s own doc comment
+   * for the one case that removes an entry, which only ever applies to a terminal task), so
+   * no separate index is needed. Used by the DH-0050 nudge branch (loop.ts) to skip nudging
+   * an agent that is deliberately waiting on its own children, not one that forgot to
+   * self-report. Direct children only, not transitive — see DH-0140's ticket Assumptions for
+   * why a grandchild isn't this agent's concern. */
+  hasNonTerminalChildren(parentAgentId: string): boolean {
+    return this.list().some(
+      (task) =>
+        task.parentAgentId === parentAgentId &&
+        (task.status === "running" || task.status === "waiting"),
+    );
+  }
+
   /** DH-0003: clears a terminal task's registry bookkeeping (the entry itself, its
    * eviction-queue slot, its per-reader read cursors) so its id can be reused by a fresh
    * `start()` call — the SendMessage-resume path (AgentRuntime.sendMessage) re-invokes

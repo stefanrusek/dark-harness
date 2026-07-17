@@ -1595,6 +1595,95 @@ describe("runAgentLoop — DH-0050 ReportOutcome self-report", () => {
     expect(result.finalOutput).toBe("All done, no marker here.");
   });
 
+  // DH-0140 User Story: an agent waiting on its own spawned children (sub-agents or
+  // background Bash calls still `running`/`waiting`) shouldn't get end-out-from-under-it by
+  // the missed-call nudge — it's deliberately polling, not forgetting to self-report.
+  test("DH-0140: the nudge is skipped (not just deferred) while hasPendingChildren() reports " +
+    "outstanding children — the loop just starts another turn", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "still waiting on my children" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "tool_use",
+        content: [
+          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({
+      provider,
+      hasPendingChildren: () => true,
+    });
+    const result = await runAgentLoop(params);
+
+    expect(provider.calls).toHaveLength(2);
+    expect(result.success).toBe(true);
+    expect(result.reportedBy).toBe("tool");
+    // No nudge text was ever injected — the second call's last message is NOT the nudge.
+    const secondCallMessages = provider.calls[1]?.messages ?? [];
+    const lastMessage = secondCallMessages[secondCallMessages.length - 1];
+    expect(lastMessage?.content).not.toEqual([
+      { type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE },
+    ]);
+    expect(
+      logLines.some(
+        (l) =>
+          l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
+      ),
+    ).toBe(false);
+  });
+
+  test("DH-0140: once hasPendingChildren() reports no more outstanding children, the nudge " +
+    "fires normally on the next non-tool-use turn", async () => {
+    let childrenPending = true;
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "still waiting on my children" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "children finished, still thinking" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "tool_use",
+        content: [
+          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({
+      provider,
+      hasPendingChildren: () => {
+        const pending = childrenPending;
+        childrenPending = false;
+        return pending;
+      },
+    });
+    const result = await runAgentLoop(params);
+
+    expect(provider.calls).toHaveLength(3);
+    expect(result.success).toBe(true);
+    expect(result.reportedBy).toBe("tool");
+    // The nudge was injected exactly once, ahead of the third (ReportOutcome) call.
+    const thirdCallMessages = provider.calls[2]?.messages ?? [];
+    const lastMessage = thirdCallMessages[thirdCallMessages.length - 1];
+    expect(lastMessage?.content).toEqual([{ type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE }]);
+    expect(
+      logLines.filter(
+        (l) =>
+          l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
+      ),
+    ).toHaveLength(1);
+  });
+
   test("legacy fallback: TASK_FAILED after the nudge is still reported as failure", async () => {
     const provider = scriptedProvider([
       {
