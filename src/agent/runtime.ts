@@ -943,19 +943,67 @@ export class AgentRuntime {
     /** DH-0050: which of the detection precedence tiers actually produced `success` above. */
     reportedBy?: OutcomeReportedBy;
   }> {
-    // DH-0038: an explicit modelName argument always wins; otherwise a resumed session
-    // defaults to the original root header's model alias (D3) rather than
-    // config.options.defaultModel, so a resume never silently switches models.
-    // DH-0093: a pending switch_model() call made before the root ever started wins over the
-    // resume/defaultModel fallback (but not over an explicit modelName argument) — see
-    // pendingInitialModel's own doc comment.
-    const model = this.resolveModel(
-      modelName ??
-        this.pendingInitialModel ??
-        this.resume?.model ??
-        this.config.options.defaultModel,
-    );
-    const provider = this.providerFor(model);
+    // DH-0131 fix: resolveModel()/providerFor() below can throw synchronously (bad/unknown
+    // model or provider name in config) *before* rootStarted/rootStatus are ever set —
+    // previously this whole block sat outside the try/catch a few lines down, so this class
+    // of "failed to start" error reached neither a status_change log line nor an agent_status
+    // SSE event from AgentRuntime itself; only src/cli.ts's own .catch() on the interactive
+    // path happened to notice (and, until this fix, only logged a plain "message" line, never
+    // structured status_change — the gap DH-0131 was filed for). The standalone `--instructions`/
+    // `--job` path (cli.ts's runInstructionsMode) has no equivalent handling at all, so it
+    // logged nothing whatsoever for this failure class. Wrapping model/provider resolution in
+    // the same try/catch as runAgentLoop() makes AgentRuntime itself the single place this is
+    // handled, for every caller.
+    let model: ModelConfig;
+    let provider: ModelProvider;
+    try {
+      // DH-0038: an explicit modelName argument always wins; otherwise a resumed session
+      // defaults to the original root header's model alias (D3) rather than
+      // config.options.defaultModel, so a resume never silently switches models.
+      // DH-0093: a pending switch_model() call made before the root ever started wins over the
+      // resume/defaultModel fallback (but not over an explicit modelName argument) — see
+      // pendingInitialModel's own doc comment.
+      model = this.resolveModel(
+        modelName ??
+          this.pendingInitialModel ??
+          this.resume?.model ??
+          this.config.options.defaultModel,
+      );
+      provider = this.providerFor(model);
+    } catch (err) {
+      this.rootStarted = true;
+      this.rootStatus = "failed";
+      const message = err instanceof Error ? err.message : String(err);
+      this.onLogLine?.(ROOT_AGENT_ID, {
+        version: 1,
+        timestamp: new Date().toISOString(),
+        type: "message",
+        role: "system",
+        content: `Root agent failed to start: ${message}`,
+      });
+      this.onLogLine?.(ROOT_AGENT_ID, {
+        version: 1,
+        timestamp: new Date().toISOString(),
+        type: "status_change",
+        status: "failed",
+      });
+      this.onEvent?.({
+        version: 1,
+        id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: "agent_status",
+        agentId: ROOT_AGENT_ID,
+        status: "failed",
+      });
+      this.onEvent?.({
+        version: 1,
+        id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: "session_ended",
+        exitCode: ExitCode.HarnessError,
+      });
+      throw err;
+    }
 
     this.rootStarted = true;
     this.rootModel = model.name;
@@ -1041,6 +1089,32 @@ export class AgentRuntime {
       });
     } catch (err) {
       this.rootStatus = "failed";
+      // DH-0131 fix: this path (runAgentLoop() itself throwing mid-run — a harness error
+      // after the loop already wrote its header line) used to emit only session_ended below,
+      // never a status_change log line or an agent_status SSE event — the same class of gap
+      // as the pre-loop resolveModel()/providerFor() catch above, just further along.
+      const message = err instanceof Error ? err.message : String(err);
+      this.onLogLine?.(ROOT_AGENT_ID, {
+        version: 1,
+        timestamp: new Date().toISOString(),
+        type: "message",
+        role: "system",
+        content: `Root agent failed: ${message}`,
+      });
+      this.onLogLine?.(ROOT_AGENT_ID, {
+        version: 1,
+        timestamp: new Date().toISOString(),
+        type: "status_change",
+        status: "failed",
+      });
+      this.onEvent?.({
+        version: 1,
+        id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        type: "agent_status",
+        agentId: ROOT_AGENT_ID,
+        status: "failed",
+      });
       this.onEvent?.({
         version: 1,
         id: randomUUID(),

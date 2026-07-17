@@ -789,36 +789,18 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
       // Fire-and-forget: the command handler (POST /api/commands) shouldn't block on the
       // whole root agent run just to acknowledge "message accepted" — progress streams via
       // onEvent/onLog as normal. A harness error before the loop ever gets going (bad
-      // model/provider config) would otherwise be an unhandled rejection; surface it as a
-      // synthetic agent_status instead of crashing the process.
-      this.runtime.runRoot(message).catch((err: unknown) => {
-        // DH-0017 fix: this used to discard `err` entirely (`.catch(() => { ... })`), so a
-        // root-start failure (bad model/provider config, an auth failure before the loop ever
-        // produced a self-report) surfaced to an operator as an opaque "failed" status with
-        // zero diagnostic detail — exactly the class of failure ADR 0005's JSONL logging
-        // exists to make diagnosable. Now logs the real error message (via onLogLine, tagged
-        // to the root agent) before/alongside the same synthetic agent_status this always
-        // emitted, so the reason reaches the durable log, not just a transient status flip.
-        const message = err instanceof Error ? err.message : String(err);
-        for (const listener of this.logListeners) {
-          listener(ROOT_AGENT_ID, {
-            version: 1,
-            timestamp: new Date().toISOString(),
-            type: "message",
-            role: "system",
-            content: `Root agent failed to start: ${message}`,
-          });
-        }
-        const event = {
-          version: 1 as const,
-          id: randomUUID(),
-          timestamp: new Date().toISOString(),
-          type: "agent_status" as const,
-          agentId: ROOT_AGENT_ID,
-          status: "failed" as const,
-        };
-        for (const listener of this.eventListeners) listener(event);
-      });
+      // model/provider config) would otherwise be an unhandled rejection.
+      //
+      // DH-0131 fix: this used to hand-construct a synthetic agent_status:"failed" SSE event
+      // here (and, before that, only a plain "message" log line — never a structured
+      // status_change) because AgentRuntime.runRoot() itself didn't emit anything but
+      // session_ended on this failure class. AgentRuntime.runRoot() now emits the full
+      // message/status_change/agent_status/session_ended sequence itself (runtime.ts) via the
+      // same onEvent/onLogLine callbacks this adapter's constructor already forwards into
+      // eventListeners/logListeners — duplicating that here would double-log the failure, so
+      // this just needs to swallow the rejection (already thrown/logged upstream) rather than
+      // let it become an unhandled promise rejection.
+      this.runtime.runRoot(message).catch(() => {});
       return;
     }
     this.runtime.sendMessageToRoot(message);
