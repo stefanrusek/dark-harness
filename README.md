@@ -6,11 +6,10 @@
 *(A CI status badge belongs here too, once the repo's public URL is confirmed — see
 [Status / deferred this round](#status--deferred-this-round).)*
 
-**`dh`** is a single-binary agent harness for autonomous "dark factory" software work: point
-it at a repo and an instructions file, and it runs an LLM agent — with sub-agents, a real
-tool set, skills, and MCP support — until the job is done. It also runs interactively, with
-both a console TUI and a web UI, so you can develop and observe locally before you let it
-loose unattended.
+**Point `dh` at a repo and an instructions file, and it works the job unattended** — a
+single compiled binary running an LLM agent, sub-agents, a real tool set, skills, and MCP
+support, until the job is done or it self-reports why not. Watch it live in a console TUI
+or a web UI, or let it run headless as a dark factory.
 
 No daemons to install, no runtime to configure — `dh` is one compiled binary that is the
 server, the console client, and the web client, composed by flags. Under the hood it's a
@@ -45,11 +44,13 @@ sizing up how I work:
   sleep replaced with poll-until-stable after it was observed failing intermittently in real
   CI, not because a general "tests should be more robust" pass suggested it.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-web-light.png">
-  <img src="docs/media/hero-web-dark.png" alt="Dark Harness web UI observing a multi-agent session: a 5-agent tree with running, waiting, done, and failed statuses, a rich-Markdown deploy report in the transcript, and real token/cost totals.">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-web-light.png">
+    <img src="docs/media/hero-web-dark.png" width="820" alt="Dark Harness web UI observing a multi-agent session: a 5-agent tree with running, waiting, done, and failed statuses, a rich-Markdown deploy report in the transcript, and real token/cost totals.">
+  </picture>
+</p>
 
 *A real session, captured through the actual web UI against a scripted mock provider — see
 [`e2e/spikes/web/hero-screenshot.ts`](e2e/spikes/web/hero-screenshot.ts) to reproduce it after
@@ -389,6 +390,10 @@ should read both before their first change.
   URL, which needs the owner's sign-off before it's published; see `tracking/DH-0068-*.md`.
 - A full logo/wordmark design is still out of scope — the ◆ brand mark above (borrowed from
   the web UI's own `.brand::before`) is the extent of the visual identity for now.
+- The repo has no GitHub social preview image set yet. A ready-to-follow generation prompt
+  for one (dimensions, brand elements, and the mechanical steps to set it) lives at
+  [docs/design/social-preview-prompt.md](docs/design/social-preview-prompt.md) for whichever
+  future agent has image-generation tooling available.
 - The config reference above is still hand-maintained prose, not generated from
   `src/contracts/config.ts` — but `src/prompt/readme-config-sync.test.ts` runs in the normal
   `bun test src` gate and fails the build if a field is added to `DhOptions` or `ModelConfig`
