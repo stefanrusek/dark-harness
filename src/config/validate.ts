@@ -9,6 +9,7 @@ import type {
   ProviderConfig,
   ProviderType,
   SecurityTlsConfig,
+  ThinkingConfig,
   WebConfig,
   WebFetchConfig,
   WebSearchConfig,
@@ -57,6 +58,12 @@ const KNOWN_WEB_FETCH_KEYS = new Set([
 ]);
 const KNOWN_WEB_SEARCH_KEYS = new Set(["provider", "apiKey", "timeoutMs", "maxResults"]);
 const WEB_SEARCH_PROVIDERS = new Set(["brave"]);
+
+// DH-0045: opt-in extended thinking — see src/contracts/config.ts's `ThinkingConfig` doc
+// comment for the adaptive/enabled distinction.
+const KNOWN_THINKING_KEYS = new Set(["type", "budgetTokens", "display"]);
+const THINKING_TYPES = new Set(["adaptive", "enabled"]);
+const THINKING_DISPLAYS = new Set(["summarized", "omitted"]);
 
 const KNOWN_LIMITS_KEYS = new Set(["completedRetention"]);
 
@@ -148,12 +155,73 @@ function validateModel(raw: unknown, index: number, providerNames: Set<string>):
     raw.outputPricePerMToken,
     `models[${index}].outputPricePerMToken`,
   );
+  const thinking =
+    raw.thinking !== undefined
+      ? validateThinking(raw.thinking, `models[${index}].thinking`)
+      : undefined;
   return {
     name,
     provider,
     model,
     ...(inputPricePerMToken !== undefined ? { inputPricePerMToken } : {}),
     ...(outputPricePerMToken !== undefined ? { outputPricePerMToken } : {}),
+    ...(thinking !== undefined ? { thinking } : {}),
+  };
+}
+
+/** DH-0045: validates the optional `models[].thinking` block. See
+ * src/contracts/config.ts's `ThinkingConfig` doc comment for the adaptive/enabled
+ * distinction — `type: "enabled"` requires `budgetTokens` (integer, >= 1024); `type:
+ * "adaptive"` forbids it. `display`, when present, must be "summarized" or "omitted". */
+function validateThinking(raw: unknown, path: string): ThinkingConfig {
+  if (!isRecord(raw)) {
+    throw new ConfigError(`${path} must be an object`);
+  }
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_THINKING_KEYS.has(key)) {
+      throw new ConfigError(
+        `${path} has unknown key "${key}"; known keys: ${[...KNOWN_THINKING_KEYS].join(", ")}`,
+      );
+    }
+  }
+  const type = raw.type;
+  if (typeof type !== "string" || !THINKING_TYPES.has(type)) {
+    throw new ConfigError(
+      `${path}.type must be one of ${[...THINKING_TYPES].join(", ")}, got ${JSON.stringify(type)}`,
+    );
+  }
+  let display: "summarized" | "omitted" | undefined;
+  if (raw.display !== undefined) {
+    if (typeof raw.display !== "string" || !THINKING_DISPLAYS.has(raw.display)) {
+      throw new ConfigError(
+        `${path}.display must be one of ${[...THINKING_DISPLAYS].join(", ")}, got ${JSON.stringify(raw.display)}`,
+      );
+    }
+    display = raw.display as "summarized" | "omitted";
+  }
+  if (type === "enabled") {
+    if (
+      typeof raw.budgetTokens !== "number" ||
+      !Number.isInteger(raw.budgetTokens) ||
+      raw.budgetTokens < 1024
+    ) {
+      throw new ConfigError(
+        `${path}.budgetTokens must be an integer >= 1024 when type is "enabled"`,
+      );
+    }
+    return {
+      type: "enabled",
+      budgetTokens: raw.budgetTokens,
+      ...(display !== undefined ? { display } : {}),
+    };
+  }
+  // type === "adaptive"
+  if (raw.budgetTokens !== undefined) {
+    throw new ConfigError(`${path}.budgetTokens must be absent when type is "adaptive"`);
+  }
+  return {
+    type: "adaptive",
+    ...(display !== undefined ? { display } : {}),
   };
 }
 

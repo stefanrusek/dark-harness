@@ -3,14 +3,24 @@
 // dh.json provider entry resolves to). Both the anthropic and bedrock adapters implement
 // this so src/agent/loop.ts is provider-agnostic.
 
+import type { ThinkingConfig } from "../../contracts/index.ts";
 import type { JsonSchema } from "../tools/types.ts";
 
 export type ProviderRole = "user" | "assistant";
 
+/**
+ * DH-0045: `thinking`/`redacted_thinking` mirror the Anthropic wire shape (verified against
+ * the installed `@anthropic-ai/sdk` `ThinkingBlock`/`RedactedThinkingBlock` types).
+ * `signature` is the model-issued verification token; it must be echoed back unmodified.
+ * `data` is opaque base64 ciphertext — never decoded, never displayed, exists solely so
+ * multi-turn echo works.
+ */
 export type ProviderContentBlock =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; toolUseId: string; content: string; isError?: boolean };
+  | { type: "tool_result"; toolUseId: string; content: string; isError?: boolean }
+  | { type: "thinking"; thinking: string; signature: string }
+  | { type: "redacted_thinking"; data: string };
 
 export interface ProviderMessage {
   role: ProviderRole;
@@ -29,6 +39,10 @@ export interface ProviderCompletionRequest {
   messages: ProviderMessage[];
   tools: ProviderToolDefinition[];
   maxTokens?: number;
+  /** DH-0045: opt-in extended thinking, threaded from `ModelConfig.thinking`. Reuses the
+   * contracts type directly (no separate camelCase internal mirror) — it's already
+   * camelCase and provider-agnostic, so a second identical type would be pure duplication. */
+  thinking?: ThinkingConfig;
 }
 
 export type ProviderStopReason = "end_turn" | "tool_use" | "max_tokens" | "other";

@@ -114,13 +114,16 @@ function newAgentRuntime(
 /** A minimal Anthropic Messages API-shaped mock server. Decides its response from the last
  * message's content, independent of call ordering, so it stays correct under the
  * concurrent sub-agent scenarios this suite exercises. */
-function startMockAnthropicServer(onRequest?: (body: { model: string; system?: string }) => void) {
+function startMockAnthropicServer(
+  onRequest?: (body: { model: string; system?: string; thinking?: unknown }) => void,
+) {
   return Bun.serve({
     port: 0,
     async fetch(req) {
       const body = (await req.json()) as {
         model: string;
         messages: { role: string; content: { type: string; text?: string }[] }[];
+        thinking?: unknown;
       };
       onRequest?.(body);
       const lastMessage = body.messages[body.messages.length - 1];
@@ -382,6 +385,10 @@ let receivedModels: string[] = [];
 // DH-0094: (model, system prompt) pairs for every request the mock server saw — used to
 // assert each agent's own resolved model produced its own per-agent self-info section.
 let receivedSystemPrompts: { model: string; system?: string }[] = [];
+// DH-0045: every request body's `thinking` field the mock server saw, in order — used to
+// verify `ModelConfig.thinking` actually threads through runtime.ts -> loop.ts ->
+// AnthropicProvider.complete() into the real wire request.
+let receivedThinkingParams: unknown[] = [];
 
 beforeAll(() => {
   server = startMockAnthropicServer((req) => {
@@ -390,6 +397,7 @@ beforeAll(() => {
       model: req.model,
       ...(req.system !== undefined ? { system: req.system } : {}),
     });
+    receivedThinkingParams.push(req.thinking);
   });
 });
 
@@ -1545,6 +1553,43 @@ describe("AgentRuntime — Round 6b/6c: config-driven cost pricing and maxTurns"
     const usageEvent = events.find((e) => e.type === "token_usage");
     expect(usageEvent?.type).toBe("token_usage");
     expect(usageEvent && "costUsd" in usageEvent ? usageEvent.costUsd : undefined).toBeUndefined();
+  });
+});
+
+describe("AgentRuntime — DH-0045: extended thinking threads from config to the real provider request", () => {
+  test("a configured ModelConfig.thinking reaches the real wire request body", async () => {
+    receivedThinkingParams = [];
+    const { onEvent } = collectors();
+    const runtime = newAgentRuntime({
+      config: baseConfig({
+        models: [
+          {
+            name: "test-model",
+            provider: "mock",
+            model: "mock-1",
+            thinking: { type: "enabled", budgetTokens: 2048, display: "summarized" },
+          },
+        ],
+      }),
+      systemPrompt: "sp",
+      onEvent,
+    });
+    await runtime.runRoot("please just answer");
+    expect(receivedThinkingParams.length).toBeGreaterThan(0);
+    expect(receivedThinkingParams[0]).toEqual({
+      type: "enabled",
+      budget_tokens: 2048,
+      display: "summarized",
+    });
+  });
+
+  test("an unconfigured model sends no thinking param at all (no regression)", async () => {
+    receivedThinkingParams = [];
+    const { onEvent } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onEvent });
+    await runtime.runRoot("please just answer");
+    expect(receivedThinkingParams.length).toBeGreaterThan(0);
+    expect(receivedThinkingParams[0]).toBeUndefined();
   });
 });
 

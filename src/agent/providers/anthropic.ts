@@ -48,7 +48,39 @@ function toAnthropicContent(block: ProviderContentBlock): Anthropic.ContentBlock
         content: block.content,
         ...(block.isError !== undefined ? { is_error: block.isError } : {}),
       };
+    case "thinking":
+      return { type: "thinking", thinking: block.thinking, signature: block.signature };
+    case "redacted_thinking":
+      return { type: "redacted_thinking", data: block.data };
   }
+}
+
+/** DH-0045 §3: builds the Anthropic `thinking` request param from `ModelConfig.thinking`. */
+function toAnthropicThinkingParam(
+  thinking: NonNullable<ProviderCompletionRequest["thinking"]>,
+): Anthropic.ThinkingConfigParam {
+  if (thinking.type === "adaptive") {
+    return {
+      type: "adaptive",
+      ...(thinking.display !== undefined ? { display: thinking.display } : {}),
+    };
+  }
+  return {
+    type: "enabled",
+    budget_tokens: thinking.budgetTokens as number,
+    ...(thinking.display !== undefined ? { display: thinking.display } : {}),
+  };
+}
+
+/** DH-0045 §3: for `type: "enabled"`, the API requires `budget_tokens < max_tokens` — the
+ * thinking budget never cannibalizes the response budget, deterministically and without a
+ * new config knob. Adaptive form: no change to max_tokens handling. */
+function resolveMaxTokens(request: ProviderCompletionRequest): number {
+  const base = request.maxTokens ?? DEFAULT_MAX_TOKENS;
+  if (request.thinking?.type === "enabled" && request.thinking.budgetTokens !== undefined) {
+    return Math.max(base, request.thinking.budgetTokens + DEFAULT_MAX_TOKENS);
+  }
+  return base;
 }
 
 function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopReason {
@@ -120,7 +152,7 @@ export class AnthropicProvider implements ModelProvider {
             {
               model: request.model,
               system: request.system,
-              max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+              max_tokens: resolveMaxTokens(request),
               stream: true,
               messages: request.messages.map((m) => ({
                 role: m.role,
@@ -131,6 +163,9 @@ export class AnthropicProvider implements ModelProvider {
                 description: t.description,
                 input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
               })),
+              ...(request.thinking !== undefined
+                ? { thinking: toAnthropicThinkingParam(request.thinking) }
+                : {}),
             },
             signal ? { signal } : undefined,
           );
@@ -194,9 +229,21 @@ async function consumeAnthropicStream(
       } else if (block.type === "tool_use") {
         blocks.set(event.index, { type: "tool_use", id: block.id, name: block.name, input: {} });
         toolJsonBuffers.set(event.index, "");
+      } else if (block.type === "thinking") {
+        // DH-0045: a non-empty `content_block_start` thinking block (rare, but the SDK type
+        // allows it) seeds the accumulator with whatever text/signature already arrived;
+        // usually both start empty and are filled in by thinking_delta/signature_delta below.
+        blocks.set(event.index, {
+          type: "thinking",
+          thinking: block.thinking,
+          signature: block.signature,
+        });
+      } else if (block.type === "redacted_thinking") {
+        // redacted_thinking arrives complete at block-start — there is no delta for it.
+        blocks.set(event.index, { type: "redacted_thinking", data: block.data });
       }
-      // Unknown block types (server tools, thinking, etc.) get no accumulator — finalized
-      // as null/skipped at content_block_stop — same treatment unknown blocks got in the
+      // Other unknown block types (server tools, etc.) get no accumulator — finalized as
+      // null/skipped at content_block_stop — same treatment unknown blocks got in the
       // adapter's prior non-streaming implementation.
     } else if (event.type === "content_block_delta") {
       if (event.delta.type === "text_delta") {
@@ -210,6 +257,16 @@ async function consumeAnthropicStream(
         const buffered = toolJsonBuffers.get(event.index);
         if (buffered !== undefined) {
           toolJsonBuffers.set(event.index, buffered + event.delta.partial_json);
+        }
+      } else if (event.delta.type === "thinking_delta") {
+        const existing = blocks.get(event.index);
+        if (existing && existing.type === "thinking") {
+          existing.thinking += event.delta.thinking;
+        }
+      } else if (event.delta.type === "signature_delta") {
+        const existing = blocks.get(event.index);
+        if (existing && existing.type === "thinking") {
+          existing.signature += event.delta.signature;
         }
       }
     } else if (event.type === "content_block_stop") {

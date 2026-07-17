@@ -3,6 +3,7 @@ import type {
   AgentOutputEvent,
   AgentSpawnedEvent,
   AgentStatusEvent,
+  AgentThinkingEvent,
   AgentTreeNode,
   ResyncEvent,
   SessionEndedEvent,
@@ -317,7 +318,31 @@ describe("setConnectionStatus", () => {
   });
 });
 
+function agentThinking(agentId: string, chunk: string, redacted?: true): AgentThinkingEvent {
+  return {
+    version: 1,
+    id: `evt-thinking-${agentId}`,
+    timestamp: new Date().toISOString(),
+    type: "agent_thinking",
+    agentId,
+    chunk,
+    ...(redacted !== undefined ? { redacted } : {}),
+  };
+}
+
 describe("markPossibleGap / dismissPossibleGap (DH-0024)", () => {
+  // DH-0045: `agent_thinking` is a new additive SSE event type (Core's piece of DH-0045).
+  // Full display (collapsed transcript turn) is a separate Web round — this build's handler
+  // just needs to accept it without corrupting state, same as tool_call/tool_result above.
+  test("agent_thinking events are accepted without altering agent state (full display deferred to a later Web round)", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("agent-1", null));
+    const before = state.agents.get("agent-1");
+    state = applyEvent(state, agentThinking("agent-1", "reasoning..."));
+    state = applyEvent(state, agentThinking("agent-1", "", true));
+    expect(state.agents.get("agent-1")).toEqual(before);
+  });
+
   // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
   // DH-0089). Rendering them as a live transcript marker is a separate Web round (D5,
   // assigned to Susan) — this build's handler just needs to accept them without corrupting
