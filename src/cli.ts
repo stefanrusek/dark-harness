@@ -1095,7 +1095,13 @@ async function runInteractiveMode(
   try {
     if (mode.kind === "connect") {
       const scheme = config.security?.tls ? "https" : "http";
-      const targetBaseUrl = `${scheme}://${mode.host}:${mode.port}`;
+      // DH-0111: `--connect <host>` documents `<host>` as a bare hostname, but an operator
+      // pasting a value from e.g. "web UI ready at http://..." output (or just guessing at
+      // the flag's shape) can hand it a full origin instead. Stripping any scheme the
+      // caller already supplied before prepending our own avoids a doubled
+      // "http://http://host:port" target that fails to resolve.
+      const host = mode.host.replace(/^https?:\/\//, "");
+      const targetBaseUrl = `${scheme}://${host}:${mode.port}`;
       if (mode.web) {
         const handle = deps.serveWebUi({
           port: 0,
