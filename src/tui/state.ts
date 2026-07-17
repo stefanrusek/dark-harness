@@ -120,6 +120,7 @@ function defaultAgent(agentId: string, at: number): AgentInfo {
     costUsd: null,
     lastEventAt: at,
     statusSince: at,
+    pendingToolCall: null,
   };
 }
 
@@ -188,16 +189,10 @@ function appendUserTurn(state: TuiState, agentId: string, at: number, message: s
   return { ...state, agents, agentOrder };
 }
 
-/** Append a synthetic `"tool"` marker turn to `agentId`'s transcript (DH-0065) — the review
- * found sub-agent spawns and tool calls invisible in the transcript ("the largest
- * observability gap in the TUI"). This only covers sub-agent spawns, inferred client-side
- * from an `agent_spawned` event's existing `parentAgentId`/`model`/`description` fields — no
- * wire change needed. Generic tool calls (Bash, Read, Edit, ...) have no SSE event at all
- * today (only `src/contracts/log.ts`'s offline JSONL log schema carries `tool_call`; the live
- * `ServerSentEvent` union in `src/contracts/events.ts` does not) — surfacing those requires a
- * new SSE event type, which is a `src/contracts/` change needing architect sign-off (CLAUDE.md
- * §6.2), so it's left out of this round rather than guessed at. Always starts a fresh turn,
- * like a user turn — a marker never merges with a neighboring turn. */
+/** Append a synthetic `"tool"` marker turn to `agentId`'s transcript. Originally DH-0065's
+ * sub-agent-spawn marker (inferred client-side from `agent_spawned`); DH-0089 reuses it for
+ * the generic `tool_call` marker too, now that a real SSE event exists for that. Always
+ * starts a fresh turn, like a user turn — a marker never merges with a neighboring turn. */
 function appendToolMarker(state: TuiState, agentId: string, at: number, text: string): TuiState {
   const agents = new Map(state.agents);
   const existing = agents.get(agentId) ?? defaultAgent(agentId, at);
@@ -209,6 +204,62 @@ function appendToolMarker(state: TuiState, agentId: string, at: number, text: st
     lastEventAt: at,
   });
   return { ...state, agents, agentOrder };
+}
+
+/** DH-0089 `tool_call` handler: appends the generic "toolName: inputSummary" marker and
+ * records the new turn's index as `pendingToolCall` so the matching `tool_result` can find
+ * it again. Per D5, `toolName === "Agent"` is suppressed entirely here — DH-0065's richer
+ * spawn marker (driven by `agent_spawned`) already covers spawns, and rendering both would
+ * double-mark every one; a failed spawn is still surfaced because its `tool_result` (with no
+ * matching pending entry) falls through to the standalone-error-marker branch below. */
+function handleToolCall(
+  state: TuiState,
+  event: Extract<ServerSentEvent, { type: "tool_call" }>,
+  at: number,
+): TuiState {
+  if (event.toolName === "Agent") return state;
+  const next = appendToolMarker(
+    state,
+    event.agentId,
+    at,
+    `${event.toolName}: ${event.inputSummary}`,
+  );
+  const agent = next.agents.get(event.agentId);
+  if (!agent) return next;
+  const agents = new Map(next.agents);
+  agents.set(event.agentId, {
+    ...agent,
+    pendingToolCall: { toolUseId: event.toolUseId, turnIndex: agent.transcript.length - 1 },
+  });
+  return { ...next, agents };
+}
+
+/** DH-0089 `tool_result` handler. If this resolves an outstanding `pendingToolCall` (the
+ * common case), marks that same marker turn as errored (no-op on success — "leave the marker
+ * unchanged" per D5) and clears the pending entry. Otherwise (resume gap, or a suppressed
+ * `Agent` `tool_call`) renders a standalone `"toolName ✗"` marker when `isError`, and drops
+ * the event entirely on success — nothing to show for an unremarkable, already-invisible
+ * call. */
+function handleToolResult(
+  state: TuiState,
+  event: Extract<ServerSentEvent, { type: "tool_result" }>,
+  at: number,
+): TuiState {
+  const agent = state.agents.get(event.agentId);
+  const pending = agent?.pendingToolCall;
+  if (agent && pending && pending.toolUseId === event.toolUseId) {
+    const agents = new Map(state.agents);
+    const turn = agent.transcript[pending.turnIndex];
+    const transcript = turn
+      ? agent.transcript.map((t, i) =>
+          i === pending.turnIndex && event.isError ? { ...t, toolError: true } : t,
+        )
+      : agent.transcript;
+    agents.set(event.agentId, { ...agent, transcript, pendingToolCall: null, lastEventAt: at });
+    return { ...state, agents };
+  }
+  if (!event.isError) return state;
+  return appendToolMarker(state, event.agentId, at, `${event.toolName} ✗`);
 }
 
 function noEffects(state: TuiState): ReducerResult {
@@ -324,14 +375,15 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
           : next,
       );
     }
-    // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
-    // DH-0089) not yet consumed here — that's a separate TUI round (D5). Not in
-    // sse-parser.ts's KNOWN_TYPES yet either, so these never actually reach this reducer at
-    // runtime; this default exists purely to keep this switch's exhaustiveness check
-    // compiling now that the union has grown, without pre-empting the real TUI-round design
-    // (pending marker text, error suffix, per-agent toolUseId pending map) that ticket
-    // explicitly assigns to Mary.
-    default:
+    case "tool_call":
+      return noEffects(handleToolCall(state, event, at));
+    case "tool_result":
+      return noEffects(handleToolResult(state, event, at));
+    // DH-0045: `agent_thinking` is a new additive SSE event type (Core's piece of DH-0045),
+    // not yet in sse-parser.ts's KNOWN_TYPES, so it never actually reaches this reducer at
+    // runtime; this case exists purely to keep this switch's exhaustiveness check compiling.
+    // Full TUI display is deferred to a later round (mirrors Web's state.ts treatment).
+    case "agent_thinking":
       return noEffects(state);
   }
 }

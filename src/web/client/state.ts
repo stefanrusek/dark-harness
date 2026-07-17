@@ -29,10 +29,15 @@ function assertNever(_value: never): void {}
 export interface Turn {
   // DH-0093: "system" is a local, never-sent transcript entry (`/help` output) — distinct
   // from "user" (an actual sent/echoed message) and "assistant" (streamed model output).
-  role: "user" | "assistant" | "system";
+  // DH-0089: "tool" is a synthetic marker for a generic tool call/result (`toolName:
+  // inputSummary`, e.g. `Bash: bun test`) — the same role the TUI calls `"tool"`.
+  role: "user" | "assistant" | "system" | "tool";
   text: string;
   /** ISO timestamp of the turn's first chunk (assistant) or the moment it was sent (user). */
   timestamp: string;
+  /** DH-0089: set on a `"tool"` turn once its matching `tool_result` reports `isError: true`.
+   * Meaningless on every other role. */
+  toolError?: boolean;
 }
 
 export interface AgentNode {
@@ -78,6 +83,12 @@ export interface AgentNode {
    * status leaves `"running"` (the turn is over); set whenever a chunk is appended.
    */
   turnOpen: boolean;
+  /** DH-0089: transcript index of the marker turn created by the most recent unresolved
+   * `tool_call` for this agent, keyed by its `toolUseId` — lets the matching `tool_result`
+   * update that same turn (error suffix/class) instead of opening a new one. `null` when no
+   * tool call is outstanding, or the outstanding one was suppressed (`toolName === "Agent"`
+   * — see `applyEvent`'s `tool_call` case). Cleared once the matching `tool_result` arrives. */
+  pendingToolCall: { toolUseId: string; turnIndex: number } | null;
   /**
    * ISO timestamp of the most recent status transition (or, for a freshly-observed node,
    * the moment it was first seen). Every `ServerSentEvent` already carries a `timestamp`
@@ -232,6 +243,7 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
     hasCost: false,
     spawnOrder: spawnCounter++,
     turnOpen: false,
+    pendingToolCall: null,
     statusSince: timestamp,
   };
   state.agents.set(agentId, node);
@@ -331,6 +343,78 @@ export function closeModelPicker(state: WebState): WebState {
   return { ...state, modelPickerOpen: false };
 }
 
+/** DH-0089: appends a synthetic `"tool"` marker turn — always a fresh turn, never merged
+ * with a neighboring turn (same lifecycle as `addUserTurn`/`addSystemTurn`). */
+function appendToolTurn(
+  state: WebState,
+  agentId: string,
+  text: string,
+  timestamp: string,
+): WebState {
+  const node = { ...ensureAgent(state, agentId, timestamp) };
+  node.transcript = trimTranscript(
+    [...node.transcript, { role: "tool" as const, text, timestamp }],
+    MAX_TRANSCRIPT_CHARS,
+  );
+  node.turnOpen = false;
+  state.agents.set(agentId, node);
+  return state;
+}
+
+/** DH-0089 `tool_call` handler: appends the generic "toolName: inputSummary" marker and
+ * records the new turn's index as `pendingToolCall`. Per D5, `toolName === "Agent"` is
+ * suppressed entirely — DH-0065-equivalent spawn info is already shown via `agent_spawned`
+ * (`description`/`model` on the sidebar), and rendering both would double-mark every spawn;
+ * a failed spawn is still surfaced because its `tool_result` (no matching pending entry)
+ * falls through to the standalone-error-marker branch in `handleToolResult`. */
+function handleToolCall(
+  state: WebState,
+  event: Extract<ServerSentEvent, { type: "tool_call" }>,
+): WebState {
+  if (event.toolName === "Agent") return state;
+  const next = appendToolTurn(
+    state,
+    event.agentId,
+    `${event.toolName}: ${event.inputSummary}`,
+    event.timestamp,
+  );
+  const existing = next.agents.get(event.agentId);
+  if (!existing) return next;
+  const node: AgentNode = {
+    ...existing,
+    pendingToolCall: { toolUseId: event.toolUseId, turnIndex: existing.transcript.length - 1 },
+  };
+  next.agents.set(event.agentId, node);
+  return next;
+}
+
+/** DH-0089 `tool_result` handler. If this resolves an outstanding `pendingToolCall` (the
+ * common case), marks that same marker turn `toolError` when `isError` (a no-op on success —
+ * leave the marker unchanged) and clears the pending entry. Otherwise (resume gap, or a
+ * suppressed `Agent` `tool_call`) renders a standalone `"toolName ✗"` marker when `isError`,
+ * and drops the event on success — nothing to show for an already-invisible call. */
+function handleToolResult(
+  state: WebState,
+  event: Extract<ServerSentEvent, { type: "tool_result" }>,
+): WebState {
+  const agent = state.agents.get(event.agentId);
+  const pending = agent?.pendingToolCall;
+  if (agent && pending && pending.toolUseId === event.toolUseId) {
+    const node = { ...agent };
+    const turn = node.transcript[pending.turnIndex];
+    node.transcript = turn
+      ? node.transcript.map((t, i) =>
+          i === pending.turnIndex && event.isError ? { ...t, toolError: true } : t,
+        )
+      : node.transcript;
+    node.pendingToolCall = null;
+    state.agents.set(event.agentId, node);
+    return state;
+  }
+  if (!event.isError) return state;
+  return appendToolTurn(state, event.agentId, `${event.toolName} ✗`, event.timestamp);
+}
+
 /** Applies one SSE event to state, returning a new `WebState` (state is not mutated). */
 export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
   const next: WebState = {
@@ -400,15 +484,10 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     case "resync":
       next.possibleGap = true;
       return next;
-    // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
-    // DH-0089) not yet consumed here — a live tool-turn marker is a separate Web round (D5,
-    // assigned to Susan: new "tool" turn kind, pending-map keyed by toolUseId, Agent
-    // suppression rule). Handled explicitly (not folded into the exhaustiveness-check
-    // default below) so `assertNever` still guards against a truly *unhandled* future
-    // variant, rather than being defeated by these two.
     case "tool_call":
+      return handleToolCall(next, event);
     case "tool_result":
-      return next;
+      return handleToolResult(next, event);
     // DH-0045: `agent_thinking` is a new additive SSE event type (Core's piece of DH-0045)
     // not yet consumed here — full display (collapsed `<details>` turn, redaction
     // placeholder) is Web's own ticket (see DH-0045 §7/§8). No-op here for the same reason
@@ -495,6 +574,7 @@ export function seedFromTree(
       hasCost: false,
       spawnOrder: spawnCounter++,
       turnOpen: false,
+      pendingToolCall: null,
       statusSince: nowIso,
     });
   }

@@ -117,6 +117,8 @@ const KNOWN_TYPES = new Set([
   "agent_spawned",
   "token_usage",
   "session_ended",
+  "tool_call",
+  "tool_result",
 ]);
 
 function isServerSentEvent(value: unknown): value is ServerSentEvent {

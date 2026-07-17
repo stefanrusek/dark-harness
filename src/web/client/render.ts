@@ -457,14 +457,27 @@ function turnRoleLabel(role: Turn["role"]): string {
  * (`markdown-dom.ts`) — never `innerHTML`.
  */
 function renderTurnText(doc: Document, container: HTMLElement, turn: Turn): void {
-  if (turn.role === "user" || turn.role === "system") {
+  if (turn.role === "user" || turn.role === "system" || turn.role === "tool") {
     container.textContent = turn.text;
     return;
   }
   renderMarkdownInto(doc, container, parseMarkdown(turn.text));
 }
 
+/** DH-0089: a `"tool"` turn is a compact, single-row marker for a generic tool call/result
+ * (`toolName: inputSummary`) — no "You"/"Agent" role label (per D5, unlike every other
+ * role), just a muted `⚙` glyph + text, with a red `✗` appended when `toolError` is set. */
+function buildToolTurnElement(doc: Document, turn: Turn): HTMLElement {
+  const classes = turn.toolError ? "turn turn-tool turn-tool-error" : "turn turn-tool";
+  const wrapper = el(doc, "div", classes);
+  const text = el(doc, "div", "turn-text");
+  text.textContent = turn.toolError ? `⚙ ${turn.text} ✗` : `⚙ ${turn.text}`;
+  wrapper.appendChild(text);
+  return wrapper;
+}
+
 function buildTurnElement(doc: Document, turn: Turn): HTMLElement {
+  if (turn.role === "tool") return buildToolTurnElement(doc, turn);
   const wrapper = el(doc, "div", `turn turn-${turn.role}`);
   const role = el(doc, "div", "turn-role");
   role.textContent = turnRoleLabel(turn.role);

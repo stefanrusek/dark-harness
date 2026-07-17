@@ -343,17 +343,82 @@ describe("markPossibleGap / dismissPossibleGap (DH-0024)", () => {
     expect(state.agents.get("agent-1")).toEqual(before);
   });
 
-  // DH-0089: `tool_call`/`tool_result` are new additive SSE event types (Core's piece of
-  // DH-0089). Rendering them as a live transcript marker is a separate Web round (D5,
-  // assigned to Susan) — this build's handler just needs to accept them without corrupting
-  // state (bumped lastEventId aside, applyEvent is otherwise a no-op for these two types).
-  test("tool_call/tool_result events are accepted without altering agent state (D5 deferred to a later Web round)", () => {
+  // DH-0089: `tool_call` appends a "toolName: inputSummary" marker turn and records it as
+  // pending; a successful `tool_result` resolves the pending entry and leaves the marker
+  // text unchanged (D5: "leave the marker unchanged" on success).
+  test("tool_call appends a tool marker turn; a successful tool_result leaves it unchanged", () => {
     let state = createInitialState();
     state = applyEvent(state, spawned("agent-1", null));
-    const before = state.agents.get("agent-1");
+    state = applyEvent(state, toolCall("agent-1", "tu_1"));
+    const agent = state.agents.get("agent-1");
+    expect(agent?.transcript).toEqual([
+      expect.objectContaining({ role: "tool", text: "Bash: echo hi" }),
+    ]);
+    expect(agent?.pendingToolCall).toEqual({ toolUseId: "tu_1", turnIndex: 0 });
+
+    state = applyEvent(state, toolResult("agent-1", "tu_1", false));
+    const after = state.agents.get("agent-1");
+    expect(after?.transcript).toEqual([
+      expect.objectContaining({ role: "tool", text: "Bash: echo hi" }),
+    ]);
+    expect(after?.transcript[0]?.toolError).toBeUndefined();
+    expect(after?.pendingToolCall).toBeNull();
+  });
+
+  // DH-0089: a failed tool_result marks the same pending turn errored instead of appending a
+  // second marker.
+  test("a failed tool_result marks the pending marker turn as errored", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("agent-1", null));
     state = applyEvent(state, toolCall("agent-1", "tu_1"));
     state = applyEvent(state, toolResult("agent-1", "tu_1", true));
-    expect(state.agents.get("agent-1")).toEqual(before);
+    const agent = state.agents.get("agent-1");
+    expect(agent?.transcript).toEqual([
+      expect.objectContaining({ role: "tool", text: "Bash: echo hi", toolError: true }),
+    ]);
+    expect(agent?.pendingToolCall).toBeNull();
+  });
+
+  // DH-0089 D5: `toolName === "Agent"` is suppressed at tool_call time (DH-0065-equivalent
+  // spawn info already covers it) — but a failed spawn's tool_result (no matching pending
+  // entry) still surfaces as a standalone error marker.
+  test("tool_call for toolName Agent is suppressed; its failed tool_result still renders standalone", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("agent-1", null));
+    state = applyEvent(state, {
+      ...toolCall("agent-1", "tu_agent"),
+      toolName: "Agent",
+      inputSummary: "spawn sonnet",
+    });
+    expect(state.agents.get("agent-1")?.transcript).toEqual([]);
+
+    state = applyEvent(state, { ...toolResult("agent-1", "tu_agent", true), toolName: "Agent" });
+    expect(state.agents.get("agent-1")?.transcript).toEqual([
+      expect.objectContaining({ role: "tool", text: "Agent ✗" }),
+    ]);
+
+    // A successful Agent tool_result with no pending entry drops silently.
+    let state2 = createInitialState();
+    state2 = applyEvent(state2, spawned("agent-2", null));
+    state2 = applyEvent(state2, {
+      ...toolResult("agent-2", "tu_agent2", false),
+      toolName: "Agent",
+    });
+    expect(state2.agents.get("agent-2")?.transcript).toEqual([]);
+  });
+
+  // An unmatched toolUseId (resume gap) drops silently on success and renders standalone on
+  // error — same rule as the suppressed-Agent case above.
+  test("an unmatched tool_result (resume gap) is dropped on success, standalone on error", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("agent-1", null));
+    state = applyEvent(state, toolResult("agent-1", "unknown-tu", false));
+    expect(state.agents.get("agent-1")?.transcript).toEqual([]);
+
+    state = applyEvent(state, toolResult("agent-1", "unknown-tu-2", true));
+    expect(state.agents.get("agent-1")?.transcript).toEqual([
+      expect.objectContaining({ role: "tool", text: "Bash ✗" }),
+    ]);
   });
 
   test("markPossibleGap sets possibleGap", () => {
