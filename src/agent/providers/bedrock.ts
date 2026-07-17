@@ -93,6 +93,40 @@ function toBedrockThinkingField(
   };
 }
 
+/** DH-0010 Part A: mirrors anthropic.ts's `withAnthropicCacheMarkers` — appends a
+ * `{ cachePoint: { type: "default" } }` content block (rather than annotating the existing
+ * last block, since Converse's cache point is its own trailing content block, not an
+ * annotation) to the final message's content and to the second-to-last user message's
+ * content, if one exists. Never mutates the input. */
+function withBedrockCacheMarkers(
+  messages: { role: "user" | "assistant"; content: BedrockContentBlock[] }[],
+): { role: "user" | "assistant"; content: BedrockContentBlock[] }[] {
+  const result = messages.map((m) => ({ ...m, content: [...m.content] }));
+  const cachePoint = { cachePoint: { type: "default" } } as unknown as BedrockContentBlock;
+
+  const appendMark = (
+    msg: { role: "user" | "assistant"; content: BedrockContentBlock[] } | undefined,
+  ): void => {
+    if (!msg) return;
+    msg.content.push(cachePoint);
+  };
+
+  appendMark(result[result.length - 1]);
+
+  const userIndices = result.reduce<number[]>((acc, m, i) => {
+    if (m.role === "user") acc.push(i);
+    return acc;
+  }, []);
+  if (userIndices.length >= 2) {
+    const secondToLastUserIndex = userIndices[userIndices.length - 2];
+    if (secondToLastUserIndex !== undefined) {
+      appendMark(result[secondToLastUserIndex]);
+    }
+  }
+
+  return result;
+}
+
 function mapStopReason(reason: BedrockStopReason | undefined): ProviderStopReason {
   if (reason === "tool_use") return "tool_use";
   if (reason === "max_tokens") return "max_tokens";
@@ -120,12 +154,21 @@ const AUTH_ERROR_NAMES = new Set([
  * plain error with no recognizable AWS exception name (e.g. a network-level failure that
  * never reached AWS at all) is treated as `network` (retryable), matching the same
  * "no status/name at all means it never reached the service" logic anthropic.ts uses. */
+/** DH-0010 Part B: best-effort detection of Bedrock's "the request was too long" — mirrors
+ * anthropic.ts's `isContextOverflowMessage`, same fragile-but-graceful-degradation rationale. */
+function isContextOverflowMessage(message: string): boolean {
+  return /input is too long/i.test(message);
+}
+
 function classifyBedrockError(err: unknown): { kind: ProviderErrorKind; retryable: boolean } {
   const name = (err as { name?: unknown } | null)?.name;
   if (typeof name === "string") {
     if (RATE_LIMIT_ERROR_NAMES.has(name)) return { kind: "rate_limit", retryable: true };
     if (OVERLOADED_ERROR_NAMES.has(name)) return { kind: "overloaded", retryable: true };
     if (AUTH_ERROR_NAMES.has(name)) return { kind: "auth", retryable: false };
+    if (name === "ValidationException" && isContextOverflowMessage((err as Error).message ?? "")) {
+      return { kind: "context_overflow", retryable: false };
+    }
     if (name !== "Error" && name !== "TypeError") return { kind: "other", retryable: false };
   }
   return { kind: "network", retryable: true };
@@ -173,14 +216,20 @@ export class BedrockProvider implements ModelProvider {
     try {
       result = await withRetry(
         async () => {
+          const rawMessages = request.messages.map((m) => ({
+            role: m.role,
+            content: m.content.map(toBedrockContent),
+          }));
           const response = await this.client.send(
             new ConverseStreamCommand({
               modelId: request.model,
-              system: [{ text: request.system }],
-              messages: request.messages.map((m) => ({
-                role: m.role,
-                content: m.content.map(toBedrockContent),
-              })),
+              // DH-0010 Part A: system gains a trailing cachePoint block only when
+              // `request.cache` is true — false/absent keeps the plain single-text-block
+              // form, byte-identical to pre-DH-0010 requests.
+              system: request.cache
+                ? [{ text: request.system }, { cachePoint: { type: "default" } }]
+                : [{ text: request.system }],
+              messages: request.cache ? withBedrockCacheMarkers(rawMessages) : rawMessages,
               ...(tools.length > 0 ? { toolConfig: { tools } } : {}),
               ...(request.thinking !== undefined
                 ? {

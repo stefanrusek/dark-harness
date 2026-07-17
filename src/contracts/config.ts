@@ -23,6 +23,23 @@ export interface ModelConfig {
    * parameter sent to the provider, today's behavior unchanged. No provider-type
    * restriction: valid on both `anthropic` and `bedrock` models. */
   thinking?: ThinkingConfig;
+  /** DH-0010 Part A: opt-in prompt caching for this model. Default `false`. Per-model (not
+   * per-provider) since Bedrock cache-point support varies by model and anthropic-type
+   * support varies by endpoint (a `baseURL`-pointed local server may reject/ignore
+   * `cache_control`) — see tracking/DH-0010's Design section for the full rationale.
+   * Absent/false means requests stay byte-identical to pre-DH-0010 behavior. */
+  cache?: boolean;
+  /** DH-0010 Part A: USD per million cache-read tokens. When unset but
+   * `inputPricePerMToken` is set, defaults to 0.1x the input price (the published
+   * multiplier on both Anthropic and Bedrock). */
+  cacheReadPricePerMToken?: number;
+  /** DH-0010 Part A: USD per million cache-write (cache-creation) tokens. When unset but
+   * `inputPricePerMToken` is set, defaults to 1.25x the input price. */
+  cacheWritePricePerMToken?: number;
+  /** DH-0010 Part B: this model's context window, in tokens. No hardcoded model→window
+   * table — same rationale as pricing (must come from config). Required for every
+   * configured model when `compaction.enabled` is `true` (validated at config load). */
+  contextWindow?: number;
 }
 
 /** DH-0045 (tracking/DH-0045-no-extended-thinking-support.md): opt-in extended thinking for
@@ -216,6 +233,19 @@ export interface WebConfig {
   search?: WebSearchConfig;
 }
 
+/**
+ * DH-0010 Part B (tracking/DH-0010-no-context-window-compaction-or-cache-control.md,
+ * architect design Fable 2026-07-15): top-level opt-in context-window compaction. Absent
+ * means disabled — the explicit on/off switch the owner asked for, no always-on background
+ * behavior. `enabled: true` requires every configured `models[]` entry to declare
+ * `contextWindow` (validated at config load, src/config/validate.ts).
+ */
+export interface CompactionConfig {
+  enabled: boolean;
+  /** Percent (1-99) of `contextWindow` at which compaction triggers. Default 80. */
+  thresholdPercent?: number;
+}
+
 export interface DhConfig {
   options: DhOptions;
   models: ModelConfig[];
@@ -234,4 +264,7 @@ export interface DhConfig {
   /** DH-0074: opt-in outbound web access (WebFetch/WebSearch). Omitted means neither tool is
    * registered — the harness stays fully air-gapped by default. */
   web?: WebConfig;
+  /** DH-0010 Part B: opt-in context-window compaction. Omitted means disabled (today's
+   * behavior, unchanged). */
+  compaction?: CompactionConfig;
 }

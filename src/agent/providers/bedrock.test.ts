@@ -647,4 +647,126 @@ describe("BedrockProvider", () => {
     expect(wasCalled).toBe(true);
     expect(receivedOptions).toBeUndefined();
   });
+
+  describe("DH-0010 Part A: prompt caching", () => {
+    test("given cache unset, requests are byte-identical to pre-DH-0010 behavior", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "turn one" }] },
+          { role: "assistant", content: [{ type: "text", text: "reply one" }] },
+          { role: "user", content: [{ type: "text", text: "turn two" }] },
+        ],
+      });
+      expect(captured?.input.system).toEqual([{ text: "you are a helpful agent" }]);
+      for (const m of captured?.input.messages ?? []) {
+        for (const block of m.content ?? []) {
+          expect(block).not.toHaveProperty("cachePoint");
+        }
+      }
+    });
+
+    test("given cache: true, cachePoint blocks appear at the three documented positions", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        cache: true,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "turn one" }] },
+          { role: "assistant", content: [{ type: "text", text: "reply one" }] },
+          { role: "user", content: [{ type: "text", text: "turn two" }] },
+        ],
+      });
+
+      // 1. system gains a trailing cachePoint block.
+      expect(captured?.input.system).toEqual([
+        { text: "you are a helpful agent" },
+        { cachePoint: { type: "default" } },
+      ]);
+
+      // 2. Last content block of the final message (turn two).
+      const messages = captured?.input.messages ?? [];
+      const finalContent = messages[messages.length - 1]?.content ?? [];
+      expect(finalContent[finalContent.length - 1]).toEqual({ cachePoint: { type: "default" } });
+
+      // 3. Last content block of the second-to-last user message (turn one).
+      const firstContent = messages[0]?.content ?? [];
+      expect(firstContent[firstContent.length - 1]).toEqual({ cachePoint: { type: "default" } });
+
+      // The assistant message in between gains no cachePoint.
+      const assistantContent = messages[1]?.content ?? [];
+      expect(assistantContent[assistantContent.length - 1]).not.toEqual({
+        cachePoint: { type: "default" },
+      });
+    });
+
+    test("given cache: true with only one user message, no second-to-last marker is applied", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete({ ...BASE_REQUEST, cache: true });
+      const messages = captured?.input.messages ?? [];
+      expect(messages).toHaveLength(1);
+      const content = messages[0]?.content ?? [];
+      expect(content[content.length - 1]).toEqual({ cachePoint: { type: "default" } });
+    });
+  });
+
+  describe("DH-0010 Part B: context_overflow classification", () => {
+    function errorWithNameLocal(name: string, message: string): Error {
+      const err = new Error(message);
+      err.name = name;
+      return err;
+    }
+
+    test('classifies a ValidationException "Input is too long" as context_overflow, non-retryable', async () => {
+      let calls = 0;
+      const client: BedrockClientLike = {
+        send: async () => {
+          calls += 1;
+          throw errorWithNameLocal("ValidationException", "Input is too long for requested model.");
+        },
+      };
+      const provider = new BedrockProvider(
+        { name: "bedrock", type: "bedrock", retry: { maxAttempts: 3, baseDelayMs: 1 } },
+        client,
+      );
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).kind).toBe("context_overflow");
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(calls).toBe(1);
+    });
+
+    test("a ValidationException with an unrelated message still classifies as other", async () => {
+      const client: BedrockClientLike = {
+        send: async () => {
+          throw errorWithNameLocal("ValidationException", "malformed request body");
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("other");
+    });
+  });
 });

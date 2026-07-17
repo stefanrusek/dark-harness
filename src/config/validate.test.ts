@@ -960,3 +960,166 @@ describe("validateConfig — web (DH-0074)", () => {
     expect(config.web?.search).toEqual({ provider: "brave", apiKey: "key" });
   });
 });
+
+describe("DH-0010 Part A: models[].cache/cacheReadPricePerMToken/cacheWritePricePerMToken", () => {
+  test("accepts models[].cache: true", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [{ name: "sonnet", provider: "anthropic", model: "sonnet-5", cache: true }],
+      }),
+    );
+    expect(config.models[0]?.cache).toBe(true);
+  });
+
+  test("models[].cache is omitted (not defaulted) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.models[0]?.cache).toBeUndefined();
+  });
+
+  test("rejects a non-boolean models[].cache", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [{ name: "sonnet", provider: "anthropic", model: "sonnet-5", cache: "yes" }],
+        }),
+      ),
+    ).toThrow(/models\[0\].cache must be a boolean/);
+  });
+
+  test("accepts models[].cacheReadPricePerMToken/cacheWritePricePerMToken", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "sonnet-5",
+            cacheReadPricePerMToken: 0.3,
+            cacheWritePricePerMToken: 3.75,
+          },
+        ],
+      }),
+    );
+    expect(config.models[0]?.cacheReadPricePerMToken).toBe(0.3);
+    expect(config.models[0]?.cacheWritePricePerMToken).toBe(3.75);
+  });
+
+  test("rejects a negative cacheReadPricePerMToken", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              cacheReadPricePerMToken: -1,
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].cacheReadPricePerMToken must be a non-negative number/);
+  });
+});
+
+describe("DH-0010 Part B: compaction config + models[].contextWindow", () => {
+  test("accepts models[].contextWindow", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+        ],
+      }),
+    );
+    expect(config.models[0]?.contextWindow).toBe(200000);
+  });
+
+  test("compaction is omitted (disabled) when absent — default behavior unchanged", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.compaction).toBeUndefined();
+  });
+
+  test("accepts compaction: { enabled: true } when every model has contextWindow", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+        ],
+        compaction: { enabled: true },
+      }),
+    );
+    expect(config.compaction).toEqual({ enabled: true });
+  });
+
+  test("accepts compaction.thresholdPercent between 1 and 99", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+        ],
+        compaction: { enabled: true, thresholdPercent: 90 },
+      }),
+    );
+    expect(config.compaction).toEqual({ enabled: true, thresholdPercent: 90 });
+  });
+
+  test("rejects compaction.thresholdPercent outside 1-99", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+          ],
+          compaction: { enabled: true, thresholdPercent: 100 },
+        }),
+      ),
+    ).toThrow(/compaction.thresholdPercent must be an integer between 1 and 99/);
+  });
+
+  test("rejects compaction without enabled", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+          ],
+          compaction: { thresholdPercent: 50 },
+        }),
+      ),
+    ).toThrow(/compaction.enabled must be a boolean/);
+  });
+
+  test("rejects an unknown compaction key", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+          ],
+          compaction: { enabled: true, bogus: true },
+        }),
+      ),
+    ).toThrow(/compaction has unknown key "bogus"/);
+  });
+
+  test("given compaction.enabled: true and a model missing contextWindow, throws naming the model and the field", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+            { name: "gemma4", provider: "anthropic", model: "gemma4" },
+          ],
+          compaction: { enabled: true },
+        }),
+      ),
+    ).toThrow(
+      /compaction.enabled is true but models\[\].contextWindow is missing for model "gemma4"/,
+    );
+  });
+
+  test("given compaction.enabled: false, a model missing contextWindow is fine", () => {
+    const config = validateConfig(baseConfig({ compaction: { enabled: false } }));
+    expect(config.compaction).toEqual({ enabled: false });
+  });
+});

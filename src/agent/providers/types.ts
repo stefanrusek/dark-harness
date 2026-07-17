@@ -43,6 +43,10 @@ export interface ProviderCompletionRequest {
    * contracts type directly (no separate camelCase internal mirror) — it's already
    * camelCase and provider-agnostic, so a second identical type would be pure duplication. */
   thinking?: ThinkingConfig;
+  /** DH-0010 Part A: opt-in prompt caching, threaded from `ModelConfig.cache`. Absent/false
+   * means requests stay byte-identical to pre-DH-0010 behavior (no cache marker fields at
+   * all) — see anthropic.ts/bedrock.ts for the exact marker positions. */
+  cache?: boolean;
 }
 
 export type ProviderStopReason = "end_turn" | "tool_use" | "max_tokens" | "other";
@@ -111,8 +115,19 @@ export interface ModelProvider {
  * - `other` — anything not confidently classified as one of the above (e.g. a malformed
  *   request, a 4xx that isn't auth). Not retryable by default — an unrecognized error
  *   shouldn't be assumed safe to blindly retry.
+ * - `context_overflow` — DH-0010 Part B: the request exceeded the model's context window
+ *   (Anthropic 400 `invalid_request_error` "prompt is too long"; Bedrock `ValidationException`
+ *   "Input is too long"). Never retryable — retrying the identical oversized request fails
+ *   identically. `loop.ts` catches this kind specifically and reports a graceful agent
+ *   failure instead of an uncaught crash.
  */
-export type ProviderErrorKind = "auth" | "rate_limit" | "overloaded" | "network" | "other";
+export type ProviderErrorKind =
+  | "auth"
+  | "rate_limit"
+  | "overloaded"
+  | "network"
+  | "other"
+  | "context_overflow";
 
 export class ProviderError extends Error {
   readonly kind: ProviderErrorKind;

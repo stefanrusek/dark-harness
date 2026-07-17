@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0010
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -223,6 +223,40 @@ acceptable.
   pricing; both are config-overridable per model.
 
 ## Notes
+
+### 2026-07-17 — Implementation complete (Part A + Part B), verifying
+
+Implemented both parts per the architect design in this ticket's Design section.
+
+**Part A (prompt caching):**
+- `ModelConfig.cache?`, `cacheReadPricePerMToken?`, `cacheWritePricePerMToken?` (src/contracts/config.ts)
+- `ProviderCompletionRequest.cache?` (src/agent/providers/types.ts), threaded loop.ts -> runtime.ts -> ModelBinding -> provider.complete()
+- Anthropic adapter: cache_control ephemeral markers at system+tools, last message, second-to-last user message (src/agent/providers/anthropic.ts)
+- Bedrock adapter: equivalent cachePoint blocks at the same three positions (src/agent/providers/bedrock.ts)
+- computeCostUsd extended with cacheReadTokens/cacheWriteTokens params and 0.1x/1.25x default multipliers (src/agent/loop.ts)
+- TokenUsageEvent gains cacheReadTokens?/cacheWriteTokens? (src/contracts/events.ts), mirrored from the JSONL log line
+- DH-0013 budget accumulator (AgentRuntime.recordUsageAndCheckBudgets) now counts input+output+cacheRead+cacheWrite
+
+**Part B (context-window compaction):**
+- Top-level `compaction?: {enabled, thresholdPercent?}` and `ModelConfig.contextWindow?` (src/contracts/config.ts)
+- Config validation: compaction.enabled requires every model to declare contextWindow (src/config/validate.ts)
+- Trigger check at top of every turn in loop.ts using contextTokens = inputTokens+cacheReadTokens+cacheWriteTokens+outputTokens vs contextWindow*thresholdPercent/100
+- Summarization-based compaction (no-tools call, rebuild history preserving instruction+summary+tail starting at an assistant-message boundary), compacts at most once per trigger
+- New `compaction` LogLine variant {preTokens, droppedMessages, retainedMessages, summaryChars} (src/contracts/log.ts)
+- `ProviderErrorKind` gains `context_overflow` (src/agent/providers/types.ts); both adapters classify Anthropic 400 "prompt is too long" / Bedrock ValidationException "Input is too long" as this kind
+- loop.ts catches context_overflow and reports a graceful agent failure: "context window exceeded; enable compaction (compaction.enabled in dh.json) or reduce task scope"
+- compaction config + model contextWindow threaded through runtime.ts into AgentLoopParams/ModelBinding
+
+README.md's config reference section updated (cache/cacheReadPricePerMToken/cacheWritePricePerMToken/contextWindow/compaction) to keep the README-config-sync drift guard (src/prompt/readme-config-sync.test.ts) passing.
+
+**User Story → test mapping (CLAUDE.md §9):**
+- "compact history before hitting the model's context limit, not crash" → src/agent/loop.test.ts: `describe("DH-0010 Part B: context-window compaction")` > `"given contextTokens at/above threshold, the next turn compacts history and emits a compaction log line"`; and `describe("DH-0010 Part B: context_overflow graceful failure")` > `"given the provider throws a context_overflow ProviderError, the agent fails gracefully with an actionable reason"`
+- "use prompt caching where the provider supports it" → src/agent/providers/anthropic.test.ts: `describe("DH-0010 Part A: prompt caching")` > `"given cache: true, cache_control markers appear at the three documented positions"`; src/agent/providers/bedrock.test.ts: `describe("DH-0010 Part A: prompt caching")` > `"given cache: true, cachePoint blocks appear at the three documented positions"`
+- "explicitly enable or disable context-window compaction via config" → src/config/validate.test.ts: `describe("DH-0010 Part B: compaction config + models[].contextWindow")` > `"compaction is omitted (disabled) when absent — default behavior unchanged"` and `"accepts compaction: { enabled: true } when every model has contextWindow"`; also `"given compaction.enabled: true and a model missing contextWindow, throws naming the model and the field"`
+
+Additional coverage: byte-identical behavior when cache is unset/false (anthropic.test.ts/bedrock.test.ts "byte-identical to pre-DH-0010 behavior" tests), computeCostUsd cache-token cost + default multipliers (loop.test.ts "DH-0010 Part A: computeCostUsd cache-token pricing"), SSE event mirroring (loop.test.ts "DH-0010 Part A: token_usage SSE event mirrors cache tokens"), budget accumulator counting cache tokens (runtime.test.ts "maxTotalTokens counts cache-read/cache-write tokens toward the cap, not just input+output"), compaction tail-boundary rebuild (loop.test.ts "compacted history's tail starts at an assistant-message boundary"), context_overflow classification for both providers (anthropic.test.ts/bedrock.test.ts "DH-0010 Part B: context_overflow classification").
+
+Gates: `bun run typecheck` (clean), `bun run lint` (clean), `bun test src --coverage` (2080 pass, 0 fail, all changed files at or near 100% coverage). e2e skipped per instructions (no e2e/ files touched).
 
 > [!NOTE]
 > Source: Core domain sweep finding #2 (no compaction) and Competitive-differentiation sweep
