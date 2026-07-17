@@ -865,6 +865,32 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(io.stdoutLines[0]).toContain("http://example.com:9000");
   });
 
+  test("DH-0111: --connect strips an http:// scheme the caller already included, avoiding a doubled scheme", async () => {
+    const io = fakeIo();
+    let receivedBaseUrl: string | undefined;
+    const code = await main(["--connect", "http://example.com"], {
+      ...interactiveOverrides(io),
+      startTui: async (baseUrl) => {
+        receivedBaseUrl = baseUrl;
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(receivedBaseUrl).toBe(`http://example.com:${DEFAULT_PORT}`);
+  });
+
+  test("DH-0111: --connect --web strips an https:// scheme the caller already included", async () => {
+    const io = fakeIo();
+    let receivedTargetBaseUrl: string | undefined;
+    await main(["--connect", "https://example.com", "--web", "--port", "9000"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedTargetBaseUrl = options.targetBaseUrl;
+        return fakeWebUi({ url: "http://localhost:60002" });
+      },
+    });
+    expect(receivedTargetBaseUrl).toBe("http://example.com:9000");
+  });
+
   test("--connect dials https:// when the connecting side's own security.tls is set", async () => {
     const io = fakeIo();
     let receivedBaseUrl: string | undefined;
