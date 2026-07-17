@@ -2,7 +2,7 @@
 // here — side effects (HTTP commands, process exit) are described as data and executed by
 // app.ts. This is what makes the TUI's core logic fully unit-testable without a terminal.
 
-import type { ModelInfo, ServerSentEvent, SkillInfo } from "../contracts/index.ts";
+import type { AgentStatus, ModelInfo, ServerSentEvent, SkillInfo } from "../contracts/index.ts";
 import { parseSlashCommand } from "./commands.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";
@@ -206,6 +206,29 @@ function appendToolMarker(state: TuiState, agentId: string, at: number, text: st
   return { ...state, agents, agentOrder };
 }
 
+/** Append a `"tool"` marker turn tagged with `terminalStatus` (DH-0130) so the render layer
+ * can style it via DH-0137's status tokens instead of the generic dim tool-marker styling. */
+function appendTerminalMarker(
+  state: TuiState,
+  agentId: string,
+  at: number,
+  status: AgentStatus,
+): TuiState {
+  const agents = new Map(state.agents);
+  const existing = agents.get(agentId) ?? defaultAgent(agentId, at);
+  const agentOrder = agents.has(agentId) ? state.agentOrder : [...state.agentOrder, agentId];
+  const transcript = [
+    ...existing.transcript,
+    { role: "tool" as const, text: `Agent ${status}`, terminalStatus: status },
+  ];
+  agents.set(agentId, {
+    ...existing,
+    transcript: trimTranscript(transcript, MAX_OUTPUT_CHARS),
+    lastEventAt: at,
+  });
+  return { ...state, agents, agentOrder };
+}
+
 /** DH-0089 `tool_call` handler: appends the generic "toolName: inputSummary" marker and
  * records the new turn's index as `pendingToolCall` so the matching `tool_result` can find
  * it again. Per D5, `toolName === "Agent"` is suppressed entirely here — DH-0065's richer
@@ -328,7 +351,11 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
       return noEffects(event.agentId === state.rootAgentId ? { ...next, rootActive: true } : next);
     }
     case "agent_status": {
-      const next = withAgent(state, event.agentId, at, { status: event.status });
+      const prior = state.agents.get(event.agentId);
+      let next = withAgent(state, event.agentId, at, { status: event.status });
+      if (TERMINAL_STATUSES.has(event.status) && prior?.status !== event.status) {
+        next = appendTerminalMarker(next, event.agentId, at, event.status);
+      }
       return noEffects(evictCompletedAgents(next, DEFAULT_COMPLETED_RETENTION));
     }
     case "token_usage": {
