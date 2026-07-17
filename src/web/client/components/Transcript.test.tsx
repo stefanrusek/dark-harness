@@ -93,16 +93,45 @@ describe("Transcript", () => {
     expect(container.querySelector(".turn-thinking")).not.toBeNull();
   });
 
-  test("reveals the jump-to-latest button when new content arrives while scrolled away from the bottom", () => {
+  // Regression coverage for DH-0129's real bug: scrollHeight only takes its post-growth value
+  // once new content actually lands (matching what a real browser does -- by the time the
+  // content-update effect runs, the DOM has already grown). A scrollHeight that stays constant
+  // across rerenders can't exercise the bug where isNearBottom() was computed AFTER the growth
+  // and mistook the height delta for "user scrolled away."
+  function mutateScrollMetrics(
+    region: HTMLElement,
+    metrics: { scrollHeight: number; clientHeight: number; scrollTop?: number },
+  ) {
+    Object.defineProperty(region, "scrollHeight", {
+      value: metrics.scrollHeight,
+      configurable: true,
+    });
+    Object.defineProperty(region, "clientHeight", {
+      value: metrics.clientHeight,
+      configurable: true,
+    });
+    if (metrics.scrollTop !== undefined) {
+      Object.defineProperty(region, "scrollTop", {
+        value: metrics.scrollTop,
+        configurable: true,
+        writable: true,
+      });
+    }
+  }
+
+  test("auto-scrolls to the new bottom when content grows while already near the bottom", () => {
     const agent = agentWithOutput() as AgentNode;
     const { container, rerender } = render(
       <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
     );
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
-    Object.defineProperty(scrollRegion, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(scrollRegion, "clientHeight", { value: 200, configurable: true });
-    Object.defineProperty(scrollRegion, "scrollTop", { value: 0, configurable: true });
+    // User is scrolled to the bottom of the initial, shorter content.
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 500, clientHeight: 200, scrollTop: 300 });
+    fireEvent.scroll(scrollRegion);
 
+    // A real browser grows scrollHeight as soon as the new, taller content is committed --
+    // simulate that growth landing before the content-update effect runs.
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 900, clientHeight: 200 });
     const grown: AgentNode = {
       ...agent,
       transcript: [
@@ -112,23 +141,22 @@ describe("Transcript", () => {
     };
     rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
 
-    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
+    expect(scrollRegion.scrollTop).toBe(900);
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
   });
 
-  test("auto-scrolls to the bottom when new content arrives while already near the bottom", () => {
+  test("stays put and reveals the jump-to-latest button when content grows while scrolled away", () => {
     const agent = agentWithOutput() as AgentNode;
     const { container, rerender } = render(
       <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
     );
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
-    Object.defineProperty(scrollRegion, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(scrollRegion, "clientHeight", { value: 200, configurable: true });
-    Object.defineProperty(scrollRegion, "scrollTop", {
-      value: 820,
-      configurable: true,
-      writable: true,
-    });
+    // User has scrolled up, away from the bottom of the initial content.
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 500, clientHeight: 200, scrollTop: 0 });
+    fireEvent.scroll(scrollRegion);
 
+    // New content grows scrollHeight even though the user never moved scrollTop.
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 900, clientHeight: 200 });
     const grown: AgentNode = {
       ...agent,
       transcript: [
@@ -138,8 +166,8 @@ describe("Transcript", () => {
     };
     rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
 
-    expect(scrollRegion.scrollTop).toBe(1000);
-    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
+    expect(scrollRegion.scrollTop).toBe(0);
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
   });
 
   test("clicking jump-to-latest scrolls back to the bottom and hides the button", () => {
@@ -148,14 +176,10 @@ describe("Transcript", () => {
       <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
     );
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
-    Object.defineProperty(scrollRegion, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(scrollRegion, "clientHeight", { value: 200, configurable: true });
-    Object.defineProperty(scrollRegion, "scrollTop", {
-      value: 0,
-      configurable: true,
-      writable: true,
-    });
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 500, clientHeight: 200, scrollTop: 0 });
+    fireEvent.scroll(scrollRegion);
 
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 900, clientHeight: 200 });
     const grown: AgentNode = {
       ...agent,
       transcript: [
@@ -169,7 +193,7 @@ describe("Transcript", () => {
     const jumpButton = container.querySelector(".jump-to-latest") as HTMLElement;
     fireEvent.click(jumpButton);
 
-    expect(scrollRegion.scrollTop).toBe(1000);
+    expect(scrollRegion.scrollTop).toBe(900);
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
   });
 

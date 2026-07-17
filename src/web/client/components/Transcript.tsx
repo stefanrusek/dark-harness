@@ -78,6 +78,13 @@ export function Transcript({ agent, sessionEnded, exitCode }: TranscriptProps): 
   const [jumpVisible, setJumpVisible] = useState(false);
   const lastTurnCount = useRef(0);
   const lastAgentId = useRef<string | null>(null);
+  // Tracks "was the user at the bottom" independent of content growth. Updated ONLY by the
+  // onScroll handler (real user-driven scroll), never read-and-recomputed after new content
+  // has already grown scrollHeight -- see DH-0129 bug notes: isNearBottom() called from the
+  // content-update effect runs after React commits the taller DOM, so scrollHeight already
+  // reflects the new content while scrollTop hasn't moved, making any turn taller than the
+  // threshold look like "user scrolled away."
+  const stickToBottomRef = useRef(true);
 
   const isNearBottom = () => {
     const region = scrollRegionRef.current;
@@ -89,6 +96,7 @@ export function Transcript({ agent, sessionEnded, exitCode }: TranscriptProps): 
     const region = scrollRegionRef.current;
     if (!region) return;
     region.scrollTop = region.scrollHeight;
+    stickToBottomRef.current = true;
     setJumpVisible(false);
   };
 
@@ -111,7 +119,7 @@ export function Transcript({ agent, sessionEnded, exitCode }: TranscriptProps): 
       scrollToBottom();
       return;
     }
-    const wasNearBottom = isNearBottom();
+    const wasNearBottom = stickToBottomRef.current;
     lastTurnCount.current = transcript.length;
     if (wasNearBottom) {
       scrollToBottom();
@@ -133,7 +141,11 @@ export function Transcript({ agent, sessionEnded, exitCode }: TranscriptProps): 
       <div
         className="output-scroll"
         ref={scrollRegionRef}
-        onScroll={() => isNearBottom() && setJumpVisible(false)}
+        onScroll={() => {
+          const nearBottom = isNearBottom();
+          stickToBottomRef.current = nearBottom;
+          if (nearBottom) setJumpVisible(false);
+        }}
       >
         <div className="agent-transcript" role="log" aria-live="polite">
           {transcript.length === 0 ? (
