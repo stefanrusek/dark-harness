@@ -25,7 +25,7 @@
 // per-row `\x1b[K` framing in render.ts stay row-local — no style can leak into header/footer
 // rows.
 
-import type { BlockNode, InlineNode } from "../markdown/index.ts";
+import type { BlockNode, InlineNode, TableAlign } from "../markdown/index.ts";
 import { charWidth, codePoints, stringWidth } from "./width.ts";
 
 const RESET = "\x1b[0m";
@@ -268,7 +268,73 @@ function renderBlock(block: BlockNode, cols: number): string[] {
     }
     case "list":
       return renderListBlock(block, cols);
+    case "table":
+      return renderTableBlock(block);
   }
+}
+
+/** One table cell's inline content flattened to a single logical line of styled segments
+ * (DH-0109) — table cells don't wrap or carry embedded line breaks in this renderer, so only
+ * the first logical line `inlineToLines` produces is used. */
+function tableCellSegments(nodes: InlineNode[]): Segment[] {
+  return inlineToLines(nodes, [])[0] ?? [];
+}
+
+function segmentsWidth(segments: readonly Segment[]): number {
+  return stringWidth(segments.map((s) => s.text).join(""));
+}
+
+/** Renders one table row (header or body) as a single ANSI row: `│ cell │ cell │` with each
+ * cell padded to its column's width and aligned per `align` (DH-0109's `:---:`/`---:`/`:---`
+ * markers). Header cells are additionally bolded. */
+function renderTableRow(
+  cells: readonly Segment[][],
+  widths: readonly number[],
+  align: readonly TableAlign[],
+  isHeader: boolean,
+): string {
+  const parts: { text: string; codes: readonly string[] }[] = [{ text: "│ ", codes: [SGR.dim] }];
+  widths.forEach((width, idx) => {
+    const segs = cells[idx] ?? [];
+    const totalPad = Math.max(0, width - segmentsWidth(segs));
+    const a = align[idx] ?? null;
+    const leftPad = a === "right" ? totalPad : a === "center" ? Math.floor(totalPad / 2) : 0;
+    const rightPad = totalPad - leftPad;
+    if (leftPad > 0) parts.push({ text: " ".repeat(leftPad), codes: [] });
+    for (const seg of segs) {
+      parts.push({ text: seg.text, codes: isHeader ? [...seg.codes, SGR.bold] : seg.codes });
+    }
+    if (rightPad > 0) parts.push({ text: " ".repeat(rightPad), codes: [] });
+    const isLast = idx === widths.length - 1;
+    parts.push({ text: isLast ? " │" : " │ ", codes: [SGR.dim] });
+  });
+  return serializeRow(parts);
+}
+
+/** GFM table -> a box-drawing ASCII table (DH-0109; the ticket left the exact terminal style
+ * up to the implementer). Column widths are computed from the widest cell in each column, not
+ * wrapped to `cols` — a table wider than the terminal simply overflows, matching this
+ * renderer's existing "no mid-word hard-wrap for structural chrome" treatment of code blocks. */
+function renderTableBlock(block: Extract<BlockNode, { kind: "table" }>): string[] {
+  const columnCount = block.header.length;
+  const headerSegs = block.header.map((h) => tableCellSegments(h));
+  const rowSegs = block.rows.map((row) => row.map((c) => tableCellSegments(c)));
+  const widths: number[] = [];
+  for (let c = 0; c < columnCount; c++) {
+    let w = segmentsWidth(headerSegs[c] ?? []);
+    for (const row of rowSegs) w = Math.max(w, segmentsWidth(row[c] ?? []));
+    widths.push(w);
+  }
+  const dim = (s: string): string => `${sgrPrefix([SGR.dim])}${s}${RESET}`;
+  const border = (left: string, mid: string, right: string): string =>
+    dim(left + widths.map((w) => "─".repeat(w + 2)).join(mid) + right);
+
+  const rows: string[] = [border("┌", "┬", "┐")];
+  rows.push(renderTableRow(headerSegs, widths, block.align, true));
+  rows.push(border("├", "┼", "┤"));
+  for (const row of rowSegs) rows.push(renderTableRow(row, widths, block.align, false));
+  rows.push(border("└", "┴", "┘"));
+  return rows;
 }
 
 function renderListBlock(block: Extract<BlockNode, { kind: "list" }>, cols: number): string[] {

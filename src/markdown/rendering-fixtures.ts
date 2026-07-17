@@ -259,45 +259,94 @@ export const renderingFixtures: RenderingFixture[] = [
     },
   },
 
-  // --- Documented exclusions: must degrade to literal text, never crash -------------------
+  // --- GFM tables (DH-0109) --------------------------------------------------------------
   {
-    name: "excluded: tables degrade to literal text",
+    name: "GFM table",
     markdown: "| a | b |\n| - | - |\n| 1 | 2 |",
     tui: (rows) => {
       const joined = stripAnsi(rows.join("\n"));
-      expect(joined).toContain("| a | b |");
-      expect(joined).toContain("| - | - |");
-      expect(joined).toContain("| 1 | 2 |");
+      expect(joined).toContain("a");
+      expect(joined).toContain("b");
+      expect(joined).toContain("1");
+      expect(joined).toContain("2");
+      // Header/body separator uses box-drawing, not literal pipe-and-dash source syntax.
+      expect(joined).not.toContain("| - | - |");
     },
     web: (root) => {
-      expect(root.querySelector("table")).toBeNull();
-      expect(root.textContent).toContain("| a | b |");
-      expect(root.textContent).toContain("| 1 | 2 |");
+      const table = root.querySelector("table");
+      expect(table).not.toBeNull();
+      const headerCells = [...(table?.querySelectorAll("thead th") ?? [])];
+      expect(headerCells.map((c) => c.textContent)).toEqual(["a", "b"]);
+      const bodyCells = [...(table?.querySelectorAll("tbody td") ?? [])];
+      expect(bodyCells.map((c) => c.textContent)).toEqual(["1", "2"]);
     },
   },
   {
-    name: "excluded: setext headings degrade to literal text",
-    markdown: "Title\n===",
+    name: "GFM table with alignment markers",
+    markdown: "| a | b | c |\n| :- | :-: | -: |\n| 1 | 2 | 3 |",
     tui: (rows) => {
       const joined = stripAnsi(rows.join("\n"));
-      expect(joined).toContain("Title");
-      expect(joined).toContain("===");
+      expect(joined).toContain("1");
+      expect(joined).toContain("3");
     },
     web: (root) => {
-      expect(root.querySelector("h1, h2, h3, h4, h5, h6")).toBeNull();
-      expect(root.textContent).toContain("Title");
-      expect(root.textContent).toContain("===");
+      const cells = [...(root.querySelectorAll("tbody td") ?? [])];
+      expect(cells).toHaveLength(3);
+    },
+  },
+
+  // --- Setext-style headings (DH-0109) -----------------------------------------------------
+  {
+    name: "setext h1",
+    markdown: "Title\n===",
+    tui: (rows) => {
+      expect(rows).toHaveLength(1);
+      expect(stripAnsi(rows[0] as string)).toBe("Title");
+    },
+    web: (root) => {
+      const heading = root.querySelector("h1");
+      expect(heading?.textContent).toBe("Title");
     },
   },
   {
-    name: "excluded: reference-style links degrade to literal text",
-    markdown: "[text][ref]",
+    name: "setext h2",
+    markdown: "Subtitle\n---",
     tui: (rows) => {
-      expect(stripAnsi(rows.join("\n"))).toBe("[text][ref]");
+      expect(rows).toHaveLength(1);
+      expect(stripAnsi(rows[0] as string)).toBe("Subtitle");
+    },
+    web: (root) => {
+      const heading = root.querySelector("h2");
+      expect(heading?.textContent).toBe("Subtitle");
+    },
+  },
+
+  // --- Reference-style links (DH-0109) -----------------------------------------------------
+  {
+    name: "reference-style link",
+    markdown: "[text][ref]\n\n[ref]: https://x.example",
+    tui: (rows) => {
+      const joined = stripAnsi(rows.join("\n"));
+      expect(joined).toContain("text");
+      expect(joined).toContain("https://x.example");
+    },
+    web: (root) => {
+      const anchor = root.querySelector("a");
+      expect(anchor?.textContent).toBe("text");
+      expect(anchor?.getAttribute("href")).toBe("https://x.example/");
+    },
+  },
+
+  // --- Documented exclusions: must degrade to literal text, never crash -------------------
+  {
+    name: "excluded: unresolved reference-style links degrade to literal text",
+    markdown: "[text][missing]",
+    tui: (rows) => {
+      expect(stripAnsi(rows.join("\n"))).toBe("[text][missing]");
     },
     web: (root) => {
       expect(root.querySelector("a")).toBeNull();
-      expect(root.textContent).toBe("[text][ref]");
+      expect(root.textContent).toBe("[text][missing]");
     },
   },
 ];

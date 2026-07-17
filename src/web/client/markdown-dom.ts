@@ -192,6 +192,35 @@ function renderBlockNode(doc: Document, block: BlockNode, parent: Node): void {
       parent.appendChild(quote);
       return;
     }
+    case "table": {
+      const table = el(doc, "table");
+      const thead = el(doc, "thead");
+      const headerRow = el(doc, "tr");
+      block.header.forEach((cellNodes, idx) => {
+        const th = el(doc, "th");
+        const align = block.align[idx];
+        if (align) th.style.textAlign = align;
+        renderInlineNodes(doc, cellNodes, th);
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+      const tbody = el(doc, "tbody");
+      for (const row of block.rows) {
+        const tr = el(doc, "tr");
+        row.forEach((cellNodes, idx) => {
+          const td = el(doc, "td");
+          const align = block.align[idx];
+          if (align) td.style.textAlign = align;
+          renderInlineNodes(doc, cellNodes, td);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      parent.appendChild(table);
+      return;
+    }
     case "thematicBreak":
       parent.appendChild(el(doc, "hr"));
       return;

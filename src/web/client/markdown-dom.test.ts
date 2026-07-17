@@ -177,6 +177,31 @@ describe("renderMarkdownInto — block constructs", () => {
     expect(root.querySelector("hr")).not.toBeNull();
   });
 
+  test("GFM table with no alignment renders <th>/<td> with no text-align style set", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, "| a | b |\n| - | - |\n| 1 | 2 |");
+    const th = root.querySelector("th") as HTMLTableCellElement;
+    const td = root.querySelector("td") as HTMLTableCellElement;
+    expect(th.style.textAlign).toBe("");
+    expect(td.style.textAlign).toBe("");
+  });
+
+  test("GFM table with alignment markers sets text-align on both <th> and <td>", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, "| a | b |\n| :-: | -: |\n| 1 | 2 |");
+    const cells = [...root.querySelectorAll("th")];
+    expect(cells.map((c) => (c as HTMLTableCellElement).style.textAlign)).toEqual(["center", "right"]);
+    const bodyCells = [...root.querySelectorAll("td")];
+    expect(bodyCells.map((c) => (c as HTMLTableCellElement).style.textAlign)).toEqual(["center", "right"]);
+  });
+
+  test("GFM table with a header but no body rows renders an empty <tbody>", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, "| a | b |\n| - | - |");
+    expect(root.querySelector("thead th")).not.toBeNull();
+    expect(root.querySelectorAll("tbody tr")).toHaveLength(0);
+  });
+
   test("renderMarkdownInto replaces existing container content", () => {
     const { document, root } = createTestDom();
     root.textContent = "stale content";

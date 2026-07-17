@@ -7,10 +7,11 @@
 // The subset parsed here (see tracking/DH-0056 D1) is deliberately smaller than CommonMark:
 // paragraphs (embedded newlines preserved, not soft-wrap-joined), ATX headings, fenced code
 // blocks (an unclosed fence at end-of-input is treated as closed — the "streaming rule"),
-// nested unordered/ordered lists, blockquotes, thematic breaks, and inline strong/emphasis/
-// strike/code/links (images degrade to links). Tables, setext headings, reference-style
-// links, autolinks, and footnotes are intentionally unrecognized and therefore render as
-// literal text — that's the "graceful degradation" functional requirement, not a bug.
+// nested unordered/ordered lists, blockquotes, thematic breaks, GFM tables, setext headings,
+// reference-style links/images, and inline strong/emphasis/strike/code/links (images degrade
+// to links, per DH-0109). Autolinks and footnotes remain intentionally unrecognized and
+// therefore render as literal text — that's the "graceful degradation" functional
+// requirement, not a bug.
 //
 // Raw HTML is always literal text: there is no HTML AST node type at all. That absence is
 // the core security property this ticket exists for — a `<script>` tag in model output can
@@ -25,13 +26,16 @@ export type InlineNode =
   | { kind: "code"; text: string }
   | { kind: "link"; children: InlineNode[]; url: string };
 
+export type TableAlign = "left" | "center" | "right" | null;
+
 export type BlockNode =
   | { kind: "paragraph"; children: InlineNode[] }
   | { kind: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; children: InlineNode[] }
   | { kind: "codeBlock"; info: string; text: string }
   | { kind: "list"; ordered: boolean; start: number; items: BlockNode[][] }
   | { kind: "blockquote"; children: BlockNode[] }
-  | { kind: "thematicBreak" };
+  | { kind: "thematicBreak" }
+  | { kind: "table"; align: TableAlign[]; header: InlineNode[][]; rows: InlineNode[][][] };
 
 const ESC = "\x1b";
 
@@ -230,6 +234,70 @@ function matchListMarker(line: string): ListMarker | null {
   return null;
 }
 
+/** Setext heading underline (DH-0109): a line made up entirely of `=` (level 1) or entirely
+ * of `-` (level 2), matched *after* the special-line checks fail so a genuine thematic break
+ * (`---` on its own) keeps taking priority when there's no preceding paragraph text — setext
+ * only wins when it directly follows in-progress paragraph lines, per the call site below. */
+function matchSetextUnderline(line: string): 1 | 2 | null {
+  const t = line.trim();
+  if (t.length === 0) return null;
+  if ([...t].every((c) => c === "=")) return 1;
+  if ([...t].every((c) => c === "-")) return 2;
+  return null;
+}
+
+/** Splits one GFM table row into raw cell strings: strips at most one leading/trailing pipe,
+ * then splits on unescaped `|` (an escaped `\|` becomes a literal `|` within a cell). Returns
+ * null if the line has no pipe at all (not table syntax). */
+function splitTableRow(line: string): string[] | null {
+  if (!line.includes("|")) return null;
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|") && !t.endsWith("\\|")) t = t.slice(0, -1);
+  const cells: string[] = [];
+  let cur = "";
+  for (let j = 0; j < t.length; j++) {
+    const c = t[j];
+    if (c === "\\" && t[j + 1] === "|") {
+      cur += "|";
+      j++;
+      continue;
+    }
+    if (c === "|") {
+      cells.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+/** Matches a GFM table delimiter row (the `| --- | :---: |` line under the header), returning
+ * one alignment per cell, or null if the line isn't a well-formed delimiter row. */
+function matchTableDelimiterRow(line: string): TableAlign[] | null {
+  if (!line.includes("-")) return null;
+  const cells = splitTableRow(line);
+  if (cells === null || cells.length === 0) return null;
+  const aligns: TableAlign[] = [];
+  for (const cell of cells) {
+    if (!/^:?-+:?$/.test(cell)) return null;
+    const left = cell.startsWith(":");
+    const right = cell.endsWith(":");
+    aligns.push(left && right ? "center" : right ? "right" : left ? "left" : null);
+  }
+  return aligns;
+}
+
+/** Pads/truncates a row's cells to `count` columns — GFM: missing trailing cells are treated
+ * as empty, extra cells are dropped. */
+function normalizeRowLength<T>(cells: T[], count: number, empty: T): T[] {
+  if (cells.length === count) return cells;
+  if (cells.length > count) return cells.slice(0, count);
+  return [...cells, ...Array(count - cells.length).fill(empty)];
+}
+
 function isSpecialLine(line: string): boolean {
   return (
     ATX_RE.test(line) ||
@@ -240,7 +308,10 @@ function isSpecialLine(line: string): boolean {
   );
 }
 
-function parseBlockLines(lines: string[]): BlockNode[] {
+function parseBlockLines(
+  lines: string[],
+  refs: Readonly<Record<string, string>> = {},
+): BlockNode[] {
   const blocks: BlockNode[] = [];
   let i = 0;
 
@@ -261,7 +332,7 @@ function parseBlockLines(lines: string[]): BlockNode[] {
     const heading = ATX_RE.exec(line);
     if (heading) {
       const level = (heading[1] as string).length as 1 | 2 | 3 | 4 | 5 | 6;
-      blocks.push({ kind: "heading", level, children: parseInline(heading[2] ?? "") });
+      blocks.push({ kind: "heading", level, children: parseInline(heading[2] ?? "", refs) });
       i++;
       continue;
     }
@@ -285,7 +356,35 @@ function parseBlockLines(lines: string[]): BlockNode[] {
         quoteLines.push(stripBlockquoteMarker(lines[i] as string));
         i++;
       }
-      blocks.push({ kind: "blockquote", children: parseBlockLines(quoteLines) });
+      blocks.push({ kind: "blockquote", children: parseBlockLines(quoteLines, refs) });
+      continue;
+    }
+
+    // GFM table (DH-0109): a row containing a pipe, immediately followed by a well-formed
+    // delimiter row (`| --- | :---: |`), starts a table; the header row's cell count is the
+    // column count every subsequent row/the delimiter row is normalized to.
+    const headerCells = splitTableRow(line);
+    const delimAlign =
+      headerCells !== null && i + 1 < lines.length
+        ? matchTableDelimiterRow(lines[i + 1] as string)
+        : null;
+    if (headerCells !== null && delimAlign !== null) {
+      const columnCount = headerCells.length;
+      const align = normalizeRowLength(delimAlign, columnCount, null as TableAlign);
+      i += 2;
+      const rows: InlineNode[][][] = [];
+      while (i < lines.length && !isBlank(lines[i] as string)) {
+        const rowCells = splitTableRow(lines[i] as string);
+        if (rowCells === null) break;
+        rows.push(normalizeRowLength(rowCells, columnCount, "").map((c) => parseInline(c, refs)));
+        i++;
+      }
+      blocks.push({
+        kind: "table",
+        align,
+        header: headerCells.map((c) => parseInline(c, refs)),
+        rows,
+      });
       continue;
     }
 
@@ -319,7 +418,7 @@ function parseBlockLines(lines: string[]): BlockNode[] {
           }
           break;
         }
-        items.push(parseBlockLines(itemLines));
+        items.push(parseBlockLines(itemLines, refs));
       }
       blocks.push({ kind: "list", ordered, start, items });
       continue;
@@ -327,11 +426,29 @@ function parseBlockLines(lines: string[]): BlockNode[] {
 
     const paraLines: string[] = [line];
     i++;
-    while (i < lines.length && !isBlank(lines[i] as string) && !isSpecialLine(lines[i] as string)) {
+    while (
+      i < lines.length &&
+      !isBlank(lines[i] as string) &&
+      !isSpecialLine(lines[i] as string) &&
+      matchSetextUnderline(lines[i] as string) === null
+    ) {
       paraLines.push(lines[i] as string);
       i++;
     }
-    blocks.push({ kind: "paragraph", children: parseInline(paraLines.join("\n")) });
+    // Setext heading (DH-0109): an underline of `=`/`-` directly beneath the paragraph lines
+    // just collected converts them into an h1/h2, taking priority over `-`'s usual thematic-
+    // break reading in this position (matching CommonMark's own precedence rule).
+    const setextLevel = i < lines.length ? matchSetextUnderline(lines[i] as string) : null;
+    if (setextLevel !== null) {
+      blocks.push({
+        kind: "heading",
+        level: setextLevel,
+        children: parseInline(paraLines.join(" "), refs),
+      });
+      i++;
+      continue;
+    }
+    blocks.push({ kind: "paragraph", children: parseInline(paraLines.join("\n"), refs) });
   }
 
   return blocks;
@@ -372,7 +489,37 @@ function parseLinkLike(text: string, at: number): ParsedLink | null {
   };
 }
 
-export function parseInline(text: string): InlineNode[] {
+/** `text[at]` must be `"["`. Parses a reference-style link/image `[label][ref]` or the
+ * collapsed form `[label][]` (which reuses `label` as the ref key), resolving `ref` against
+ * `refs` (lowercased, trimmed keys, per the definitions `parseMarkdown` extracts up front).
+ * Returns null if the bracket structure doesn't parse or the ref has no definition — the call
+ * site then falls back to literal text, same as an unresolved inline link. */
+function parseReferenceLink(
+  text: string,
+  at: number,
+  refs: Readonly<Record<string, string>>,
+): ParsedLink | null {
+  const closeBracket = findMatchingBracket(text, at);
+  if (closeBracket === -1) return null;
+  const label = text.slice(at + 1, closeBracket);
+  let refLabel = label;
+  let end = closeBracket + 1;
+  if (text[closeBracket + 1] === "[") {
+    const closeRef = findMatchingBracket(text, closeBracket + 1);
+    if (closeRef === -1) return null;
+    const refText = text.slice(closeBracket + 2, closeRef);
+    if (refText !== "") refLabel = refText;
+    end = closeRef + 1;
+  }
+  const url = refs[refLabel.trim().toLowerCase()];
+  if (url === undefined) return null;
+  return { label, url, end };
+}
+
+export function parseInline(
+  text: string,
+  refs: Readonly<Record<string, string>> = {},
+): InlineNode[] {
   const nodes: InlineNode[] = [];
   let i = 0;
   let buf = "";
@@ -387,7 +534,7 @@ export function parseInline(text: string): InlineNode[] {
     const rest = text.slice(i);
 
     if (text[i] === "!" && text[i + 1] === "[") {
-      const link = parseLinkLike(text, i + 1);
+      const link = parseLinkLike(text, i + 1) ?? parseReferenceLink(text, i + 1, refs);
       if (link) {
         flush();
         // Images degrade to links: alt text becomes the visible link text (D1).
@@ -398,10 +545,10 @@ export function parseInline(text: string): InlineNode[] {
     }
 
     if (text[i] === "[") {
-      const link = parseLinkLike(text, i);
+      const link = parseLinkLike(text, i) ?? parseReferenceLink(text, i, refs);
       if (link) {
         flush();
-        nodes.push({ kind: "link", children: parseInline(link.label), url: link.url });
+        nodes.push({ kind: "link", children: parseInline(link.label, refs), url: link.url });
         i = link.end;
         continue;
       }
@@ -481,10 +628,32 @@ export function parseInline(text: string): InlineNode[] {
   return nodes;
 }
 
+const REF_DEFINITION_RE = /^ {0,3}\[([^\]]+)\]:\s*(\S+)\s*$/;
+
+/** Scans for GFM reference definitions (`[ref]: url`, one per line, at most 3 leading spaces)
+ * and pulls them out of the line stream — they're metadata, not their own paragraph — into a
+ * lowercased-label -> url map consumed by `parseInline`'s reference-link resolution. A matched
+ * definition line is blanked out in place (not spliced) so every other line's index is
+ * unaffected. */
+function extractReferenceDefinitions(lines: string[]): {
+  refs: Record<string, string>;
+  lines: string[];
+} {
+  const refs: Record<string, string> = {};
+  const out = lines.map((line) => {
+    const m = REF_DEFINITION_RE.exec(line);
+    if (!m) return line;
+    const label = (m[1] as string).trim().toLowerCase();
+    if (!(label in refs)) refs[label] = m[2] as string;
+    return "";
+  });
+  return { refs, lines: out };
+}
+
 /** Parse dh Markdown. Applies {@link sanitizeText} unconditionally as step zero — a client
  * cannot forget the defensive fallback because it cannot bypass it. */
 export function parseMarkdown(raw: string): BlockNode[] {
   const sanitized = sanitizeText(raw);
-  const lines = sanitized.split("\n");
-  return parseBlockLines(lines);
+  const { refs, lines } = extractReferenceDefinitions(sanitized.split("\n"));
+  return parseBlockLines(lines, refs);
 }
