@@ -279,6 +279,18 @@ Multiple agents writing to one repository need discipline. Two viable models:
 Either way: **directory ownership is the primary collision-avoidance mechanism**, and the
 coordinator is the reconciler of record.
 
+**Per-agent worktrees, mechanized:** `.claude/skills/forked-subagent/` gives the "per-agent
+worktrees" model above a filesystem-enforced form, for when directory-ownership convention
+alone isn't enough — it launches a sub-agent as a real OS subprocess (the `claude` CLI, not
+the in-process `Agent` tool) with `cwd` hard-scoped to a dedicated `git worktree`, so a
+confused implementer physically cannot write outside its assigned worktree regardless of what
+its prompt says. Built after a real incident (2026-07-16): an in-process `Agent`-dispatched
+sub-agent ran a bare `git commit` in the shared checkout and swept another agent's staged
+files into an unrelated commit, briefly breaking `main` (see `tracking/DH-0114-*.md`). Use it
+for implementation dispatches with real file-write risk; the in-process `Agent` tool remains
+the lower-overhead default for read-only research and quick lookups where isolation doesn't
+matter.
+
 ---
 
 ## 7. How work flows

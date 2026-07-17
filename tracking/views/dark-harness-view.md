@@ -25,6 +25,7 @@ source: tracking/
 | [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | status: verifying |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | deferred (2026-07-16): GitHub issue #7 created to gauge demand |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut | waiting on a real release/binary to exist before this can be written accurately |
+| [DH-0114](../DH-0114-launch-sub-agents-as-real-claude-cli-subprocesses-in-the-target-worktree-not-in-process-agent-tool.md) | Launch sub-agents as real claude CLI subprocesses in the target worktree, not in-process Agent tool | status: verifying |
 
 ## Board
 
@@ -47,6 +48,7 @@ source: tracking/
 | [DH-0107](../DH-0107-real-gemma-4-support-requires-a-new-provider-type-bedrock-mantle-openai-compatible-api.md) | Real Gemma 4 support requires a new provider type (Bedrock Mantle, OpenAI-compatible API) | feature | stefan |
 | [DH-0109](../DH-0109-missing-markdown-features-gfm-table-rendering-and-other-explicitly-out-of-scope-constructs.md) | Missing Markdown features: GFM table rendering (and other explicitly-out-of-scope constructs) | feature | stefan |
 | [DH-0111](../DH-0111-dh-connect-web-malforms-the-target-url-http-http-localhost.md) | dh --connect --web malforms the target URL (http://http://localhost...) | bug | stefan |
+| [DH-0113](../DH-0113-coordinator-gate-checks-should-be-a-checked-in-sub-agent-prompt-not-run-inline.md) | Coordinator gate checks should be a checked-in sub-agent prompt, not run inline | feature | stefan |
 
 ### ready
 
@@ -77,6 +79,7 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0060](../DH-0060-tui-overnight-behavioral-test-agent-tmux-text-screenshot-verification-suite.md) | TUI overnight behavioral test agent: tmux text-screenshot verification suite | feature | stefan |
 | [DH-0061](../DH-0061-web-overnight-behavioral-test-agent-playwright-screenshot-verification-suite.md) | Web overnight behavioral test agent: Playwright screenshot verification suite | feature | stefan |
+| [DH-0114](../DH-0114-launch-sub-agents-as-real-claude-cli-subprocesses-in-the-target-worktree-not-in-process-agent-tool.md) | Launch sub-agents as real claude CLI subprocesses in the target worktree, not in-process Agent tool | feature | stefan |
 
 ## Recently Closed
 
