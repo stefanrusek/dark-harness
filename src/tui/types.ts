@@ -49,6 +49,11 @@ export type ViewState =
 export interface Turn {
   role: "user" | "assistant" | "tool";
   text: string;
+  /** DH-0089: set on a `"tool"` turn once its matching `tool_result` reports `isError: true`
+   * — render.ts appends a red "✗" for these instead of baking raw ANSI into `text` (which
+   * would be stripped by `sanitizeText`'s defensive escape-stripping before wrapping).
+   * Meaningless on `"user"`/`"assistant"` turns. */
+  toolError?: boolean;
 }
 
 export interface AgentInfo {
@@ -72,6 +77,13 @@ export interface AgentInfo {
   /** Epoch ms when `status` last changed — answers "how long in this status", as opposed to
    * `lastEventAt`'s "how long since anything happened at all". */
   statusSince: number;
+  /** DH-0089: the transcript index of the marker turn created by the most recent unresolved
+   * `tool_call` for this agent, keyed by its `toolUseId` — lets the matching `tool_result`
+   * append an error suffix to the same turn rather than creating a new one. `null` when no
+   * tool call is outstanding (or the outstanding one was suppressed, e.g. `toolName ===
+   * "Agent"` — see state.ts's `handleSseEvent`). Cleared once the matching `tool_result`
+   * arrives. */
+  pendingToolCall: { toolUseId: string; turnIndex: number } | null;
 }
 
 export interface TuiState {

@@ -129,6 +129,36 @@ describe("parseServerSentEvent", () => {
     expect(result).toBeNull();
   });
 
+  test("DH-0089: accepts tool_call and tool_result event types", () => {
+    const toolCall = {
+      version: 1 as const,
+      id: "1",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "tool_call" as const,
+      agentId: "root",
+      toolUseId: "tu_1",
+      toolName: "Bash",
+      inputSummary: "echo hi",
+    };
+    const toolResult = {
+      version: 1 as const,
+      id: "2",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "tool_result" as const,
+      agentId: "root",
+      toolUseId: "tu_1",
+      toolName: "Bash",
+      isError: false,
+      durationMs: 12,
+    };
+    expect(parseServerSentEvent({ id: "1", event: null, data: JSON.stringify(toolCall) })).toEqual(
+      toolCall,
+    );
+    expect(
+      parseServerSentEvent({ id: "2", event: null, data: JSON.stringify(toolResult) }),
+    ).toEqual(toolResult);
+  });
+
   test("returns null for an unrecognized event type", () => {
     const payload = { ...outputEvent(), type: "something_else" };
     const result = parseServerSentEvent({ id: "1", event: null, data: JSON.stringify(payload) });

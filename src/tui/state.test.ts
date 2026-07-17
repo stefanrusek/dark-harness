@@ -7,6 +7,8 @@ import type {
   ResyncEvent,
   SessionEndedEvent,
   TokenUsageEvent,
+  ToolCallEvent,
+  ToolResultEvent,
 } from "../contracts/index.ts";
 import { MAX_OUTPUT_CHARS, initialState, reducer } from "./state.ts";
 import type { TuiState } from "./types.ts";
@@ -82,6 +84,35 @@ function resync(overrides: Partial<ResyncEvent> = {}): ResyncEvent {
     id: "e6",
     timestamp: "2026-07-15T00:00:00.000Z",
     type: "resync",
+    ...overrides,
+  };
+}
+
+function toolCall(overrides: Partial<ToolCallEvent> = {}): ToolCallEvent {
+  return {
+    version: 1,
+    id: "e7",
+    timestamp: "2026-07-15T00:00:00.000Z",
+    type: "tool_call",
+    agentId: "root",
+    toolUseId: "tu_1",
+    toolName: "Bash",
+    inputSummary: "echo hi",
+    ...overrides,
+  };
+}
+
+function toolResult(overrides: Partial<ToolResultEvent> = {}): ToolResultEvent {
+  return {
+    version: 1,
+    id: "e8",
+    timestamp: "2026-07-15T00:00:00.000Z",
+    type: "tool_result",
+    agentId: "root",
+    toolUseId: "tu_1",
+    toolName: "Bash",
+    isError: false,
+    durationMs: 12,
     ...overrides,
   };
 }
@@ -223,6 +254,84 @@ describe("reducer: sse_event agent_status", () => {
     const agent = state.agents.get("root");
     expect(agent?.status).toBe("done");
     expect(agent?.model).toBe("sonnet");
+  });
+});
+
+describe("reducer: sse_event agent_thinking (DH-0045 exhaustiveness case)", () => {
+  test("is a no-op — full TUI display is a later round", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, { type: "sse_event", event: spawned({ agentId: "root" }) }));
+    const before = state;
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: {
+        version: 1,
+        id: "e9",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        type: "agent_thinking",
+        agentId: "root",
+        chunk: "reasoning...",
+      },
+    }));
+    expect(state).toBe(before);
+  });
+});
+
+describe("reducer: sse_event tool_call / tool_result (DH-0089)", () => {
+  test("tool_call appends a tool marker turn and records it pending; a successful tool_result leaves it unchanged", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, { type: "sse_event", event: spawned({ agentId: "root" }) }));
+    ({ state } = reducer(state, { type: "sse_event", event: toolCall() }));
+    let agent = state.agents.get("root");
+    expect(agent?.transcript).toEqual([{ role: "tool", text: "Bash: echo hi" }]);
+    expect(agent?.pendingToolCall).toEqual({ toolUseId: "tu_1", turnIndex: 0 });
+
+    ({ state } = reducer(state, { type: "sse_event", event: toolResult({ isError: false }) }));
+    agent = state.agents.get("root");
+    expect(agent?.transcript).toEqual([{ role: "tool", text: "Bash: echo hi" }]);
+    expect(agent?.pendingToolCall).toBeNull();
+  });
+
+  test("a failed tool_result marks the pending marker turn errored instead of adding a new one", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, { type: "sse_event", event: spawned({ agentId: "root" }) }));
+    ({ state } = reducer(state, { type: "sse_event", event: toolCall() }));
+    ({ state } = reducer(state, { type: "sse_event", event: toolResult({ isError: true }) }));
+    const agent = state.agents.get("root");
+    expect(agent?.transcript).toEqual([{ role: "tool", text: "Bash: echo hi", toolError: true }]);
+    expect(agent?.pendingToolCall).toBeNull();
+  });
+
+  test("toolName Agent is suppressed at tool_call time; a failed tool_result still renders standalone", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, { type: "sse_event", event: spawned({ agentId: "root" }) }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: toolCall({ toolName: "Agent", inputSummary: "spawn sonnet" }),
+    }));
+    expect(state.agents.get("root")?.transcript).toEqual([]);
+
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: toolResult({ toolName: "Agent", isError: true }),
+    }));
+    expect(state.agents.get("root")?.transcript).toEqual([{ role: "tool", text: "Agent ✗" }]);
+  });
+
+  test("an unmatched tool_result (resume gap) drops silently on success, renders standalone on error", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, { type: "sse_event", event: spawned({ agentId: "root" }) }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: toolResult({ toolUseId: "unknown", isError: false }),
+    }));
+    expect(state.agents.get("root")?.transcript).toEqual([]);
+
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: toolResult({ toolUseId: "unknown-2", isError: true }),
+    }));
+    expect(state.agents.get("root")?.transcript).toEqual([{ role: "tool", text: "Bash ✗" }]);
   });
 });
 

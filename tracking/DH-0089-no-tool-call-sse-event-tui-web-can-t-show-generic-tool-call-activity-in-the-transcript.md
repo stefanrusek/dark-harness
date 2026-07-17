@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0089
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -262,3 +262,40 @@ already covers spawns, and rendering both would double-mark every spawn. Excepti
 >
 > **Still open, not closed:** TUI (Mary) and Web (Susan) — D5 client rendering. E2E (Hedy)
 > — D6 follow-up, sequenced last.
+
+> [!NOTE]
+> **2026-07-17 — TUI's (Mary) and Web's (Susan) D5 client rendering done, in one pass.**
+> Both clients now consume `tool_call`/`tool_result` per D5: a per-agent `pendingToolCall`
+> (`{toolUseId, turnIndex}`) records the marker turn a `tool_call` appends
+> (`"toolName: inputSummary"`), suppressing the marker entirely when `toolName === "Agent"`
+> (DH-0065's spawn marker already covers it). The matching `tool_result` resolves the
+> pending entry — marking the same turn `toolError: true` on failure, leaving it unchanged
+> on success — or, when there's no matching pending entry (resume gap, or the suppressed
+> `Agent` case), renders a standalone `"toolName ✗"` marker on failure and drops silently on
+> success.
+>
+> TUI: `src/tui/sse-parser.ts`'s `KNOWN_TYPES` gained `tool_call`/`tool_result`;
+> `src/tui/state.ts` replaced Grace's placeholder default case with real
+> `handleToolCall`/`handleToolResult` handlers (plus an explicit `agent_thinking` case, since
+> removing the blanket default made the switch require every variant named); `src/tui/types.ts`
+> added `AgentInfo.pendingToolCall` and `Turn.toolError`; `src/tui/render.ts` appends a red
+> `✗` after a `toolError` turn's last row rather than baking ANSI into `turn.text` (which
+> `sanitizeText` would strip).
+>
+> Web: `src/web/client/state.ts` replaced the no-op `tool_call`/`tool_result` cases with the
+> same handler pair (`AgentNode.pendingToolCall`, `Turn.toolError`); `src/web/client/render.ts`
+> added a `buildToolTurnElement` branch — no "You"/"Agent" role label (unlike every other
+> turn kind, per D5), just a muted `⚙` glyph + text, red on error; `src/web/client/styles.css`
+> added `.turn-tool`/`.turn-tool-error`.
+>
+> Gates: `bun run typecheck` and `bun run lint` clean (lint's only remaining findings are
+> pre-existing, unrelated to `src/`: `.claude/skills/forked-subagent/scripts/*`).
+> `bun run test:coverage`: 2052 pass/0 fail, 100% coverage on every changed file except two
+> pre-existing gaps this round didn't touch (`src/tui/state.ts:376`'s `model_switched`
+> non-root branch, `src/web/client/render.ts:766-769`'s model-picker keydown handler).
+> Replaced Grace's and Radia's placeholder "accepted without altering state" tests in both
+> `state.test.ts` files with real assertions of the marker/pending/suppression/error-suffix
+> behavior above.
+>
+> **Still open, not closed:** E2E (Hedy) — D6 follow-up, sequenced last (mock-provider
+> `tool_use` turn → assert TUI shows a `⚙ Bash:` marker and Web grows a `.turn-tool` row).

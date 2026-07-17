@@ -138,6 +138,7 @@ const USER_ROLE_SGR = "\x1b[1;33m"; // bold yellow — matches the input box's o
 const AGENT_ROLE_SGR = "\x1b[36m"; // cyan — pairs with the tree view's "●" status-glyph language
 const TRANSCRIPT_GUTTER_COLS = 2; // "> ", "● ", and "⚙ " are all exactly 2 visual columns
 const TRANSCRIPT_CONT_GUTTER = "  "; // continuation rows: aligned blank indent, no marker
+const TOOL_ERROR_SGR = "\x1b[31m"; // red — DH-0089's failed-tool-call suffix
 
 /** Render a conversation transcript with real turn separation: each turn wrapped to
  * `cols - TRANSCRIPT_GUTTER_COLS`, a blank line between consecutive turns, and every row
@@ -154,9 +155,11 @@ const TRANSCRIPT_CONT_GUTTER = "  "; // continuation rows: aligned blank indent,
  * allowlist — never a raw passthrough of model-authored bytes. User turns are the operator's
  * own echoed input, not Markdown, so they're only run through `sanitizeText` and wrapped as
  * plain text. `"tool"` turns (DH-0065, `state.ts`'s `appendToolMarker`) are synthetic
- * one-line markers — e.g. a sub-agent spawn — rendered dim with a `"⚙ "` marker, kept
- * visually subordinate to real conversation content per the ticket's "kept visually
- * subordinate to text output" requirement. */
+ * one-line markers — a sub-agent spawn, or (DH-0089) a generic tool call/result — rendered
+ * dim with a `"⚙ "` marker, kept visually subordinate to real conversation content per the
+ * ticket's "kept visually subordinate to text output" requirement. A failed tool call's
+ * `toolError` flag appends a red "✗" after the marker's last row, outside the dim run (never
+ * baked into `text` itself — that would be stripped by `sanitizeText`). */
 export function renderTranscript(transcript: Turn[], cols: number): string[] {
   const lines: string[] = [];
   const innerCols = Math.max(1, cols - TRANSCRIPT_GUTTER_COLS);
@@ -172,7 +175,8 @@ export function renderTranscript(transcript: Turn[], cols: number): string[] {
       const rows = wrapText(sanitizeText(turn.text), innerCols);
       rows.forEach((row, i) => {
         const marker = i === 0 ? "⚙ " : TRANSCRIPT_CONT_GUTTER;
-        lines.push(`${DIM}${marker}${row}${RESET}`);
+        const suffix = i === rows.length - 1 && turn.toolError ? ` ${TOOL_ERROR_SGR}✗${RESET}` : "";
+        lines.push(`${DIM}${marker}${row}${RESET}${suffix}`);
       });
     } else {
       const rows = renderMarkdownRows(parseMarkdown(turn.text), innerCols);

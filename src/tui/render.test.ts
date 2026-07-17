@@ -38,6 +38,7 @@ function agentInfo(overrides: Partial<AgentInfo> = {}): AgentInfo {
     costUsd: null,
     lastEventAt: 0,
     statusSince: 0,
+    pendingToolCall: null,
     ...overrides,
   };
 }
@@ -551,6 +552,11 @@ describe("renderTranscript", () => {
     for (const line of lines.slice(1)) {
       expect(line.startsWith(`${"\x1b[2m"}  `)).toBe(true);
     }
+  });
+
+  test("DH-0089: a toolError tool turn appends a red ✗ after the marker", () => {
+    const lines = renderTranscript([{ role: "tool", text: "Bash: bun test", toolError: true }], 40);
+    expect(lines).toEqual(["\x1b[2m⚙ Bash: bun test\x1b[0m \x1b[31m✗\x1b[0m"]);
   });
 
   test("an empty transcript renders no lines", () => {

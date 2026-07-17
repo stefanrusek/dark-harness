@@ -725,6 +725,28 @@ button {
   white-space: pre-wrap;
 }
 
+/* DH-0089: a compact, single-row marker for a generic tool call/result (`⚙ toolName:
+ * inputSummary`) — no role label (unlike every other turn kind), muted foreground, smaller
+ * font, kept visually subordinate to real conversation content (mirrors the TUI's dim
+ * treatment of the same event). */
+.turn-tool {
+  align-self: center;
+  max-width: 100%;
+}
+
+.turn-tool .turn-text {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.turn-tool-error .turn-text {
+  color: var(--danger);
+}
+
 /* DH-0066: was bottom-right, the same corner user bubbles anchor to (`.turn-user`'s
    `align-self: flex-end`) — the architect review's live capture showed it sitting directly
    on top of the newest user message. Bottom-center clears that corner; a taller offset than

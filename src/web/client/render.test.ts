@@ -39,6 +39,7 @@ function fakeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
     hasCost: true,
     spawnOrder: 0,
     turnOpen: false,
+    pendingToolCall: null,
     statusSince: "2026-07-15T00:00:00.000Z",
     ...overrides,
   };
@@ -821,6 +822,30 @@ describe("renderTranscript: system turns (DH-0093 /help)", () => {
     expect(systemTurn?.querySelector(".turn-text")?.textContent).toBe(
       "Available commands:\n  /help",
     );
+  });
+});
+
+describe("renderTranscript: tool turns (DH-0089)", () => {
+  test("renders a tool turn as a compact marker with no role label", () => {
+    const { document, root } = createTestDom();
+    const agent = fakeAgentNode({ transcript: [turn("tool", "Bash: echo hi")] });
+    renderTranscript(document, root, agent);
+    const toolTurn = root.querySelector(".turn-tool");
+    expect(toolTurn).not.toBeNull();
+    expect(toolTurn?.querySelector(".turn-role")).toBeNull();
+    expect(toolTurn?.querySelector(".turn-text")?.textContent).toBe("⚙ Bash: echo hi");
+    expect(toolTurn?.classList.contains("turn-tool-error")).toBe(false);
+  });
+
+  test("a toolError tool turn gets the error class and a trailing ✗", () => {
+    const { document, root } = createTestDom();
+    const agent = fakeAgentNode({
+      transcript: [{ ...turn("tool", "Bash: echo hi"), toolError: true }],
+    });
+    renderTranscript(document, root, agent);
+    const toolTurn = root.querySelector(".turn-tool");
+    expect(toolTurn?.classList.contains("turn-tool-error")).toBe(true);
+    expect(toolTurn?.querySelector(".turn-text")?.textContent).toBe("⚙ Bash: echo hi ✗");
   });
 });
 
