@@ -138,7 +138,7 @@ Roster file template:
 
 | Name | Pronouns | Role | Persistence | Memory |
 | --- | --- | --- | --- | --- |
-| Ada | she/her | Coordinator | Persistent for this build (this session) | (this session; no separate file yet) |
+| Ada | she/her | Coordinator | Persistent | `docs/roster/ada.md` |
 | Iris | she/her | Prompt domain lead (`src/prompt/`, `README.md`) | Persistent | `docs/roster/iris.md` |
 | Radia | she/her | Server domain lead (`src/server/`) | Persistent | `docs/roster/radia.md` |
 | Mary | she/her | TUI domain lead (`src/tui/`) | Persistent | `docs/roster/mary.md` |
