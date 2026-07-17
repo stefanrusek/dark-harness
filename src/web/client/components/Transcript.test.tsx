@@ -1,7 +1,7 @@
 import "../test-dom.ts";
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { applyEvent, createInitialState, selectedAgent } from "../state.ts";
 import type { AgentNode } from "../state.ts";
 import { Transcript } from "./Transcript.tsx";
@@ -113,6 +113,64 @@ describe("Transcript", () => {
     rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
 
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
+  });
+
+  test("auto-scrolls to the bottom when new content arrives while already near the bottom", () => {
+    const agent = agentWithOutput() as AgentNode;
+    const { container, rerender } = render(
+      <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
+    );
+    const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
+    Object.defineProperty(scrollRegion, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(scrollRegion, "clientHeight", { value: 200, configurable: true });
+    Object.defineProperty(scrollRegion, "scrollTop", {
+      value: 820,
+      configurable: true,
+      writable: true,
+    });
+
+    const grown: AgentNode = {
+      ...agent,
+      transcript: [
+        ...agent.transcript,
+        { role: "user", text: "more", timestamp: "2026-01-01T00:00:02Z" },
+      ],
+    };
+    rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
+
+    expect(scrollRegion.scrollTop).toBe(1000);
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
+  });
+
+  test("clicking jump-to-latest scrolls back to the bottom and hides the button", () => {
+    const agent = agentWithOutput() as AgentNode;
+    const { container, rerender } = render(
+      <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
+    );
+    const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
+    Object.defineProperty(scrollRegion, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(scrollRegion, "clientHeight", { value: 200, configurable: true });
+    Object.defineProperty(scrollRegion, "scrollTop", {
+      value: 0,
+      configurable: true,
+      writable: true,
+    });
+
+    const grown: AgentNode = {
+      ...agent,
+      transcript: [
+        ...agent.transcript,
+        { role: "user", text: "more", timestamp: "2026-01-01T00:00:02Z" },
+      ],
+    };
+    rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
+
+    const jumpButton = container.querySelector(".jump-to-latest") as HTMLElement;
+    fireEvent.click(jumpButton);
+
+    expect(scrollRegion.scrollTop).toBe(1000);
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
   });
 
   test("shows a tool-turn marker for a tool call", () => {
