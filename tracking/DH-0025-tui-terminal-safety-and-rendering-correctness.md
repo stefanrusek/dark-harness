@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0025
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -55,3 +55,22 @@ over high-latency SSH.
 > tick, not diff-based). Finding #7 (ANSI injection) — the original reason this ticket was
 > flagged for owner input — moved to **DH-0056** entirely; this ticket needed no further
 > input once trimmed and is ready to implement directly.
+
+> [!NOTE]
+> **2026-07-16 — verification pass.** Re-checked a prior blocked attempt's claim that this
+> was already implemented on this branch, rather than trusting it outright. Confirmed true:
+> commit `9d04fe4` adds `src/tui/width.ts` (codepoint/East-Asian-width-aware measurement,
+> proven by `src/tui/width.test.ts`) and commit `99a4c58` wires it in — `sliceCodePoints`
+> for surrogate-safe trimming in `trimTranscript` (proven by `src/tui/state.test.ts`), a
+> 50ms resize debounce, and a skip-unchanged-frame tick redraw in `src/tui/app.ts` (both
+> proven by `src/tui/app.test.ts`). Confirmed `width.ts` is genuinely wired in, not dead
+> code — imported by `state.ts`, `render.ts`, and `markdown-ansi.ts`. Gates: `typecheck`
+> passes; `lint` has only pre-existing failures under `.claude/skills/forked-subagent/`,
+> none in `src/tui/`; `test:coverage` is 1959 pass / 0 fail with `src/tui/*` at 100% except
+> one pre-existing, unrelated gap (`app.ts:190`, from DH-0093, predates this ticket);
+> `e2e` is 17 pass / 18 fail, but every failure is the separately-tracked DH-0112 bug
+> (`e2e/support/mock-provider.ts` not updated for DH-0044's mandatory streaming, causing
+> hangs/wrong-exit-codes across bedrock/exit-codes/http-sse/tui/web tests generally) — no
+> e2e test targets wide-char/resize/redraw behavior, so this ticket's criteria are
+> unaffected. No code changes were needed; working tree was already clean. Moving to
+> `verifying`.
