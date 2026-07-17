@@ -174,7 +174,7 @@ export const SAMPLE_DH_JSON = `{
     {
       "name": "mantle-openai",
       "type": "openai-compatible",
-      "baseURL": "https://bedrock-mantle.$(AWS_REGION).api.aws/v1",
+      "baseURL": "https://bedrock-mantle.$(AWS_REGION).api.aws/openai/v1",
       "apiKey": "$(BEDROCK_MANTLE_API_KEY)"
     },
     { "name": "local", "type": "anthropic", "baseURL": "$(LOCAL_AI_PROVIDER)" }
@@ -1409,17 +1409,15 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
     ),
   );
   // DH-0119: real Amazon Bedrock Mantle is a distinct endpoint with two model-vendor-routed
-  // API surfaces, both bearer-apiKey authenticated (not SigV4 — live-tested both ways, same
-  // result either way): "mantle-anthropic" (.../anthropic, Anthropic Messages shape,
-  // live-verified working — see "haiku-mantle") and "mantle-openai" (.../v1, Chat Completions
-  // shape). "gemma4" is correctly wired to "mantle-openai" and Mantle's own catalog lists it
-  // (confirmed via GET /v1/models) — but every live call so far returns
-  // access_denied "Berm is not enabled for this account", a separate AWS-side entitlement
-  // gate on top of base Mantle access, not a code bug. It'll start working the moment that
-  // entitlement is granted; re-run "dh doctor" to check.
+  // API surfaces, both bearer-apiKey authenticated: "mantle-anthropic" (.../anthropic,
+  // Anthropic Messages shape) and "mantle-openai" (.../openai/v1, Chat Completions shape —
+  // note the "/openai" prefix: some Mantle models, gemma4 included, live on that prefixed
+  // path specifically; the unprefixed path rejects them with a misleading "Berm is not
+  // enabled for this account" error that has nothing to do with account access). Both
+  // "gemma4" and "haiku-mantle" are live-verified working end to end, tool-use included.
   io.stdout(
     cliDim(
-      `dh:   Amazon Bedrock Mantle needs BEDROCK_MANTLE_API_KEY. "haiku-mantle" is live-verified working; "gemma4" is correctly wired but blocked on an AWS-side "Berm" entitlement not yet granted on this account — see tracking/DH-0119.`,
+      `dh:   Amazon Bedrock Mantle needs BEDROCK_MANTLE_API_KEY. "haiku-mantle" and "gemma4" are both live-verified working end to end (tool-use included) — see tracking/DH-0119.`,
       initTty,
     ),
   );

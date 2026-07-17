@@ -38,3 +38,28 @@ Supersedes DH-0118 (which guessed a bespoke SigV4-signed adapter). Live-tested e
 ## Open Questions
 
 ## Notes
+
+> [!NOTE]
+> **Root cause found, fully resolved 2026-07-17.** "Berm is not enabled for this account"
+> is NOT an account-level entitlement gate at all -- it's a misleading error Mantle returns
+> when a model that requires the `/openai`-prefixed path (`/openai/v1/chat/completions`)
+> is routed to the unprefixed path (`/v1/chat/completions`) instead. Found via a third-party
+> gateway's docs (truefoundry.com) documenting this exact routing quirk and explicitly
+> listing `google.gemma-4-31b` as one of the affected models (alongside `google.gemma-4-e2b`,
+> `google.gemma-4-26b-a4b`, `openai.gpt-5.5`, `openai.gpt-5.4`, `xai.grok-4.3`). Confirmed
+> live: the identical request against `/openai/v1/chat/completions` returns `200` with a
+> real completion. `mantle-openai`'s `baseURL` fixed to
+> `https://bedrock-mantle.$(AWS_REGION).api.aws/openai/v1`.
+>
+> **Both `haiku-mantle` and `gemma4` are now fully live-verified working end to end via
+> `dh doctor`** -- `gemma4` shows a plain `PASS` (not `PASS (no tool-use)`), meaning it
+> passed the tool-use probe too. This is the first real evidence on real Gemma 4 behavior
+> this project has had (DH-0106's original tool-use claim was based on untested gemma3
+> assumptions) -- Gemma 4 via Mantle does make real tool calls.
+>
+> Known limitation carried forward, not yet handled generically: which models need the
+> `/openai` prefix isn't derivable from the model catalog itself (per the same third-party
+> docs) -- `mantle-openai`'s baseURL is hardcoded to always use the prefix, which happens to
+> be correct for every model currently in this config's `mantle-openai` slot, but would be
+> wrong if a future model needing the *unprefixed* path were added to the same provider
+> entry. Not worth generalizing until that actually happens.

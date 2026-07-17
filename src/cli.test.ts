@@ -2599,7 +2599,9 @@ describe("main — dh init", () => {
     expect(mantleAnthropic.apiKey).toBe("$(BEDROCK_MANTLE_API_KEY)");
     expect(mantleOpenai).toBeDefined();
     expect(mantleOpenai.type).toBe("openai-compatible");
-    expect(mantleOpenai.baseURL).toBe("https://bedrock-mantle.$(AWS_REGION).api.aws/v1");
+    // DH-0119: the "/openai" prefix is required for models like gemma4 -- the unprefixed
+    // path rejects them with a misleading "Berm is not enabled for this account" error.
+    expect(mantleOpenai.baseURL).toBe("https://bedrock-mantle.$(AWS_REGION).api.aws/openai/v1");
     expect(mantleOpenai.apiKey).toBe("$(BEDROCK_MANTLE_API_KEY)");
 
     const gemma = parsed.models.find((m: { name: string }) => m.name === "gemma4");
