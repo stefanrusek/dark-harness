@@ -101,3 +101,12 @@ export function formatHeaderLines(info: HeaderInfo, opts: { compact?: boolean } 
   lines.push(formatConfigStatusLine(info.config));
   return lines;
 }
+
+/** DH-0124: the lighter empty-state variant — compact logo + version identity only, no
+ * config-status line. Used before the operator's first message, when a full header (with its
+ * `dh.json` model-count/bind/token summary) would be noise: nothing about that config is
+ * relevant yet, and — for a TUI `--connect`ed to a remote server — isn't even known locally
+ * (see Header.tsx's header comment). */
+export function formatEmptyStateLines(info: HeaderInfo): string[] {
+  return [info.logoCompact, formatVersionString(info.build)];
+}

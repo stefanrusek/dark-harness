@@ -4,6 +4,7 @@ import {
   buildConfigStatusSummary,
   buildHeaderInfo,
   formatConfigStatusLine,
+  formatEmptyStateLines,
   formatHeaderLines,
   formatVersionString,
 } from "./header-info.ts";
@@ -180,5 +181,19 @@ describe("buildHeaderInfo / formatHeaderLines", () => {
       "dh 0.1.0 (abc123)",
       "config: dh.json — 2 models, bind all interfaces, no token",
     ]);
+  });
+});
+
+describe("formatEmptyStateLines", () => {
+  const build = { version: "0.1.0", gitSha: "abc123", dirty: false, releaseTag: null };
+
+  test("DH-0124: compact logo + version only, no config-status line", () => {
+    const info = buildHeaderInfo(baseConfig(), "dh.json", build);
+    expect(formatEmptyStateLines(info)).toEqual([DH_ASCII_LOGO_COMPACT, "dh 0.1.0 (abc123)"]);
+  });
+
+  test("DH-0124: unaffected by config being absent (no dh.json known, e.g. --connect)", () => {
+    const info = buildHeaderInfo(null, "dh.json", build);
+    expect(formatEmptyStateLines(info)).toEqual([DH_ASCII_LOGO_COMPACT, "dh 0.1.0 (abc123)"]);
   });
 });
