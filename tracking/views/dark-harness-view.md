@@ -56,6 +56,7 @@ source: tracking/
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom 🔒 | feature | stefan |
 | [DH-0132](../DH-0132-adopt-a-convention-of-writing-acceptance-tests-as-prompts-run-via-dh-job-for-real-end-to-end-verification.md) | Adopt a convention of writing acceptance tests as prompts run via dh --job for real end-to-end verification | feature | stefan |
+| [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | feature | stefan |
 
 ### ready
 
