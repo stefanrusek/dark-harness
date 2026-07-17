@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0037
 type: feature
-status: implementing
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -75,3 +75,13 @@ answering "what did it cost, where is it stuck, did it loop" today can only do s
 > (`success`, `turns`, `outcome` in particular — DH-0050's own design text already commits to
 > those names matching). This ticket's `summary.json` piece is unblocked; not implemented
 > here (out of this round's scope per DH-0050's own boundary note).
+
+> [!NOTE]
+> Grace (2026-07-16): implemented `summary.json` — `src/server/summary.ts` writes
+> `success`/`turns`/`outcome`/cost/duration/agent-count into the session's log directory when
+> a `--job` run finishes, reused via `src/cli.ts` and `src/server/index.ts`. Verified with
+> `bun run typecheck`, `bun run lint` (9 pre-existing errors, all in unrelated
+> `.claude/skills/forked-subagent/` files, none touching this change), and `bun test src`
+> (1964 pass, 0 fail). Full `bun run e2e` intentionally not re-run this round (change doesn't
+> touch `e2e/`, and the suite is slow) — commit `1f3d6a2`. All three user stories now have
+> shipped code; moving to `verifying` for close-out test-name verification per §9.
