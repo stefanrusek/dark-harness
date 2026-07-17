@@ -93,6 +93,35 @@ describe("serveWebUi", () => {
     });
   });
 
+  describe("DH-0128: cross-machine config resolution", () => {
+    test("rewrites a loopback targetBaseUrl's host to the Host the request actually used, keeping port/scheme", async () => {
+      handle = serveWebUi({
+        port: 0,
+        targetBaseUrl: "http://localhost:4000",
+        hostname: "127.0.0.1",
+      });
+      const res = await fetch(`http://127.0.0.1:${handle.port}${WEB_CONFIG_PATH}`, {
+        headers: { host: "192.168.1.238" },
+      });
+      const body = await res.json();
+      expect(body).toEqual({ baseUrl: "http://192.168.1.238:4000" });
+    });
+
+    test("leaves a non-loopback targetBaseUrl (e.g. --connect <host>) untouched regardless of request Host", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://remote-dh-host:4000" });
+      const res = await fetch(new URL(WEB_CONFIG_PATH, handle.url));
+      const body = await res.json();
+      expect(body).toEqual({ baseUrl: "http://remote-dh-host:4000" });
+    });
+
+    test("still resolves to localhost when the request itself came in on localhost (unchanged same-machine behavior)", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
+      const res = await fetch(new URL(WEB_CONFIG_PATH, handle.url));
+      const body = await res.json();
+      expect(body).toEqual({ baseUrl: "http://localhost:4000" });
+    });
+  });
+
   describe("DH-0022: opt-in bind address", () => {
     test("with hostname unset (default), still reachable on loopback (unchanged behavior)", async () => {
       handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
