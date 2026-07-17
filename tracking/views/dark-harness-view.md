@@ -26,10 +26,11 @@ source: tracking/
 | [DH-0122](../DH-0122-every-dh-run-should-print-an-application-header-name-logo-version-build-config-status.md) | Every dh run should print an application header (name, logo, version/build, config status) | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
 | [DH-0124](../DH-0124-tui-empty-state-before-first-message-is-misleading-show-app-header-friendlier-prompt.md) | TUI empty-state before first message is misleading -- show app header + friendlier prompt | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
 | [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
-| [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
-| [DH-0127](../DH-0127-web-ui-has-heavy-visual-flicker-no-virtual-dom-diffing-sections-fully-rebuilt-on-every-render.md) | Web UI has heavy visual flicker -- no virtual-DOM diffing, sections fully rebuilt on every render | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
+| [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history | blocked on DH-0136 (UI overhaul phase 2: TUI/Ink migration) -- the working fix pattern (see Notes) is Ink-specific, not portable to the current ANSI renderer |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
 | [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
+| [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React | blocked on DH-0133a (Core toolchain) landing first |
+| [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink | blocked on DH-0133a (Core toolchain) landing first |
 
 ## Board
 
@@ -55,24 +56,27 @@ source: tracking/
 | [DH-0124](../DH-0124-tui-empty-state-before-first-message-is-misleading-show-app-header-friendlier-prompt.md) | TUI empty-state before first message is misleading -- show app header + friendlier prompt 🔒 | feature | stefan |
 | [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) 🔒 | feature | stefan |
 | [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history 🔒 | bug | stefan |
-| [DH-0127](../DH-0127-web-ui-has-heavy-visual-flicker-no-virtual-dom-diffing-sections-fully-rebuilt-on-every-render.md) | Web UI has heavy visual flicker -- no virtual-DOM diffing, sections fully rebuilt on every render 🔒 | feature | stefan |
 | [DH-0128](../DH-0128-urgent-web-ui-connecting-from-a-separate-machine-loads-the-shell-but-sticks-on-reconnecting.md) | URGENT: Web UI connecting from a separate machine loads the shell but sticks on 'Reconnecting...' | bug | stefan |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom 🔒 | feature | stefan |
 | [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker 🔒 | bug | stefan |
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | bug | stefan |
 | [DH-0132](../DH-0132-adopt-a-convention-of-writing-acceptance-tests-as-prompts-run-via-dh-job-for-real-end-to-end-verification.md) | Adopt a convention of writing acceptance tests as prompts run via dh --job for real end-to-end verification | feature | stefan |
-| [DH-0133](../DH-0133-ui-overhaul-migrate-web-to-react-tui-to-ink.md) | UI overhaul: migrate Web to React, TUI to Ink | feature | stefan |
+| [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React 🔒 | feature | stefan |
+| [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink 🔒 | feature | stefan |
 
 ### ready
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0115](../DH-0115-e2e-reportoutcome-nudge-doubling-successturn-taskfailedturn-mock-helpers-predate-dh-0050.md) | e2e ReportOutcome-nudge doubling: successTurn/taskFailedTurn mock helpers predate DH-0050 | bug | stefan |
+| [DH-0133](../DH-0133-ui-overhaul-migrate-web-to-react-tui-to-ink.md) | UI overhaul: migrate Web to React, TUI to Ink | feature | stefan |
+| [DH-0134](../DH-0134-ui-overhaul-phase-1-core-toolchain-integration-for-react-ink.md) | UI overhaul phase 1: Core toolchain integration for React + Ink | feature | stefan |
 
 ## Recently Closed
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0127](../DH-0127-web-ui-has-heavy-visual-flicker-no-virtual-dom-diffing-sections-fully-rebuilt-on-every-render.md) | Web UI has heavy visual flicker -- no virtual-DOM diffing, sections fully rebuilt on every render | superseded |
 | [DH-0120](../DH-0120-openai-compatible-provider-omitted-required-type-function-on-outgoing-tool-calls.md) | openai-compatible provider omitted required type:function on outgoing tool_calls | done |
 | [DH-0119](../DH-0119-real-bedrock-mantle-integration-live-verified-mantle-anthropic-mantle-openai.md) | Real Bedrock Mantle integration, live-verified: mantle-anthropic + mantle-openai | done |
 | [DH-0118](../DH-0118-amazon-bedrock-mantle-is-a-real-separate-endpoint-wire-it-up-as-its-own-provider-not-folded-into-bedrock.md) | Amazon Bedrock Mantle is a real, separate endpoint -- wire it up as its own provider, not folded into bedrock | done |
@@ -87,4 +91,3 @@ source: tracking/
 | [DH-0107](../DH-0107-real-gemma-4-support-requires-a-new-provider-type-bedrock-mantle-openai-compatible-api.md) | Real Gemma 4 support requires a new provider type (Bedrock Mantle, OpenAI-compatible API) | done |
 | [DH-0106](../DH-0106-gemma4-bedrock-default-model-hallucinates-tool-calls-instead-of-making-them.md) | dh init's scaffolded "gemma4" is actually Gemma 3 (wrong model), and hallucinates tool calls | done |
 | [DH-0105](../DH-0105-unify-connection-state-and-status-vocabulary-across-tui-and-web.md) | Unify connection-state and status vocabulary across TUI and Web | done |
-| [DH-0104](../DH-0104-unify-number-cost-elapsed-and-token-formatting-across-tui-web-and-cli.md) | Unify number, cost, elapsed, and token formatting across TUI, Web, and CLI | done |

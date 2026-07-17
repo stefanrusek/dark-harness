@@ -2,14 +2,14 @@
 spile: ticket
 id: DH-0127
 type: feature
-status: draft
+status: closed
 owner: stefan
-resolution:
-blocked_by: ["blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward"]
+resolution: superseded
+blocked_by: []
 created: 2026-07-17
 relations:
   depends_on: []
-  relates_to: []
+  relates_to: [DH-0133, DH-0135]
   supersedes: []
 implementation:
   - repo: dark-harness
@@ -38,3 +38,9 @@ Owner observation from live manual testing 2026-07-17, confirmed by code inspect
 ## Open Questions
 
 ## Notes
+
+> [!NOTE]
+> Closed by supersession per Fable's DH-0133 design (2026-07-17): this ticket's entire ask
+> ("add diffing so unchanged sections don't repaint") *is* the React migration -- its
+> acceptance criteria have been folded into DH-0135 (UI overhaul phase 2: Web/React) as one
+> of that ticket's own User Stories verbatim, rather than tracked as a separate effort.
