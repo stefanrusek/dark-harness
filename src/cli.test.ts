@@ -1792,6 +1792,69 @@ describe("main — real filesystem-backed default deps", () => {
     }
   });
 
+  // DH-0037: `summary.json` — reuses the exact real-runtime setup as the JSONL test above
+  // (real mock Anthropic-compatible HTTP endpoint, real default createRuntime dep) to prove
+  // the standalone `--instructions --job` path writes a real summary.json alongside the
+  // per-agent JSONL it already writes, not just under `--json`.
+  test("the real (default) createRuntime dep writes summary.json for a standalone --job run", async () => {
+    const mockProvider = Bun.serve({
+      port: 0,
+      fetch() {
+        return sseMessageResponse([{ type: "text", text: "all done" }], "end_turn", {
+          input_tokens: 3,
+          output_tokens: 5,
+        });
+      },
+    });
+    const instructionsPath = join(dir, "plan.md");
+    await Bun.write(instructionsPath, "do the thing");
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const io = fakeIo();
+      const code = await main(["--instructions", instructionsPath, "--job"], {
+        loadConfig: async () => ({
+          options: { defaultModel: "mock-model" },
+          models: [{ name: "mock-model", provider: "mock", model: "mock-1" }],
+          provider: [
+            {
+              name: "mock",
+              type: "anthropic",
+              baseURL: mockProvider.url.toString(),
+              apiKey: "sk-test",
+            },
+          ],
+        }),
+        loadSystemPrompt: async () => "sp",
+        io,
+        installSignalHandlers: fakeInstallSignalHandlers(),
+      });
+      expect(code).toBe(ExitCode.Success);
+
+      const logsRoot = join(dir, ".dh-logs");
+      const sessions = readdirSync(logsRoot);
+      expect(sessions.length).toBe(1);
+      const summaryPath = join(logsRoot, sessions[0] ?? "", "summary.json");
+      const summary = JSON.parse(await Bun.file(summaryPath).text());
+      expect(summary.version).toBe(1);
+      expect(summary.sessionId).toBe(sessions[0]);
+      expect(summary.success).toBe(true);
+      expect(summary.exitCode).toBe(0);
+      // 2, not 1: the mock provider's plain-text response never calls ReportOutcome, so
+      // DH-0050's nudge-then-fall-back-to-clean-end path (loop.ts) burns one extra real turn
+      // before accepting the text as a clean finish.
+      expect(summary.turns).toBe(2);
+      expect(summary.agentCount).toBe(1);
+      // costUsd stays undefined: this test's model config has no `pricing`, so
+      // computeCostUsd never has a rate to apply (see loop.ts's costUsd derivation).
+      expect(summary.costUsd).toBeUndefined();
+      expect(typeof summary.durationMs).toBe("number");
+    } finally {
+      process.chdir(originalCwd);
+      mockProvider.stop(true);
+    }
+  });
+
   test("the real createAgentLoop + createServer defaults wire up without a real terminal (startTui faked)", async () => {
     const io = fakeIo();
     const code = await main([], {
