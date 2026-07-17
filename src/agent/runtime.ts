@@ -5,6 +5,7 @@
 // tools/index.ts.
 
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
   type AgentStatus,
   type AgentTreeNode,
@@ -28,8 +29,9 @@ import { loadProjectMcpServers } from "./mcp/project-config.ts";
 import { buildMcpTools } from "./mcp/tools.ts";
 import { createProvider } from "./providers/index.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
+import { reconstructSubAgentHistory } from "./resume.ts";
 import { BUILTIN_CLI_TOOLS_SKILL, loadSkillFromPaths } from "./skills.ts";
-import { TaskRegistry, type TaskSnapshot } from "./tasks.ts";
+import { TaskFinishedError, TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { TodoStore } from "./todos.ts";
 import { buildToolMap, composeTools, reportOutcomeTool } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
@@ -94,6 +96,13 @@ export interface AgentRuntimeOptions {
    * explicit `modelName` is still passed to `runRoot()` itself. Root agent only (v1 scope,
    * D1) — never threaded into `spawnAgent()`'s sub-agent calls. */
   resume?: { messages: ProviderMessage[]; fromSessionId: string; model: string };
+  /** DH-0003: the `.dh-logs` root directory this runtime's own session lives under — needed
+   * so SendMessage's finished-sub-agent-resume path (`sendMessage()` below) can read that
+   * sub-agent's own JSONL log back via `reconstructSubAgentHistory()` (src/agent/resume.ts)
+   * before re-invoking spawnAgent() with its history seeded. Defaults to `./.dh-logs`
+   * (relative to `cwd`), matching every other call site's own `.dh-logs` convention
+   * (src/cli.ts) — only needs overriding by tests that use a different logs root. */
+  logsRoot?: string;
 }
 
 /** Builds loop.ts's `AgentLoopParams.pricing` from a model's optional config prices — round
@@ -200,6 +209,8 @@ export class AgentRuntime {
   private readonly interactive: boolean;
   private readonly client: SessionClientKind;
   private readonly resume: AgentRuntimeOptions["resume"];
+  /** DH-0003: see AgentRuntimeOptions.logsRoot's doc comment. */
+  private readonly logsRoot: string;
 
   // Root-agent bookkeeping: runRoot() isn't tracked in `tasks` (it IS the session, per its
   // own doc comment below), so getAgentTree()/sendMessageToRoot() need their own small
@@ -327,6 +338,7 @@ export class AgentRuntime {
     this.onLogLine = options.onLogLine;
     this.client = options.client;
     this.resume = options.resume;
+    this.logsRoot = options.logsRoot ?? join(this.cwd, ".dh-logs");
     // DH-0012: wired to handleTaskSettled() so every *background* Bash/Agent task's
     // completion pushes a notification into its parent's conversation — see that method's
     // doc comment for the full design, including the orphaned-grandchild case. Retention cap
@@ -460,6 +472,7 @@ export class AgentRuntime {
       agentId,
       config: this.config,
       tasks: this.tasks,
+      sendMessage: (taskId: string, message: string) => this.sendMessage(taskId, message),
       spawnAgent: (params: { model: string; prompt: string }) => this.spawnAgent(agentId, params),
       loadSkill: (name: string) => loadSkillFromPaths(name, this.config.skillPaths ?? []),
       searchDeferredTools: async (query: string, searchOptions?: { maxResults?: number }) => {
@@ -603,6 +616,17 @@ export class AgentRuntime {
       background?: boolean;
       description?: string;
       isolation?: "worktree";
+      /** DH-0003: reuse this id instead of minting a fresh `agent-<uuid>` — the
+       * finished-sub-agent SendMessage-resume path (`sendMessage()` below) re-invokes
+       * spawnAgent() for the *same* agent identity, not a new one, so its SSE events/log
+       * lines stay attributed to the same id it always had. Only ever set internally by
+       * `sendMessage()`'s resume path — never by the `Agent` tool (ToolContext.spawnAgent
+       * never exposes this param). */
+      id?: string;
+      /** DH-0003: seeds this run's conversation history, the same way AgentRuntimeOptions.
+       * resume seeds the root's — sourced from `reconstructSubAgentHistory()` on the resume
+       * path, never set on a fresh spawn. */
+      seedHistory?: ProviderMessage[];
     },
   ): string {
     // DH-0013: fan-out budget checks — depth first (cheaper, no model/provider resolution
@@ -627,7 +651,7 @@ export class AgentRuntime {
 
     const model = this.resolveModel(params.model);
     const provider = this.providerFor(model);
-    const agentId = `agent-${randomUUID()}`;
+    const agentId = params.id ?? `agent-${randomUUID()}`;
     this.agentDepth.set(agentId, depth);
 
     // DH-0077: worktree isolation requested — validated (and, if valid, actually created)
@@ -714,6 +738,9 @@ export class AgentRuntime {
             // run_in_background subprocess handling. Passing it through here is what makes
             // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
             signal: handle.signal,
+            ...(params.seedHistory
+              ? { resume: { messages: params.seedHistory, fromSessionId: this.sessionId } }
+              : {}),
             // Round 7 fix (docs/handoffs/core.md status log): sub-agents never inherit the
             // root/runtime's `interactive` flag. Round 5's "pause instead of end" semantics
             // exist so an operator can keep talking to an interactive root — but a sub-agent
@@ -1004,6 +1031,51 @@ export class AgentRuntime {
    * idempotent). */
   stopRoot(): void {
     this.rootController?.abort();
+  }
+
+  /** DH-0003: delivers a message into `agentId`'s conversation, resuming a finished sub-agent
+   * task rather than just refusing (real Claude Code semantics — HANDOFF.md). Every caller
+   * that used to reach `TaskRegistry.sendMessage()` directly (the `SendMessage` tool via
+   * `ToolContext.sendMessage`, the wire-facing `AgentLoopHandle.sendMessage` in src/cli.ts for
+   * a non-root `agentId`) now goes through here instead, so both entry points share the one
+   * resume decision. `TaskRegistry.sendMessage()` itself stays the dumb status/sink check its
+   * own doc comment describes — this is the layer that reacts to its `TaskFinishedError`.
+   *
+   * Only `kind === "agent"` tasks are eligible for resume (a finished `bash`-kind task has no
+   * conversation to resume — its `TaskFinishedError` propagates unchanged, same as before this
+   * ticket). `failed`/`stopped` sub-agents resume identically to `done` ones — see
+   * `reconstructSubAgentHistory()`'s own doc comment for why. */
+  sendMessage(agentId: string, message: string): void {
+    try {
+      this.tasks.sendMessage(agentId, message);
+    } catch (err) {
+      if (err instanceof TaskFinishedError) {
+        const snapshot = this.tasks.trySnapshot(agentId);
+        if (snapshot?.kind === "agent") {
+          this.resumeFinishedAgent(agentId, snapshot, message);
+          return;
+        }
+      }
+      throw err;
+    }
+  }
+
+  /** DH-0003: reconstructs `agentId`'s prior conversation from its own JSONL log (this
+   * session — a finished sub-agent lived and died entirely inside it, no chain to walk),
+   * clears its terminal `TaskRegistry` bookkeeping so the id can be reused, then re-invokes
+   * `spawnAgent()` for the *same* agent identity with that history seeded and `message` as the
+   * new turn's instruction — `loop.ts`'s existing trailing-role merge (the same one
+   * `AgentRuntimeOptions.resume` uses for the root) appends it, no second merge path. */
+  private resumeFinishedAgent(agentId: string, snapshot: TaskSnapshot, message: string): void {
+    const history = reconstructSubAgentHistory(this.logsRoot, this.sessionId, agentId);
+    this.tasks.clearTerminal(agentId);
+    this.spawnAgent(snapshot.parentAgentId, {
+      model: snapshot.model ?? this.config.options.defaultModel,
+      prompt: message,
+      id: agentId,
+      seedHistory: history,
+      ...(snapshot.description !== undefined ? { description: snapshot.description } : {}),
+    });
   }
 
   /** DH-0093: wire-facing `ModelInfo[]` for the `list_models` command — maps `config.models`

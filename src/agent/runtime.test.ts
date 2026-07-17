@@ -7,9 +7,16 @@
 // documents (custom baseURL). This gives real end-to-end coverage of config -> provider ->
 // loop -> tool dispatch without ever touching the network.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +27,7 @@ import {
   type LogLine,
   type ServerSentEvent,
 } from "../contracts/index.ts";
+import { SessionLogger } from "../server/index.ts";
 import {
   AgentRuntime,
   type AgentRuntimeOptions,
@@ -339,6 +347,12 @@ function startMockAnthropicServer(onRequest?: (body: { model: string; system?: s
         }
         if (text === "child instruction") {
           return message([{ type: "text", text: "child done" }], "end_turn");
+        }
+        // DH-0003 test support: the SendMessage-resume path's new turn, sent to an already-
+        // finished sub-agent whose seeded history should carry the original "child
+        // instruction"/"child done" turn ahead of this one.
+        if (text === "resume: continue please") {
+          return message([{ type: "text", text: "resumed done" }], "end_turn");
         }
         // DH-0050 note: checked against `firstText` (the conversation's original instruction),
         // not `text` (the latest message) — a non-tool-use, non-ReportOutcome turn now gets
@@ -2336,6 +2350,120 @@ describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
       prompt: "loop-forever",
     });
     await runtime.invokeSkill(taskId, "cli-tools", undefined);
+    runtime.tasks.stop(taskId);
+    await runtime.tasks.awaitDone(taskId).catch(() => {});
+  });
+});
+
+describe("AgentRuntime.sendMessage — DH-0003: resuming a finished sub-agent's conversation", () => {
+  let logsRoot: string | undefined;
+
+  afterEach(() => {
+    if (logsRoot) rmSync(logsRoot, { recursive: true, force: true });
+    logsRoot = undefined;
+  });
+
+  /** Builds a runtime wired the same way the real `src/cli.ts` call sites wire one — a real
+   * `SessionLogger` writing into a fresh tmpdir `.dh-logs` root, with `sessionId`/`logsRoot`
+   * both explicit — so `AgentRuntime.sendMessage()`'s `reconstructSubAgentHistory()` call
+   * reads back real JSONL files, the same way it will in production. */
+  function newLoggedRuntime(): AgentRuntime {
+    logsRoot = mkdtempSync(join(tmpdir(), "dh-logs-runtime-sendmessage-"));
+    const sessionId = "session-resume-test";
+    const logger = new SessionLogger(join(logsRoot, sessionId));
+    return newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      sessionId,
+      logsRoot,
+      onLogLine: (agentId, line) => logger.append(agentId, line),
+    });
+  }
+
+  test("SendMessage to a done sub-agent resumes it under the same task id, seeded with its prior history", async () => {
+    const runtime = newLoggedRuntime();
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+      description: "Child",
+    });
+    await runtime.tasks.awaitDone(taskId);
+    expect(runtime.tasks.snapshot(taskId).status).toBe("done");
+
+    runtime.sendMessage(taskId, "resume: continue please");
+    // sendMessage() re-invokes spawnAgent() synchronously (before its async `run` resolves),
+    // so the task is live again under the very same id immediately.
+    expect(runtime.tasks.trySnapshot(taskId)?.status).not.toBe("done");
+    await runtime.tasks.awaitDone(taskId);
+
+    const snapshot = runtime.tasks.snapshot(taskId);
+    expect(snapshot.id).toBe(taskId);
+    expect(snapshot.status).toBe("done");
+    expect(snapshot.output).toContain("resumed done");
+    // Reused the same description too (spawnAgent's params carried it through from the
+    // finished snapshot, not lost on resume).
+    expect(snapshot.description).toBe("Child");
+
+    // The reused id's JSONL log file now holds both the original run (header + "child
+    // instruction"/"child done") and the resumed run (a second header + "resume: continue
+    // please"/"resumed done") — proof this was the SAME agent identity resuming, not a fresh
+    // one, and that the seeded history actually came from this file.
+    // biome-ignore lint/style/noNonNullAssertion: set by newLoggedRuntime() above
+    const logPath = join(logsRoot!, "session-resume-test", `${encodeURIComponent(taskId)}.jsonl`);
+    const raw = readFileSync(logPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const headers = raw.filter((l) => l.type === "header");
+    expect(headers).toHaveLength(2);
+    const userTexts = raw
+      .filter((l) => l.type === "message" && l.role === "user")
+      .map((l) => l.content);
+    expect(userTexts).toContain("child instruction");
+    expect(userTexts).toContain("resume: continue please");
+  });
+
+  test("SendMessage to a failed sub-agent resumes it identically to a done one (no special-casing)", async () => {
+    const runtime = newLoggedRuntime();
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "fail please",
+    });
+    await runtime.tasks.awaitDone(taskId);
+    expect(runtime.tasks.snapshot(taskId).status).toBe("failed");
+
+    runtime.sendMessage(taskId, "resume: continue please");
+    await runtime.tasks.awaitDone(taskId);
+
+    // Resumed history still starts with the original "fail please" instruction (D6: resume
+    // never rewrites prior turns), so the mock's TASK_FAILED-marker fallback fires again on
+    // this run's own missed-call nudge — the resumed run reprocesses "resume: continue
+    // please" (proving it actually saw the new message) before that happens.
+    const snapshot = runtime.tasks.snapshot(taskId);
+    expect(snapshot.id).toBe(taskId);
+    expect(snapshot.status).toBe("failed");
+    expect(snapshot.output).toContain("resumed done");
+  });
+
+  test("SendMessage to a bash-kind finished task still throws TaskFinishedError (no conversation to resume)", async () => {
+    const runtime = newLoggedRuntime();
+    const taskId = runtime.tasks.start({
+      kind: "bash",
+      parentAgentId: ROOT_AGENT_ID,
+      run: async () => {},
+    });
+    await runtime.tasks.awaitDone(taskId);
+    expect(() => runtime.sendMessage(taskId, "hi")).toThrow(/already finished/);
+  });
+
+  test("SendMessage to a still-running sub-agent delivers normally, no resume path taken", async () => {
+    const runtime = newLoggedRuntime();
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "loop-forever",
+    });
+    // Doesn't throw, doesn't go through the resume path (the task is still live).
+    expect(() => runtime.sendMessage(taskId, "steer this way")).not.toThrow();
     runtime.tasks.stop(taskId);
     await runtime.tasks.awaitDone(taskId).catch(() => {});
   });

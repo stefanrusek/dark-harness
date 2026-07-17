@@ -399,4 +399,74 @@ describe("TaskRegistry", () => {
       expect(registry.trySnapshot(id)).toBeUndefined();
     });
   });
+
+  describe("clearTerminal (DH-0003: SendMessage-resume id reuse)", () => {
+    test("clears a done task's entry, letting start() reuse its id", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "agent",
+        parentAgentId: "root",
+        id: "agent-fixed",
+        run: async () => {},
+      });
+      await registry.awaitDone(id);
+      expect(registry.trySnapshot(id)?.status).toBe("done");
+
+      registry.clearTerminal(id);
+      expect(registry.trySnapshot(id)).toBeUndefined();
+
+      // Reusing the id no longer throws DuplicateTaskIdError.
+      const reused = registry.start({
+        kind: "agent",
+        parentAgentId: "root",
+        id,
+        run: async () => {},
+      });
+      expect(reused).toBe(id);
+    });
+
+    test("clears a failed task's eviction-queue slot and read cursors, not just its entry", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "agent",
+        parentAgentId: "root",
+        id: "agent-fixed",
+        run: async () => {
+          throw new Error("boom");
+        },
+      });
+      await registry.awaitDone(id);
+      expect(registry.trySnapshot(id)?.status).toBe("failed");
+      // Populate a read cursor for this id — clearTerminal must drop it too, or a reused id
+      // would start with a stale "already read up to N chars" cursor from the finished run.
+      registry.outputSince(id, "some-reader");
+
+      registry.clearTerminal(id);
+
+      const reused = registry.start({
+        kind: "agent",
+        parentAgentId: "root",
+        id,
+        run: async () => {},
+      });
+      // A fresh read cursor for the same reader starts from 0 again, not from wherever the
+      // evicted run's cursor had advanced to.
+      expect(registry.outputSince(reused, "some-reader").totalLength).toBe(0);
+    });
+
+    test("clearTerminal on a still-running task throws instead of abandoning live state", () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "agent",
+        parentAgentId: "root",
+        run: () => new Promise(() => {}),
+      });
+      expect(() => registry.clearTerminal(id)).toThrow(/has not finished/);
+    });
+
+    test("clearTerminal on an unknown id throws TaskNotFoundError", () => {
+      const registry = new TaskRegistry();
+      expect(() => registry.clearTerminal("nope")).toThrow(TaskNotFoundError);
+    });
+  });
 });

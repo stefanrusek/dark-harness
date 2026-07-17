@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0003
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -57,6 +57,60 @@ its own design pass.
 ## Notes
 
 > [!NOTE]
+> Implemented (Grace, 2026-07-16), per the architect design pass below — followed precisely.
+>
+> - `src/agent/resume.ts`: extracted `replayAgentHistory(logsRoot, sessionId, agentId)` (open
+>   one agent's JSONL log + fold to `ProviderMessage[]`) as the shared primitive.
+>   `loadResumeSession()` now calls it once per chain hop and concatenates.
+>   `reconstructSubAgentHistory(logsRoot, sessionId, agentId)` is the new single-hop, no-
+>   chain-walk caller for SendMessage's resume path.
+> - `src/agent/tasks.ts`: added `TaskRegistry.clearTerminal(id)` — clears a terminal task's
+>   entry, eviction-queue slot, and per-reader read cursors so `start()` can reuse its id.
+> - `src/agent/runtime.ts`: `AgentRuntime.sendMessage(agentId, message)` is the new shared
+>   entry point (both the `SendMessage` tool, via a new `ToolContext.sendMessage`, and
+>   `src/cli.ts`'s wire-facing `AgentLoopHandle.sendMessage` for non-root agentIds now route
+>   through it instead of calling `TaskRegistry.sendMessage` directly). It catches
+>   `TaskFinishedError` for `kind === "agent"` tasks, reconstructs history via (3), clears the
+>   old entry via `clearTerminal`, and re-invokes `spawnAgent()` with the id reused (`spawnAgent`
+>   grew optional `id`/`seedHistory` params) and history seeded through the same
+>   `AgentLoopParams.resume` trailing-role merge `AgentRuntimeOptions.resume` already uses for
+>   the root — no second merge path. `failed`/`stopped` sub-agents resume identically to `done`
+>   ones, no special-casing, per the resolved open question.
+> - Added `AgentRuntimeOptions.logsRoot` (defaults to `<cwd>/.dh-logs`, matching every existing
+>   `.dh-logs` call site) so the runtime can read back its own session's sub-agent logs.
+>
+> Proving tests (all real filesystem/JSONL round-trips, no mocking of the reconstruction path):
+> - `src/agent/resume.test.ts` — `describe("reconstructSubAgentHistory (DH-0003) — single-hop,
+>   no chain walk")`: replays a finished sub-agent's own log independent of the root's log in
+>   the same session; a failed sub-agent's history includes the failure verbatim (no special-
+>   casing); missing sub-agent log throws `ResumeError`.
+> - `src/agent/tasks.test.ts` — `describe("clearTerminal (DH-0003: SendMessage-resume id
+>   reuse)")`: clears a done task's entry to let `start()` reuse its id; clears a failed task's
+>   eviction-queue slot and read cursors (not just the entry); throws on a still-running task;
+>   throws `TaskNotFoundError` on an unknown id.
+> - `src/agent/runtime.test.ts` — `describe("AgentRuntime.sendMessage — DH-0003: resuming a
+>   finished sub-agent's conversation")`: SendMessage to a `done` sub-agent resumes it under
+>   the same task id with prior history seeded (verified via the real on-disk JSONL: two header
+>   lines, both turns' user messages present); a `failed` sub-agent resumes identically (no
+>   special-casing — its stale-marker history still drives the mock's fallback the same way);
+>   a `bash`-kind finished task still throws `TaskFinishedError` (no conversation to resume); a
+>   still-running sub-agent's SendMessage takes the normal (non-resume) path.
+>
+> Gates run: `bun run typecheck` (clean), `bun run lint` (clean on changed files), `bun test
+> src --coverage` (1970 pass, 0 fail; 100% line coverage on every changed file). Full `bun run
+> e2e` skipped per dispatch instructions — no `e2e/` files touched.
+>
+> Flagged, not fixed (out of this ticket's scope — pre-existing, Core-owned but a larger,
+> separate change): in `--server`/interactive mode, `src/cli.ts` generates the `AgentRuntime`'s
+> internal `sessionId` via `AgentRuntimeLoopAdapter`'s own default (a fresh `randomUUID()`)
+> *before* the outer `sessionId`/`logDir` used for `DhServer`'s actual `SessionLogger` is
+> generated — so `AgentRuntime.sessionId` (and thus the JSONL header's own `sessionId` field
+> written into every log line) never matches the directory the logs actually live in for that
+> mode. This predates this ticket (it already affected `--resume`'s header stamping the same
+> way) and would need `sessionId` generated before `deps.createAgentLoop()` is called and
+> threaded through, touching several call sites/tests — worth its own ticket if an operator
+> hits it.
+>
 > Current (correct, but partial) behavior: `SendMessage` to a finished task now returns a
 > clear error naming it as already finished, rather than silently losing the message. That
 > is the fix that already shipped; this ticket is the fuller "actually resume it" behavior.

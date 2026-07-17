@@ -35,6 +35,12 @@ export interface ToolContext {
   agentId: string;
   config: DhConfig;
   tasks: TaskRegistry;
+  /** DH-0003: delivers a message into `taskId`'s conversation — the `SendMessage` tool's own
+   * entry point, in preference to calling `tasks.sendMessage()` directly (which throws
+   * `TaskFinishedError` unconditionally for a terminal task with no recovery). This resumes a
+   * finished agent-kind task's conversation instead of just erroring; see
+   * `AgentRuntime.sendMessage()`'s doc comment for the full design. */
+  sendMessage(taskId: string, message: string): void;
   /** Starts a sub-agent as a task; resolves to the task id immediately (task runs concurrently).
    * `background` (Round 12, default true) should mirror the tool call's own
    * `run_in_background` resolution — only a background spawn gets a completion

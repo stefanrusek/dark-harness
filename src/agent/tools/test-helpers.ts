@@ -13,12 +13,17 @@ export const TEST_CONFIG: DhConfig = {
 };
 
 export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
+  const tasks = overrides.tasks ?? new TaskRegistry();
   const context: ToolContext = {
     cwd: process.cwd(),
     runInBackgroundDefault: true,
     agentId: "agent-test-root",
     config: TEST_CONFIG,
-    tasks: new TaskRegistry(),
+    tasks,
+    // DH-0003: default mirrors the plain (non-resuming) delegation `ctx.sendMessage` had
+    // before AgentRuntime grew the finished-agent-resume path — tests that specifically want
+    // resume behavior override this directly.
+    sendMessage: (taskId, message) => tasks.sendMessage(taskId, message),
     spawnAgent: () => {
       throw new Error("spawnAgent not wired in this test context");
     },

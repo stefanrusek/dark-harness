@@ -48,7 +48,7 @@ export const sendMessageTool: Tool = {
     const taskId = resolution.id;
 
     try {
-      ctx.tasks.sendMessage(taskId, message);
+      ctx.sendMessage(taskId, message);
     } catch (err) {
       // Round 13 (docs/handoffs/core.md): previously this fell through to a generic
       // "delivery failed" message while `tasks.sendMessage()` actually threw nothing — the
@@ -56,6 +56,11 @@ export const sendMessageTool: Tool = {
       // call and the message was never read again, while the tool still reported success.
       // TaskFinishedError (thrown by tasks.ts now that finished status is checked first)
       // makes that state explicit instead of a false "delivered" claim.
+      //
+      // DH-0003: this is now only ever reached for a *bash*-kind terminal task (no
+      // conversation to resume) — `ctx.sendMessage()` (AgentRuntime.sendMessage) resumes a
+      // finished *agent*-kind task's conversation instead of throwing, so that case no longer
+      // reaches here at all.
       if (err instanceof TaskFinishedError) {
         return {
           output: `SendMessage tool error: task ${taskId} has already finished; message not delivered.`,
