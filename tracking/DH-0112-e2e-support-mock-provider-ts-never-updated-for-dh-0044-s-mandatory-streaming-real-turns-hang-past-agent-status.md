@@ -74,3 +74,33 @@ e2e/support/mock-provider.ts (the shared mock Anthropic-compatible provider most
 > the moment DH-0044 made streaming mandatory. Filed, not dispatched — new-work dispatch is
 > paused 2026-07-16 while the owner works on a separate Slack integration; see the
 > `dispatch_paused_2026-07-16` memory note for full context on resuming.
+
+> [!NOTE]
+> 2026-07-16: `e2e/support/mock-provider.ts` now emits a real Anthropic-shaped SSE stream
+> (`message_start`/`content_block_start`/`content_block_delta`/`content_block_stop`/
+> `message_delta`/`message_stop`), reusing the same event-construction pattern as
+> `src/agent/runtime.test.ts`'s `sseMessageResponse()` — landed as a side effect of DH-0068
+> (the hero-screenshot spike hung on exactly this bug). `bun test src` is unaffected (1959
+> pass, 100% coverage held). A full `bun run e2e` afterward surfaced the predicted fallout,
+> now visible instead of hung:
+> - `e2e/server-protocol.test.ts`'s sub-agent-spawn scenario: `subProvider.callCount` is now
+>   2, not 1 — the DH-0050 ReportOutcome nudge (a real, correct behavior: a non-tool-use turn
+>   with no `ReportOutcome` call gets one nudge-and-retry) fires because the scripted turn
+>   never calls `ReportOutcome`. Stale assertion, not a product bug.
+> - `e2e/exit-codes.test.ts`: same nudge-driven `callCount` staleness on the success-path
+>   test (expects 1, now legitimately 2).
+> - `e2e/exit-codes.test.ts`'s malformed-response-body test regressed further: exit code is
+>   now `0` (expected `>=2`) — worth real investigation, not just a stale assertion. Root
+>   cause traced (not fixed) to `consumeAnthropicStream` in
+>   `src/agent/providers/anthropic.ts`: a garbage/non-SSE 200 body with no parseable stream
+>   events silently yields an empty completion (`stopReason: "other"`, no text, no blocks)
+>   rather than throwing — the loop then treats it as an empty-but-valid turn, nudges once,
+>   and reports success on the (still garbage) retry. This looks like a real gap in the
+>   provider adapter's malformed-stream handling, separate from this ticket's mock-only
+>   scope — worth its own ticket rather than folding into DH-0112's close-out.
+> - `e2e/bedrock-provider.test.ts`'s 3 failures are unrelated and pre-existing — confirmed via
+>   `git stash` that they fail identically with this fix (and DH-0068's loop.ts change)
+>   fully reverted, i.e. before either touched anything.
+> DH-0112 itself (the mock's non-streaming-vs-mandatory-streaming mismatch) is now fixed;
+> what's left to close it out is updating the stale `callCount` assertions above and deciding
+> whether the malformed-stream gap gets its own ticket or rides along here.

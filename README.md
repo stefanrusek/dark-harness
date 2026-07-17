@@ -1,4 +1,10 @@
-# Dark Harness
+# ◆ Dark Harness
+
+[![npm version](https://img.shields.io/npm/v/dark-harness)](https://www.npmjs.com/package/dark-harness)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+*(A CI status badge belongs here too, once the repo's public URL is confirmed — see
+[Status / deferred this round](#status--deferred-this-round).)*
 
 **`dh`** is a single-binary agent harness for autonomous "dark factory" software work: point
 it at a repo and an instructions file, and it runs an LLM agent — with sub-agents, a real
@@ -9,7 +15,15 @@ loose unattended.
 No daemons to install, no runtime to configure — `dh` is one compiled binary that is the
 server, the console client, and the web client, composed by flags.
 
-<!-- Promo screenshot goes here (see design-review ticket). -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-web-light.png">
+  <img src="docs/media/hero-web-dark.png" alt="Dark Harness web UI observing a multi-agent session: a 5-agent tree with running, waiting, done, and failed statuses, a rich-Markdown deploy report in the transcript, and real token/cost totals.">
+</picture>
+
+*A real session, captured through the actual web UI against a scripted mock provider — see
+[`e2e/spikes/web/hero-screenshot.ts`](e2e/spikes/web/hero-screenshot.ts) to reproduce it after
+any visual change.*
 
 ## Security posture, up front
 
@@ -521,7 +535,10 @@ should read both before their first change.
 
 ## Status / deferred this round
 
-- No logo or wordmark yet.
+- The CI badge above is a placeholder — wiring it to a real status requires the repo's public
+  URL, which needs the owner's sign-off before it's published; see `tracking/DH-0068-*.md`.
+- A full logo/wordmark design is still out of scope — the ◆ brand mark above (borrowed from
+  the web UI's own `.brand::before`) is the extent of the visual identity for now.
 - The config reference above is still hand-maintained prose, not generated from
   `src/contracts/config.ts` — but `src/prompt/readme-config-sync.test.ts` runs in the normal
   `bun test src` gate and fails the build if a field is added to `DhOptions` or `ModelConfig`

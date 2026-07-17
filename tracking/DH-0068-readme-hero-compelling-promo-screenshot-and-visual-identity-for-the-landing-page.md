@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0068
 type: feature
-status: draft
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -133,3 +133,58 @@ grounded in what the review found photogenic and what it found embarrassing:
 > (all `$0.00`/light-mode/sparse — counter-examples for the hero), and the fresh dark-mode
 > captures from `e2e/spikes/web/explore-design-review.ts` showing the palette is
 > hero-worthy once DH-0066's Markdown styling lands.
+
+> [!NOTE]
+> 2026-07-16: finished and ran `e2e/spikes/web/hero-screenshot.ts` (found already drafted,
+> uncommitted, from a prior blocked attempt). Two blockers along the way, both fixed:
+> - The spike hung indefinitely on the first turn — root-caused to `e2e/support/
+>   mock-provider.ts` still serving non-streaming JSON responses after DH-0044 made
+>   `stream: true` mandatory on both real provider adapters (the exact gap DH-0112 already
+>   tracks). Fixed the mock to emit real SSE streams, reusing the event-construction pattern
+>   from `src/agent/runtime.test.ts`'s `sseMessageResponse()`. `bun test src` unaffected
+>   (1959 pass, 100% coverage held). Left follow-up notes on DH-0112 for the e2e assertions
+>   this newly unblocks/breaks (mostly stale `callCount` expectations, plus one real gap in
+>   `consumeAnthropicStream`'s malformed-response handling worth its own ticket) — out of
+>   this ticket's scope, not blocking the hero.
+> - Once streaming worked, a spawned sub-agent still mid-first-turn showed `waiting` (amber)
+>   instead of `running` (blue) in the web UI — `src/agent/loop.ts` never emitted an initial
+>   `agent_status: "running"` for a freshly spawned sub-agent, so the web client's
+>   `ensureAgent` default (`waiting`) stood until the turn resolved, contradicting the style
+>   guide's own definition of `waiting` ("idle, awaiting input/dispatch" — a dispatched,
+>   in-flight sub-agent is neither). Fixed by emitting `agent_status: "running"` (+ matching
+>   JSONL `status_change`) right after `agent_spawned`, scoped to sub-agents only
+>   (`parentAgentId !== null`) so root's separately-governed `rootStatus` state machine is
+>   untouched. `bun test src` unaffected (1959 pass, 100% coverage held, all 7 previously
+>   order-dependent `find()`-first-`agent_status` assertions still pass since they're root-
+>   scoped).
+> - Also fixed the hero script itself: root's background fan-out wakes it once per completed/
+>   failed sub-agent, and the script only had one scripted follow-up turn — the exhausted-
+>   turns fallback repeated it verbatim, rendering as three duplicate assistant bubbles.
+>   Added two short acknowledgment turns (one per real wake-up) and scrolled the transcript
+>   pane back to the rich-Markdown deploy report before capture (a fresh message auto-scrolls
+>   to the bottom).
+> - Captured `docs/media/hero-web-dark.png` (129KB) and `-light.png` (126KB), both under the
+>   400KB budget. Verified in frame: 5-agent tree (root + 3 children + 1 grandchild) with all
+>   four status colors (blue running / amber waiting / green done / red failed), the deploy-
+>   report Markdown (heading, bold/italic, nested list, ordered list, blockquote, fenced
+>   `typescript` code block, link), a user message bubble, non-zero realistic token/cost
+>   totals ($0.45 session total, no `$0.00`), short non-UUID sidebar labels, the `Live`
+>   connection pill, and the composer.
+> - Updated `README.md`: `<picture>`/`#gh-dark-mode-only`-equivalent (`prefers-color-scheme`
+>   media queries, since GitHub's own `#gh-dark-mode-only` anchor trick only works for
+>   anchor-referenced images, not inline `<picture>` — used the standards-based
+>   `prefers-color-scheme` `<source>` pattern instead, which GitHub also honors) hero image
+>   with alt text, added the ◆ brand mark to the H1, added npm-version and MIT-license
+>   shields (left the CI badge as an explicit placeholder — needs the public repo URL, which
+>   needs owner sign-off first, per this ticket's own Functional Requirements), and updated
+>   "Status / deferred this round" to drop the stale "no logo/wordmark" line.
+> - Gates: `bun run typecheck` clean, `bun test src --coverage` 1959/1959 pass at 100% new/
+>   changed-code coverage, `bunx biome check` clean on every file this ticket touched (the
+>   repo-wide `bun run lint` has 9 pre-existing failures in `.claude/skills/forked-subagent/`,
+>   unrelated to this ticket). `bun run e2e` is not fully green — see the DH-0112 note above
+>   for exactly which failures are pre-existing/newly-surfaced-but-out-of-scope vs. this
+>   ticket's own work; none are in `e2e/spikes/` (not gated) or caused by files this ticket
+>   owns beyond the two Core/E2E-domain fixes described above.
+> Status → `verifying`. Closing needs sign-off that the loop.ts status-semantics fix and the
+> mock-provider.ts streaming fix (both outside this ticket's original `e2e/spikes/` scope)
+> are acceptable riders, plus the owner's call on the CI badge/public repo URL.

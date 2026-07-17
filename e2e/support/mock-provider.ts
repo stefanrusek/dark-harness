@@ -74,34 +74,78 @@ export interface MockAnthropicProvider {
   stop(): void;
 }
 
-function turnToMessage(turn: MockTurn) {
-  const content: Record<string, unknown>[] = [];
-  if (turn.text !== undefined && turn.text.length > 0) {
-    content.push({ type: "text", text: turn.text });
-  }
-  for (const call of turn.toolCalls ?? []) {
-    content.push({
-      type: "tool_use",
-      id: call.id ?? `toolu_${randomUUID()}`,
-      name: call.name,
-      input: call.input,
-    });
-  }
+/** Builds a real Anthropic-shaped SSE streaming body (`message_start` /
+ * `content_block_start` / `content_block_delta` / `content_block_stop` / `message_delta` /
+ * `message_stop`) from a scripted `MockTurn` — DH-0044 made `stream: true` mandatory on both
+ * real provider adapters, so a single non-streaming JSON body (the pre-DH-0112 shape) is
+ * never actually decoded by `AnthropicProvider.complete()`'s `consumeAnthropicStream`. Mirrors
+ * the pattern already built in `src/agent/runtime.test.ts`'s `sseMessageResponse()` /
+ * `src/agent/providers/anthropic.test.ts`'s `streamOf()` helpers. */
+function turnToSseBody(turn: MockTurn): string {
+  const inputTokens = turn.inputTokens ?? 10;
+  const outputTokens = turn.outputTokens ?? 10;
   const stopReason =
     turn.stopReason ?? ((turn.toolCalls?.length ?? 0) > 0 ? "tool_use" : "end_turn");
-  return {
-    id: `msg_${randomUUID()}`,
-    type: "message",
-    role: "assistant",
-    model: "mock-model",
-    content,
-    stop_reason: stopReason,
-    stop_sequence: null,
-    usage: {
-      input_tokens: turn.inputTokens ?? 10,
-      output_tokens: turn.outputTokens ?? 10,
+
+  const events: { type: string; [key: string]: unknown }[] = [
+    {
+      type: "message_start",
+      message: {
+        id: `msg_${randomUUID()}`,
+        type: "message",
+        role: "assistant",
+        model: "mock-model",
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: inputTokens, output_tokens: 0 },
+      },
     },
-  };
+  ];
+
+  let index = 0;
+  if (turn.text !== undefined && turn.text.length > 0) {
+    events.push({
+      type: "content_block_start",
+      index,
+      content_block: { type: "text", text: "", citations: null },
+    });
+    events.push({
+      type: "content_block_delta",
+      index,
+      delta: { type: "text_delta", text: turn.text },
+    });
+    events.push({ type: "content_block_stop", index });
+    index += 1;
+  }
+  for (const call of turn.toolCalls ?? []) {
+    events.push({
+      type: "content_block_start",
+      index,
+      content_block: {
+        type: "tool_use",
+        id: call.id ?? `toolu_${randomUUID()}`,
+        name: call.name,
+        input: {},
+      },
+    });
+    events.push({
+      type: "content_block_delta",
+      index,
+      delta: { type: "input_json_delta", partial_json: JSON.stringify(call.input ?? {}) },
+    });
+    events.push({ type: "content_block_stop", index });
+    index += 1;
+  }
+
+  events.push({
+    type: "message_delta",
+    delta: { stop_reason: stopReason, stop_sequence: null },
+    usage: { output_tokens: outputTokens },
+  });
+  events.push({ type: "message_stop" });
+
+  return events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
 }
 
 /**
@@ -148,7 +192,9 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
       if (turn.delayMs !== undefined && turn.delayMs > 0) {
         await Bun.sleep(turn.delayMs);
       }
-      return Response.json(turnToMessage(turn));
+      return new Response(turnToSseBody(turn), {
+        headers: { "content-type": "text/event-stream" },
+      });
     },
   });
 

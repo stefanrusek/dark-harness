@@ -429,6 +429,26 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     // via its separate tree-poll path.
     ...(params.description !== undefined ? { description: params.description } : {}),
   });
+  // A freshly spawned sub-agent is about to make its first model call — genuinely "running",
+  // not idle. Without this, a client that defaults an unknown agent's status to "waiting" on
+  // `agent_spawned` (see web client state.ts's `ensureAgent`) shows a sub-agent mid-turn as
+  // amber/idle for its entire first call, contradicting the style guide's own definition of
+  // `waiting` ("idle, awaiting input/dispatch") — this agent has already been dispatched.
+  // Root is excluded: its own "running"/"waiting" semantics are already governed separately
+  // by AgentRuntime.rootStatus (runtime.ts) and its own set of interactive-loop transitions;
+  // duplicating an unconditional "running" here would just be a redundant/contradictory event
+  // on top of that existing, already-tested state machine.
+  const isSubAgent = params.parentAgentId !== null;
+  if (isSubAgent && !params.signal?.aborted) {
+    emitEvent(params, {
+      version: 1,
+      id: randomUUID(),
+      timestamp: nowIso(),
+      type: "agent_status",
+      agentId: params.agentId,
+      status: "running",
+    });
+  }
   emitLog(params, {
     type: "header",
     version: 1,
@@ -450,6 +470,14 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     role: "user",
     content: params.instruction,
   });
+  if (isSubAgent && !params.signal?.aborted) {
+    emitLog(params, {
+      version: 1,
+      timestamp: nowIso(),
+      type: "status_change",
+      status: "running",
+    });
+  }
 
   let turns = 0;
   let finalText = "";
