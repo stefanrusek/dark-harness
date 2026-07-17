@@ -184,6 +184,14 @@ export class AnthropicProvider implements ModelProvider {
         // the bounded retry policy an operator configured. This adapter now owns retry/backoff
         // exclusively; the SDK makes exactly one real attempt per call.
         maxRetries: 0,
+        // dh is a CLI/server tool -- this client never actually runs inside a browser, so the
+        // SDK's browser-credential-exposure guard is a false-positive risk here, not a real
+        // one. Without this, the SDK's `typeof window !== "undefined"` heuristic throws
+        // whenever another test file in the same bun test process has loaded happy-dom (used
+        // for TUI/Web component tests) and left a global `window` behind -- cross-file global
+        // leakage `--parallel=1` alone doesn't prevent, since it only serializes execution
+        // order within one shared process, not per-file global state.
+        dangerouslyAllowBrowser: true,
       });
     this.retryPolicy = config.retry;
   }
