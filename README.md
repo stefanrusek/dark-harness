@@ -13,7 +13,37 @@ both a console TUI and a web UI, so you can develop and observe locally before y
 loose unattended.
 
 No daemons to install, no runtime to configure — `dh` is one compiled binary that is the
-server, the console client, and the web client, composed by flags.
+server, the console client, and the web client, composed by flags. Under the hood it's a
+full harness: three provider integrations (Anthropic, AWS Bedrock, OpenAI-compatible)
+behind one interface, arbitrarily nested sub-agent orchestration, resumable JSONL-per-agent
+session logging, and an exit-code contract designed to be scripted against — not just a
+wrapper around a single API call.
+
+### Why this exists, and what it's meant to demonstrate
+
+I built `dh` to have a real, unattended agent harness I trust enough to point at actual
+work — and as a vehicle to practice the engineering judgment that matters once "call an LLM
+API" stops being the hard part. A few decisions below are worth a closer look if you're
+sizing up how I work:
+
+- **Security posture reasoned from the use case, not bolted on.** An unattended agent that
+  can't run a shell command without asking permission isn't unattended — so `dh` allows
+  everything and pushes the security boundary to the network perimeter instead, and says so
+  explicitly rather than pretending a permission-prompt UI would have helped. See
+  [Security posture, up front](#security-posture-up-front) below.
+- **A testing discipline that closes the loop, not just a coverage number.** Every
+  acceptance criterion in this project's ticket process has to name the specific test that
+  proves it before a ticket can close — "I manually verified this" doesn't count. See
+  [`CLAUDE.md` §9](CLAUDE.md#9-acceptance-criteria--verification-tddbdd) (Dark Harness's own
+  constitution).
+- **A multi-agent build process with real ownership boundaries.** This project itself was
+  built by a small fleet of AI agents coordinating through durable documents instead of a
+  shared conversation — directory-level ownership, an escalation policy for cross-cutting
+  decisions, and locked-decision ADRs instead of relitigating settled calls. See
+  [Contributing / how this was built](#contributing--how-this-was-built) below.
+- **Fixes driven by real incidents, not speculative hardening.** e.g. a flaky test's fixed
+  sleep replaced with poll-until-stable after it was observed failing intermittently in real
+  CI, not because a general "tests should be more robust" pass suggested it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
