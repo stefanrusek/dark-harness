@@ -220,6 +220,11 @@ describe("AppView interactive bootstrap (Round 2 — fresh-session deadlock fix)
 
     const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
     textarea.value = "enter to send";
+    // React's ChangeEventPlugin tracks `keydown` against whichever element last received a
+    // real `focus` event (`activeElementInst`) — a synthetic `keydown` dispatched without a
+    // preceding `focus()` call never reaches this component's `onKeyDown` handler under
+    // happy-dom, unlike a real browser where typing implies the field is already focused.
+    textarea.focus();
     h.dispatchKey(textarea, "keydown", { key: "Enter", cancelable: true });
     await flush();
 
@@ -347,6 +352,65 @@ describe("AppView construction and rendering", () => {
     expect(h.app.getState().rootAgentId).toBe("root-1");
     expect(h.root.querySelector(".agent-row")).not.toBeNull();
     expect(h.root.querySelector(".agent-header-name")?.textContent).toBe("Root agent");
+  });
+
+  test("DH-0135: the React-mounted composer mounts exactly once and never duplicates across repeated old-renderer full-section rebuilds (sidebar/header/transcript still on render.ts)", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+
+    const textareaBefore = h.root.querySelector("textarea");
+    expect(textareaBefore).not.toBeNull();
+
+    // Drives several full `renderAll()` passes via the still-imperative sections (sidebar/
+    // header/transcript rebuild wholesale on every SSE event and liveness tick) — the
+    // composer's own React root must not pick up a second mount or lose its node identity
+    // as a byproduct of those unrelated rebuilds.
+    for (let i = 0; i < 5; i++) {
+      h.stream.push({
+        version: 1,
+        id: `tick-${i}`,
+        timestamp: `2026-01-01T00:00:0${i}Z`,
+        type: "agent_output",
+        agentId: "root-1",
+        chunk: `chunk-${i} `,
+      });
+      // eslint-disable-next-line no-await-in-loop
+      await flush();
+    }
+    h.clock.now += 1000;
+    h.intervalCalls[0]?.();
+
+    expect(h.root.querySelectorAll("form.composer")).toHaveLength(1);
+    expect(h.root.querySelectorAll("textarea.composer-input")).toHaveLength(1);
+    expect(h.root.querySelector("textarea")).toBe(textareaBefore);
+  });
+
+  test("DH-0135: the composer's focus and unsent text survive an unrelated SSE event and the liveness tick (DH-0117 regression, end to end through AppView)", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+
+    const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "unsent draft";
+    textarea.focus();
+
+    h.stream.push({
+      version: 1,
+      id: "e2",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "agent_output",
+      agentId: "root-1",
+      chunk: "unrelated output",
+    });
+    await flush();
+    h.clock.now += 1000;
+    h.intervalCalls[0]?.();
+
+    const textareaAfter = h.root.querySelector("textarea");
+    expect(textareaAfter).toBe(textarea);
+    expect((textareaAfter as HTMLTextAreaElement).value).toBe("unsent draft");
+    expect(h.document.activeElement).toBe(textarea);
   });
 
   test("streaming output appends to the pane without resetting selection", async () => {

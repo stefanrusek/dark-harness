@@ -4,6 +4,31 @@
 
 import { Window } from "happy-dom";
 
+// DH-0135: `bun test` doesn't strictly finish one file's tests before starting another's —
+// several files can have test bodies in flight in the same process at once — so toggling
+// `globalThis.window`/`document` on and off per-test (set at the top of a test, deleted at
+// the end) is observable by an unrelated concurrently-running test in a half-registered
+// state. Registering once, at module load, for the lifetime of the whole `bun test` process
+// avoids that race entirely — `react-dom` (mounted for the Composer/AppHeader sections, see
+// app.ts) only needs `window`/`document` to exist as *some* object for its few ambient reads
+// (e.g. `getCurrentEventPriority`'s `window.event`); each individual test still gets its own
+// isolated happy-dom `Window`/`Document`/root threaded through explicitly via `createTestDom`
+// below, which is what actually determines what gets rendered where.
+//
+// The one thing that must NOT become ambiently true for the whole process is "looks like a
+// browser": the Anthropic SDK's `isRunningInBrowser()` (src/agent/providers/anthropic.ts)
+// checks `window`/`window.document`/`navigator` together and throws once all three are
+// present — Bun itself always provides a real `navigator`, so `navigator` is overridden to
+// `undefined` here too, permanently, alongside `window`/`document`.
+const globalAny = globalThis as unknown as Record<string, unknown>;
+if (!globalAny.window) {
+  const bootWindow = new Window({ url: "http://localhost/" });
+  globalAny.window = bootWindow;
+  globalAny.document = bootWindow.document;
+  globalAny.HTMLElement = bootWindow.HTMLElement;
+  globalAny.navigator = undefined;
+}
+
 export interface TestDom {
   window: Window;
   document: Document;

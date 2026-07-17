@@ -6,7 +6,6 @@ import {
   hideError,
   hideGapBanner,
   renderAgentHeader,
-  renderComposer,
   renderConnectionStatus,
   renderErrorLog,
   renderModelPicker,
@@ -118,6 +117,9 @@ describe("buildShell", () => {
     expect(root.className).toBe("dh-app");
     expect(root.querySelector(".sidebar")).not.toBeNull();
     expect(root.querySelector(".main-pane")).not.toBeNull();
+    // DH-0135: reserved React-mounted `<AppHeader>` slot, above the sidebar/main row.
+    expect(root.querySelector(".app-header-slot")).not.toBeNull();
+    expect(shell.appHeaderSlot === root.querySelector(".app-header-slot")).toBe(true);
     expect(shell.jumpToLatest.classList.contains("hidden")).toBe(true);
     expect(shell.errorBanner.classList.contains("hidden")).toBe(true);
     expect(shell.gapBanner.classList.contains("hidden")).toBe(true);
@@ -643,99 +645,6 @@ describe("renderTranscript / appendTranscript: session-end echo (DH-0066)", () =
     );
     expect(root.querySelector(".session-end-echo")).not.toBeNull();
     expect(state).toEqual({ turnCount: 0, lastTurnTextLength: 0 });
-  });
-});
-
-describe("renderComposer", () => {
-  test("renders nothing when no agent is selected", () => {
-    const { document, root } = createTestDom();
-    renderComposer(document, root, createInitialState(), () => {});
-    expect(root.querySelector("form")).toBeNull();
-  });
-
-  test("renders nothing when a non-root agent is selected", () => {
-    const { document, root } = createTestDom();
-    let state = stateWithRootAndChild();
-    state = { ...state, selectedAgentId: "child-1" };
-    renderComposer(document, root, state, () => {});
-    expect(root.querySelector("form")).toBeNull();
-  });
-
-  test("renders the composer for the root agent and submits trimmed, non-empty text", () => {
-    const { document, root, dispatch } = createTestDom();
-    const sent: string[] = [];
-    renderComposer(document, root, stateWithRootAndChild(), (msg) => sent.push(msg));
-
-    const form = root.querySelector("form") as HTMLFormElement;
-    const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
-    expect(form).not.toBeNull();
-
-    textarea.value = "  hello there  ";
-    dispatch(form, "submit", { cancelable: true });
-    expect(sent).toEqual(["hello there"]);
-    expect(textarea.value).toBe("");
-  });
-
-  test("does not submit an empty/whitespace-only message", () => {
-    const { document, root, dispatch } = createTestDom();
-    const sent: string[] = [];
-    renderComposer(document, root, stateWithRootAndChild(), (msg) => sent.push(msg));
-    const form = root.querySelector("form") as HTMLFormElement;
-    const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
-    textarea.value = "   ";
-    dispatch(form, "submit", { cancelable: true });
-    expect(sent).toEqual([]);
-  });
-
-  test("Enter without Shift submits; Shift+Enter does not", () => {
-    const { document, root, dispatchKey } = createTestDom();
-    const sent: string[] = [];
-    renderComposer(document, root, stateWithRootAndChild(), (msg) => sent.push(msg));
-    const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
-
-    textarea.value = "shift held";
-    dispatchKey(textarea, "keydown", { key: "Enter", shiftKey: true, cancelable: true });
-    expect(sent).toEqual([]);
-
-    textarea.value = "plain enter";
-    dispatchKey(textarea, "keydown", { key: "Enter", shiftKey: false, cancelable: true });
-    expect(sent).toEqual(["plain enter"]);
-  });
-
-  test("re-rendering for the same root-agent state is a no-op: preserves the live textarea (identity, focus, unsent value)", () => {
-    const { document, root } = createTestDom();
-    renderComposer(document, root, stateWithRootAndChild(), () => {});
-    const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
-    textarea.value = "not yet sent";
-    textarea.focus();
-
-    // Simulates renderAll() firing repeatedly (SSE events, the 1s liveness tick) while the
-    // user is mid-type — must not tear down and recreate the composer each time.
-    renderComposer(document, root, stateWithRootAndChild(), () => {});
-    renderComposer(document, root, stateWithRootAndChild(), () => {});
-
-    const textareaAfter = root.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textareaAfter).toBe(textarea);
-    expect(textareaAfter.value).toBe("not yet sent");
-    expect(document.activeElement).toBe(textarea);
-  });
-
-  test("rebuilds the composer on an actual show/hide transition (root -> non-root -> root)", () => {
-    const { document, root } = createTestDom();
-    let state = stateWithRootAndChild();
-    renderComposer(document, root, state, () => {});
-    const firstTextarea = root.querySelector("textarea");
-    expect(firstTextarea).not.toBeNull();
-
-    state = { ...state, selectedAgentId: "child-1" };
-    renderComposer(document, root, state, () => {});
-    expect(root.querySelector("form")).toBeNull();
-
-    state = { ...state, selectedAgentId: stateWithRootAndChild().selectedAgentId };
-    renderComposer(document, root, state, () => {});
-    const secondTextarea = root.querySelector("textarea");
-    expect(secondTextarea).not.toBeNull();
-    expect(secondTextarea).not.toBe(firstTextarea);
   });
 });
 

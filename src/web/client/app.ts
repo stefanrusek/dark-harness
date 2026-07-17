@@ -3,6 +3,8 @@
 // instance state; everything it delegates to is pure/injectable, which is what keeps this
 // class itself cheap to test (fake DOM, fake fetch/streams — no `EventSource`, see sse.ts).
 
+import { createElement } from "react";
+import { type Root, createRoot } from "react-dom/client";
 import type { ServerSentEvent } from "../../contracts/index.ts";
 import type { ServerTarget } from "../protocol.ts";
 import {
@@ -17,6 +19,8 @@ import {
   stopAgent,
   switchModel,
 } from "./commands.ts";
+import { AppHeader } from "./components/AppHeader.tsx";
+import { Composer } from "./components/Composer.tsx";
 import { type DownloadEnv, downloadLogs } from "./download.ts";
 import {
   type AppCallbacks,
@@ -27,7 +31,6 @@ import {
   hideError,
   hideGapBanner,
   renderAgentHeader,
-  renderComposer,
   renderConnectionStatus,
   renderErrorLog,
   renderModelPicker,
@@ -109,6 +112,18 @@ export interface AppDeps {
 export class AppView {
   private state: WebState = createInitialState();
   private readonly shell: ShellRefs;
+  /** DH-0135: `react-dom` roots for the migrated composer section and the reserved
+   *  `<AppHeader>` slot — re-rendered (not rebuilt) on every `renderAll()` pass, same as
+   *  every other section, but via React's own reconciliation instead of this module's
+   *  hand-written DOM diffing. */
+  private readonly composerRoot: Root;
+  private readonly appHeaderRoot: Root;
+  /** DH-0135: guards the two React roots above from being rendered into after `stop()` —
+   *  a coalesced render scheduled just before `stop()` (see `scheduleRenderAll`) can still
+   *  fire after the roots are unmounted if the injected `rafImpl`/timer implementation
+   *  doesn't cancel synchronously; `react-dom` throws on `Root.render()` after `unmount()`,
+   *  where the old plain-DOM render functions would have just harmlessly no-op'd. */
+  private stopped = false;
   private connection: SseConnection | null = null;
   private renderedTranscript: TranscriptRenderState = { turnCount: 0, lastTurnTextLength: 0 };
   private renderedTranscriptForAgentId: string | null = null;
@@ -173,6 +188,8 @@ export class AppView {
     private readonly deps: AppDeps,
   ) {
     this.shell = buildShell(deps.doc, root);
+    this.composerRoot = createRoot(this.shell.composer);
+    this.appHeaderRoot = createRoot(this.shell.appHeaderSlot);
     this.shell.jumpToLatest.addEventListener("click", () => this.scrollToBottom());
     this.shell.scrollRegion.addEventListener("scroll", () => this.handleScroll());
     // DH-0093: Escape closes the /model picker — scoped to the document since it isn't tied
@@ -379,6 +396,9 @@ export class AppView {
       cancelRaf(this.renderRafHandle);
       this.renderRafHandle = undefined;
     }
+    this.stopped = true;
+    this.composerRoot.unmount();
+    this.appHeaderRoot.unmount();
   }
 
   getState(): WebState {
@@ -447,7 +467,12 @@ export class AppView {
     renderConnectionStatus(this.shell.connectionPill, this.state);
     renderSessionSummary(doc, this.shell.sessionSummary, this.state);
     renderAgentHeader(doc, this.shell.agentHeader, this.state, this.callbacks, now);
-    renderComposer(doc, this.shell.composer, this.state, this.callbacks.onSendMessage);
+    if (!this.stopped) {
+      this.composerRoot.render(
+        createElement(Composer, { state: this.state, onSend: this.callbacks.onSendMessage }),
+      );
+      this.appHeaderRoot.render(createElement(AppHeader, {}));
+    }
     if (this.state.possibleGap) {
       showGapBanner(this.shell.gapBanner, () => this.dismissGapBanner());
     } else {
