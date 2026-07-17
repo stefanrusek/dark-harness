@@ -27,6 +27,13 @@ make) — if you point it at a fully local provider (e.g. LM Studio or another
 Anthropic-compatible local endpoint via `baseURL`), it needs no external network access at
 all to run.
 
+Concretely: the Bash tool inherits the harness process's full environment (including any
+provider API key or `DH_TOKEN` referenced via `$(VAR)` in `dh.json`), with no approval prompt
+before it runs. If an agent reads attacker-controlled content (a poisoned README, a malicious
+issue comment, a compromised dependency) that directs it to read `process.env` and exfiltrate
+those values over the network, a non-air-gapped deployment lets that succeed. Air-gapping is
+the mitigation; this is the specific risk it mitigates.
+
 For cases where air-gapping alone isn't practical, `dh` ships two independent, opt-in
 protections (see [Configuration](#configuration--dhjson) below): a bearer token and TLS.
 Neither turns this into a general-purpose auth system — no user accounts, no per-agent
