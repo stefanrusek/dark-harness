@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0129
 type: feature
-status: draft
+status: implementing
 owner: stefan
 resolution:
-blocked_by: ["blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward"]
+blocked_by: []
 created: 2026-07-17
 relations:
   depends_on: []
