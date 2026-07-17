@@ -3,6 +3,17 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // DH-0136: root now needs `jsx` too — src/cli.ts reaches src/tui/app.ts, which (for the
+    // Ink migration) statically imports src/tui/ink/App.tsx so `bun build --compile` can
+    // actually bundle it (a dynamic, type-erased import defeats the bundler's static import
+    // graph just as much as it defeats tsc's — verified the hard way: it silently produces a
+    // binary that throws `Cannot find module` at runtime). Enabling this pulls in
+    // @types/react's ambient DOM-lib globals for this whole program, which is what previously
+    // broke e2e/spikes/web/spike-reconnect.ts's playwright element typing (src/tui/tsconfig.json
+    // and src/web/tsconfig.json's own "give it an isolated program" comments describe the same
+    // collision) — fixed directly in that file instead of avoided here, since avoiding it here
+    // isn't actually possible once a real .tsx file is unavoidably part of this program.
+    "jsx": "react-jsx",
     "lib": ["ESNext"],
     "types": ["bun-types"],
     "strict": true,

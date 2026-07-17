@@ -52,6 +52,14 @@ class FakeStdin implements StdinLike {
     return this;
   }
 
+  off(): this {
+    return this;
+  }
+
+  removeListener(): this {
+    return this;
+  }
+
   type(chunk: string): void {
     for (const listener of this.listeners) listener(chunk);
   }
@@ -71,6 +79,15 @@ class FakeStdout implements StdoutLike {
   on(_event: "resize", listener: () => void): this {
     this.resizeListeners.push(listener);
     return this;
+  }
+
+  off(_event: "resize", listener: () => void): this {
+    this.resizeListeners = this.resizeListeners.filter((l) => l !== listener);
+    return this;
+  }
+
+  removeListener(_event: "resize", listener: () => void): this {
+    return this.off(_event, listener);
   }
 
   removeAllListeners(): this {
@@ -166,10 +183,15 @@ async function flush(times = 5): Promise<void> {
   for (let i = 0; i < times; i++) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  // DH-0044: app.ts now coalesces redraws to at most one every FRAME_INTERVAL_MS (33ms) via
-  // a real setTimeout, so a flush must wait out that window for a pending redraw to actually
+  // DH-0044: app.ts coalesces redraws to at most one every FRAME_INTERVAL_MS (33ms) via a
+  // real setTimeout, so a flush must wait out that window for a pending redraw to actually
   // land — otherwise assertions on stdout writes can race a still-pending coalesced frame.
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // DH-0136: Ink's own `render()` adds a second, independent throttle on top of that (its
+  // internal write scheduling isn't synchronous with `rerender()`), so this window needs
+  // enough headroom to clear both layers, not just app.ts's own one — 40ms (barely over the
+  // first layer alone) was intermittently too tight and made this a flaky test once Ink
+  // owned the actual write.
+  await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
 function enqueueSse(server: FakeServer, event: ServerSentEvent): void {

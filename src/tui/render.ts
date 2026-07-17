@@ -3,6 +3,10 @@
 // app.ts is the only place that actually writes to a terminal.
 
 import type { AgentStatus } from "../contracts/index.ts";
+// DH-0137: status/connection color+glyph+word is centralized in the shared, framework-
+// independent `src/design-tokens.ts` module (same precedent as `src/format.ts` below) — this
+// file no longer declares its own `STATUS_COLOR`/`CONNECTION_COLOR`/`CONNECTION_LABEL` maps.
+import { CONNECTION_TOKENS, STATUS_TOKENS } from "../design-tokens.ts";
 // DH-0104 (docs/design/style-guide.md §4): token/cost/elapsed formatting is defined once in
 // the shared `src/format.ts` module (see its header comment for the two-tier rule) so the
 // TUI, Web, and `dh logs` render the same value the same way instead of drifting apart.
@@ -16,7 +20,7 @@ import { parseMarkdown, sanitizeText } from "../markdown/index.ts";
 import { SPINNER_FRAMES, SPINNER_FRAME_MS } from "../terminal.ts";
 import { renderMarkdownRows } from "./markdown-ansi.ts";
 import { flattenTree } from "./tree.ts";
-import type { AgentInfo, ConnectionStatus, TuiState, Turn } from "./types.ts";
+import type { AgentInfo, TuiState, Turn } from "./types.ts";
 import { wrapText } from "./width.ts";
 
 export { wrapText } from "./width.ts";
@@ -46,6 +50,7 @@ function applyMargin(row: string): string {
 }
 
 const RESET = "\x1b[0m";
+const SGR_PREFIX = "\x1b[";
 const INVERSE = "\x1b[7m";
 /** Synthetic cursor marker: an inverse-video space appended after the input text. The alt-
  * screen shell hides the real terminal cursor for the whole session (see app.ts), and this
@@ -54,21 +59,8 @@ const INVERSE = "\x1b[7m";
  * `TuiState -> string[]` rendering architecture, no real cursor-position math needed. Only
  * the root view's input line is editable, so only `renderRoot` uses this. */
 export const CURSOR_MARKER = `${INVERSE} ${RESET}`;
-// DH-0100: canonical status color model (docs/design/style-guide.md §1/§2.3) — running is
-// blue (34), waiting is yellow (33), stopped is magenta (35); cyan (36) is reserved for
-// structural/informational chrome, not a status. done/failed unchanged (already canonical).
-const STATUS_COLOR: Record<AgentStatus, string> = {
-  running: "\x1b[34m",
-  waiting: "\x1b[33m",
-  done: "\x1b[32m",
-  failed: "\x1b[31m",
-  // DH-0100: stopped is magenta (35), matching the Web's purple stopped hue — never gray,
-  // which reads as unstyled/unknown (DH-0029 regression guard).
-  stopped: "\x1b[35m",
-};
-
 export function colorizeStatus(status: AgentStatus, text: string): string {
-  return `${STATUS_COLOR[status]}${text}${RESET}`;
+  return `${SGR_PREFIX}${STATUS_TOKENS[status].sgr}m${text}${RESET}`;
 }
 
 // DH-0065: chrome styling — header/footer/heading had "zero deliberate styling choices"
@@ -78,23 +70,6 @@ export function colorizeStatus(status: AgentStatus, text: string): string {
 // introduced.
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
-// DH-0105: canonical connection-state color + label vocabulary (docs/design/style-guide.md
-// §1/§6), shared word-for-word (modulo TUI/CLI's lowercase casing rule, DH-0100 §4) with the
-// Web client's `CONNECTION_LABELS` (src/web/client/format.ts) — see
-// `EXPECTED_CONNECTION_LABEL_WORDS` in each surface's tests for the drift guard.
-const CONNECTION_COLOR: Record<ConnectionStatus, string> = {
-  live: "\x1b[32m",
-  connecting: "\x1b[33m",
-  reconnecting: "\x1b[33m",
-  disconnected: "\x1b[31m",
-};
-
-const CONNECTION_LABEL: Record<ConnectionStatus, string> = {
-  connecting: "connecting…",
-  live: "live",
-  reconnecting: "reconnecting…",
-  disconnected: "disconnected",
-};
 
 function dim(text: string): string {
   return `${DIM}${text}${RESET}`;
@@ -214,7 +189,7 @@ function viewLabel(state: TuiState): string {
   }
 }
 
-function headerRows(state: TuiState, cols: number): string[] {
+export function headerRows(state: TuiState, cols: number): string[] {
   const sessionSuffix = state.sessionEnded
     ? `  session ended (exit ${state.sessionEnded.exitCode})`
     : "";
@@ -230,10 +205,9 @@ function headerRows(state: TuiState, cols: number): string[] {
   // DH-0105 / style-guide §1.1: connecting/reconnecting get the animated braille spinner
   // (pending, non-alarming — amber) ahead of the word; live/disconnected are resolved states
   // and show only the word.
-  const connectionPending =
-    state.connection === "connecting" || state.connection === "reconnecting";
-  const connectionGlyph = connectionPending ? `${spinnerFrame(state.now)} ` : "";
-  const connection = `${CONNECTION_COLOR[state.connection]}${connectionGlyph}${CONNECTION_LABEL[state.connection]}${RESET}`;
+  const connectionToken = CONNECTION_TOKENS[state.connection];
+  const connectionGlyph = connectionToken.pending ? `${spinnerFrame(state.now)} ` : "";
+  const connection = `${SGR_PREFIX}${connectionToken.sgr}m${connectionGlyph}${connectionToken.tuiLabel}${RESET}`;
   // DH-0065 liveness: a spinner next to the connection pill whenever the root agent is
   // actively "running" — the root view otherwise gives no live sign the agent is thinking
   // during a long turn (only the tree/agent view's elapsed counter did).
@@ -289,7 +263,7 @@ export function sessionTokenTotals(state: TuiState): {
   return { inputTokens, outputTokens, costUsd };
 }
 
-function renderRoot(
+export function renderRoot(
   state: TuiState,
   contentRows: number,
   cols: number,
@@ -309,7 +283,7 @@ function renderRoot(
   return { content: padRows(content, contentRows), footer: [hint, inputLine] };
 }
 
-function renderTree(
+export function renderTree(
   state: TuiState,
   contentRows: number,
   cols: number,
@@ -375,7 +349,7 @@ function renderTree(
   return { content: padRows(content, contentRows), footer: [hint] };
 }
 
-function renderAgent(
+export function renderAgent(
   state: TuiState,
   contentRows: number,
   cols: number,
@@ -402,7 +376,7 @@ function renderAgent(
  * "Focus & selection are always visible" — the selected row is marked, not color-only).
  * Rows show `name  (provider/model)` with active/default markers, matching the design's
  * exact content spec (Web's markers must match this). */
-function renderPicker(
+export function renderPicker(
   state: TuiState,
   contentRows: number,
   cols: number,
