@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0126
 type: bug
-status: draft
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["blocked on DH-0136 (UI overhaul phase 2: TUI/Ink migration) -- the working fix pattern (see Notes) is Ink-specific, not portable to the current ANSI renderer"]
+blocked_by: []
 created: 2026-07-17
 relations:
   depends_on: []

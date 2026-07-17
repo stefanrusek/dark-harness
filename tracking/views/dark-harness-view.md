@@ -26,13 +26,8 @@ source: tracking/
 | [DH-0109](../DH-0109-missing-markdown-features-gfm-table-rendering-and-other-explicitly-out-of-scope-constructs.md) | Missing Markdown features: GFM table rendering (and other explicitly-out-of-scope constructs) | status: verifying |
 | [DH-0115](../DH-0115-e2e-reportoutcome-nudge-doubling-successturn-taskfailedturn-mock-helpers-predate-dh-0050.md) | e2e ReportOutcome-nudge doubling: successTurn/taskFailedTurn mock helpers predate DH-0050 | status: verifying |
 | [DH-0121](../DH-0121-dh-needs-a-logo-svg-ascii-art-versions.md) | dh needs a logo: SVG + ASCII art versions | status: verifying |
-| [DH-0122](../DH-0122-every-dh-run-should-print-an-application-header-name-logo-version-build-config-status.md) | Every dh run should print an application header (name, logo, version/build, config status) | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
-| [DH-0124](../DH-0124-tui-empty-state-before-first-message-is-misleading-show-app-header-friendlier-prompt.md) | TUI empty-state before first message is misleading -- show app header + friendlier prompt | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
-| [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
-| [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history | blocked on DH-0136 (UI overhaul phase 2: TUI/Ink migration) -- the working fix pattern (see Notes) is Ink-specific, not portable to the current ANSI renderer |
 | [DH-0128](../DH-0128-urgent-web-ui-connecting-from-a-separate-machine-loads-the-shell-but-sticks-on-reconnecting.md) | URGENT: Web UI connecting from a separate machine loads the shell but sticks on 'Reconnecting...' | status: verifying |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
-| [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | status: verifying |
 | [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React | blocked on DH-0133a (Core toolchain) landing first |
 | [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink | blocked on DH-0133a (Core toolchain) landing first |
@@ -54,15 +49,19 @@ source: tracking/
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut 🔒 | feature | stefan |
-| [DH-0122](../DH-0122-every-dh-run-should-print-an-application-header-name-logo-version-build-config-status.md) | Every dh run should print an application header (name, logo, version/build, config status) 🔒 | feature | stefan |
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
-| [DH-0124](../DH-0124-tui-empty-state-before-first-message-is-misleading-show-app-header-friendlier-prompt.md) | TUI empty-state before first message is misleading -- show app header + friendlier prompt 🔒 | feature | stefan |
-| [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) 🔒 | feature | stefan |
-| [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history 🔒 | bug | stefan |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom 🔒 | feature | stefan |
-| [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker 🔒 | bug | stefan |
 | [DH-0132](../DH-0132-adopt-a-convention-of-writing-acceptance-tests-as-prompts-run-via-dh-job-for-real-end-to-end-verification.md) | Adopt a convention of writing acceptance tests as prompts run via dh --job for real end-to-end verification | feature | stefan |
 | [DH-0140](../DH-0140-agents-need-an-incoming-event-message-queue-mid-turn-events-e-g-background-sub-agent-completions-are-currently-orphaned-not-queued.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | feature | stefan |
+
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0122](../DH-0122-every-dh-run-should-print-an-application-header-name-logo-version-build-config-status.md) | Every dh run should print an application header (name, logo, version/build, config status) | feature | stefan |
+| [DH-0124](../DH-0124-tui-empty-state-before-first-message-is-misleading-show-app-header-friendlier-prompt.md) | TUI empty-state before first message is misleading -- show app header + friendlier prompt | feature | stefan |
+| [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) | feature | stefan |
+| [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history | bug | stefan |
 
 ### implementing
 
@@ -90,6 +89,7 @@ source: tracking/
 | [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React | done |
 | [DH-0134](../DH-0134-ui-overhaul-phase-1-core-toolchain-integration-for-react-ink.md) | UI overhaul phase 1: Core toolchain integration for React + Ink | done |
 | [DH-0133](../DH-0133-ui-overhaul-migrate-web-to-react-tui-to-ink.md) | UI overhaul: migrate Web to React, TUI to Ink | done |
+| [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker | done |
 | [DH-0127](../DH-0127-web-ui-has-heavy-visual-flicker-no-virtual-dom-diffing-sections-fully-rebuilt-on-every-render.md) | Web UI has heavy visual flicker -- no virtual-DOM diffing, sections fully rebuilt on every render | superseded |
 | [DH-0120](../DH-0120-openai-compatible-provider-omitted-required-type-function-on-outgoing-tool-calls.md) | openai-compatible provider omitted required type:function on outgoing tool_calls | done |
 | [DH-0119](../DH-0119-real-bedrock-mantle-integration-live-verified-mantle-anthropic-mantle-openai.md) | Real Bedrock Mantle integration, live-verified: mantle-anthropic + mantle-openai | done |
@@ -98,4 +98,3 @@ source: tracking/
 | [DH-0116](../DH-0116-server-mode-s-agentruntime-sessionid-mismatches-the-outer-logdir-cli-ts-uses.md) | --server mode's AgentRuntime sessionId mismatches the outer logDir cli.ts uses | done |
 | [DH-0114](../DH-0114-launch-sub-agents-as-real-claude-cli-subprocesses-in-the-target-worktree-not-in-process-agent-tool.md) | Launch sub-agents as real claude CLI subprocesses in the target worktree, not in-process Agent tool | done |
 | [DH-0113](../DH-0113-coordinator-gate-checks-should-be-a-checked-in-sub-agent-prompt-not-run-inline.md) | Coordinator gate checks should be a checked-in sub-agent prompt, not run inline | done |
-| [DH-0112](../DH-0112-e2e-support-mock-provider-ts-never-updated-for-dh-0044-s-mandatory-streaming-real-turns-hang-past-agent-status.md) | e2e/support/mock-provider.ts never updated for DH-0044's mandatory streaming -- real turns hang past agent_status | done |
