@@ -756,7 +756,7 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
 
   sendMessage(agentId: string, message: string): void {
     if (agentId !== ROOT_AGENT_ID) {
-      this.runtime.tasks.sendMessage(agentId, message);
+      this.runtime.sendMessage(agentId, message);
       return;
     }
     if (!this.runtime.rootHasStarted) {

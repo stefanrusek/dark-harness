@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LogHeader, LogLine } from "../contracts/index.ts";
-import { ResumeError, loadResumeSession } from "./resume.ts";
+import { ResumeError, loadResumeSession, reconstructSubAgentHistory } from "./resume.ts";
 
 let logsRoot: string | undefined;
 
@@ -34,6 +34,16 @@ function writeRootJsonl(sessionId: string, lines: LogLine[]): void {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "agent-root.jsonl"),
+    `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`,
+  );
+}
+
+function writeAgentJsonl(sessionId: string, agentId: string, lines: LogLine[]): void {
+  // biome-ignore lint/style/noNonNullAssertion: set by every test before this is called
+  const dir = join(logsRoot!, sessionId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${encodeURIComponent(agentId)}.jsonl`),
     `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`,
   );
 }
@@ -434,5 +444,103 @@ describe("loadResumeSession — model + lostAgents metadata", () => {
     expect(result.lostAgents[0]?.agentId).toBe("agent-child-1");
     expect(result.lostAgents[0]?.description).toBe("running sub-task");
     expect(result.lostAgents[0]?.status).toBe("running");
+  });
+});
+
+describe("reconstructSubAgentHistory (DH-0003) — single-hop, no chain walk", () => {
+  test("replays a finished sub-agent's own log, agnostic of the root's own log in the same session", () => {
+    const root = newLogsRoot();
+    // Root log present too (same session dir) — reconstructSubAgentHistory must ignore it
+    // entirely and only ever read the named agentId's own file.
+    writeRootJsonl("s1", [
+      header({ sessionId: "s1" }),
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:01.000Z",
+        type: "message",
+        role: "user",
+        content: "root turn",
+      },
+    ]);
+    writeAgentJsonl("s1", "agent-child-1", [
+      header({ sessionId: "s1", agentId: "agent-child-1", parentAgentId: "agent-root" }),
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:01.000Z",
+        type: "message",
+        role: "user",
+        content: "do the sub-task",
+      },
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:02.000Z",
+        type: "message",
+        role: "assistant",
+        content: "done",
+      },
+    ]);
+    const messages = reconstructSubAgentHistory(root, "s1", "agent-child-1");
+    expect(messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "do the sub-task" }] },
+      { role: "assistant", content: [{ type: "text", text: "done" }] },
+    ]);
+  });
+
+  test("a failed sub-agent's history includes the failure — no special-casing vs. done/stopped", () => {
+    const root = newLogsRoot();
+    writeAgentJsonl("s1", "agent-child-1", [
+      header({ sessionId: "s1", agentId: "agent-child-1", parentAgentId: "agent-root" }),
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:01.000Z",
+        type: "message",
+        role: "user",
+        content: "do the sub-task",
+      },
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:02.000Z",
+        type: "tool_call",
+        toolName: "Bash",
+        toolUseId: "t1",
+        input: { command: "false" },
+      },
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:03.000Z",
+        type: "tool_result",
+        toolUseId: "t1",
+        output: "command failed",
+        isError: true,
+      },
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:04.000Z",
+        type: "failed",
+        reason: "command failed",
+      },
+    ]);
+    const messages = reconstructSubAgentHistory(root, "s1", "agent-child-1");
+    expect(messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "do the sub-task" }] },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "false" } }],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", toolUseId: "t1", content: "command failed", isError: true },
+        ],
+      },
+    ]);
+  });
+
+  test("missing sub-agent log throws ResumeError, same failure shape as a missing root log", () => {
+    const root = newLogsRoot();
+    writeRootJsonl("s1", [header({ sessionId: "s1" })]);
+    expect(() => reconstructSubAgentHistory(root, "s1", "agent-never-existed")).toThrow(
+      /missing or headerless "agent-never-existed" log/,
+    );
   });
 });

@@ -1,15 +1,19 @@
 // DH-0038 (tracking/DH-0038-no-crash-recovery-or-session-resume.md): `--resume <sessionId>`
 // crash-recovery mechanism. This module is the replay half — a pure(-ish, filesystem-reading)
-// fold of a root agent's durable JSONL event stream (ADR 0004/0005) back into an equivalent
+// fold of an agent's durable JSONL event stream (ADR 0004/0005) back into an equivalent
 // `ProviderMessage[]` history, per the architect (Fable) design's D1/D6/D7.
 //
-// Scope: root agent only, v1 (D1's "Scope" note) — sub-agents are never reconstructed, only
-// *named* (via `lostAgents`, sourced from Server's `readSessionLogSummaries`) so the resume
-// notice (built by the caller, src/cli.ts) can tell the operator/model what didn't survive.
+// DH-0003: `replayAgentHistory()` is the shared primitive — open one agent's JSONL log, fold
+// its events into `ProviderMessage[]`. `loadResumeSession()` (root-only, `--resume`) calls it
+// once per hop of a `resumedFrom` chain and concatenates; `reconstructSubAgentHistory()`
+// (SendMessage's finished-sub-agent-resume path) calls it once, no chain walk — a sub-agent's
+// log never has a `resumedFrom` header, it isn't its own session.
 //
 // This module never writes anything and never touches config/providers — it only reads an
 // existing `.dh-logs/<sessionId>` directory tree and returns data; src/cli.ts is responsible
-// for turning `ResumeResult` into a running `AgentRuntime` (see AgentRuntimeOptions.resume).
+// for turning `ResumeResult` into a running `AgentRuntime` (see AgentRuntimeOptions.resume),
+// and src/agent/runtime.ts is responsible for turning `reconstructSubAgentHistory()`'s result
+// into a resumed sub-agent spawn (see AgentRuntime.sendMessage()).
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -62,16 +66,16 @@ interface ChainHop {
   events: LogEvent[];
 }
 
-function loadHop(logsRoot: string, sessionId: string): ChainHop {
+function loadHop(logsRoot: string, sessionId: string, agentId: string): ChainHop {
   const dir = join(logsRoot, sessionId);
   if (!existsSync(dir)) {
     throw new ResumeError(`session directory not found: ${dir}`);
   }
-  const lines: LogLine[] = readAgentLogLines(dir, ROOT_AGENT_ID);
+  const lines: LogLine[] = readAgentLogLines(dir, agentId);
   const header = lines[0];
   if (header === undefined || header.type !== "header") {
     throw new ResumeError(
-      `not a valid dh session directory (missing or headerless root agent log): ${dir}`,
+      `not a valid dh session directory (missing or headerless "${agentId}" log): ${dir}`,
     );
   }
   if (header.version !== 1) {
@@ -112,7 +116,7 @@ function resolveChain(logsRoot: string, sessionId: string): ChainHop[] {
 
     let hop: ChainHop;
     try {
-      hop = loadHop(logsRoot, currentId);
+      hop = loadHop(logsRoot, currentId, ROOT_AGENT_ID);
     } catch (err) {
       if (currentId === sessionId || !(err instanceof ResumeError)) throw err;
       // An ancestor in the chain is missing/invalid (e.g. pruned by retention, DH-0037) —
@@ -225,12 +229,29 @@ function foldEventsToMessages(events: LogEvent[]): ProviderMessage[] {
   return messages;
 }
 
+/** DH-0003: the shared reconstruction primitive — opens one agent's JSONL log within one
+ * session directory and folds it into `ProviderMessage[]`. The one place that turns a JSONL
+ * log back into replayable history; both `loadResumeSession()` (root, chain-walking) and
+ * `reconstructSubAgentHistory()` (sub-agent, single-hop) bottom out here rather than each
+ * hand-rolling the file-open/header-validate/fold sequence. Throws `ResumeError` for every
+ * failure mode `loadHop` itself enumerates (missing directory, headerless/malformed log,
+ * unsupported version, sessionId mismatch). */
+export function replayAgentHistory(
+  logsRoot: string,
+  sessionId: string,
+  agentId: string,
+): { header: LogHeader; messages: ProviderMessage[] } {
+  const hop = loadHop(logsRoot, sessionId, agentId);
+  return { header: hop.header, messages: foldEventsToMessages(hop.events) };
+}
+
 /**
  * Loads and replays the full `--resume <sessionId>` history: walks the `resumedFrom` chain
- * (D1), folds every hop's root-agent events into one `ProviderMessage[]` (oldest → newest),
- * and gathers the metadata (`model` alias, lost sub-agents) the caller needs to build the
- * resume notice and construct a resumed `AgentRuntime`. Synchronous (matches every other
- * filesystem read in this codepath — `SessionLogger`, `log-analysis.ts` — none of it is async).
+ * (D1), replays every hop's root-agent log via `replayAgentHistory()` and concatenates
+ * (oldest → newest), and gathers the metadata (`model` alias, lost sub-agents) the caller
+ * needs to build the resume notice and construct a resumed `AgentRuntime`. Synchronous
+ * (matches every other filesystem read in this codepath — `SessionLogger`, `log-analysis.ts`
+ * — none of it is async).
  *
  * Throws `ResumeError` for every failure mode enumerated in D6; callers (`src/cli.ts`) are
  * expected to catch it and route through the standard `dh: cannot resume session "<id>": ...`
@@ -239,8 +260,9 @@ function foldEventsToMessages(events: LogEvent[]): ProviderMessage[] {
 export function loadResumeSession(logsRoot: string, sessionId: string): ResumeResult {
   const hops = resolveChain(logsRoot, sessionId);
 
-  const allEvents = hops.flatMap((hop) => hop.events);
-  const messages = foldEventsToMessages(allEvents);
+  const messages = hops.flatMap(
+    (hop) => replayAgentHistory(logsRoot, hop.sessionId, ROOT_AGENT_ID).messages,
+  );
 
   // resolveChain() always returns at least one hop (the requested session itself) or throws
   // — never an empty array, so this can't actually be undefined.
@@ -258,4 +280,21 @@ export function loadResumeSession(logsRoot: string, sessionId: string): ResumeRe
     resumedFromSessionId: lastHop.sessionId,
     lostAgents,
   };
+}
+
+/** DH-0003: `SendMessage`'s finished-sub-agent-resume path — reconstructs one sub-agent's
+ * conversation history from its JSONL log in the *current* session directory, no chain walk
+ * (a sub-agent's log never carries a `resumedFrom` header; it isn't its own session — see
+ * this module's doc comment). `failed`/`stopped` sub-agents resume identically to `done` ones
+ * — the same treatment `--resume` itself already gives crash-terminal vs. clean-terminal
+ * sessions (D6 only cares about chain integrity, never how the prior run ended); a `failed`
+ * status is already visible to the resumed agent in the replayed history itself (a
+ * `failed`-status log line, or a tool_result with `isError: true`). Throws `ResumeError` on
+ * the same failure modes as `replayAgentHistory()`/`loadHop()`. */
+export function reconstructSubAgentHistory(
+  logsRoot: string,
+  sessionId: string,
+  agentId: string,
+): ProviderMessage[] {
+  return replayAgentHistory(logsRoot, sessionId, agentId).messages;
 }

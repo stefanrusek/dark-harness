@@ -354,4 +354,26 @@ export class TaskRegistry {
   list(): TaskSnapshot[] {
     return [...this.tasks.keys()].map((id) => this.snapshot(id));
   }
+
+  /** DH-0003: clears a terminal task's registry bookkeeping (the entry itself, its
+   * eviction-queue slot, its per-reader read cursors) so its id can be reused by a fresh
+   * `start()` call — the SendMessage-resume path (AgentRuntime.sendMessage) re-invokes
+   * spawnAgent() with the *same* task id for the same agent identity, rather than minting a
+   * new one, and the old terminal entry's state must not leak forward under the reused id
+   * (a stale eviction-queue slot, a read cursor left over from the finished run). Throws
+   * `TaskNotFoundError` for an unknown id, and refuses (plain `Error`) a still-live task —
+   * only a terminal task's bookkeeping is ever cleared this way, never abandoned live state. */
+  clearTerminal(id: string): void {
+    const task = this.require(id);
+    if (task.status === "running" || task.status === "waiting") {
+      throw new Error(
+        `task ${id} has not finished (status: ${task.status}); cannot clear it for reuse`,
+      );
+    }
+    this.tasks.delete(id);
+    this.readCursors.delete(id);
+    this.terminalIds.delete(id);
+    const index = this.completedOrder.indexOf(id);
+    if (index !== -1) this.completedOrder.splice(index, 1);
+  }
 }
