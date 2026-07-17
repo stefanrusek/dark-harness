@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0141
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
@@ -42,11 +42,23 @@ No mechanism exists today to step back and look for cleanup/refactor opportuniti
 ## Functional Requirements
 
 - Sentinel format: a git commit message trailer `Refactoring-Round: DH-XXXX`, not a subject-line magic string -- keeps `git log --grep`/`--pretty` queryable and out of the human-readable subject.
-- Hook implementation: a checked-in script (e.g. `scripts/hooks/post-commit`), NOT a raw `.git/hooks/` file (unversioned) -- plus a one-time install step (e.g. `scripts/install-git-hooks.sh`) that copies/symlinks it into `.git/hooks/post-commit` for the main checkout only.
-- Threshold: starts at 15 commits, owner-confirmed 2026-07-17 ("if we had it in from the start we would have done 20 of them by now, which is not so many as to be painful"). Must be easily tunable (a constant or config value, not hardcoded string-matched in three places).
+- **Per-round ticket, not a reused DH-0141 (resolved -- see Notes for reasoning).** Every round's sentinel trailer points at a fresh ticket minted for that round (e.g. `DH-0187`), not back at DH-0141. DH-0141 is the mechanism's own design/build ticket and closes normally once the hook+install script+template ship; it is never itself a trailer target. Each round ticket's body is the natural place for that round's Fable to leave a short "what I looked at, what I filed, what I explicitly decided not to file" note, distinct from the tickets it spawns.
+- **`scripts/hooks/` and `scripts/install-git-hooks.sh` are Core-owned (resolved).** CLAUDE.md section 3 already assigns `scripts/` to Core (Grace) in full -- there is no existing carve-out for a coordinator-owned subtree under `scripts/`, and a hook that is invoked by git plumbing (not dispatched by the agent loop) is exactly the kind of build/dev tooling Core already owns (`scripts/build.ts`). No new ownership convention needed; this is a straightforward extension of an existing one.
+- Hook implementation: a checked-in script `scripts/hooks/post-commit` (POSIX sh, executable bit set), NOT a raw `.git/hooks/` file (unversioned) -- plus a one-time install step `scripts/install-git-hooks.sh` that copies (not symlinks -- symlinks into `.git/hooks/` don't survive `git worktree add` cleanly and this must never activate in a worktree) `post-commit` into `.git/hooks/post-commit` for the main checkout only. The install script must refuse to run (no-op with a message) when `git rev-parse --show-toplevel` and `git rev-parse --git-common-dir`/`--git-dir` indicate the current checkout is a linked worktree rather than the main one, as a second guard beyond "just don't run the installer there."
+- Threshold: starts at 15 commits, owner-confirmed 2026-07-17 ("if we had it in from the start we would have done 20 of them by now, which is not so many as to be painful"). Implemented as a single named constant/env-overridable value in the hook script (e.g. `THRESHOLD="${DH_REFACTOR_THRESHOLD:-15}"`), read once, not string-matched in multiple places.
+- **Commit-counting semantics (was underspecified -- resolved):** "N commits" means commits on the main checkout's current branch **since the last commit carrying a `Refactoring-Round: DH-XXXX` trailer**, counted via `git log --grep='^Refactoring-Round: DH-[0-9]\+' -1 --format=%H` to find that commit, then `git rev-list --count <that-sha>..HEAD` (or `git rev-list --count HEAD` for the zero-sentinel case below) -- not a literal `git log -15` window. This is what makes the "several worktrees merge in a row and jump the counter past 15 in one step" behavior in the User Stories work correctly: the hook always measures distance from the last sentinel, so a burst of merges is reflected immediately on whichever commit crosses the threshold, and undercounting/overcounting from a fixed-window `-15` slice never happens.
+- **Zero-sentinel-trailers-ever case (was underspecified -- resolved):** if `git log --grep` finds no commit with the trailer anywhere in history, treat the count as `git rev-list --count HEAD` (distance from the repo root) rather than erroring or silently skipping. This ticket (or the round-0 commit that ships the hook) is expected to be the first sentinel, so in practice this path fires once, at or near hook installation, and should not be treated as a special/rare edge case to under-test -- it is the *first* real invocation.
+- **Banner wording/format (was underspecified -- resolved):** printed to stderr only, must not resemble normal git output (so it isn't scrollback-lost), suggested format below -- exact copy is an implementation call but the shape (count, threshold, both trailer commands) is not:
+  ```
+  ================================================================
+  REFACTORING ROUND DUE: 17 commits since the last Refactoring-Round trailer (threshold: 15)
+  Dispatch Fable using docs/design/refactoring-round-prompt.md to review recent history and file cleanup tickets.
+  Close the round with a commit carrying: Refactoring-Round: DH-XXXX
+  ================================================================
+  ```
+  Below-threshold case prints nothing (silence, per User Stories' "exact silence... is an implementation call" -- resolved in favor of silence to keep normal commits quiet).
 - Notification channel: stderr only for now, no Slack/SlackBus posting -- owner decision 2026-07-17, revisit only if a real miss happens (this project's standing "defer speculative hardening" convention).
-- Decide ownership: which directory/domain owns `scripts/hooks/`? Likely Core (`scripts/` is already Core-owned per CLAUDE.md section 3) or a new coordinator-owned convention -- needs a call during implementation.
-- Decide whether each refactoring round gets its own fresh ticket ID (so the trailer always points at a distinct per-round record) vs. reusing DH-0141 itself as the trailer target for every round -- leaning toward a fresh ticket per round (keeps history of "what did round N actually find" per round, rather than one ticket accumulating unrelated notes forever), but not yet decided.
+- **Refactoring-round research prompt template:** lives at `docs/design/refactoring-round-prompt.md` (durable, reusable, cross-cutting process artifact per CLAUDE.md section 3's description of `docs/design/` -- this is not a ticket-scoped spike, it is the standing instruction set dispatched every single round, and needs to be editable in place by a future Fable without going through a ticket). The banner (above) points at this file by path so whoever dispatches Fable does not have to remember where it lives. See that file for full content; hook/install-script implementers do not need to modify it, only reference its path in the banner text.
 
 ## Assumptions
 
@@ -58,7 +70,21 @@ No mechanism exists today to step back and look for cleanup/refactor opportuniti
 
 ## Open Questions
 
-- Per-round ticket vs. reusing DH-0141 as the perpetual trailer target (see Functional Requirements).
-- Which domain owns `scripts/hooks/` and the install script.
+Both resolved by Fable (architect-on-call), 2026-07-17 -- see Functional Requirements for the resolutions and reasoning inline. Summary:
+
+- **Per-round ticket vs. reusing DH-0141:** resolved in favor of a fresh ticket per round. Reusing DH-0141 forever would turn one ticket into an unbounded, unstructured log of every round's findings with no way to tell "what did round 4 find" from "what did round 9 find" without archaeology, and it would never be closeable (the mechanism's own build ticket should close like any other ticket once shipped). A fresh ticket per round costs one `spile-ops` mint per round (infrequent -- threshold is 15 commits) and gives each round a clean, closeable record.
+- **`scripts/hooks/` ownership:** resolved as Core (Grace), per CLAUDE.md section 3's existing blanket assignment of `scripts/` to Core. No new ownership convention was needed -- this is not a boundary case.
 
 ## Notes
+
+### 2026-07-17 -- Fable design pass
+
+Resolved both open design questions (see Open Questions/Functional
+Requirements above), firmed up the Functional Requirements with previously-
+underspecified detail (commit-counting semantics, zero-sentinel-trailer
+handling, banner wording), and wrote the reusable refactoring-round research
+prompt template implementers will wire the hook to point at:
+`docs/design/refactoring-round-prompt.md`. Moved this ticket to `ready` --
+Functional Requirements are implementer-actionable. Did not touch
+implementation (hook script, install script) per this pass's design-only
+scope; that is Core's (Grace's) pickup.
