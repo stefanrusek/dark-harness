@@ -701,6 +701,42 @@ describe("renderComposer", () => {
     dispatchKey(textarea, "keydown", { key: "Enter", shiftKey: false, cancelable: true });
     expect(sent).toEqual(["plain enter"]);
   });
+
+  test("re-rendering for the same root-agent state is a no-op: preserves the live textarea (identity, focus, unsent value)", () => {
+    const { document, root } = createTestDom();
+    renderComposer(document, root, stateWithRootAndChild(), () => {});
+    const textarea = root.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "not yet sent";
+    textarea.focus();
+
+    // Simulates renderAll() firing repeatedly (SSE events, the 1s liveness tick) while the
+    // user is mid-type — must not tear down and recreate the composer each time.
+    renderComposer(document, root, stateWithRootAndChild(), () => {});
+    renderComposer(document, root, stateWithRootAndChild(), () => {});
+
+    const textareaAfter = root.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textareaAfter).toBe(textarea);
+    expect(textareaAfter.value).toBe("not yet sent");
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  test("rebuilds the composer on an actual show/hide transition (root -> non-root -> root)", () => {
+    const { document, root } = createTestDom();
+    let state = stateWithRootAndChild();
+    renderComposer(document, root, state, () => {});
+    const firstTextarea = root.querySelector("textarea");
+    expect(firstTextarea).not.toBeNull();
+
+    state = { ...state, selectedAgentId: "child-1" };
+    renderComposer(document, root, state, () => {});
+    expect(root.querySelector("form")).toBeNull();
+
+    state = { ...state, selectedAgentId: stateWithRootAndChild().selectedAgentId };
+    renderComposer(document, root, state, () => {});
+    const secondTextarea = root.querySelector("textarea");
+    expect(secondTextarea).not.toBeNull();
+    expect(secondTextarea).not.toBe(firstTextarea);
+  });
 });
 
 describe("showError / hideError", () => {

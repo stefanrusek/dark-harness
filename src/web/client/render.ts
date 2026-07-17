@@ -651,17 +651,37 @@ export function appendTranscript(
   };
 }
 
-/** Renders the root-agent message composer, or nothing when a non-root agent is selected. */
+/**
+ * Renders the root-agent message composer, or nothing when a non-root agent is selected.
+ *
+ * Idempotent by design: `renderAll()` runs on every SSE event and on a 1s liveness tick, so a
+ * naive unconditional rebuild here would tear down and recreate the `<textarea>` every second
+ * -- destroying focus and any unsent typed text out from under the user constantly. Once the
+ * composer is built for the current "is a root agent selected" mode, subsequent calls are a
+ * no-op; it only rebuilds on an actual show/hide transition.
+ */
 export function renderComposer(
   doc: Document,
   container: HTMLElement,
   state: WebState,
   onSend: (message: string) => void,
 ): void {
-  container.textContent = "";
   const agent = selectedAgent(state);
-  if (!agent || !isRoot(state, agent.agentId)) return;
+  const shouldShow = Boolean(agent && isRoot(state, agent.agentId));
 
+  if (!shouldShow) {
+    if (container.dataset.composerRendered) {
+      container.textContent = "";
+      delete container.dataset.composerRendered;
+    }
+    return;
+  }
+
+  if (container.dataset.composerRendered === "true") {
+    return;
+  }
+
+  container.textContent = "";
   const form = el(doc, "form", "composer");
   const textarea = el(doc, "textarea", "composer-input");
   textarea.placeholder = "Message the root agent… (Enter to send, Shift+Enter for newline)";
@@ -690,6 +710,7 @@ export function renderComposer(
   });
 
   container.appendChild(form);
+  container.dataset.composerRendered = "true";
 }
 
 /**

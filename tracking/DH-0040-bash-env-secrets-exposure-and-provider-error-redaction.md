@@ -84,3 +84,14 @@ real evidence behind it, not a revival of this story.
 > unrelated to this change) since this diff touches no `e2e/`, agent, or runtime code —
 > README.md, docs/adr/0004-security-posture.md, and the new test file only. Moving to
 > `verifying`.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification walkthrough (dh + Ada)**
+>
+> Reviewed both documents together:
+> - **README.md (lines 44-49):** Clearly states "Bash tool inherits the harness process's full environment (including any provider API key or `DH_TOKEN`)" and the specific risk: "If an agent reads attacker-controlled content...that directs it to read `process.env` and exfiltrate those values over the network, a non-air-gapped deployment lets that succeed. Air-gapping is the mitigation; this is the specific risk it mitigates."
+> - **ADR 0004 (lines 14-20):** States the Bash environment inheritance explicitly and names it as intentional parity with Claude Code, not a gap.
+>
+> **Verdict:** ✅ Risk language is plain, specific, and actionable. Documentation clearly steers toward air-gapping as the mitigation. Redaction story correctly deferred (owner decision 2026-07-15 — no observed SDK leaks to defend against).
+>
+> Status: ready for close-out.
