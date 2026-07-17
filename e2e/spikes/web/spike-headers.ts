@@ -29,7 +29,7 @@ const webProc = await spawnDh({ args: ["--web"], cwd: webWs.dir });
 try {
   const apiRes = await fetch(`http://localhost:${port}/api/commands`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: "http://localhost:5173" },
     body: JSON.stringify({ type: "request_agent_tree" }),
   });
   report.check(
@@ -37,10 +37,13 @@ try {
     apiRes.status === 200,
     `status = ${apiRes.status}`,
   );
+  // The server deliberately echoes the request's own Origin rather than a fixed "*"
+  // (src/server/server.ts's corsHeaders, covered by src/server/server.test.ts) — so this
+  // check must send an Origin header and assert it's echoed back, not assert a constant.
   const allowOrigin = apiRes.headers.get("access-control-allow-origin");
   report.check(
-    "CORS: Access-Control-Allow-Origin present",
-    allowOrigin === "*",
+    "CORS: Access-Control-Allow-Origin echoes the request's Origin",
+    allowOrigin === "http://localhost:5173",
     `access-control-allow-origin = ${allowOrigin}`,
   );
   const expose = apiRes.headers.get("access-control-expose-headers") ?? "";

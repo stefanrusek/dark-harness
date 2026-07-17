@@ -17,36 +17,20 @@
 // Run from the repo root:   bun e2e/spikes/web/spike-liveness.ts
 
 import { spawnDh } from "../../support/dh-process.ts";
+import { startMockAnthropicProvider, successTurn } from "../../support/mock-provider.ts";
 import { baseConfig, createWorkspace } from "../../support/workspace.ts";
 import { artifactPath, createReport, resolveChromiumExecutable, sendMessage } from "./support.ts";
 
 const report = createReport("spike-liveness");
 const SLOW_TURN_MS = 8_000;
 
-// A minimal Anthropic-shaped provider that delays its one reply, unlike
-// `startMockAnthropicProvider` (which is intentionally instant) — the delay is the point of
-// this spike: it gives the UI's liveness tick multiple opportunities to re-render mid-turn.
-const server = Bun.serve({
-  port: 0,
-  fetch: async (req) => {
-    const url = new URL(req.url);
-    if (url.pathname !== "/v1/messages" || req.method !== "POST") {
-      return new Response("not found", { status: 404 });
-    }
-    await new Promise((resolve) => setTimeout(resolve, SLOW_TURN_MS));
-    return Response.json({
-      id: "msg_slow",
-      type: "message",
-      role: "assistant",
-      model: "mock-model",
-      content: [{ type: "text", text: "Finally responded after a slow turn." }],
-      stop_reason: "end_turn",
-      stop_sequence: null,
-      usage: { input_tokens: 10, output_tokens: 10 },
-    });
-  },
-});
-const baseURL = `http://localhost:${server.port}`;
+// Delay this turn's (real, streaming — DH-0044/DH-0112) reply so the UI's liveness tick gets
+// multiple opportunities to re-render mid-turn before it arrives.
+const provider = startMockAnthropicProvider([
+  { ...successTurn("Finally responded after a slow turn."), delayMs: SLOW_TURN_MS },
+]);
+const server = { stop: () => provider.stop() };
+const baseURL = provider.baseURL;
 
 const workspace = createWorkspace("dh-spike-web-liveness-");
 workspace.writeConfig(baseConfig(baseURL));
@@ -56,7 +40,7 @@ const webUrl = /web UI ready at (\S+)\./.exec(stdout)?.[1];
 
 async function cleanup() {
   proc.kill();
-  server.stop(true);
+  server.stop();
   workspace.cleanup();
 }
 
