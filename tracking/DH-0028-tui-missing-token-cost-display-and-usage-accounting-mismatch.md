@@ -76,3 +76,43 @@ being resolved unilaterally by either domain.
 > semantics are unambiguous from the existing provider-adapter code — no live disagreement
 > requiring arbitration, just a straightforward TUI bug (replace instead of accumulate). Owner
 > confirmed no further input needed; ticket is ready to implement directly.
+
+> [!NOTE]
+> **Fable, 2026-07-16 — architect design pass, confirming existing decision.** Re-invoked per
+> CLAUDE.md §6 (coordinator flagged the delta-vs-total question as needing an architect
+> sign-off before implementation could be considered safe to close out). On inspection, both
+> the design decision above and its implementation are already in place and correct — there
+> is no open design question left to settle, so this note records the confirmation rather
+> than a new decision:
+>
+> - **Semantics**: `TokenUsageEvent` (`src/contracts/events.ts`) is a per-turn delta — one
+>   event per provider completion call, sourced from that call's own `usage` field — never a
+>   running total. Both clients sum. `events.ts`'s doc comment already states this explicitly
+>   on `inputTokens`/`outputTokens`/`costUsd`, citing DH-0028, so the ambiguity is resolved in
+>   the contract itself, not left to each client's guess (closes the maintainer user story).
+> - **TUI accumulation**: `src/tui/state.ts`'s `token_usage` case (~line 283) adds into
+>   `existing.inputTokens`/`outputTokens`/`costUsd` instead of replacing, matching Web's
+>   `state.ts` (`node.inputTokens += event.inputTokens`, etc., ~line 386). Both track "cost
+>   unknown" (no model pricing configured) as a tri-state distinct from "$0" — TUI via
+>   `costUsd: number | null` populated lazily, Web via an explicit `hasCost` flag — same
+>   semantics, different but equally correct encodings for each client's existing state
+>   shape.
+> - **Display — both per-agent and session-total, in both clients**: `src/tui/render.ts` now
+>   renders per-agent token/cost in the tree view (`formatTokenCost(..., "compact")`) and the
+>   agent detail view (`"full"`), plus a session-wide total in the always-visible header via
+>   `sessionTokenTotals()` — the TUI-equivalent of Web's `sessionTotals()`. This closes the
+>   operator user story: TUI now shows what Web already showed.
+> - **Formatting is consistent with DH-0104, not a competing convention**: cost uses the
+>   shared `formatCostUsd` (2-dp, `<$0.01` floor, `—` for unknown) from `src/format.ts` in
+>   both clients. Tokens follow DH-0104's two-tier context-class rule: compact (`12.3k`) in
+>   glanceable chrome (TUI tree rows, header strip; Web badges/strips) via
+>   `formatTokenCountCompact`, full comma form (`12,345`) in detail contexts (TUI agent
+>   view) via `formatTokenCountFull`. This ticket introduces no new formatting logic — it
+>   consumes DH-0104's shared formatters exactly as prescribed.
+> - **Test coverage**: `src/tui/state.test.ts`'s "reducer: sse_event token_usage" suite
+>   exercises accumulation across multiple events, `costUsd` staying `null` when no event
+>   ever carries one, and the tri-state cost behavior once a cost figure does arrive.
+>
+> No unresolved design question remains. Status stays `ready` (implementation already matches
+> spec); whether to move it forward to `closed` is a verification call for the ticket's owner,
+> not part of this design pass.
