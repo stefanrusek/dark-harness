@@ -46,6 +46,7 @@ source: tracking/
 | [DH-0109](../DH-0109-missing-markdown-features-gfm-table-rendering-and-other-explicitly-out-of-scope-constructs.md) | Missing Markdown features: GFM table rendering (and other explicitly-out-of-scope constructs) | feature | stefan |
 | [DH-0111](../DH-0111-dh-connect-web-malforms-the-target-url-http-http-localhost.md) | dh --connect --web malforms the target URL (http://http://localhost...) | bug | stefan |
 | [DH-0113](../DH-0113-coordinator-gate-checks-should-be-a-checked-in-sub-agent-prompt-not-run-inline.md) | Coordinator gate checks should be a checked-in sub-agent prompt, not run inline | feature | stefan |
+| [DH-0115](../DH-0115-server-mode-s-agentruntime-sessionid-mismatches-the-outer-logdir-cli-ts-uses.md) | --server mode's AgentRuntime sessionId mismatches the outer logDir cli.ts uses | bug | stefan |
 
 ### ready
 
