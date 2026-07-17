@@ -202,3 +202,30 @@ asserts.
 - A ticket cannot move to `closed` without each User Story bullet naming the specific test
   (file + case) that proves it. A prose "I manually verified this" is no longer sufficient
   close-out evidence.
+
+## 10. Slack communication (owner reliability requirement)
+
+The owner has repeatedly caught the coordinator failing to see real Slack messages/replies
+in a timely way — this is a standing trust problem, not a one-off. Rules, going forward:
+
+- **SlackBus (`../slackbus`), not the claude.ai Slack connector.** The connector was tried
+  first and abandoned (see `~/.claude/uploads/.../slackbushandoffspec.md` §1): pull-based
+  polling instead of push, no bot identity separate from the human, no message-editing for
+  live status. SlackBus is a local daemon (`slackbus start`, already running as a background
+  process on the owner's machine) that holds a genuine Slack Socket Mode connection and
+  pushes events to a durable SQLite queue. The coordinator talks to it via the `slackbus` CLI
+  (`open`, `post`, `set-status`, `reply-mention`, `wait`, `events --undelivered`, `tickets`).
+- **`slackbus wait --timeout N` is the correct way to check for new messages** — it blocks
+  until an event arrives or the timeout expires, backed by durable at-least-once delivery.
+  Never re-derive "did anyone message me" by searching/reading the channel some other way;
+  always go through `slackbus events --undelivered` (catch-up) and `slackbus wait` (live).
+- **Because SlackBus is a local unix-socket daemon, a cloud-scheduled routine (RemoteTrigger)
+  cannot reach it** — cloud sandboxes have no path to the daemon. Do not stand up a cloud
+  routine that uses the Slack MCP connector as a substitute; that reintroduces the exact
+  failure mode SlackBus was built to fix. Reliable Slack coverage requires an active local
+  session (this coordinator, or a `/loop`-style local wait loop) actually calling
+  `slackbus wait`.
+- **At the start of any session/turn that touches Slack, or any resumption after a gap,**
+  run `slackbus events --undelivered` first — do not trust that everything relevant already
+  got a reply. This has caught at least one real missed message (2026-07-17: a substantive
+  reply on the DH-0004 packaging-token question sat undelivered).
