@@ -15,7 +15,7 @@ import type {
 } from "../contracts/index.ts";
 import { ConfigError } from "./errors.ts";
 
-const PROVIDER_TYPES: ProviderType[] = ["anthropic", "bedrock"];
+const PROVIDER_TYPES: ProviderType[] = ["anthropic", "bedrock", "openai-compatible"];
 
 // DH-0015 fix (tracking/DH-0015-config-validation-gaps.md): provider/mcpServers entries used
 // to spread unknown keys straight through unchecked (`{ ...raw, name, type }`), unlike the
@@ -28,6 +28,7 @@ const PROVIDER_COMMON_KEYS = new Set(["name", "type", "retry"]);
 const PROVIDER_TYPE_KEYS: Record<ProviderType, Set<string>> = {
   anthropic: new Set(["baseURL", "apiKey"]),
   bedrock: new Set(["region"]),
+  "openai-compatible": new Set(["baseURL", "apiKey"]),
 };
 const KNOWN_MCP_SERVER_KEYS = new Set(["command", "args", "env", "url", "headers"]);
 

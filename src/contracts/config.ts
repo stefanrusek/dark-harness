@@ -21,7 +21,7 @@ export interface ModelConfig {
   outputPricePerMToken?: number;
 }
 
-export type ProviderType = "anthropic" | "bedrock";
+export type ProviderType = "anthropic" | "bedrock" | "openai-compatible";
 
 /**
  * DH-0009 (tracking/DH-0009-provider-retry-backoff-and-error-taxonomy.md): per-provider

@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0107
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -195,3 +195,12 @@ who implements this.
 > confirmed via live investigation (DNS + a real `405 Method Not Allowed` response from
 > `bedrock-mantle.us-east-1.api.aws`, matching AWS's documented API contract exactly).
 > Routing to Fable for architect design given the `src/contracts/` touch, per CLAUDE.md §6.
+
+> [!NOTE]
+> 2026-07-16: Implementer pass complete — new `src/agent/providers/openai-compatible.ts`
+> adapter, `ProviderType` extended with `"openai-compatible"` in `src/contracts/config.ts`,
+> `PROVIDER_TYPE_KEYS` updated in `src/config/validate.ts`, wired into `createProvider` in
+> `src/agent/providers/index.ts`. Verified with `bun run typecheck` (clean), `bun run lint`
+> (0 new errors — pre-existing 9 errors are all in unrelated `.claude/skills/forked-subagent/`
+> files), and `bun test src` (1984 pass, 0 fail). Full e2e suite intentionally not run this
+> pass (unrelated to `e2e/`, slow). Committed as `53482eb`.
