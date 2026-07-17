@@ -110,9 +110,14 @@ export interface AgentRuntimeOptions {
  * per computeCostUsd()'s own doc comment in loop.ts), otherwise an object with only the
  * configured keys present (exactOptionalPropertyTypes forbids passing `undefined` through
  * explicitly). */
-function buildPricing(
-  model: ModelConfig,
-): { inputPricePerMToken?: number; outputPricePerMToken?: number } | undefined {
+function buildPricing(model: ModelConfig):
+  | {
+      inputPricePerMToken?: number;
+      outputPricePerMToken?: number;
+      cacheReadPricePerMToken?: number;
+      cacheWritePricePerMToken?: number;
+    }
+  | undefined {
   if (model.inputPricePerMToken === undefined && model.outputPricePerMToken === undefined) {
     return undefined;
   }
@@ -122,6 +127,14 @@ function buildPricing(
       : {}),
     ...(model.outputPricePerMToken !== undefined
       ? { outputPricePerMToken: model.outputPricePerMToken }
+      : {}),
+    // DH-0010 Part A: threaded straight through — computeCostUsd (loop.ts) applies the
+    // 0.1x/1.25x default multipliers itself when these are unset.
+    ...(model.cacheReadPricePerMToken !== undefined
+      ? { cacheReadPricePerMToken: model.cacheReadPricePerMToken }
+      : {}),
+    ...(model.cacheWritePricePerMToken !== undefined
+      ? { cacheWritePricePerMToken: model.cacheWritePricePerMToken }
       : {}),
   };
 }
@@ -148,6 +161,32 @@ function thinkingOverride(
 ): { thinking: NonNullable<ModelConfig["thinking"]> } | Record<string, never> {
   if (model.thinking === undefined) return {};
   return { thinking: model.thinking };
+}
+
+/** DH-0010 Part A: `{ cache: ... }` when configured, `{}` otherwise — same spreadable-helper
+ * pattern as `pricingOverride`/`thinkingOverride` above. */
+function cacheOverride(model: ModelConfig): { cache: boolean } | Record<string, never> {
+  if (model.cache === undefined) return {};
+  return { cache: model.cache };
+}
+
+/** DH-0010 Part B: `{ contextWindow: ... }` when configured, `{}` otherwise — same
+ * spreadable-helper pattern as `pricingOverride`/`thinkingOverride`/`cacheOverride` above. */
+function contextWindowOverride(
+  model: ModelConfig,
+): { contextWindow: number } | Record<string, never> {
+  if (model.contextWindow === undefined) return {};
+  return { contextWindow: model.contextWindow };
+}
+
+/** DH-0010 Part B: `{ compaction: ... }` when the top-level config block is present,
+ * `{}` otherwise — session-wide (not per-model), so this reads `DhConfig.compaction`
+ * directly rather than a `ModelConfig` field. */
+function compactionOverride(
+  config: DhConfig,
+): { compaction: { enabled: boolean; thresholdPercent?: number } } | Record<string, never> {
+  if (config.compaction === undefined) return {};
+  return { compaction: config.compaction };
 }
 
 export class ConfigModelError extends Error {
@@ -361,14 +400,21 @@ export class AgentRuntime {
 
   /** DH-0013: records a `token_usage` event's contribution to the session-wide cumulative
    * cost/token budgets and trips them if exceeded. Called from every onEvent path (root and
-   * every sub-agent) — see spawnAgent()'s/runRoot()'s onEvent handlers below. */
+   * every sub-agent) — see spawnAgent()'s/runRoot()'s onEvent handlers below.
+   *
+   * DH-0010 Part A fix: the cumulative token count must include cache-read/cache-write
+   * tokens, not just input+output — otherwise enabling caching would silently inflate
+   * `maxTotalTokens`'s effective budget (cache tokens are real provider-reported usage, just
+   * priced/reported separately). */
   private recordUsageAndCheckBudgets(
     inputTokens: number,
     outputTokens: number,
     costUsd: number | undefined,
+    cacheReadTokens = 0,
+    cacheWriteTokens = 0,
   ): void {
     if (this.budgetTripped) return;
-    this.cumulativeTokens += inputTokens + outputTokens;
+    this.cumulativeTokens += inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
     if (costUsd !== undefined) this.cumulativeCostUsd += costUsd;
 
     const { maxCostUsd, maxTotalTokens } = this.config.options;
@@ -546,11 +592,15 @@ export class AgentRuntime {
           buildPricing(model),
           result.usage.inputTokens,
           result.usage.outputTokens,
+          result.usage.cacheReadTokens ?? 0,
+          result.usage.cacheWriteTokens ?? 0,
         );
         this.recordUsageAndCheckBudgets(
           result.usage.inputTokens,
           result.usage.outputTokens,
           costUsd,
+          result.usage.cacheReadTokens ?? 0,
+          result.usage.cacheWriteTokens ?? 0,
         );
         this.onEvent?.({
           version: 1,
@@ -560,6 +610,12 @@ export class AgentRuntime {
           agentId,
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
+          ...(result.usage.cacheReadTokens !== undefined
+            ? { cacheReadTokens: result.usage.cacheReadTokens }
+            : {}),
+          ...(result.usage.cacheWriteTokens !== undefined
+            ? { cacheWriteTokens: result.usage.cacheWriteTokens }
+            : {}),
           ...(costUsd !== undefined ? { costUsd } : {}),
         });
         return result;
@@ -770,6 +826,9 @@ export class AgentRuntime {
               : {}),
             ...pricingOverride(model),
             ...thinkingOverride(model),
+            ...cacheOverride(model),
+            ...contextWindowOverride(model),
+            ...compactionOverride(this.config),
             onEvent: (event) => {
               if (event.type === "agent_output") handle.append(event.chunk);
               // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
@@ -787,6 +846,8 @@ export class AgentRuntime {
                   event.inputTokens,
                   event.outputTokens,
                   event.costUsd,
+                  event.cacheReadTokens ?? 0,
+                  event.cacheWriteTokens ?? 0,
                 );
               }
               this.onEvent?.(event);
@@ -947,6 +1008,9 @@ export class AgentRuntime {
           : {}),
         ...pricingOverride(model),
         ...thinkingOverride(model),
+        ...cacheOverride(model),
+        ...contextWindowOverride(model),
+        ...compactionOverride(this.config),
         ...(this.resume
           ? { resume: { messages: this.resume.messages, fromSessionId: this.resume.fromSessionId } }
           : {}),
@@ -961,7 +1025,13 @@ export class AgentRuntime {
           // DH-0013: the root's own token usage counts toward the session-wide cumulative
           // cost/token budgets, same as every sub-agent's.
           if (event.type === "token_usage") {
-            this.recordUsageAndCheckBudgets(event.inputTokens, event.outputTokens, event.costUsd);
+            this.recordUsageAndCheckBudgets(
+              event.inputTokens,
+              event.outputTokens,
+              event.costUsd,
+              event.cacheReadTokens ?? 0,
+              event.cacheWriteTokens ?? 0,
+            );
           }
           this.onEvent?.(event);
         },
@@ -1132,6 +1202,8 @@ export class AgentRuntime {
       provider,
       ...pricingOverride(model),
       ...thinkingOverride(model),
+      ...cacheOverride(model),
+      ...contextWindowOverride(model),
     });
   }
 

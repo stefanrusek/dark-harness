@@ -60,11 +60,13 @@ import {
   type SessionClientKind,
   type ThinkingConfig,
 } from "../contracts/index.ts";
-import type {
-  ModelProvider,
-  ProviderCompletionResult,
-  ProviderContentBlock,
-  ProviderMessage,
+import {
+  type ModelProvider,
+  type ProviderCompletionResult,
+  type ProviderContentBlock,
+  ProviderError,
+  type ProviderMessage,
+  type ProviderUsage,
 } from "./providers/types.ts";
 import { summarizeToolInput } from "./tool-summary.ts";
 import { parseReportedOutcome } from "./tools/report-outcome.ts";
@@ -158,11 +160,33 @@ export interface AgentLoopParams {
    * unconfigured models — see computeCostUsd()'s own doc comment for the half-configured
    * case).
    */
-  pricing?: { inputPricePerMToken?: number; outputPricePerMToken?: number };
+  pricing?: {
+    inputPricePerMToken?: number;
+    outputPricePerMToken?: number;
+    /** DH-0010 Part A: USD per million cache-read tokens. When unset but
+     * `inputPricePerMToken` is set, `computeCostUsd` defaults to 0.1x the input price. */
+    cacheReadPricePerMToken?: number;
+    /** DH-0010 Part A: USD per million cache-write tokens. When unset but
+     * `inputPricePerMToken` is set, `computeCostUsd` defaults to 1.25x the input price. */
+    cacheWritePricePerMToken?: number;
+  };
   /** DH-0045: opt-in extended thinking, threaded from `ModelConfig.thinking` via runtime.ts
    * (same pattern as `pricing`/`providerModel`). Absent means off — no `thinking` param sent
    * to the provider. */
   thinking?: ThinkingConfig;
+  /** DH-0010 Part A: opt-in prompt caching, threaded from `ModelConfig.cache` via runtime.ts
+   * (same pattern as `pricing`/`thinking`). Absent/false means every `provider.complete()`
+   * call this loop makes stays byte-identical to pre-DH-0010 behavior. */
+  cache?: boolean;
+  /** DH-0010 Part B: this model's context window (tokens), threaded from
+   * `ModelConfig.contextWindow` via runtime.ts. Required (alongside `compaction.enabled`) for
+   * the compaction trigger check below to ever fire — absent means compaction never triggers
+   * for this model, regardless of `compaction.enabled`. */
+  contextWindow?: number;
+  /** DH-0010 Part B: opt-in context-window compaction, threaded from the top-level
+   * `compaction` config block via runtime.ts. Absent/`enabled: false` means the trigger
+   * check below never runs — today's unbounded-growth behavior, unchanged. */
+  compaction?: { enabled: boolean; thresholdPercent?: number };
   /** Round 8 (ADR 0005 amendment): how the process that owns this session was invoked — see
    * SessionClientKind's own doc comment in src/contracts/log.ts. Required (not defaulted) so
    * no call site can silently record a wrong value; threaded from AgentRuntimeOptions.client
@@ -196,16 +220,28 @@ export interface ModelBinding {
   provider: ModelProvider;
   pricing?: AgentLoopParams["pricing"];
   thinking?: AgentLoopParams["thinking"];
+  /** DH-0010 Part A: threaded per-model, same reasoning as `pricing`/`thinking` — a live
+   * model switch can change whether caching applies. */
+  cache?: AgentLoopParams["cache"];
+  /** DH-0010 Part B: threaded per-model — a live model switch can change (or newly set/
+   * unset) the context window this loop compacts against. */
+  contextWindow?: AgentLoopParams["contextWindow"];
 }
 
 /** Computes a `token_usage` event's `costUsd`, or undefined if pricing wasn't configured at
  * all for this model. If only one side of the split (input/output) is configured, the other
  * side is treated as $0/MToken rather than making the whole result undefined — a partial
- * price is still a real, deliberately-configured value, not "unconfigured". */
+ * price is still a real, deliberately-configured value, not "unconfigured". DH-0010 Part A:
+ * `cacheReadTokens`/`cacheWriteTokens` (default 0) are priced at `pricing.
+ * cacheReadPricePerMToken`/`cacheWritePricePerMToken` when set, else 0.1x/1.25x of
+ * `inputPricePerMToken` when *that* is set, else $0 — same "unconfigured stays unconfigured,
+ * partial is still real" rule as input/output above. */
 export function computeCostUsd(
   pricing: AgentLoopParams["pricing"],
   inputTokens: number,
   outputTokens: number,
+  cacheReadTokens = 0,
+  cacheWriteTokens = 0,
 ): number | undefined {
   if (
     !pricing ||
@@ -213,9 +249,14 @@ export function computeCostUsd(
   ) {
     return undefined;
   }
-  const inputCost = ((pricing.inputPricePerMToken ?? 0) * inputTokens) / 1_000_000;
+  const inputPrice = pricing.inputPricePerMToken ?? 0;
+  const cacheReadPrice = pricing.cacheReadPricePerMToken ?? inputPrice * 0.1;
+  const cacheWritePrice = pricing.cacheWritePricePerMToken ?? inputPrice * 1.25;
+  const inputCost = (inputPrice * inputTokens) / 1_000_000;
   const outputCost = ((pricing.outputPricePerMToken ?? 0) * outputTokens) / 1_000_000;
-  return inputCost + outputCost;
+  const cacheReadCost = (cacheReadPrice * cacheReadTokens) / 1_000_000;
+  const cacheWriteCost = (cacheWritePrice * cacheWriteTokens) / 1_000_000;
+  return inputCost + outputCost + cacheReadCost + cacheWriteCost;
 }
 
 export interface AgentLoopResult {
@@ -286,6 +327,97 @@ function textOf(content: ProviderContentBlock[]): string {
     .filter((b): b is Extract<ProviderContentBlock, { type: "text" }> => b.type === "text")
     .map((b) => b.text)
     .join("");
+}
+
+/** DH-0010 Part B: number of trailing messages to keep verbatim after compaction (~2
+ * exchanges) — an implementer constant per the ticket's Design section. */
+const COMPACTION_TAIL_SIZE = 4;
+
+export const COMPACTION_SUMMARY_REQUEST =
+  "Summarize this conversation for context compaction: the original task, decisions made " +
+  "and why, current state, files touched, and work remaining. Respond with the summary " +
+  "text only, no preamble.";
+
+/** DH-0010 Part B: finds the first index at or after `messages.length - COMPACTION_TAIL_SIZE`
+ * whose message is an `assistant` turn — the tail must start at an assistant-message
+ * boundary, never at a `user` tool_result message (which would orphan its `tool_use`
+ * pairing and be rejected by both providers) and starting at `assistant` also keeps
+ * user/assistant alternation valid. Returns `messages.length` (empty tail) if no assistant
+ * message exists at or after the target cutoff. */
+function computeCompactionTailStart(messages: ProviderMessage[]): number {
+  let start = Math.max(0, messages.length - COMPACTION_TAIL_SIZE);
+  while (start < messages.length && messages[start]?.role !== "assistant") {
+    start += 1;
+  }
+  return start;
+}
+
+/** DH-0010 Part B: performs one compaction pass — one extra no-tools `provider.complete()`
+ * call requesting a structured summary, then rebuilds `messages` in place as `[ user:
+ * original instruction + compaction marker + summary, ...tail ]` (tail starting at an
+ * assistant-message boundary — see `computeCompactionTailStart`). Emits the `compaction`
+ * JSONL log line. A summarization-call failure propagates like any provider error (already
+ * passes through the adapter's own withRetry) — no half-compacted state is left behind,
+ * since `messages` is only mutated after the call resolves. */
+async function performCompaction(
+  params: AgentLoopParams,
+  binding: ModelBinding,
+  messages: ProviderMessage[],
+  preTokens: number,
+): Promise<void> {
+  const summaryRequestMessages: ProviderMessage[] = [
+    ...messages,
+    { role: "user", content: [{ type: "text", text: COMPACTION_SUMMARY_REQUEST }] },
+  ];
+  const summaryCompletion = await binding.provider.complete({
+    model: binding.providerModel,
+    system: params.systemPrompt,
+    messages: summaryRequestMessages,
+    tools: [],
+  });
+  const summary = textOf(summaryCompletion.content);
+
+  const tailStart = computeCompactionTailStart(messages);
+  const tail = messages.slice(tailStart);
+  const droppedMessages = messages.length - tail.length;
+
+  const rebuilt: ProviderMessage[] = [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `${params.instruction}\n\n[History compacted — summary of prior work follows]\n${summary}`,
+        },
+      ],
+    },
+    ...tail,
+  ];
+
+  messages.length = 0;
+  messages.push(...rebuilt);
+
+  emitLog(params, {
+    version: 1,
+    timestamp: nowIso(),
+    type: "compaction",
+    preTokens,
+    droppedMessages,
+    retainedMessages: tail.length,
+    summaryChars: summary.length,
+  });
+}
+
+/** DH-0010 Part B: `contextTokens ≈ inputTokens + cacheReadTokens + cacheWriteTokens +
+ * outputTokens`, the provider's own usage report used as a next-request context-size proxy
+ * (no client-side tokenizer exists for Bedrock/local models). */
+function contextTokensOf(usage: ProviderUsage): number {
+  return (
+    usage.inputTokens +
+    (usage.cacheReadTokens ?? 0) +
+    (usage.cacheWriteTokens ?? 0) +
+    usage.outputTokens
+  );
 }
 
 async function runToolCalls(
@@ -397,6 +529,8 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     provider: params.provider,
     pricing: params.pricing,
     thinking: params.thinking,
+    cache: params.cache,
+    contextWindow: params.contextWindow,
   };
   params.registerModelSwitch?.((newBinding: ModelBinding) => {
     const from = binding.model;
@@ -405,6 +539,8 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     binding.provider = newBinding.provider;
     binding.pricing = newBinding.pricing;
     binding.thinking = newBinding.thinking;
+    binding.cache = newBinding.cache;
+    binding.contextWindow = newBinding.contextWindow;
     binding.model = to;
     emitEvent(params, {
       version: 1,
@@ -493,12 +629,36 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
   // per run — the second consecutive non-tool-use turn falls through to the legacy fallback
   // regardless of whether the model complied.
   let nudged = false;
+  // DH-0010 Part B: the previous turn's usage (the compaction trigger's own proxy for
+  // "current context size") and a one-shot guard so a trigger compacts at most once — see
+  // `performCompaction`'s doc comment and the trigger check below.
+  let lastUsage: ProviderUsage | undefined;
+  let justCompacted = false;
 
   while (turns < maxTurns) {
     if (params.signal?.aborted) {
       return reportStopped(params, finalText, turns, STOPPED_BETWEEN_TURNS_REASON);
     }
     turns += 1;
+
+    // DH-0010 Part B: trigger check, top of every turn, before the provider call — compacts
+    // at most once per trigger (a second consecutive turn hitting this check, immediately
+    // after a compaction, is skipped; if the compacted request itself still overflows, the
+    // context_overflow catch below is the safety net rather than compaction-looping).
+    if (justCompacted) {
+      justCompacted = false;
+    } else if (
+      params.compaction?.enabled &&
+      binding.contextWindow !== undefined &&
+      lastUsage !== undefined
+    ) {
+      const thresholdPercent = params.compaction.thresholdPercent ?? 80;
+      const contextTokens = contextTokensOf(lastUsage);
+      if (contextTokens >= (binding.contextWindow * thresholdPercent) / 100) {
+        await performCompaction(params, binding, messages, contextTokens);
+        justCompacted = true;
+      }
+    }
 
     // DH-0002: computed fresh every turn (not once before the loop) so a `deferred` MCP
     // tool that ToolSearch activates mid-conversation becomes visible to the provider on
@@ -583,6 +743,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
           messages,
           tools: toolDefs,
           ...(binding.thinking !== undefined ? { thinking: binding.thinking } : {}),
+          ...(binding.cache !== undefined ? { cache: binding.cache } : {}),
         },
         params.signal,
         { onTextDelta },
@@ -607,6 +768,23 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       }
       if (params.signal?.aborted) {
         return reportStopped(params, finalText, turns, STOPPED_DURING_PROVIDER_CALL_REASON);
+      }
+      // DH-0010 Part B: a context-window overflow (disabled compaction, or a
+      // pathologically-oversized single turn even with compaction enabled) is a graceful
+      // agent failure with an actionable reason, never an uncaught crash.
+      if (err instanceof ProviderError && err.kind === "context_overflow") {
+        const reason =
+          "context window exceeded; enable compaction (compaction.enabled in dh.json) or reduce task scope";
+        emitEvent(params, {
+          version: 1,
+          id: randomUUID(),
+          timestamp: nowIso(),
+          type: "agent_status",
+          agentId: params.agentId,
+          status: "failed",
+        });
+        emitLog(params, { version: 1, timestamp: nowIso(), type: "failed", reason });
+        return { success: false, finalOutput: finalText, turns };
       }
       throw err;
     }
@@ -689,10 +867,13 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       finalText = text;
     }
 
+    lastUsage = completion.usage;
     const costUsd = computeCostUsd(
       binding.pricing,
       completion.usage.inputTokens,
       completion.usage.outputTokens,
+      completion.usage.cacheReadTokens ?? 0,
+      completion.usage.cacheWriteTokens ?? 0,
     );
     emitEvent(params, {
       version: 1,
@@ -702,6 +883,12 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       agentId: params.agentId,
       inputTokens: completion.usage.inputTokens,
       outputTokens: completion.usage.outputTokens,
+      ...(completion.usage.cacheReadTokens !== undefined
+        ? { cacheReadTokens: completion.usage.cacheReadTokens }
+        : {}),
+      ...(completion.usage.cacheWriteTokens !== undefined
+        ? { cacheWriteTokens: completion.usage.cacheWriteTokens }
+        : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
     });
     emitLog(params, {

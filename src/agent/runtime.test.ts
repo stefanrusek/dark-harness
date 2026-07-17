@@ -1667,6 +1667,91 @@ describe("AgentRuntime — DH-0013: session-wide budgets", () => {
     ).toBe(true);
   });
 
+  // DH-0010 Part A fix: the cumulative token count must include cache-read/cache-write
+  // tokens, not just input+output — otherwise enabling caching would silently inflate
+  // maxTotalTokens's effective budget.
+  test("maxTotalTokens counts cache-read/cache-write tokens toward the cap, not just input+output", async () => {
+    // A dedicated mock server that always answers with a looping tool_use turn (so nothing
+    // but the budget can end the run) whose usage carries mostly cache tokens — input+output
+    // alone (2 total) would never reach a cap of 10 within a reasonable number of turns, but
+    // the 8 cache tokens reported per turn do.
+    const cacheServer = Bun.serve({
+      port: 0,
+      fetch() {
+        const events = [
+          {
+            type: "message_start",
+            message: {
+              id: "msg_mock",
+              type: "message",
+              role: "assistant",
+              model: "mock",
+              content: [],
+              stop_reason: null,
+              stop_sequence: null,
+              usage: {
+                input_tokens: 1,
+                output_tokens: 0,
+                cache_read_input_tokens: 5,
+                cache_creation_input_tokens: 3,
+              },
+            },
+          },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "tu_loop", name: "Bash", input: {} },
+          },
+          {
+            type: "content_block_delta",
+            index: 0,
+            delta: {
+              type: "input_json_delta",
+              partial_json: JSON.stringify({ command: "true", run_in_background: false }),
+            },
+          },
+          { type: "content_block_stop", index: 0 },
+          {
+            type: "message_delta",
+            delta: { stop_reason: "tool_use", stop_sequence: null },
+            usage: { output_tokens: 1 },
+          },
+          { type: "message_stop" },
+        ];
+        const body = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join("");
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      },
+    });
+    try {
+      const { onLogLine, logLines } = collectors();
+      const runtime = newAgentRuntime({
+        config: baseConfig({
+          options: { defaultModel: "test-model", maxTotalTokens: 10 },
+          provider: [
+            {
+              name: "mock",
+              type: "anthropic",
+              baseURL: cacheServer.url.toString(),
+              apiKey: "sk-test",
+            },
+          ],
+        }),
+        systemPrompt: "sp",
+        onLogLine,
+      });
+      const result = await runtime.runRoot("loop-forever please");
+      expect(result.success).toBe(false);
+      expect(
+        logLines.some(
+          (l) =>
+            l.type === "message" && l.role === "system" && l.content.includes("maxTotalTokens"),
+        ),
+      ).toBe(true);
+    } finally {
+      cacheServer.stop(true);
+    }
+  });
+
   test("no budget configured never trips (no regression)", async () => {
     const { onLogLine, logLines } = collectors();
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });

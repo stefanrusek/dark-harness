@@ -769,4 +769,153 @@ describe("AnthropicProvider", () => {
     expect(wasCalled).toBe(true);
     expect(receivedOptions).toBeUndefined();
   });
+
+  describe("DH-0010 Part A: prompt caching", () => {
+    test("given cache unset, requests are byte-identical to pre-DH-0010 behavior", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "turn one" }] },
+          { role: "assistant", content: [{ type: "text", text: "reply one" }] },
+          { role: "user", content: [{ type: "text", text: "turn two" }] },
+        ],
+      });
+      const sent = captured as Anthropic.MessageCreateParamsStreaming;
+      expect(sent.system).toBe("you are a helpful agent");
+      for (const m of sent.messages) {
+        for (const block of m.content as unknown[]) {
+          expect(block).not.toHaveProperty("cache_control");
+        }
+      }
+    });
+
+    test("given cache: false explicitly, requests still have no marker fields at all", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({ ...BASE_REQUEST, cache: false });
+      const sent = captured as Anthropic.MessageCreateParamsStreaming;
+      expect(sent.system).toBe("you are a helpful agent");
+    });
+
+    test("given cache: true, cache_control markers appear at the three documented positions", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        cache: true,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "turn one" }] },
+          { role: "assistant", content: [{ type: "text", text: "reply one" }] },
+          { role: "user", content: [{ type: "text", text: "turn two" }] },
+        ],
+      });
+      const sent = captured as Anthropic.MessageCreateParamsStreaming;
+
+      // 1. System prompt block gains an ephemeral cache_control marker.
+      expect(sent.system).toEqual([
+        { type: "text", text: "you are a helpful agent", cache_control: { type: "ephemeral" } },
+      ]);
+
+      // 2. Last content block of the final message (turn two, the only/last block).
+      const finalMessage = sent.messages[sent.messages.length - 1];
+      const finalContent = finalMessage?.content as Anthropic.ContentBlockParam[];
+      expect(finalContent[finalContent.length - 1]).toMatchObject({
+        cache_control: { type: "ephemeral" },
+      });
+
+      // 3. Last content block of the second-to-last user message (turn one).
+      const firstUserContent = sent.messages[0]?.content as Anthropic.ContentBlockParam[];
+      expect(firstUserContent[firstUserContent.length - 1]).toMatchObject({
+        cache_control: { type: "ephemeral" },
+      });
+
+      // The assistant message in between gains no marker — only the two user-side positions.
+      const assistantContent = sent.messages[1]?.content as Anthropic.ContentBlockParam[];
+      expect(assistantContent[assistantContent.length - 1]).not.toHaveProperty("cache_control");
+    });
+
+    test("given cache: true with only one user message, no second-to-last marker is applied", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({ ...BASE_REQUEST, cache: true });
+      const sent = captured as Anthropic.MessageCreateParamsStreaming;
+      expect(sent.messages).toHaveLength(1);
+      const content = sent.messages[0]?.content as Anthropic.ContentBlockParam[];
+      expect(content[content.length - 1]).toMatchObject({ cache_control: { type: "ephemeral" } });
+    });
+  });
+
+  describe("DH-0010 Part B: context_overflow classification", () => {
+    test('classifies a 400 "prompt is too long" as context_overflow, non-retryable', async () => {
+      let calls = 0;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            calls += 1;
+            const err = new Error("prompt is too long: 250000 tokens > 200000 maximum");
+            (err as unknown as { status: number }).status = 400;
+            throw err;
+          },
+        },
+      };
+      const provider = new AnthropicProvider(
+        { name: "anthropic", type: "anthropic", retry: { maxAttempts: 3, baseDelayMs: 1 } },
+        client,
+      );
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect(err).toBeInstanceOf(ProviderError);
+      expect((err as ProviderError).kind).toBe("context_overflow");
+      expect((err as ProviderError).retryable).toBe(false);
+      expect(calls).toBe(1);
+    });
+
+    test("a 400 with an unrelated message still classifies as other", async () => {
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async () => {
+            const err = new Error("bad request: invalid tool schema");
+            (err as unknown as { status: number }).status = 400;
+            throw err;
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const err = await provider.complete(BASE_REQUEST).catch((e) => e);
+      expect((err as ProviderError).kind).toBe("other");
+    });
+  });
 });

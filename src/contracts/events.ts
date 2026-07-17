@@ -57,6 +57,12 @@ export interface TokenUsageEvent extends SseEventBase {
   outputTokens: number;
   /** See {@link TokenUsageEvent.inputTokens} — same per-turn-delta semantics, when present. */
   costUsd?: number;
+  /** DH-0010 Part A: mirrors the JSONL `token_usage` log line's field of the same name —
+   * see log.ts's `LogTokenUsageEvent.cacheReadTokens` doc comment. Additive/optional;
+   * existing clients ignore unknown fields. */
+  cacheReadTokens?: number;
+  /** DH-0010 Part A: see {@link TokenUsageEvent.cacheReadTokens}. */
+  cacheWriteTokens?: number;
 }
 
 /**

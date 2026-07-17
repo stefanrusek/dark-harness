@@ -45,7 +45,12 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   "limits",
   "logRetention",
   "web",
+  "compaction",
 ]);
+
+// DH-0010 Part B: opt-in context-window compaction — see src/contracts/config.ts's
+// `CompactionConfig` doc comment.
+const KNOWN_COMPACTION_KEYS = new Set(["enabled", "thresholdPercent"]);
 
 // DH-0074: `web.fetch`/`web.search` opt-in blocks — see src/contracts/config.ts's WebConfig
 // doc comment for the "presence registers the tool, absence means it doesn't exist" semantics.
@@ -160,6 +165,27 @@ function validateModel(raw: unknown, index: number, providerNames: Set<string>):
     raw.thinking !== undefined
       ? validateThinking(raw.thinking, `models[${index}].thinking`)
       : undefined;
+  // DH-0010 Part A: opt-in per-model prompt caching.
+  const cache = raw.cache;
+  if (cache !== undefined && typeof cache !== "boolean") {
+    throw new ConfigError(`models[${index}].cache must be a boolean when present`);
+  }
+  const cacheReadPricePerMToken = validateOptionalPrice(
+    raw.cacheReadPricePerMToken,
+    `models[${index}].cacheReadPricePerMToken`,
+  );
+  const cacheWritePricePerMToken = validateOptionalPrice(
+    raw.cacheWritePricePerMToken,
+    `models[${index}].cacheWritePricePerMToken`,
+  );
+  // DH-0010 Part B: this model's context window, in tokens — required only when
+  // `compaction.enabled` is true (cross-checked once every model is parsed, see
+  // validateConfig()'s call to validateCompactionRequiresContextWindow below).
+  const contextWindow = validatePositiveNumber(
+    raw.contextWindow,
+    `models[${index}].contextWindow`,
+    true,
+  );
   return {
     name,
     provider,
@@ -167,6 +193,10 @@ function validateModel(raw: unknown, index: number, providerNames: Set<string>):
     ...(inputPricePerMToken !== undefined ? { inputPricePerMToken } : {}),
     ...(outputPricePerMToken !== undefined ? { outputPricePerMToken } : {}),
     ...(thinking !== undefined ? { thinking } : {}),
+    ...(cache !== undefined ? { cache } : {}),
+    ...(cacheReadPricePerMToken !== undefined ? { cacheReadPricePerMToken } : {}),
+    ...(cacheWritePricePerMToken !== undefined ? { cacheWritePricePerMToken } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
 }
 
@@ -444,6 +474,45 @@ export function validateMcpServers(raw: unknown): Record<string, McpServerConfig
   return raw as Record<string, McpServerConfig>;
 }
 
+/** DH-0010 Part B: validates the optional top-level `compaction` block. `enabled` is
+ * required when the block is present (boolean); `thresholdPercent`, if present, must be an
+ * integer 1-99 (default 80 applied at read time, not here — see loop.ts). The cross-check
+ * that every configured model has `contextWindow` when `enabled: true` happens separately in
+ * `validateConfig` below, once every model has been parsed (this function only validates the
+ * block's own shape). */
+function validateCompaction(raw: unknown): DhConfig["compaction"] {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) {
+    throw new ConfigError("compaction must be an object");
+  }
+  for (const key of Object.keys(raw)) {
+    if (!KNOWN_COMPACTION_KEYS.has(key)) {
+      throw new ConfigError(
+        `compaction has unknown key "${key}"; known keys: ${[...KNOWN_COMPACTION_KEYS].join(", ")}`,
+      );
+    }
+  }
+  if (typeof raw.enabled !== "boolean") {
+    throw new ConfigError("compaction.enabled must be a boolean");
+  }
+  let thresholdPercent: number | undefined;
+  if (raw.thresholdPercent !== undefined) {
+    if (
+      typeof raw.thresholdPercent !== "number" ||
+      !Number.isInteger(raw.thresholdPercent) ||
+      raw.thresholdPercent < 1 ||
+      raw.thresholdPercent > 99
+    ) {
+      throw new ConfigError("compaction.thresholdPercent must be an integer between 1 and 99");
+    }
+    thresholdPercent = raw.thresholdPercent;
+  }
+  return {
+    enabled: raw.enabled,
+    ...(thresholdPercent !== undefined ? { thresholdPercent } : {}),
+  };
+}
+
 export function validateConfig(raw: unknown): DhConfig {
   if (!isRecord(raw)) {
     throw new ConfigError("config root must be a JSON object");
@@ -573,6 +642,20 @@ export function validateConfig(raw: unknown): DhConfig {
   const limits = validateLimits(raw.limits);
   const logRetention = validateLogRetention(raw.logRetention);
   const web = validateWeb(raw.web);
+  const compaction = validateCompaction(raw.compaction);
+
+  // DH-0010 Part B: `compaction.enabled: true` requires every configured model to declare
+  // `contextWindow` — fail fast at config load (same spirit as the defaultModel referential
+  // check above), not at hour three of an unattended run.
+  if (compaction?.enabled) {
+    for (const m of models) {
+      if (m.contextWindow === undefined) {
+        throw new ConfigError(
+          `compaction.enabled is true but models[].contextWindow is missing for model "${m.name}"; every configured model must declare contextWindow when compaction is enabled`,
+        );
+      }
+    }
+  }
 
   const config: DhConfig = {
     options: {
@@ -594,6 +677,7 @@ export function validateConfig(raw: unknown): DhConfig {
     ...(limits !== undefined ? { limits } : {}),
     ...(logRetention !== undefined ? { logRetention } : {}),
     ...(web !== undefined ? { web } : {}),
+    ...(compaction !== undefined ? { compaction } : {}),
   };
   return config;
 }

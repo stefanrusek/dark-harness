@@ -83,6 +83,48 @@ function resolveMaxTokens(request: ProviderCompletionRequest): number {
   return base;
 }
 
+/** DH-0010 Part A: mutates a copy of `messages` (never the original — the caller's own
+ * `messages` array in loop.ts must survive unchanged across turns) to add `cache_control:
+ * { type: "ephemeral" }` to the last content block of the final message, and (if one
+ * exists) the last content block of the second-to-last *user* message — the two message-side
+ * breakpoints per tracking/DH-0010's Design section. The system+tools breakpoint is applied
+ * separately at the request-building call site. Only called when `request.cache` is true;
+ * when false the request is built with zero marker fields, byte-identical to pre-DH-0010
+ * behavior. */
+interface CacheableMessage {
+  role: "user" | "assistant";
+  content: Anthropic.ContentBlockParam[];
+}
+
+function withAnthropicCacheMarkers(messages: CacheableMessage[]): CacheableMessage[] {
+  const result = messages.map((m) => ({ ...m, content: [...m.content] }));
+
+  const markLast = (msg: CacheableMessage | undefined): void => {
+    if (!msg || msg.content.length === 0) return;
+    const lastIndex = msg.content.length - 1;
+    const block = msg.content[lastIndex];
+    msg.content[lastIndex] = {
+      ...block,
+      cache_control: { type: "ephemeral" },
+    } as Anthropic.ContentBlockParam;
+  };
+
+  markLast(result[result.length - 1]);
+
+  const userIndices = result.reduce<number[]>((acc, m, i) => {
+    if (m.role === "user") acc.push(i);
+    return acc;
+  }, []);
+  if (userIndices.length >= 2) {
+    const secondToLastUserIndex = userIndices[userIndices.length - 2];
+    if (secondToLastUserIndex !== undefined) {
+      markLast(result[secondToLastUserIndex]);
+    }
+  }
+
+  return result;
+}
+
 function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopReason {
   if (reason === "tool_use") return "tool_use";
   if (reason === "max_tokens") return "max_tokens";
@@ -99,12 +141,24 @@ function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopRe
  * `SyntaxError` from `JSON.parse` when the provider responds 200 with a garbled/non-JSON
  * body) got a response, just an unusable one — retrying the same malformed endpoint is
  * unlikely to help, so this is `other`/not retryable rather than optimistically `network`. */
+/** DH-0010 Part B: best-effort detection of "the request was rejected for being too long" —
+ * string/shape-matching on the Anthropic 400 `invalid_request_error` message, since the SDK
+ * has no dedicated error subclass for this. Accepted as a known-fragile heuristic (see
+ * tracking/DH-0010's Risks section) — a miss here just falls through to the normal `other`
+ * (non-retryable) classification, not a crash. */
+function isContextOverflowMessage(message: string): boolean {
+  return /prompt is too long/i.test(message);
+}
+
 function classifyAnthropicError(err: unknown): { kind: ProviderErrorKind; retryable: boolean } {
   const status = (err as { status?: unknown } | null)?.status;
   if (typeof status === "number") {
     if (status === 401 || status === 403) return { kind: "auth", retryable: false };
     if (status === 429) return { kind: "rate_limit", retryable: true };
     if (status >= 500) return { kind: "overloaded", retryable: true };
+    if (status === 400 && isContextOverflowMessage((err as Error).message ?? "")) {
+      return { kind: "context_overflow", retryable: false };
+    }
     return { kind: "other", retryable: false };
   }
   if (err instanceof Anthropic.APIConnectionError) {
@@ -148,16 +202,22 @@ export class AnthropicProvider implements ModelProvider {
     try {
       result = await withRetry(
         async () => {
+          const rawMessages: CacheableMessage[] = request.messages.map((m) => ({
+            role: m.role,
+            content: m.content.map(toAnthropicContent),
+          }));
           const stream = await this.client.messages.create(
             {
               model: request.model,
-              system: request.system,
+              // DH-0010 Part A: system becomes the cache-control-annotated array form only
+              // when `request.cache` is true — false/absent keeps the plain string, byte-
+              // identical to pre-DH-0010 requests.
+              system: request.cache
+                ? [{ type: "text", text: request.system, cache_control: { type: "ephemeral" } }]
+                : request.system,
               max_tokens: resolveMaxTokens(request),
               stream: true,
-              messages: request.messages.map((m) => ({
-                role: m.role,
-                content: m.content.map(toAnthropicContent),
-              })),
+              messages: request.cache ? withAnthropicCacheMarkers(rawMessages) : rawMessages,
               tools: request.tools.map((t) => ({
                 name: t.name,
                 description: t.description,

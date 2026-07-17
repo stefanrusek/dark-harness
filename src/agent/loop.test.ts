@@ -6,6 +6,7 @@ import {
   STOPPED_BETWEEN_TURNS_REASON,
   STOPPED_DURING_PROVIDER_CALL_REASON,
   TASK_FAILED_MARKER,
+  computeCostUsd,
   runAgentLoop,
 } from "./loop.ts";
 import type {
@@ -13,6 +14,7 @@ import type {
   ProviderCompletionRequest,
   ProviderCompletionResult,
 } from "./providers/types.ts";
+import { ProviderError } from "./providers/types.ts";
 import { buildToolMap } from "./tools/index.ts";
 import { makeToolContext } from "./tools/test-helpers.ts";
 
@@ -1686,5 +1688,311 @@ describe("runAgentLoop — DH-0050 ReportOutcome self-report", () => {
     expect(
       logLines.some((l) => l.type === "tool_result" && l.output === "Unknown tool: ReportOutcome"),
     ).toBe(true);
+  });
+});
+
+describe("DH-0010 Part A: computeCostUsd cache-token pricing", () => {
+  test("given no cache tokens, cost matches pre-DH-0010 input/output-only computation", () => {
+    const cost = computeCostUsd(
+      { inputPricePerMToken: 3, outputPricePerMToken: 15 },
+      1_000_000,
+      500_000,
+    );
+    expect(cost).toBe(10.5);
+  });
+
+  test("given explicit cache prices, cache tokens are billed at those rates", () => {
+    const cost = computeCostUsd(
+      {
+        inputPricePerMToken: 3,
+        outputPricePerMToken: 15,
+        cacheReadPricePerMToken: 0.5,
+        cacheWritePricePerMToken: 6,
+      },
+      0,
+      0,
+      1_000_000,
+      1_000_000,
+    );
+    expect(cost).toBe(6.5);
+  });
+
+  test("given unset cache prices but a configured input price, defaults to 0.1x/1.25x of input", () => {
+    const cost = computeCostUsd({ inputPricePerMToken: 10 }, 0, 0, 1_000_000, 1_000_000);
+    // cacheRead default 0.1x of $10 = $1/M; cacheWrite default 1.25x of $10 = $12.5/M.
+    expect(cost).toBe(1 + 12.5);
+  });
+
+  test("given no pricing configured at all, cost stays undefined even with cache tokens present", () => {
+    const cost = computeCostUsd(undefined, 100, 50, 10, 10);
+    expect(cost).toBeUndefined();
+  });
+});
+
+describe("DH-0010 Part A: token_usage SSE event mirrors cache tokens", () => {
+  test("given the provider reports cache tokens, the SSE token_usage event carries them", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 7, cacheWriteTokens: 3 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+    ]);
+    const { params, events } = baseParams({ provider, cache: true });
+    await runAgentLoop(params);
+    const usageEvent = events.find((e) => e.type === "token_usage");
+    expect(
+      usageEvent && usageEvent.type === "token_usage" ? usageEvent.cacheReadTokens : undefined,
+    ).toBe(7);
+    expect(
+      usageEvent && usageEvent.type === "token_usage" ? usageEvent.cacheWriteTokens : undefined,
+    ).toBe(3);
+  });
+
+  test("given the provider reports no cache tokens, the SSE event carries no cache fields", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+    ]);
+    const { params, events } = baseParams({ provider });
+    await runAgentLoop(params);
+    const usageEvent = events.find((e) => e.type === "token_usage");
+    expect(usageEvent).not.toHaveProperty("cacheReadTokens");
+    expect(usageEvent).not.toHaveProperty("cacheWriteTokens");
+  });
+});
+
+describe("DH-0010 Part A: cache param threaded to provider.complete", () => {
+  test("given ModelBinding.cache is true (via params.cache), the request sent to the provider carries cache: true", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider, cache: true });
+    await runAgentLoop(params);
+    expect(provider.calls[0]?.cache).toBe(true);
+  });
+
+  test("given cache is unset, the request sent to the provider carries no cache field", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    await runAgentLoop(params);
+    expect(provider.calls[0]).not.toHaveProperty("cache");
+  });
+});
+
+describe("DH-0010 Part B: context-window compaction", () => {
+  test("given contextTokens at/above threshold, the next turn compacts history and emits a compaction log line", async () => {
+    const provider = scriptedProvider([
+      // Turn 1: usage puts contextTokens (80+15=95) at exactly 95% of a 100-token window.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "turn one done" }],
+        usage: { inputTokens: 80, outputTokens: 15 },
+      },
+      // Nudge-ack (no ReportOutcome, non-interactive) triggers the compaction check before
+      // this turn — the summarization call itself (no tools).
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "SUMMARY TEXT" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // Post-compaction turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // Final nudge-ack.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({
+      provider,
+      contextWindow: 100,
+      compaction: { enabled: true, thresholdPercent: 80 },
+    });
+    await runAgentLoop(params);
+
+    const compactionLine = logLines.find((l) => l.type === "compaction");
+    expect(compactionLine).toBeDefined();
+    expect(
+      compactionLine && compactionLine.type === "compaction" ? compactionLine.preTokens : undefined,
+    ).toBe(95);
+    expect(
+      compactionLine && compactionLine.type === "compaction"
+        ? compactionLine.summaryChars
+        : undefined,
+    ).toBe("SUMMARY TEXT".length);
+
+    // The summarization call itself must have sent no tools.
+    const summaryCall = provider.calls.find((c) => c.tools.length === 0);
+    expect(summaryCall).toBeDefined();
+  });
+
+  test("given contextTokens below threshold, no compaction occurs", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "turn one done" }],
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({
+      provider,
+      contextWindow: 1000,
+      compaction: { enabled: true, thresholdPercent: 80 },
+    });
+    await runAgentLoop(params);
+    expect(logLines.some((l) => l.type === "compaction")).toBe(false);
+  });
+
+  test("given compaction disabled, high contextTokens never triggers compaction", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "turn one done" }],
+        usage: { inputTokens: 95, outputTokens: 5 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({ provider, contextWindow: 100 });
+    await runAgentLoop(params);
+    expect(logLines.some((l) => l.type === "compaction")).toBe(false);
+  });
+
+  test("compacted history's tail starts at an assistant-message boundary", async () => {
+    // Build a scripted provider whose first turn (the trigger) is preceded by a seeded
+    // resumed history ending mid-tool-exchange, so we can assert the rebuilt tail never
+    // starts at a user tool_result message.
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "trigger turn" }],
+        usage: { inputTokens: 90, outputTokens: 5 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "SUMMARY" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({
+      provider,
+      contextWindow: 100,
+      compaction: { enabled: true, thresholdPercent: 80 },
+      resume: {
+        messages: [
+          { role: "user", content: [{ type: "text", text: "original instruction" }] },
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "tu_1", name: "Bash", input: {} }],
+          },
+          {
+            role: "user",
+            content: [{ type: "tool_result", toolUseId: "tu_1", content: "ok", isError: false }],
+          },
+        ],
+        fromSessionId: "prior-session",
+      },
+    });
+    await runAgentLoop(params);
+    // The post-compaction request (the one after the summarization call) must never start
+    // its history with a lone tool_result message (which would orphan the tool_use pairing).
+    const postCompactionCall = provider.calls[2];
+    expect(postCompactionCall?.messages[0]?.role).toBe("user");
+    const firstBlock = postCompactionCall?.messages[0]?.content[0];
+    expect(firstBlock?.type).toBe("text");
+  });
+});
+
+describe("DH-0010 Part B: context_overflow graceful failure", () => {
+  test("given the provider throws a context_overflow ProviderError, the agent fails gracefully with an actionable reason", async () => {
+    const provider: ModelProvider & { calls: ProviderCompletionRequest[] } = {
+      calls: [],
+      async complete(request) {
+        this.calls.push(request);
+        throw new ProviderError("prompt is too long", { kind: "context_overflow" });
+      },
+    };
+    const { params, events, logLines } = baseParams({ provider });
+    const result = await runAgentLoop(params);
+
+    expect(result.success).toBe(false);
+    const statusEvent = events.find((e) => e.type === "agent_status");
+    expect(
+      statusEvent && statusEvent.type === "agent_status" ? statusEvent.status : undefined,
+    ).toBe("failed");
+    const failedLine = logLines.find((l) => l.type === "failed");
+    expect(failedLine && failedLine.type === "failed" ? failedLine.reason : undefined).toContain(
+      "context window exceeded",
+    );
+    expect(failedLine && failedLine.type === "failed" ? failedLine.reason : undefined).toContain(
+      "compaction.enabled",
+    );
+  });
+
+  test("a non-context_overflow ProviderError still propagates uncaught (no behavior change)", async () => {
+    const provider: ModelProvider = {
+      async complete() {
+        throw new ProviderError("boom", { kind: "other" });
+      },
+    };
+    const { params } = baseParams({ provider });
+    await expect(runAgentLoop(params)).rejects.toThrow(ProviderError);
   });
 });

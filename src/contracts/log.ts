@@ -159,6 +159,23 @@ export interface LogThinkingEvent extends LogEventBase {
   redacted: boolean;
 }
 
+/** DH-0010 Part B: durable record of a context-window compaction (architect-approved,
+ * tracking/DH-0010's Design section) — diagnostics-critical for post-hoc "why did the agent
+ * forget X" analysis, since compaction is lossy by construction. No SSE event counterpart in
+ * round 1 (JSONL-only). */
+export interface LogCompactionEvent extends LogEventBase {
+  type: "compaction";
+  /** The trigger turn's reported context tokens (inputTokens + cacheReadTokens +
+   * cacheWriteTokens + outputTokens) that crossed the threshold. */
+  preTokens: number;
+  /** Number of messages removed from the rebuilt history (replaced by the summary). */
+  droppedMessages: number;
+  /** Number of messages kept verbatim in the rebuilt history's tail. */
+  retainedMessages: number;
+  /** Length (in characters) of the generated summary text. */
+  summaryChars: number;
+}
+
 export type LogEvent =
   | LogMessageEvent
   | LogToolCallEvent
@@ -168,7 +185,8 @@ export type LogEvent =
   | LogCompletedEvent
   | LogFailedEvent
   | LogModelSwitchedEvent
-  | LogThinkingEvent;
+  | LogThinkingEvent
+  | LogCompactionEvent;
 
 /** The union of every line type that can appear in an agent's JSONL file. */
 export type LogLine = LogHeader | LogEvent;

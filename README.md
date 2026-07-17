@@ -238,6 +238,23 @@ below).
   | "omitted"`. Omitted entirely (the default) means no `thinking` parameter is sent at all —
   dh does no capability gating, so requesting the wrong form for a given model surfaces as
   that provider's own 400 error.
+  Optional **`cache`** (default `false`) opts this model into prompt caching — the Anthropic
+  adapter marks `cache_control: { type: "ephemeral" }` breakpoints (system+tools, plus the two
+  most recent message positions) and the Bedrock adapter marks equivalent `cachePoint` blocks
+  at the same three positions. Per-model (not per-provider) because caching support varies by
+  model/endpoint. Optional **`cacheReadPricePerMToken`**/**`cacheWritePricePerMToken`** price
+  cache tokens for cost display; when unset but `inputPricePerMToken` is set they default to
+  0.1x/1.25x of the input price (the published multiplier on both Anthropic and Bedrock).
+  Optional **`contextWindow`** (tokens) declares this model's context limit — required for
+  every configured model when the top-level `compaction.enabled` option (below) is `true`.
+- **`compaction`** (top-level, optional) — `{ "enabled": true, "thresholdPercent": 80 }` opts
+  the session into context-window compaction: once a turn's reported context tokens
+  (input + cache-read + cache-write + output) reach `thresholdPercent` (1-99, default 80) of
+  the active model's `contextWindow`, the harness summarizes older history into a compact
+  recap before continuing, rather than letting the provider reject an oversized request.
+  Requires every configured model to declare `contextWindow` (config-load-time error
+  otherwise). Omitted entirely (the default) means compaction never runs; a context-window
+  overflow instead fails the agent with an actionable message.
 - **`provider`** — `type: "anthropic"` (the Anthropic SDK; supports a custom `baseURL`, which
   is how the `"local"` provider above points at any Anthropic-compatible endpoint, e.g.
   LM Studio) or `type: "bedrock"` (AWS Bedrock via the standard AWS credential chain — see
