@@ -29,8 +29,10 @@ source: tracking/
 | [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history | blocked on DH-0136 (UI overhaul phase 2: TUI/Ink migration) -- the working fix pattern (see Notes) is Ink-specific, not portable to the current ANSI renderer |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
 | [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
+| [DH-0134](../DH-0134-ui-overhaul-phase-1-core-toolchain-integration-for-react-ink.md) | UI overhaul phase 1: Core toolchain integration for React + Ink | status: verifying |
 | [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React | blocked on DH-0133a (Core toolchain) landing first |
 | [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink | blocked on DH-0133a (Core toolchain) landing first |
+| [DH-0137](../DH-0137-shared-design-token-module-for-status-connection-color-glyph-consumed-by-both-react-and-ink-component-trees.md) | Shared design-token module for status/connection color+glyph, consumed by both React and Ink component trees | status: verifying |
 
 ## Board
 
@@ -70,13 +72,13 @@ source: tracking/
 | [DH-0133](../DH-0133-ui-overhaul-migrate-web-to-react-tui-to-ink.md) | UI overhaul: migrate Web to React, TUI to Ink | feature | stefan |
 | [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React 🔒 | feature | stefan |
 | [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink 🔒 | feature | stefan |
-| [DH-0137](../DH-0137-shared-design-token-module-for-status-connection-color-glyph-consumed-by-both-react-and-ink-component-trees.md) | Shared design-token module for status/connection color+glyph, consumed by both React and Ink component trees | feature | grace |
 
-### implementing
+### verifying
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0134](../DH-0134-ui-overhaul-phase-1-core-toolchain-integration-for-react-ink.md) | UI overhaul phase 1: Core toolchain integration for React + Ink | feature | stefan |
+| [DH-0137](../DH-0137-shared-design-token-module-for-status-connection-color-glyph-consumed-by-both-react-and-ink-component-trees.md) | Shared design-token module for status/connection color+glyph, consumed by both React and Ink component trees | feature | grace |
 
 ## Recently Closed
 

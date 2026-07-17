@@ -1,0 +1,19 @@
+{
+  // TUI's own TS program, split out from the root tsconfig.json the same way src/web's is
+  // (see that file's comment). Reason: enabling `"jsx": "react-jsx"` at the root pulls in
+  // @types/react's `global.d.ts`, which triple-slash-references the real DOM lib project-
+  // wide — that collided with e2e/spikes/web/spike-reconnect.ts's playwright `evaluate()`
+  // callback typing (its `HTMLElement | SVGElement` parameter lost `classList`) once the
+  // real DOM lib merged in ambiently. Giving src/tui (DH-0134, Ink/React components) its own
+  // isolated `tsc` program with `jsx` enabled avoids leaking that side effect onto every
+  // other domain's root-program file, mirroring why src/web already has its own program.
+  //
+  // `bun run typecheck` (package.json) runs the root program (excludes src/web and src/tui)
+  // plus src/web's and this program, so the gate still covers every file exactly once.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  },
+  "include": ["**/*"],
+  "exclude": []
+}

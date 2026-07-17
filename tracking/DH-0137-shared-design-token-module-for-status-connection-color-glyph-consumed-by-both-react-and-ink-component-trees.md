@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0137
 type: feature
-status: ready
+status: verifying
 owner: grace
 resolution:
 blocked_by: []
@@ -55,3 +55,24 @@ Muriel design pass 2026-07-17 on DH-0133: STATUS_COLOR (src/tui/render.ts) and S
 ## Notes
 
 Filed by Muriel (design crew) per CLAUDE.md SS7, as part of the DH-0133 UI-overhaul design pass (owner ask 2026-07-17, following Fable's architecture-level design on DH-0133). This formalizes what style-guide.md SS1/1.2/2.3 already state as canonical prose into an importable module, closing the gap where two renderers currently transcribe the same table by hand.
+
+### 2026-07-17 — implemented, ready for verification
+
+- Added `src/design-tokens.ts` exporting `STATUS_TOKENS`
+  (`Record<AgentStatus, {word,glyph,webVar,webHex,sgr}>`) and `CONNECTION_TOKENS`
+  (`Record<ConnectionState, {webLabel,tuiLabel,sgr,pending}>`), transcribed from
+  `docs/design/style-guide.md` §1/§1.2/§2.3.
+- `src/tui/render.ts`'s `STATUS_COLOR` and `src/web/client/format.ts`'s `STATUS_STYLES` are
+  intentionally left in place per this ticket's own scope note (DH-0135/DH-0136 own removing
+  them during their migration) — not touched.
+- 100% unit test coverage (`src/design-tokens.test.ts`): table-driven tests asserting every
+  status/state's fields against `style-guide.md`'s tables verbatim, plus a grep-based
+  regression test walking `src/` for any competing `Record<AgentStatus,` declaration outside
+  the shared module (allowlisting the two known pre-migration duplicates plus
+  `src/cli.ts`'s own `CLI_STATUS_COLOR`, which is out of scope for DH-0135/DH-0136's
+  React/Ink migration).
+- User Stories → tests: story 1 (complete mapping, no competing record) →
+  `design-tokens.test.ts` "has a complete entry..." + "no file outside the shared module
+  declares Record<AgentStatus,...>"; story 2 (Web hex + TUI SGR match style-guide.md §2.3) →
+  the per-status table-driven tests; story 3 (kept in sync with style-guide.md, drift fails
+  the test) → the same table-driven tests, hardcoded from the doc's tables.
