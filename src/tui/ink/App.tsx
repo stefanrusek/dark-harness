@@ -12,15 +12,19 @@ import { PickerView } from "./PickerView.tsx";
 import { RootView } from "./RootView.tsx";
 import { StatusRow } from "./StatusRow.tsx";
 import { TitleBar } from "./TitleBar.tsx";
+import type { ScrollBus } from "./scroll-bus.ts";
 
 export interface AppProps {
   state: TuiState;
+  /** DH-0126: wired through to whichever `<TranscriptPane>` is currently mounted. Optional —
+   * omitted by existing tests that render `<App>` standalone with no scroll behavior needed. */
+  scrollBus?: ScrollBus;
 }
 
 const HEADER_ROWS = 2;
 const MARGIN = 1;
 
-export function App({ state }: AppProps) {
+export function App({ state, scrollBus }: AppProps) {
   const { rows, cols } = state.size;
   const innerCols = Math.max(1, cols - 2 * MARGIN);
   const footerRows = state.view.kind === "root" ? 2 : 1;
@@ -31,13 +35,23 @@ export function App({ state }: AppProps) {
     <Box flexDirection="column" paddingLeft={MARGIN}>
       <TitleBar state={state} cols={innerCols} />
       {state.view.kind === "root" && (
-        <RootView state={state} contentRows={contentRows} cols={innerCols} />
+        <RootView
+          state={state}
+          contentRows={contentRows}
+          cols={innerCols}
+          {...(scrollBus ? { scrollBus } : {})}
+        />
       )}
       {state.view.kind === "tree" && (
         <AgentTree state={state} contentRows={contentRows} cols={innerCols} />
       )}
       {state.view.kind === "agent" && (
-        <AgentView state={state} contentRows={contentRows} cols={innerCols} />
+        <AgentView
+          state={state}
+          contentRows={contentRows}
+          cols={innerCols}
+          {...(scrollBus ? { scrollBus } : {})}
+        />
       )}
       {state.view.kind === "picker" && (
         <PickerView state={state} contentRows={contentRows} cols={innerCols} />

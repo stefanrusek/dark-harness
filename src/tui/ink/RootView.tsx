@@ -4,15 +4,17 @@ import { Box } from "ink";
 import type { TuiState } from "../types.ts";
 import { Composer } from "./Composer.tsx";
 import { TranscriptPane } from "./TranscriptPane.tsx";
+import type { ScrollBus } from "./scroll-bus.ts";
 import { rootAgent } from "./tokens.ts";
 
 export interface RootViewProps {
   state: TuiState;
   contentRows: number;
   cols: number;
+  scrollBus?: ScrollBus;
 }
 
-export function RootView({ state, contentRows, cols }: RootViewProps) {
+export function RootView({ state, contentRows, cols, scrollBus }: RootViewProps) {
   const agent = rootAgent(state);
   return (
     <Box flexDirection="column">
@@ -21,6 +23,7 @@ export function RootView({ state, contentRows, cols }: RootViewProps) {
         cols={cols}
         height={contentRows}
         emptyText="Waiting for root agent to start…"
+        {...(scrollBus ? { scrollBus } : {})}
       />
       <Box paddingLeft={1}>
         <Composer state={state} />

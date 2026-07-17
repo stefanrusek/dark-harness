@@ -288,6 +288,63 @@ describe("startTui", () => {
     await done;
   });
 
+  test("DH-0126: enables SGR mouse reporting on startup and disables it on quit", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+
+    expect(stdout.allWrites()).toContain("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+
+    stdin.type("\x03");
+    await done;
+
+    expect(stdout.allWrites()).toContain("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l");
+  });
+
+  test("DH-0126: a raw SGR mouse-wheel report does not leak into the composer as garbage keystrokes", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+    enqueueSse(server, {
+      version: 1,
+      id: "1",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "agent_spawned",
+      agentId: "root",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    await flush();
+
+    // A scroll-up wheel report (SGR 1006), the exact sequence a real terminal sends. Before
+    // DH-0126's fix, `parseKeys` couldn't recognize the `[<...M` introducer and leaked its
+    // digits into the composer as literal keystrokes.
+    stdin.type("\x1b[<64;10;5M");
+    stdin.type("\x1b[<65;10;5M");
+    stdin.type("hi");
+    stdin.type("\r");
+    await flush();
+
+    expect(server.commands).toContainEqual({
+      type: "send_message",
+      agentId: "root",
+      message: "hi",
+    });
+
+    stdin.type("\x03");
+    await done;
+  });
+
   test("left-arrow on empty input requests and renders the agent tree", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();

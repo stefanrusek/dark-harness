@@ -3,6 +3,11 @@ import { render } from "ink-testing-library";
 import React from "react";
 import type { Turn } from "../types.ts";
 import { TranscriptPane, renderTranscript } from "./TranscriptPane.tsx";
+import { createScrollBus } from "./scroll-bus.ts";
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 10));
+}
 
 function turn(overrides: Partial<Turn> & Pick<Turn, "role" | "text">): Turn {
   return overrides;
@@ -117,5 +122,60 @@ describe("TranscriptPane", () => {
       React.createElement(TranscriptPane, { transcript, cols: 40, height: 1, emptyText: "" }),
     );
     expect(lastFrame() ?? "").toContain("m4");
+  });
+
+  test("DH-0126: a negative scrollBus delta scrolls up, revealing earlier content", async () => {
+    const transcript: Turn[] = Array.from({ length: 10 }, (_, i) =>
+      turn({ role: "user", text: `msg ${i}` }),
+    );
+    const scrollBus = createScrollBus();
+    const { lastFrame } = render(
+      React.createElement(TranscriptPane, {
+        transcript,
+        cols: 40,
+        height: 3,
+        emptyText: "",
+        scrollBus,
+      }),
+    );
+    expect(lastFrame() ?? "").toContain("msg 9");
+    await flush();
+    scrollBus.emit(-10);
+    await flush();
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("msg 9");
+    expect(frame).toContain("msg 4");
+  });
+
+  test("DH-0126: scrolling up then back down returns to the bottom (clamped, not runaway)", async () => {
+    const transcript: Turn[] = Array.from({ length: 10 }, (_, i) =>
+      turn({ role: "user", text: `msg ${i}` }),
+    );
+    const scrollBus = createScrollBus();
+    const { lastFrame } = render(
+      React.createElement(TranscriptPane, {
+        transcript,
+        cols: 40,
+        height: 3,
+        emptyText: "",
+        scrollBus,
+      }),
+    );
+    await flush();
+    scrollBus.emit(-3);
+    await flush();
+    scrollBus.emit(30);
+    await flush();
+    expect(lastFrame() ?? "").toContain("msg 9");
+  });
+
+  test("without a scrollBus prop, emitting on an unrelated bus has no effect (no crash, offset unchanged)", () => {
+    const transcript: Turn[] = Array.from({ length: 10 }, (_, i) =>
+      turn({ role: "user", text: `msg ${i}` }),
+    );
+    const { lastFrame } = render(
+      React.createElement(TranscriptPane, { transcript, cols: 40, height: 3, emptyText: "" }),
+    );
+    expect(lastFrame() ?? "").toContain("msg 9");
   });
 });

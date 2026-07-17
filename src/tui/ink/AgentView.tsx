@@ -2,15 +2,17 @@
 import { Box, Text } from "ink";
 import type { TuiState } from "../types.ts";
 import { TranscriptPane } from "./TranscriptPane.tsx";
+import type { ScrollBus } from "./scroll-bus.ts";
 import { colorizeStatus, dim, formatElapsed, formatTokenCost } from "./tokens.ts";
 
 export interface AgentViewProps {
   state: TuiState;
   contentRows: number;
   cols: number;
+  scrollBus?: ScrollBus;
 }
 
-export function AgentView({ state, contentRows, cols }: AgentViewProps) {
+export function AgentView({ state, contentRows, cols, scrollBus }: AgentViewProps) {
   if (state.view.kind !== "agent") return null;
   const agent = state.agents.get(state.view.agentId) ?? null;
   const meta = agent
@@ -27,6 +29,7 @@ export function AgentView({ state, contentRows, cols }: AgentViewProps) {
         cols={cols}
         height={contentRows}
         emptyText="(no output yet)"
+        {...(scrollBus ? { scrollBus } : {})}
       />
       <Text>{hint}</Text>
     </Box>

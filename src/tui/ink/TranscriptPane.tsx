@@ -6,17 +6,18 @@
 // privateer's "controller stores just the offset" split (scroll-viewport.ts's own doc comment)
 // and keeping `state.ts` free of render-only offset bookkeeping (DH-0133's own User Story:
 // reducer requires no behavioral changes beyond what DH-0126/DH-0130 independently need).
-// DH-0126's own mouse/key input-parsing fix (separate ticket scope) is what will actually call
-// `setOffset` in response to real scroll input; this component supplies the windowing plus the
-// auto-scroll-at-bottom behavior around whatever offset it's given.
+// DH-0126: mouse-wheel input is parsed off raw stdin in app.ts (see mouse.ts/mouse-lifecycle.ts)
+// and forwarded here via `scrollBus` (ink/scroll-bus.ts) rather than through the reducer —
+// this component subscribes and applies the delta to its local offset itself.
 import { Box, Text } from "ink";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { STATUS_TOKENS } from "../../design-tokens.ts";
 import { parseMarkdown, sanitizeText } from "../../markdown/index.ts";
 import { renderMarkdownRows } from "../markdown-ansi.ts";
-import { atBottom, toBottom, visibleSlice } from "../scroll-viewport.ts";
+import { atBottom, scrollBy, toBottom, visibleSlice } from "../scroll-viewport.ts";
 import type { Turn } from "../types.ts";
 import { wrapText } from "../width.ts";
+import type { ScrollBus } from "./scroll-bus.ts";
 
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
@@ -74,11 +75,31 @@ export interface TranscriptPaneProps {
   cols: number;
   height: number;
   emptyText: string;
+  /** DH-0126: wheel-scroll trigger, wired up by whichever view (root/agent) currently mounts
+   * this pane — see app.ts/mouse.ts for where the raw SGR events are parsed. Optional so
+   * existing tests that render `<TranscriptPane>` standalone don't need to supply one. */
+  scrollBus?: ScrollBus;
 }
 
-export function TranscriptPane({ transcript, cols, height, emptyText }: TranscriptPaneProps) {
+export function TranscriptPane({
+  transcript,
+  cols,
+  height,
+  emptyText,
+  scrollBus,
+}: TranscriptPaneProps) {
   const lines = transcript.length === 0 ? [emptyText] : renderTranscript(transcript, cols);
   const [offset, setOffset] = useState(() => toBottom(lines.length, height).offset);
+
+  // Re-subscribe each render so the listener closes over the current lines/height — a scroll
+  // event applies against the viewport as it exists right now, not as it existed when the
+  // pane first mounted.
+  useEffect(() => {
+    if (!scrollBus) return;
+    return scrollBus.subscribe((deltaLines) => {
+      setOffset((prev) => scrollBy({ offset: prev }, deltaLines, lines.length, height).offset);
+    });
+  }, [scrollBus, lines.length, height]);
   // "Adjust state during render in response to a prop change" — the documented React pattern
   // for deriving state from props without an effect (avoids relying on effects actually
   // flushing before `lastFrame()` is read in ink-testing-library, which they don't). Tracked

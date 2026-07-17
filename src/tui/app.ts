@@ -9,10 +9,17 @@
 import { sendCommand } from "./http-client.ts";
 import type { InkMount } from "./ink/mount.ts";
 import { mountInk } from "./ink/mount.ts";
+import { createScrollBus } from "./ink/scroll-bus.ts";
 import { parseKeys } from "./keys.ts";
+import { MouseLifecycle } from "./mouse-lifecycle.ts";
+import { parseSgrMouseChunk, stripSgrMouseSequences } from "./mouse.ts";
 import { runSseClient } from "./sse-client.ts";
 import { initialState, reducer } from "./state.ts";
 import type { Action, Effect, TuiState } from "./types.ts";
+
+/** DH-0126: lines the transcript scrolls per wheel notch — no per-notch line-count is
+ * reported by SGR 1006 (one event = one notch), so this is a fixed, editor-typical step. */
+const SCROLL_LINES_PER_NOTCH = 3;
 
 const ALT_SCREEN_ENTER = "\x1b[?1049h";
 const ALT_SCREEN_EXIT = "\x1b[?1049l";
@@ -146,6 +153,12 @@ export async function startTui(
     // biome-ignore lint/style/useConst: see comment above.
     let inkInstance: InkMount;
 
+    // DH-0126: SGR mouse reporting (see mouse.ts) is enabled/disabled through the same
+    // idempotent-teardown lifecycle privateer uses — `tearDown()` is safe to call
+    // unconditionally from `cleanup()` below even if `enable()` was never reached.
+    const mouseLifecycle = new MouseLifecycle((s) => stdout.write(s));
+    const scrollBus = createScrollBus();
+
     function draw(): void {
       inkInstance.rerender(state);
     }
@@ -258,6 +271,7 @@ export async function startTui(
       if (pendingDrawTimer !== undefined) clearTimeout(pendingDrawTimer);
       abortController.abort();
       inkInstance.unmount();
+      mouseLifecycle.tearDown();
       stdout.write(BRACKETED_PASTE_DISABLE + SHOW_CURSOR + ALT_SCREEN_EXIT);
       stdin.setRawMode?.(false);
       stdin.pause?.();
@@ -266,13 +280,28 @@ export async function startTui(
     }
 
     stdout.write(ALT_SCREEN_ENTER + HIDE_CURSOR + BRACKETED_PASTE_ENABLE);
-    inkInstance = mountInk(state, stdout, stdin);
+    mouseLifecycle.enable();
+    inkInstance = mountInk(state, stdout, stdin, scrollBus);
     stdin.setRawMode?.(true);
     stdin.setEncoding?.("utf8");
     stdin.resume?.();
 
+    // DH-0126: parse SGR mouse reports off the raw chunk first — wheel notches drive the
+    // transcript's scroll offset via `scrollBus` rather than the key-dispatch pipeline. The
+    // matched (and any trailing partial) sequences are then stripped before the remainder goes
+    // to `parseKeys`, which has no notion of the `[<...M` introducer and would otherwise fall
+    // through its "unrecognized CSI" branch and leak the sequence's digits into the composer
+    // as literal keystrokes — the exact bug this ticket reports.
     stdin.on("data", (chunk: string) => {
-      for (const key of parseKeys(chunk)) {
+      for (const event of parseSgrMouseChunk(chunk)) {
+        if (event.type === "scrollUp") {
+          scrollBus.emit(-SCROLL_LINES_PER_NOTCH);
+        } else if (event.type === "scrollDown") {
+          scrollBus.emit(SCROLL_LINES_PER_NOTCH);
+        }
+      }
+      const rest = stripSgrMouseSequences(chunk);
+      for (const key of parseKeys(rest)) {
         dispatch({ type: "key", key });
       }
     });
