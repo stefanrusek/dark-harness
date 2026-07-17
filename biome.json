@@ -21,6 +21,18 @@
       "recommended": true
     }
   },
+  "overrides": [
+    {
+      "include": ["src/web/client/components/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double",

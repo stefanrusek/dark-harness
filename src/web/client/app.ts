@@ -1,7 +1,8 @@
-// Wires state (state.ts) + transport (sse.ts, commands.ts, download.ts) + rendering
-// (render.ts) into a running app. This is the one place with side effects and mutable
-// instance state; everything it delegates to is pure/injectable, which is what keeps this
-// class itself cheap to test (fake DOM, fake fetch/streams — no `EventSource`, see sse.ts).
+// Wires state (state.ts) + transport (sse.ts, commands.ts, download.ts) into a running app,
+// owning the SSE subscription and a single React root render of <App> (DH-0135). This is the
+// one place with side effects and mutable instance state; everything it delegates to is
+// pure/injectable, which is what keeps this class itself cheap to test (fake DOM, fake
+// fetch/streams — no `EventSource`, see sse.ts).
 
 import { createElement } from "react";
 import { type Root, createRoot } from "react-dom/client";
@@ -19,27 +20,8 @@ import {
   stopAgent,
   switchModel,
 } from "./commands.ts";
-import { AppHeader } from "./components/AppHeader.tsx";
-import { Composer } from "./components/Composer.tsx";
+import { App } from "./components/App.tsx";
 import { type DownloadEnv, downloadLogs } from "./download.ts";
-import {
-  type AppCallbacks,
-  type ShellRefs,
-  type TranscriptRenderState,
-  appendTranscript,
-  buildShell,
-  hideError,
-  hideGapBanner,
-  renderAgentHeader,
-  renderConnectionStatus,
-  renderErrorLog,
-  renderModelPicker,
-  renderSessionSummary,
-  renderSidebar,
-  renderTranscript,
-  showError,
-  showGapBanner,
-} from "./render.ts";
 import { parseSlashCommand } from "./slash-commands.ts";
 import { type SseConnection, connectEvents } from "./sse.ts";
 import {
@@ -63,7 +45,6 @@ import {
   setSkills,
 } from "./state.ts";
 
-const NEAR_BOTTOM_THRESHOLD_PX = 48;
 const ERROR_BANNER_DURATION_MS = 5000;
 /** How often the "time in current status" indicator ticks forward with no new event. */
 const LIVENESS_TICK_MS = 1000;
@@ -111,89 +92,27 @@ export interface AppDeps {
 
 export class AppView {
   private state: WebState = createInitialState();
-  private readonly shell: ShellRefs;
-  /** DH-0135: `react-dom` roots for the migrated composer section and the reserved
-   *  `<AppHeader>` slot — re-rendered (not rebuilt) on every `renderAll()` pass, same as
-   *  every other section, but via React's own reconciliation instead of this module's
-   *  hand-written DOM diffing. */
-  private readonly composerRoot: Root;
-  private readonly appHeaderRoot: Root;
-  /** DH-0135: guards the two React roots above from being rendered into after `stop()` —
-   *  a coalesced render scheduled just before `stop()` (see `scheduleRenderAll`) can still
-   *  fire after the roots are unmounted if the injected `rafImpl`/timer implementation
-   *  doesn't cancel synchronously; `react-dom` throws on `Root.render()` after `unmount()`,
-   *  where the old plain-DOM render functions would have just harmlessly no-op'd. */
+  private errorMessage: string | null = null;
+  /** DH-0135: single `react-dom` root for the whole app — replaces the per-section
+   *  imperative render functions in the old render.ts. */
+  private readonly root: Root;
+  /** Guards the root from being rendered into after `stop()` — a coalesced render scheduled
+   *  just before `stop()` (see `scheduleRenderAll`) can still fire after the root is
+   *  unmounted if the injected `rafImpl`/timer implementation doesn't cancel synchronously;
+   *  `react-dom` throws on `Root.render()` after `unmount()`. */
   private stopped = false;
   private connection: SseConnection | null = null;
-  private renderedTranscript: TranscriptRenderState = { turnCount: 0, lastTurnTextLength: 0 };
-  private renderedTranscriptForAgentId: string | null = null;
   private errorTimer: ReturnType<typeof setTimeout> | undefined;
   private livenessTimer: ReturnType<typeof setInterval> | undefined;
   /** DH-0044 D9: batches SSE-driven `renderAll()` calls to at most one per animation frame —
    *  see `scheduleRenderAll`. */
   private renderRafHandle: number | undefined;
 
-  private readonly callbacks: AppCallbacks = {
-    onSelectAgent: (agentId) => {
-      this.state = selectAgent(this.state, agentId);
-      this.renderedTranscriptForAgentId = null;
-      this.renderAll();
-    },
-    onSendMessage: (message) => {
-      // DH-0093 design §1: a recognized slash command never becomes a chat message —
-      // intercepted here, the one place a `send_message` call is built from the composer's
-      // submitted text. A leading space before the slash, or a bare "/" alone, deliberately
-      // fails to match and falls through to ordinary chat (see slash-commands.ts).
-      const parsed = parseSlashCommand(message);
-      if (parsed) {
-        this.handleSlashCommand(parsed.name, parsed.args);
-        return;
-      }
-      const agent = selectedAgent(this.state);
-      if (!agent) return;
-      // Local echo, same as any real chat UI: the operator's own turn appears immediately,
-      // client-side — it never arrives over SSE, so waiting for a server round-trip would
-      // mean the conversation view never showed what was actually sent (docs/handoffs/web.md
-      // Round 4).
-      const nowFn = this.deps.nowFn ?? Date.now;
-      this.state = addUserTurn(this.state, agent.agentId, message, new Date(nowFn()).toISOString());
-      this.renderAll();
-      sendMessage(
-        this.deps.target,
-        agent.agentId,
-        message,
-        this.deps.fetchImpl,
-        this.commandOptions(),
-      ).catch((err) => this.reportError(err));
-    },
-    onDownloadAgentLog: (agentId) => {
-      downloadLogs(this.deps.target, agentId, this.deps.downloadEnv, this.deps.fetchImpl).catch(
-        (err) => this.reportError(err),
-      );
-    },
-    onDownloadSessionBundle: () => {
-      downloadLogs(this.deps.target, undefined, this.deps.downloadEnv, this.deps.fetchImpl).catch(
-        (err) => this.reportError(err),
-      );
-    },
-    onStopAgent: (agentId) => {
-      stopAgent(this.deps.target, agentId, this.deps.fetchImpl, this.commandOptions()).catch(
-        (err) => this.reportError(err),
-      );
-    },
-  };
-
   constructor(
-    private readonly root: HTMLElement,
+    private readonly container: HTMLElement,
     private readonly deps: AppDeps,
   ) {
-    this.shell = buildShell(deps.doc, root);
-    this.composerRoot = createRoot(this.shell.composer);
-    this.appHeaderRoot = createRoot(this.shell.appHeaderSlot);
-    this.shell.jumpToLatest.addEventListener("click", () => this.scrollToBottom());
-    this.shell.scrollRegion.addEventListener("scroll", () => this.handleScroll());
-    // DH-0093: Escape closes the /model picker — scoped to the document since it isn't tied
-    // to any one row (the per-row Enter/Space handling lives in render.ts's picker rows).
+    this.root = createRoot(container);
     deps.doc.addEventListener("keydown", (evt: KeyboardEvent) => {
       if (evt.key === "Escape" && this.state.modelPickerOpen) {
         this.closeModelPicker();
@@ -311,8 +230,6 @@ export class AppView {
 
     if (name === "clear") {
       this.state = clearAllTranscripts(this.state);
-      this.renderedTranscript = { turnCount: 0, lastTurnTextLength: 0 };
-      this.renderedTranscriptForAgentId = null;
       this.renderAll();
       return;
     }
@@ -383,6 +300,34 @@ export class AppView {
     this.renderAll();
   }
 
+  private onSendMessage = (message: string): void => {
+    // DH-0093 design §1: a recognized slash command never becomes a chat message —
+    // intercepted here, the one place a `send_message` call is built from the composer's
+    // submitted text. A leading space before the slash, or a bare "/" alone, deliberately
+    // fails to match and falls through to ordinary chat (see slash-commands.ts).
+    const parsed = parseSlashCommand(message);
+    if (parsed) {
+      this.handleSlashCommand(parsed.name, parsed.args);
+      return;
+    }
+    const agent = selectedAgent(this.state);
+    if (!agent) return;
+    // Local echo, same as any real chat UI: the operator's own turn appears immediately,
+    // client-side — it never arrives over SSE, so waiting for a server round-trip would
+    // mean the conversation view never showed what was actually sent (docs/handoffs/web.md
+    // Round 4).
+    const nowFn = this.deps.nowFn ?? Date.now;
+    this.state = addUserTurn(this.state, agent.agentId, message, new Date(nowFn()).toISOString());
+    this.renderAll();
+    sendMessage(
+      this.deps.target,
+      agent.agentId,
+      message,
+      this.deps.fetchImpl,
+      this.commandOptions(),
+    ).catch((err) => this.reportError(err));
+  };
+
   stop(): void {
     this.connection?.close();
     this.connection = null;
@@ -397,8 +342,7 @@ export class AppView {
       this.renderRafHandle = undefined;
     }
     this.stopped = true;
-    this.composerRoot.unmount();
-    this.appHeaderRoot.unmount();
+    this.root.unmount();
   }
 
   getState(): WebState {
@@ -413,10 +357,10 @@ export class AppView {
   /**
    * DH-0044 D9: coalesces `renderAll()` calls triggered by SSE events (streaming turns can
    * arrive at ~20 `agent_output` events/second per agent) into at most one full state->DOM
-   * pass per animation frame, rather than rebuilding the sidebar/header/transcript on every
-   * single event. State (`this.state`) is always updated synchronously in `handleEvent`
-   * above — only the DOM render pass is deferred, so a render that does fire always reflects
-   * every event received so far, never a stale intermediate state.
+   * pass per animation frame, rather than rebuilding on every single event. State
+   * (`this.state`) is always updated synchronously in `handleEvent` above — only the React
+   * render pass is deferred, so a render that does fire always reflects every event received
+   * so far, never a stale intermediate state.
    */
   private scheduleRenderAll(): void {
     if (this.renderRafHandle !== undefined) return;
@@ -429,7 +373,7 @@ export class AppView {
 
   private handleStatus(status: ConnectionStatus): void {
     this.state = setConnectionStatus(this.state, status);
-    renderConnectionStatus(this.shell.connectionPill, this.state);
+    this.renderAll();
   }
 
   /** DH-0024: fires on every SSE reconnect (not the initial connect) — see sse.ts's
@@ -440,22 +384,23 @@ export class AppView {
     this.renderAll();
   }
 
-  private dismissGapBanner(): void {
+  private dismissGapBanner = (): void => {
     this.state = dismissPossibleGap(this.state);
-    hideGapBanner(this.shell.gapBanner);
-  }
+    this.renderAll();
+  };
 
   private reportError(err: unknown): void {
     const message = err instanceof CommandError ? err.message : "Request failed.";
-    showError(this.shell.errorBanner, message);
+    this.errorMessage = message;
     const nowFn = this.deps.nowFn ?? Date.now;
     this.state = logError(this.state, message, new Date(nowFn()).toISOString());
-    renderErrorLog(this.deps.doc, this.shell.errorLogPanel, this.state);
+    this.renderAll();
     const setTimeoutFn = this.deps.setTimeoutImpl ?? setTimeout;
     const clearTimeoutFn = this.deps.clearTimeoutImpl ?? clearTimeout;
     if (this.errorTimer) clearTimeoutFn(this.errorTimer);
     this.errorTimer = setTimeoutFn(() => {
-      hideError(this.shell.errorBanner);
+      this.errorMessage = null;
+      this.renderAll();
     }, ERROR_BANNER_DURATION_MS);
   }
 
@@ -463,80 +408,46 @@ export class AppView {
     const { doc } = this.deps;
     const nowFn = this.deps.nowFn ?? Date.now;
     const now = nowFn();
-    renderSidebar(doc, this.shell.sidebar, this.state, this.callbacks.onSelectAgent, now);
-    renderConnectionStatus(this.shell.connectionPill, this.state);
-    renderSessionSummary(doc, this.shell.sessionSummary, this.state);
-    renderAgentHeader(doc, this.shell.agentHeader, this.state, this.callbacks, now);
     if (!this.stopped) {
-      this.composerRoot.render(
-        createElement(Composer, { state: this.state, onSend: this.callbacks.onSendMessage }),
+      this.root.render(
+        createElement(App, {
+          state: this.state,
+          now,
+          errorMessage: this.errorMessage,
+          onSelectAgent: (agentId) => {
+            this.state = selectAgent(this.state, agentId);
+            this.renderAll();
+          },
+          onSendMessage: this.onSendMessage,
+          onDownloadAgentLog: (agentId) => {
+            downloadLogs(
+              this.deps.target,
+              agentId,
+              this.deps.downloadEnv,
+              this.deps.fetchImpl,
+            ).catch((err) => this.reportError(err));
+          },
+          onDownloadSessionBundle: () => {
+            downloadLogs(
+              this.deps.target,
+              undefined,
+              this.deps.downloadEnv,
+              this.deps.fetchImpl,
+            ).catch((err) => this.reportError(err));
+          },
+          onStopAgent: (agentId) => {
+            stopAgent(this.deps.target, agentId, this.deps.fetchImpl, this.commandOptions()).catch(
+              (err) => this.reportError(err),
+            );
+          },
+          onSelectModel: (name) => this.selectModel(name),
+          onCloseModelPicker: () => this.closeModelPicker(),
+          onDismissGapBanner: this.dismissGapBanner,
+        }),
       );
-      this.appHeaderRoot.render(createElement(AppHeader, {}));
     }
-    if (this.state.possibleGap) {
-      showGapBanner(this.shell.gapBanner, () => this.dismissGapBanner());
-    } else {
-      hideGapBanner(this.shell.gapBanner);
-    }
-    renderErrorLog(doc, this.shell.errorLogPanel, this.state);
-    renderModelPicker(
-      doc,
-      this.shell.modelPicker,
-      this.state,
-      (name) => this.selectModel(name),
-      () => this.closeModelPicker(),
-    );
     // DH-0066: keep the browser tab itself informative (running/ended/idle) — see
     // `documentTitle`'s doc comment for why this matters with the tab backgrounded.
     doc.title = documentTitle(this.state);
-    this.updateOutput();
-  }
-
-  private updateOutput(): void {
-    const agent = selectedAgent(this.state);
-    const currentAgentId = agent?.agentId ?? null;
-
-    if (currentAgentId !== this.renderedTranscriptForAgentId) {
-      this.renderedTranscript = renderTranscript(
-        this.deps.doc,
-        this.shell.output,
-        agent,
-        this.state.sessionEnded,
-        this.state.exitCode,
-      );
-      this.renderedTranscriptForAgentId = currentAgentId;
-      this.scrollToBottom();
-      return;
-    }
-    if (!agent) return;
-
-    const wasNearBottom = this.isNearBottom();
-    this.renderedTranscript = appendTranscript(
-      this.deps.doc,
-      this.shell.output,
-      agent,
-      this.renderedTranscript,
-      this.state.sessionEnded,
-      this.state.exitCode,
-    );
-    if (wasNearBottom) {
-      this.scrollToBottom();
-    } else {
-      this.shell.jumpToLatest.classList.remove("hidden");
-    }
-  }
-
-  private isNearBottom(): boolean {
-    const region = this.shell.scrollRegion;
-    return region.scrollHeight - region.scrollTop - region.clientHeight < NEAR_BOTTOM_THRESHOLD_PX;
-  }
-
-  private scrollToBottom(): void {
-    this.shell.scrollRegion.scrollTop = this.shell.scrollRegion.scrollHeight;
-    this.shell.jumpToLatest.classList.add("hidden");
-  }
-
-  private handleScroll(): void {
-    if (this.isNearBottom()) this.shell.jumpToLatest.classList.add("hidden");
   }
 }
