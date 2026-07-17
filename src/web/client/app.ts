@@ -65,6 +65,24 @@ const ERROR_BANNER_DURATION_MS = 5000;
 /** How often the "time in current status" indicator ticks forward with no new event. */
 const LIVENESS_TICK_MS = 1000;
 
+/** DH-0044 D9 (Web/Susan): default `requestAnimationFrame`/`cancelAnimationFrame`, falling
+ *  back to an immediate-macrotask `setTimeout` when no real rAF exists (headless test
+ *  environments — `bun test` has no DOM globals). Production (a real browser) always has
+ *  `requestAnimationFrame`; the fallback only exists so this module has a sensible default
+ *  without forcing every test to inject one. */
+function defaultRaf(cb: FrameRequestCallback): number {
+  if (typeof requestAnimationFrame === "function") return requestAnimationFrame(cb);
+  return setTimeout(() => cb(Date.now()), 0) as unknown as number;
+}
+
+function defaultCancelRaf(handle: number): void {
+  if (typeof cancelAnimationFrame === "function") {
+    cancelAnimationFrame(handle);
+    return;
+  }
+  clearTimeout(handle as unknown as ReturnType<typeof setTimeout>);
+}
+
 export interface AppDeps {
   doc: Document;
   target: ServerTarget;
@@ -81,6 +99,11 @@ export interface AppDeps {
    *  real `setInterval`/`clearInterval`. */
   setIntervalImpl?: typeof setInterval;
   clearIntervalImpl?: typeof clearInterval;
+  /** DH-0044 D9: injectable `requestAnimationFrame`/`cancelAnimationFrame`, used to batch
+   *  SSE-driven DOM updates (see `scheduleRenderAll`). Defaults to the real rAF (falling back
+   *  to an immediate macrotask outside a browser — see `defaultRaf`). */
+  rafImpl?: (cb: FrameRequestCallback) => number;
+  cancelRafImpl?: (handle: number) => void;
 }
 
 export class AppView {
@@ -91,6 +114,9 @@ export class AppView {
   private renderedTranscriptForAgentId: string | null = null;
   private errorTimer: ReturnType<typeof setTimeout> | undefined;
   private livenessTimer: ReturnType<typeof setInterval> | undefined;
+  /** DH-0044 D9: batches SSE-driven `renderAll()` calls to at most one per animation frame —
+   *  see `scheduleRenderAll`. */
+  private renderRafHandle: number | undefined;
 
   private readonly callbacks: AppCallbacks = {
     onSelectAgent: (agentId) => {
@@ -348,6 +374,11 @@ export class AppView {
       clearIntervalFn(this.livenessTimer);
       this.livenessTimer = undefined;
     }
+    if (this.renderRafHandle !== undefined) {
+      const cancelRaf = this.deps.cancelRafImpl ?? defaultCancelRaf;
+      cancelRaf(this.renderRafHandle);
+      this.renderRafHandle = undefined;
+    }
   }
 
   getState(): WebState {
@@ -356,7 +387,24 @@ export class AppView {
 
   private handleEvent(event: ServerSentEvent): void {
     this.state = applyEvent(this.state, event);
-    this.renderAll();
+    this.scheduleRenderAll();
+  }
+
+  /**
+   * DH-0044 D9: coalesces `renderAll()` calls triggered by SSE events (streaming turns can
+   * arrive at ~20 `agent_output` events/second per agent) into at most one full state->DOM
+   * pass per animation frame, rather than rebuilding the sidebar/header/transcript on every
+   * single event. State (`this.state`) is always updated synchronously in `handleEvent`
+   * above — only the DOM render pass is deferred, so a render that does fire always reflects
+   * every event received so far, never a stale intermediate state.
+   */
+  private scheduleRenderAll(): void {
+    if (this.renderRafHandle !== undefined) return;
+    const raf = this.deps.rafImpl ?? defaultRaf;
+    this.renderRafHandle = raf(() => {
+      this.renderRafHandle = undefined;
+      this.renderAll();
+    });
   }
 
   private handleStatus(status: ConnectionStatus): void {

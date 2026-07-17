@@ -80,6 +80,21 @@ export interface MockAnthropicProvider {
   stop(): void;
 }
 
+/** DH-0044: chunk size (chars) for splitting a scripted turn's `text` into multiple
+ * `content_block_delta` events — see `turnToStreamResponse` below. Small enough that a
+ * realistically "long" scripted turn (a few KB) produces enough deltas to cross
+ * `STREAM_FLUSH_BYTES` (1 KiB, src/agent/loop.ts) more than once. */
+const TEXT_DELTA_CHUNK_SIZE = 64;
+
+/** Splits `text` into chunks of at most `size` characters, in order. */
+function chunkText(text: string, size: number): string[] {
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += size) {
+    chunks.push(text.slice(i, i + size));
+  }
+  return chunks;
+}
+
 /** Builds a fake Anthropic-shaped SSE streaming HTTP response (`text/event-stream`, one
  * `event:`/`data:` pair per raw stream event) for a scripted `MockTurn` — the same event
  * shape `AnthropicProvider.complete()` now always requests (DH-0044) and the same
@@ -114,11 +129,20 @@ function turnToStreamResponse(turn: MockTurn): Response {
       index,
       content_block: { type: "text", text: "", citations: null },
     });
-    events.push({
-      type: "content_block_delta",
-      index,
-      delta: { type: "text_delta", text: turn.text },
-    });
+    // DH-0044: split the text into multiple `content_block_delta` events instead of one
+    // whole-text delta, so a long enough turn actually exercises the real provider's
+    // per-delta streaming shape — and, downstream, the agent loop's coalescing buffer
+    // (STREAM_FLUSH_BYTES in src/agent/loop.ts), which only flushes multiple `agent_output`
+    // SSE events when it observes multiple `onTextDelta` calls whose accumulated size
+    // crosses the flush threshold more than once. A single giant delta would collapse back
+    // into one flush regardless of the total turn length.
+    for (const chunk of chunkText(turn.text, TEXT_DELTA_CHUNK_SIZE)) {
+      events.push({
+        type: "content_block_delta",
+        index,
+        delta: { type: "text_delta", text: chunk },
+      });
+    }
     events.push({ type: "content_block_stop", index });
     index += 1;
   }

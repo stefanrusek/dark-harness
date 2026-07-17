@@ -321,6 +321,25 @@ describe("AppView construction and rendering", () => {
     expect(h.isIntervalCleared()).toBe(true);
   });
 
+  test("stop() cancels a still-pending coalesced render (DH-0044 D9) without throwing, using the default rAF fallback", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+    // Push an event and stop() immediately, before the default rAF fallback's macrotask
+    // fires — exercises `scheduleRenderAll`'s pending-handle path and `defaultCancelRaf`'s
+    // non-browser (`clearTimeout`) fallback, since this harness never overrides `rafImpl`.
+    h.stream.push({
+      version: 1,
+      id: "e2",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "agent_output",
+      agentId: "root-1",
+      chunk: "hello",
+    });
+    expect(() => h.app.stop()).not.toThrow();
+    await flush();
+  });
+
   test("incoming events update state and re-render the sidebar/header", async () => {
     const h = harness();
     h.app.start();

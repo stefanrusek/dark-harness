@@ -11,11 +11,24 @@
 // `AnthropicProvider` — no client injection, no source change.
 //
 // Only the one wire call the adapter ever makes is implemented: `POST
-// /model/{modelId}/converse` (confirmed from the SDK's operation table:
-// `{ [_h]: ["POST", "/model/{modelId}/converse", 200] }`). SigV4 auth headers are accepted
-// but never verified — static dummy credentials (any non-empty `AWS_ACCESS_KEY_ID` /
-// `AWS_SECRET_ACCESS_KEY`) are enough for the SDK to sign requests locally with no network
-// egress to real AWS involved.
+// /model/{modelId}/converse-stream` (confirmed from the SDK's operation table:
+// `{ [_h]: ["POST", "/model/{modelId}/converse-stream", 200] }`). SigV4 auth headers are
+// accepted but never verified — static dummy credentials (any non-empty
+// `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) are enough for the SDK to sign requests
+// locally with no network egress to real AWS involved.
+//
+// DH-0044: `BedrockProvider.complete()` now issues `ConverseStreamCommand`, not
+// `ConverseCommand` — the response body is no longer a single JSON object but AWS's binary
+// `application/vnd.amazon.eventstream` framing (length-prefixed messages with CRC32
+// checksums, headers carrying `:event-type`/`:message-type`/`:content-type`, and a JSON
+// payload per frame). This mock builds real frames via `@smithy/core/event-streams`'
+// `EventStreamCodec` (the same codec the SDK itself uses to decode them) rather than
+// hand-rolling the binary format — see `encodeEvent` below. Wire field names inside each
+// frame's JSON payload (`delta`, `contentBlockIndex`, `stopReason`, `usage`, ...) were
+// confirmed by reading the generated schema tables in
+// node_modules/@aws-sdk/client-bedrock-runtime/dist-cjs/index.js (e.g. `_d = "delta"`,
+// `_cBI = "contentBlockIndex"`) — this client generation has no `jsonName` trait overrides,
+// so each frame's JSON field name equals the SDK's own camelCase TS property name.
 //
 // One wrinkle vs. the Anthropic mock: `BedrockRuntimeClient` always builds a
 // `NodeHttp2Handler` (dist-cjs/index.js: `requestHandler: NodeHttp2Handler.create(...)`),
@@ -26,6 +39,12 @@
 
 import { randomUUID } from "node:crypto";
 import http2 from "node:http2";
+// `@smithy/core` isn't a direct dependency of this project — it's a transitive dependency of
+// `@aws-sdk/client-bedrock-runtime`, reused here so this mock builds real AWS event-stream
+// binary frames with the exact same codec the SDK itself uses to decode them, rather than
+// hand-rolling the framing/CRC32 logic a second time.
+import { EventStreamCodec } from "@smithy/core/event-streams";
+import { fromUtf8, toUtf8 } from "@smithy/core/serde";
 
 export interface MockBedrockToolCall {
   toolUseId?: string;
@@ -56,30 +75,85 @@ export interface MockBedrockProvider {
   stop(): void;
 }
 
-function turnToConverseResponse(turn: MockBedrockTurn) {
-  const content: Record<string, unknown>[] = [];
+/** DH-0044: chunk size (chars) for splitting a scripted turn's `text` into multiple
+ * `contentBlockDelta` frames — mirrors `mock-provider.ts`'s identical constant/rationale, so
+ * a sufficiently long scripted turn produces enough deltas to cross the agent loop's
+ * `STREAM_FLUSH_BYTES` threshold (src/agent/loop.ts) more than once. */
+const TEXT_DELTA_CHUNK_SIZE = 64;
+
+function chunkText(text: string, size: number): string[] {
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += size) {
+    chunks.push(text.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/** Builds the ordered sequence of `ConverseStreamOutput` union-member payloads (event-type ->
+ * JSON body) for a scripted turn — one per Bedrock Converse stream event, matching the
+ * accumulation loop in `consumeBedrockStream` (src/agent/providers/bedrock.ts). */
+function turnToStreamEvents(turn: MockBedrockTurn): Array<{ eventType: string; payload: unknown }> {
+  const events: Array<{ eventType: string; payload: unknown }> = [
+    { eventType: "messageStart", payload: { role: "assistant" } },
+  ];
+
+  let index = 0;
   if (turn.text !== undefined && turn.text.length > 0) {
-    content.push({ text: turn.text });
+    // Bedrock has no explicit text block-start (bedrock.ts's `consumeBedrockStream` opens the
+    // accumulator on the first delta) — only start events for tool_use are emitted below.
+    for (const chunk of chunkText(turn.text, TEXT_DELTA_CHUNK_SIZE)) {
+      events.push({
+        eventType: "contentBlockDelta",
+        payload: { contentBlockIndex: index, delta: { text: chunk } },
+      });
+    }
+    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: index } });
+    index += 1;
   }
   for (const call of turn.toolCalls ?? []) {
-    content.push({
-      toolUse: {
-        toolUseId: call.toolUseId ?? `tu_${randomUUID()}`,
-        name: call.name,
-        input: call.input,
+    const toolUseId = call.toolUseId ?? `tu_${randomUUID()}`;
+    events.push({
+      eventType: "contentBlockStart",
+      payload: { contentBlockIndex: index, start: { toolUse: { toolUseId, name: call.name } } },
+    });
+    events.push({
+      eventType: "contentBlockDelta",
+      payload: {
+        contentBlockIndex: index,
+        delta: { toolUse: { input: JSON.stringify(call.input ?? {}) } },
       },
     });
+    events.push({ eventType: "contentBlockStop", payload: { contentBlockIndex: index } });
+    index += 1;
   }
+
   const stopReason =
     turn.stopReason ?? ((turn.toolCalls?.length ?? 0) > 0 ? "tool_use" : "end_turn");
-  return {
-    output: { message: { role: "assistant", content } },
-    stopReason,
-    usage: {
-      inputTokens: turn.inputTokens ?? 10,
-      outputTokens: turn.outputTokens ?? 10,
+  events.push({ eventType: "messageStop", payload: { stopReason } });
+  events.push({
+    eventType: "metadata",
+    payload: {
+      usage: { inputTokens: turn.inputTokens ?? 10, outputTokens: turn.outputTokens ?? 10 },
     },
-  };
+  });
+
+  return events;
+}
+
+const eventStreamCodec = new EventStreamCodec(toUtf8, fromUtf8);
+
+/** Encodes one `ConverseStreamOutput` union member as a real AWS event-stream binary frame —
+ * `:message-type: event`, `:event-type: <member name>`, `:content-type: application/json`,
+ * JSON-encoded body — using the same codec the SDK uses to decode it. */
+function encodeEvent(eventType: string, payload: unknown): Uint8Array {
+  return eventStreamCodec.encode({
+    headers: {
+      ":message-type": { type: "string", value: "event" },
+      ":event-type": { type: "string", value: eventType },
+      ":content-type": { type: "string", value: "application/json" },
+    },
+    body: new TextEncoder().encode(JSON.stringify(payload)),
+  });
 }
 
 /**
@@ -98,7 +172,7 @@ export async function startMockBedrockProvider(
 
   const server = http2.createServer((req, res) => {
     const path = req.url ?? "";
-    const match = path.match(/^\/model\/(.+)\/converse$/);
+    const match = path.match(/^\/model\/(.+)\/converse-stream$/);
     if (!match || req.method !== "POST") {
       res.writeHead(404).end("not found");
       return;
@@ -115,8 +189,11 @@ export async function startMockBedrockProvider(
       callCount += 1;
       // biome-ignore lint/style/noNonNullAssertion: index is clamped into [0, turns.length)
       const turn = turns[index]!;
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(turnToConverseResponse(turn)));
+      res.writeHead(200, { "content-type": "application/vnd.amazon.eventstream" });
+      for (const { eventType, payload } of turnToStreamEvents(turn)) {
+        res.write(Buffer.from(encodeEvent(eventType, payload)));
+      }
+      res.end();
     });
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
