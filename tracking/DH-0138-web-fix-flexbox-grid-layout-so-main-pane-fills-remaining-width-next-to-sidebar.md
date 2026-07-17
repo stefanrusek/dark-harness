@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0138
 type: bug
-status: verifying
+status: closed
 owner: Susan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:

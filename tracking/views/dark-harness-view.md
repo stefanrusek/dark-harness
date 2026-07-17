@@ -36,7 +36,6 @@ source: tracking/
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | status: verifying |
 | [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React | blocked on DH-0133a (Core toolchain) landing first |
 | [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink | blocked on DH-0133a (Core toolchain) landing first |
-| [DH-0138](../DH-0138-web-fix-flexbox-grid-layout-so-main-pane-fills-remaining-width-next-to-sidebar.md) | Web: fix flexbox/grid layout so main-pane fills remaining width next to sidebar | status: verifying |
 
 ## Board
 
@@ -64,12 +63,6 @@ source: tracking/
 | [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker 🔒 | bug | stefan |
 | [DH-0132](../DH-0132-adopt-a-convention-of-writing-acceptance-tests-as-prompts-run-via-dh-job-for-real-end-to-end-verification.md) | Adopt a convention of writing acceptance tests as prompts run via dh --job for real end-to-end verification | feature | stefan |
 
-### implementing
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0138](../DH-0138-web-ui-flexbox-layout-broken-after-dh-0135-react-migration-main-content-squeezed-into-sidebar-column.md) | Web UI flexbox layout broken after DH-0135 React migration -- main content squeezed into sidebar column | bug | stefan |
-
 ### verifying
 
 | ID | Title | Type | Owner |
@@ -79,12 +72,12 @@ source: tracking/
 | [DH-0121](../DH-0121-dh-needs-a-logo-svg-ascii-art-versions.md) | dh needs a logo: SVG + ASCII art versions | feature | stefan |
 | [DH-0128](../DH-0128-urgent-web-ui-connecting-from-a-separate-machine-loads-the-shell-but-sticks-on-reconnecting.md) | URGENT: Web UI connecting from a separate machine loads the shell but sticks on 'Reconnecting...' | bug | stefan |
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | bug | stefan |
-| [DH-0138](../DH-0138-web-fix-flexbox-grid-layout-so-main-pane-fills-remaining-width-next-to-sidebar.md) | Web: fix flexbox/grid layout so main-pane fills remaining width next to sidebar | bug | Susan |
 
 ## Recently Closed
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0138](../DH-0138-web-fix-flexbox-grid-layout-so-main-pane-fills-remaining-width-next-to-sidebar.md) | Web: fix flexbox/grid layout so main-pane fills remaining width next to sidebar | done |
 | [DH-0137](../DH-0137-shared-design-token-module-for-status-connection-color-glyph-consumed-by-both-react-and-ink-component-trees.md) | Shared design-token module for status/connection color+glyph, consumed by both React and Ink component trees | done |
 | [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink | done |
 | [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React | done |
@@ -99,4 +92,3 @@ source: tracking/
 | [DH-0114](../DH-0114-launch-sub-agents-as-real-claude-cli-subprocesses-in-the-target-worktree-not-in-process-agent-tool.md) | Launch sub-agents as real claude CLI subprocesses in the target worktree, not in-process Agent tool | done |
 | [DH-0113](../DH-0113-coordinator-gate-checks-should-be-a-checked-in-sub-agent-prompt-not-run-inline.md) | Coordinator gate checks should be a checked-in sub-agent prompt, not run inline | done |
 | [DH-0112](../DH-0112-e2e-support-mock-provider-ts-never-updated-for-dh-0044-s-mandatory-streaming-real-turns-hang-past-agent-status.md) | e2e/support/mock-provider.ts never updated for DH-0044's mandatory streaming -- real turns hang past agent_status | done |
-| [DH-0111](../DH-0111-dh-connect-web-malforms-the-target-url-http-http-localhost.md) | dh --connect --web malforms the target URL (http://http://localhost...) | done |
