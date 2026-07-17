@@ -109,10 +109,20 @@ button {
 .dh-app {
   display: grid;
   grid-template-columns: 280px 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "header header"
+    "sidebar main";
   height: 100%;
 }
 
+.app-header-slot {
+  grid-area: header;
+  min-width: 0;
+}
+
 .sidebar {
+  grid-area: sidebar;
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex;
@@ -133,9 +143,11 @@ button {
 }
 
 .main-pane {
+  grid-area: main;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   position: relative;
 }
 
