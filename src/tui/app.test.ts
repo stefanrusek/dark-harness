@@ -179,7 +179,7 @@ function makeFakeServer(): FakeServer {
   return server;
 }
 
-async function flush(times = 5): Promise<void> {
+async function flush(times = 5, stdout?: FakeStdout): Promise<void> {
   for (let i = 0; i < times; i++) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
@@ -192,6 +192,21 @@ async function flush(times = 5): Promise<void> {
   // first layer alone) was intermittently too tight and made this a flaky test once Ink
   // owned the actual write.
   await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // DH-0146: on a slower/differently-scheduled CI runner, 100ms is not always enough for
+  // Ink's underlying render (yoga-layout WASM init, node graph resolution) to land at all —
+  // stdout.writes can still be sitting at just the startup preamble. When a stdout is
+  // provided, poll until writes stop growing (render has caught up and stabilized) instead
+  // of trusting a single fixed sleep, up to a generous ceiling so a genuinely broken render
+  // still fails fast rather than hanging.
+  if (stdout) {
+    let lastLength = stdout.writes.length;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (stdout.writes.length === lastLength) break;
+      lastLength = stdout.writes.length;
+    }
+  }
 }
 
 function enqueueSse(server: FakeServer, event: ServerSentEvent): void {
@@ -211,7 +226,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     expect(stdout.writes[0]).toContain(ALT_SCREEN_ENTER);
     expect(stdin.rawMode).toBe(true);
 
@@ -227,7 +242,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     enqueueSse(server, {
       version: 1,
@@ -246,7 +261,7 @@ describe("startTui", () => {
       agentId: "root",
       chunk: "hello from the agent",
     });
-    await flush();
+    await flush(5, stdout);
 
     expect(stdout.allWrites()).toContain("hello from the agent");
 
@@ -262,7 +277,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     enqueueSse(server, {
       version: 1,
       id: "1",
@@ -272,11 +287,11 @@ describe("startTui", () => {
       parentAgentId: null,
       model: "sonnet",
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("hi");
     stdin.type("\r");
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({
       type: "send_message",
@@ -296,7 +311,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     expect(stdout.allWrites()).toContain("\x1b[?1000h\x1b[?1002h\x1b[?1006h");
 
@@ -314,7 +329,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     enqueueSse(server, {
       version: 1,
       id: "1",
@@ -324,7 +339,7 @@ describe("startTui", () => {
       parentAgentId: null,
       model: "sonnet",
     });
-    await flush();
+    await flush(5, stdout);
 
     // A scroll-up wheel report (SGR 1006), the exact sequence a real terminal sends. Before
     // DH-0126's fix, `parseKeys` couldn't recognize the `[<...M` introducer and leaked its
@@ -333,7 +348,7 @@ describe("startTui", () => {
     stdin.type("\x1b[<65;10;5M");
     stdin.type("hi");
     stdin.type("\r");
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({
       type: "send_message",
@@ -359,10 +374,10 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x1b[D");
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({ type: "request_agent_tree" });
     expect(stdout.allWrites()).toContain("root (sonnet)");
@@ -385,7 +400,7 @@ describe("startTui", () => {
     const done = startTui("http://x", "s3cret", {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     // The SSE connection and the two automatic startup commands (Round 3's request_agent_tree
     // deadlock fix, plus DH-0093's list_skills bootstrap) all fire as soon as the TUI starts —
@@ -399,7 +414,7 @@ describe("startTui", () => {
     // A later, operator-triggered command (left-arrow -> another request_agent_tree)
     // carries it too, not just the startup ones.
     stdin.type("\x1b[D");
-    await flush();
+    await flush(5, stdout);
     expect(server.commandHeaders).toHaveLength(3);
     expect(server.commandHeaders[2]?.get("Authorization")).toBe("Bearer s3cret");
 
@@ -416,14 +431,14 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     // Index 0/1 are the two automatic startup commands (request_agent_tree, list_skills).
     expect(server.sseHeaders[0]?.has("Authorization")).toBe(false);
     expect(server.commandHeaders[0]?.has("Authorization")).toBe(false);
     expect(server.commandHeaders[1]?.has("Authorization")).toBe(false);
 
     stdin.type("\x1b[D");
-    await flush();
+    await flush(5, stdout);
     expect(server.commandHeaders[2]?.has("Authorization")).toBe(false);
 
     stdin.type("\x03");
@@ -438,7 +453,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({ type: "request_agent_tree" });
 
@@ -467,7 +482,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     // Deliberately no enqueueSse(...) call here — this is the whole point of the
     // regression test. Before Round 3's fix, this would sit forever on
@@ -475,7 +490,7 @@ describe("startTui", () => {
     // message is sent, and a first message could never be sent.
     stdin.type("hello");
     stdin.type("\r");
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({
       type: "send_message",
@@ -497,10 +512,10 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x1b[D");
-    await flush();
+    await flush(5, stdout);
 
     expect(stdout.allWrites()).toContain("agent not found");
 
@@ -527,10 +542,10 @@ describe("startTui", () => {
     }) as unknown as typeof fetch;
 
     const done = startTui("http://x", undefined, { io: { stdin, stdout, fetchImpl } });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x1b[D");
-    await flush();
+    await flush(5, stdout);
 
     expect(stdout.allWrites()).toContain("agent busy");
 
@@ -547,10 +562,10 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x1b[D");
-    await flush();
+    await flush(5, stdout);
 
     expect(stdout.allWrites()).toContain("network down");
 
@@ -566,7 +581,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     const writesBefore = stdout.writes.length;
 
     stdout.triggerResize(40, 120);
@@ -594,7 +609,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     // DH-0028/DH-0025: the tick only redraws when the rendered frame actually changes
     // (otherwise it's skipped, per DH-0025's "don't full-clear-and-rewrite when nothing
@@ -610,9 +625,9 @@ describe("startTui", () => {
       parentAgentId: null,
       model: "sonnet",
     });
-    await flush();
+    await flush(5, stdout);
     stdin.type("\x1b[D"); // left: open tree view
-    await flush();
+    await flush(5, stdout);
     const writesBefore = stdout.writes.length;
 
     // No key was pressed and no further SSE event arrived — any further redraw must come
@@ -633,7 +648,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x03");
     await done;
@@ -658,7 +673,7 @@ describe("startTui", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     enqueueSse(server, {
       version: 1,
       id: "1",
@@ -667,19 +682,19 @@ describe("startTui", () => {
       agentId: "child",
       chunk: "child says hi",
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x1b[D"); // left: open tree
-    await flush();
+    await flush(5, stdout);
     stdin.type("\x1b[B"); // down: select "child"
     stdin.type("\r"); // enter: open its read-only view
-    await flush();
+    await flush(5, stdout);
 
     expect(stdout.allWrites()).toContain("child says hi");
     expect(stdout.allWrites()).toContain("read-only");
 
     stdin.type("\x1b"); // escape: back to root
-    await flush();
+    await flush(5, stdout);
     expect(stdout.lastWrite()).toContain("Root Agent");
 
     stdin.type("\x03");
@@ -697,7 +712,7 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
       ownsServer: false,
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     enqueueSse(server, {
       version: 1,
       id: "1",
@@ -707,7 +722,7 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
       parentAgentId: null,
       model: "sonnet",
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x03");
     await done;
@@ -724,7 +739,7 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
       ownsServer: true,
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x03");
     await done;
@@ -741,7 +756,7 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
       ownsServer: true,
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     enqueueSse(server, {
       version: 1,
       id: "1",
@@ -751,10 +766,10 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
       parentAgentId: null,
       model: "sonnet",
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x03");
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({ type: "stop_agent", agentId: "agent-root" });
     expect(stdout.allWrites()).toContain("stopping session");
@@ -781,7 +796,7 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
       ownsServer: true,
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
     enqueueSse(server, {
       version: 1,
       id: "1",
@@ -791,10 +806,10 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
       parentAgentId: null,
       model: "sonnet",
     });
-    await flush();
+    await flush(5, stdout);
 
     stdin.type("\x03");
-    await flush();
+    await flush(5, stdout);
     stdin.type("\x03");
 
     await done;
@@ -811,7 +826,7 @@ describe("startTui: DH-0093 slash-command wiring", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({ type: "request_agent_tree" });
     expect(server.commands).toContainEqual({ type: "list_skills" });
@@ -834,7 +849,7 @@ describe("startTui: DH-0093 slash-command wiring", () => {
     const done = startTui("http://x", undefined, {
       io: { stdin, stdout, fetchImpl: server.fetchImpl },
     });
-    await flush();
+    await flush(5, stdout);
 
     server.commandResponses.push({
       ok: true,
@@ -857,7 +872,7 @@ describe("startTui: DH-0093 slash-command wiring", () => {
     });
     stdin.type("/model");
     stdin.type("\r");
-    await flush();
+    await flush(5, stdout);
 
     expect(server.commands).toContainEqual({ type: "list_models" });
     expect(stdout.allWrites()).toContain("Select Model");

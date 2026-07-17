@@ -59,6 +59,7 @@ source: tracking/
 | [DH-0142](../DH-0142-tui-commands-should-autocomplete.md) | TUI: / commands should autocomplete | feature | stefan |
 | [DH-0143](../DH-0143-web-commands-should-autocomplete.md) | Web: / commands should autocomplete | feature | stefan |
 | [DH-0144](../DH-0144-all-recognized-skills-should-be-accessible-as-commands.md) | All recognized skills should be accessible as / commands | feature | stefan |
+| [DH-0146](../DH-0146-app-test-ts-intermittently-fails-in-ci-root-cause-unconfirmed.md) | src/tui/app.test.ts intermittently fails in real GitHub Actions CI -- root cause still unconfirmed | bug | stefan |
 
 ### implementing
 
