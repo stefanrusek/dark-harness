@@ -5,9 +5,9 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "dh": "./dist/dh"
+    "dh": "./npm/bin/dh.js"
   },
-  "files": ["dist"],
+  "files": ["npm/bin/dh.js", "npm/resolve-platform.mjs"],
   "scripts": {
     "dev": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/web",
@@ -17,19 +17,28 @@
     "test": "bun test src",
     "test:coverage": "bun test src --coverage",
     "e2e": "bun test e2e",
-    "build": "bun scripts/build.ts"
+    "build": "bun scripts/build.ts",
+    "generate:npm-platform-packages": "bun scripts/generate-npm-platform-packages.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/bun": "latest",
     "happy-dom": "^20.10.6",
     "playwright": "^1.61.1",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "yaml": "^2.9.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1087.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "unpdf": "^1.6.2"
+  },
+  "optionalDependencies": {
+    "dark-harness-linux-x64": "0.1.0",
+    "dark-harness-linux-arm64": "0.1.0",
+    "dark-harness-darwin-x64": "0.1.0",
+    "dark-harness-darwin-arm64": "0.1.0",
+    "dark-harness-windows-x64": "0.1.0"
   }
 }

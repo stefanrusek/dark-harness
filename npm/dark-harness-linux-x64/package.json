@@ -1,0 +1,9 @@
+{
+  "name": "dark-harness-linux-x64",
+  "version": "0.1.0",
+  "description": "Dark Harness (dh) precompiled binary for linux/x64. Installed automatically as an optionalDependency of the main \"dark-harness\" package — not intended for direct use.",
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["dh"]
+}
