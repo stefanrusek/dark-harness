@@ -166,6 +166,10 @@ async function flush(times = 5): Promise<void> {
   for (let i = 0; i < times; i++) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
+  // DH-0044: app.ts now coalesces redraws to at most one every FRAME_INTERVAL_MS (33ms) via
+  // a real setTimeout, so a flush must wait out that window for a pending redraw to actually
+  // land — otherwise assertions on stdout writes can race a still-pending coalesced frame.
+  await new Promise((resolve) => setTimeout(resolve, 40));
 }
 
 function enqueueSse(server: FakeServer, event: ServerSentEvent): void {

@@ -67,6 +67,11 @@ const TICK_INTERVAL_MS = 1000;
  * the final terminal size without a full-clear-and-rewrite per intermediate size. */
 const RESIZE_DEBOUNCE_MS = 50;
 
+/** DH-0044 D9 (Mary): max redraw rate (~30fps) while coalescing frames — see `scheduleDraw`
+ * inside `startTui`. With multiple agents streaming concurrently at ~20 SSE events/s each,
+ * redrawing the full frame on every single dispatched action is wasteful; this caps it. */
+const FRAME_INTERVAL_MS = 33;
+
 /** DH-0059: how long an operator-initiated shutdown (Ctrl+C, `ownsServer: true`) waits for
  * `session_ended` to arrive before force-quitting anyway — the escape hatch for a stop that
  * never completes (e.g. `stopRoot()` deliberately doesn't interrupt a tool call already in
@@ -129,6 +134,31 @@ export async function startTui(
       stdout.write(frame);
     }
 
+    // DH-0044 D9: frame-coalesced redraw. Streaming turns can dispatch actions at a high
+    // rate (~20 SSE events/s per agent, times however many agents are streaming
+    // concurrently); redrawing the full frame synchronously on every single dispatch is
+    // wasteful. `scheduleDraw` marks the frame dirty and redraws immediately if at least
+    // FRAME_INTERVAL_MS has elapsed since the last draw, otherwise schedules exactly one
+    // pending timer for the remainder of the window — never stacking multiple timers.
+    let lastDrawAt = 0;
+    let pendingDrawTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function scheduleDraw(): void {
+      if (pendingDrawTimer !== undefined) return;
+      const elapsed = Date.now() - lastDrawAt;
+      if (elapsed >= FRAME_INTERVAL_MS) {
+        lastDrawAt = Date.now();
+        draw();
+        return;
+      }
+      pendingDrawTimer = setTimeout(() => {
+        pendingDrawTimer = undefined;
+        lastDrawAt = Date.now();
+        draw();
+      }, FRAME_INTERVAL_MS - elapsed);
+      pendingDrawTimer.unref?.();
+    }
+
     // DH-0059: once the reducer sets `shutdownRequested` (Ctrl+C's rule 3 — first press,
     // ownsServer, root active), start the hard fallback timer here rather than inside the
     // reducer (which is pure and has no timers) — if `session_ended` never arrives (wire
@@ -157,7 +187,7 @@ export async function startTui(
       for (const effect of result.effects) {
         void runEffect(effect);
       }
-      draw();
+      scheduleDraw();
     }
 
     async function runEffect(effect: Effect): Promise<void> {
@@ -209,6 +239,7 @@ export async function startTui(
     function cleanup(): void {
       clearInterval(tickTimer);
       if (resizeDebounceTimer !== undefined) clearTimeout(resizeDebounceTimer);
+      if (pendingDrawTimer !== undefined) clearTimeout(pendingDrawTimer);
       abortController.abort();
       stdout.write(BRACKETED_PASTE_DISABLE + SHOW_CURSOR + ALT_SCREEN_EXIT);
       stdin.setRawMode?.(false);

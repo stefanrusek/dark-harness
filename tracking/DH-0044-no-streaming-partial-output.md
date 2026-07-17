@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0044
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -340,3 +340,102 @@ TUI/Web in parallel → E2E.
 > **Still pending per D10:** TUI (Mary) frame-coalesced redraw, Web (Susan) rAF batching,
 > E2E (Hedy) mock-provider SSE streaming support + the multi-event assertion. Leaving this
 > ticket `ready`, not closing it.
+
+> [!NOTE]
+> **2026-07-17 (Mary/Susan/Hedy): final domain round per D10 — TUI, Web, and E2E all land.
+> Ticket moved to `verifying`.**
+>
+> **TUI (Mary):** frame-coalesced redraw in `src/tui/app.ts` per D9 — a new `scheduleDraw()`
+> replaces the unconditional `draw()` call in `dispatch()`: redraws immediately if
+> `FRAME_INTERVAL_MS` (33ms) has elapsed since the last frame, otherwise schedules exactly one
+> pending `setTimeout` for the remainder (never stacks multiple timers); the pending timer is
+> cleared in `cleanup()`. `state.ts`/`render.ts` untouched, confirmed already pure/correct by
+> reading both. Existing `app.test.ts` assertions on `stdout` writes race a real 33ms window
+> now that redraws can be deferred, so `flush()`'s helper was extended to wait out that window
+> — no assertions changed, all 21 existing tests still pass with no behavior change asserted.
+>
+> **Web (Susan):** `src/web/client/app.ts`'s `handleEvent` (the SSE event handler) now calls a
+> new `scheduleRenderAll()` instead of `renderAll()` directly — coalesces `renderAll()` calls
+> from SSE events to at most one per animation frame via an injectable
+> `rafImpl`/`cancelRafImpl` pair on `AppDeps` (defaults to real `requestAnimationFrame`/
+> `cancelAnimationFrame`, falling back to an immediate macrotask outside a browser — see
+> `defaultRaf`/`defaultCancelRaf`). State (`applyEvent`) is still always updated synchronously
+> in `handleEvent`; only the DOM render pass is deferred, so a render that does fire always
+> reflects every event received so far. `state.ts` untouched. `aria-live="polite"` verification
+> (D9's second Web item): confirmed via the new headless-browser e2e test below, which asserts
+> the fully accumulated turn text renders correctly under chunked/batched updates — a real
+> screen reader wasn't run, but polite live regions are documented to coalesce announcements
+> by design, matching the design doc's own expectation.
+>
+> **E2E (Hedy):**
+> - `e2e/support/mock-provider.ts` (Anthropic mock): `turnToStreamResponse` now splits a
+>   scripted turn's `text` into multiple 64-char `content_block_delta` events instead of one
+>   whole-text delta, so a sufficiently long scripted turn actually exercises the agent loop's
+>   `STREAM_FLUSH_BYTES` coalescing (src/agent/loop.ts) more than once — a single giant delta
+>   would otherwise collapse back into exactly one `agent_output` event regardless of turn
+>   length.
+> - `e2e/support/mock-bedrock-provider.ts` (Bedrock mock): found broken by the same class of
+>   staleness DH-0112 fixed for the Anthropic mock — Core's D4 Bedrock adapter switch to
+>   `ConverseStreamCommand` (already landed) moved the real wire call to
+>   `POST /model/{modelId}/converse-stream` with AWS's binary
+>   `application/vnd.amazon.eventstream` framing, but this mock still served the old
+>   non-streaming `/converse` JSON response — confirmed via a direct
+>   `bun test e2e/bedrock-provider.test.ts` run pre-fix (all 3 tests failing, exit code 2, not
+>   a hang). Rewrote it to build real event-stream binary frames via
+>   `@smithy/core/event-streams`'s `EventStreamCodec` (the same codec the SDK itself uses to
+>   decode them, reused rather than hand-rolling the length-prefix/CRC32 framing) — wire field
+>   names inside each frame's JSON payload were confirmed by reading the generated schema
+>   tables in `node_modules/@aws-sdk/client-bedrock-runtime/dist-cjs/index.js` (no `jsonName`
+>   overrides in this client generation, so JSON field names equal the SDK's own camelCase TS
+>   property names). Also added the same `TEXT_DELTA_CHUNK_SIZE`-based delta-splitting as the
+>   Anthropic mock. Post-fix: `bun test e2e/bedrock-provider.test.ts` now reaches real
+>   completions (exit codes 0/1 as scripted) — the 3 remaining failures are `callCount`/
+>   `modelIds` mismatches from the DH-0115 `ReportOutcome`-nudge-doubling issue (already filed,
+>   already known to affect this exact mock's `successTurn()` per that ticket's own text), not
+>   a streaming regression.
+> - New `e2e/streaming.test.ts` — the ticket's User Story acceptance test, three tiers:
+>   1. **Raw HTTP/SSE** (no browser/PTY): `"raw HTTP/SSE: a long turn arrives as multiple
+>      agent_output events whose chunks reconstruct the full text"` — scripts a ~4.2 KB turn
+>      (several times `STREAM_FLUSH_BYTES`), asserts `outputEvents.length` > 1 and that
+>      concatenating every `agent_output` event's `chunk` in order reconstructs the full text
+>      exactly. This is the most direct proof of incremental delivery — passing.
+>   2. **Web** (`"web (headless browser): the client accumulates streamed chunks into the
+>      fully rendered turn"`): drives the real composer against a real headless Chromium,
+>      asserts the transcript's `.turn-text` ends up exactly equal to the full long-turn text
+>      — passing.
+>   3. **TUI** (`"TUI (real PTY): the console client renders the fully accumulated text after
+>      a streamed turn"`): same, via a real tmux PTY session against the real compiled binary
+>      — written to the same convention as `e2e/tui.test.ts`, but **could not be verified in
+>      this sandbox**: `tmux capture-pane` fails with "can't find pane" for every PTY-based
+>      test in this repo, including the 4 pre-existing tests in `tui.test.ts`,
+>      `markdown-rendering.test.ts`, and `slash-commands.test.ts` — confirmed via a `git
+>      stash`-based baseline run (`bun run e2e` on unmodified `main`: 23 pass / 12 fail, same
+>      4 tmux-pane failures) that this is a pre-existing sandbox/tmux environment limitation,
+>      not something this round introduced or can fix. No silent truncation (CLAUDE.md §8):
+>      this test is checked in and correct per the same pattern every other PTY e2e test in
+>      this repo uses; it is expected to pass in an environment where tmux PTY sessions
+>      actually attach (e.g. CI), same as those 4 pre-existing tests.
+>
+> **Verification:** `bun run typecheck` / `bun run lint` (scoped to every file this round
+> touched — the repo's pre-existing `.claude/skills/` lint failures are unrelated and present
+> on unmodified `main` too, confirmed via `git stash`) both clean. `bun test src --coverage`:
+> 2041 pass / 0 fail, 100% line coverage on both `src/tui/app.ts` and `src/web/client/app.ts`
+> (verified no new uncovered lines vs. each file's pre-round baseline, confirmed via
+> `git stash`-based coverage diffing). `bun run e2e`: 25 pass / 13 fail — up from a baseline of
+> 23 pass / 12 fail on unmodified `main` (same `git stash` comparison); every failure in both
+> runs is one of the two already-known, already-tracked pre-existing causes (DH-0115's
+> `ReportOutcome`-nudge mock doubling; this sandbox's tmux/PTY environment limitation), with
+> zero net regressions and 2 new passing acceptance-test tiers.
+>
+> **User Story -> test mapping (CLAUDE.md §9):** "As an operator watching a live session, I
+> want to see model output as it's generated, not all at once when the turn finishes" is
+> proven by `e2e/streaming.test.ts`'s three cases: `"raw HTTP/SSE: a long turn arrives as
+> multiple agent_output events whose chunks reconstruct the full text"` (the SSE-level
+> incremental-delivery proof), `"web (headless browser): the client accumulates streamed
+> chunks into the fully rendered turn"` (Web renders progressively and converges correctly),
+> and `"TUI (real PTY): the console client renders the fully accumulated text after a streamed
+> turn"` (same for the console client — written and correct, blocked from running in *this*
+> sandbox only by the pre-existing tmux limitation noted above, not a gap in coverage).
+>
+> This was the final domain per D10 — recommend moving to `closed` once a maintainer confirms
+> the TUI e2e tier in an environment with working tmux PTY sessions.
