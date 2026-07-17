@@ -9,7 +9,7 @@ blocked_by: []
 created: 2026-07-17
 relations:
   depends_on: []
-  relates_to: [DH-0107]
+  relates_to: [DH-0107, DH-0119]
   supersedes: []
 implementation:
   - repo: dark-harness
@@ -53,3 +53,14 @@ Deep research (2026-07-17) confirmed Amazon Bedrock Mantle ("Project Mantle") is
 > their tooling may only recognize one name. No further code action needed until Mantle
 > access is granted on the account; then re-run `dh doctor` to confirm gemma4 actually works
 > end-to-end (connectivity + tool-use).
+
+> [!NOTE]
+> **Superseded by DH-0119.** The owner correctly pushed back on the "Berm is not enabled"
+> conclusion above being final -- with a real filled-in `BEDROCK_MANTLE_API_KEY`, extensive
+> further live testing (including a working sample the owner provided directly, and a real
+> `GET /v1/models` catalog listing confirming Mantle recognizes `google.gemma-4-31b`) showed
+> this ticket's `openai-compatible`-adapter wiring was correct in shape, but two details were
+> wrong: (1) auth is bearer apiKey (this part was right), and (2) Mantle has *two*
+> model-vendor-routed surfaces (`/anthropic` for Claude, `/v1` for everything else), not one
+> universal one, requiring a second `mantle-anthropic` provider entry this ticket never
+> added. DH-0119 has the corrected, live-verified design and is the one to read.

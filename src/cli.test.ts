@@ -2582,19 +2582,30 @@ describe("main — dh init", () => {
     expect(local.region).toBeUndefined();
   });
 
-  // DH-0118: Amazon Bedrock Mantle is a separate OpenAI-compatible endpoint from
-  // bedrock-runtime (distinct hostname, own quota pool, API-key auth not SigV4) — the
-  // scaffold needs its own provider entry, not folded into "bedrock".
-  test("scaffolds a mantle provider entry (openai-compatible type) alongside bedrock", () => {
+  // DH-0119: Amazon Bedrock Mantle is a separate endpoint from bedrock-runtime with two
+  // model-vendor-routed API surfaces (live-tested 2026-07-17): "mantle-anthropic" (Anthropic
+  // Messages shape, .../anthropic) and "mantle-openai" (Chat Completions shape, .../v1) —
+  // both bearer-apiKey authenticated, reusing the existing "anthropic"/"openai-compatible"
+  // provider types rather than a bespoke adapter.
+  test("scaffolds mantle-anthropic and mantle-openai provider entries alongside bedrock", () => {
     const parsed = JSON.parse(SAMPLE_DH_JSON);
-    const mantle = parsed.provider.find((p: { name: string }) => p.name === "mantle");
-    expect(mantle).toBeDefined();
-    expect(mantle.type).toBe("openai-compatible");
-    expect(mantle.baseURL).toContain("bedrock-mantle");
-    expect(mantle.apiKey).toBe("$(BEDROCK_MANTLE_API_KEY)");
+    const mantleAnthropic = parsed.provider.find(
+      (p: { name: string }) => p.name === "mantle-anthropic",
+    );
+    const mantleOpenai = parsed.provider.find((p: { name: string }) => p.name === "mantle-openai");
+    expect(mantleAnthropic).toBeDefined();
+    expect(mantleAnthropic.type).toBe("anthropic");
+    expect(mantleAnthropic.baseURL).toBe("https://bedrock-mantle.$(AWS_REGION).api.aws/anthropic");
+    expect(mantleAnthropic.apiKey).toBe("$(BEDROCK_MANTLE_API_KEY)");
+    expect(mantleOpenai).toBeDefined();
+    expect(mantleOpenai.type).toBe("openai-compatible");
+    expect(mantleOpenai.baseURL).toBe("https://bedrock-mantle.$(AWS_REGION).api.aws/v1");
+    expect(mantleOpenai.apiKey).toBe("$(BEDROCK_MANTLE_API_KEY)");
 
     const gemma = parsed.models.find((m: { name: string }) => m.name === "gemma4");
-    expect(gemma.provider).toBe("mantle");
+    expect(gemma.provider).toBe("mantle-openai");
+    const haikuMantle = parsed.models.find((m: { name: string }) => m.name === "haiku-mantle");
+    expect(haikuMantle.provider).toBe("mantle-anthropic");
   });
 
   // DH-0096: the scaffolded catalog should cover all four Claude tiers on both providers,
@@ -2617,9 +2628,10 @@ describe("main — dh init", () => {
     // not gemma4 (whose tool-use reliability is unverified against real Gemma 4 — DH-0118).
     expect(parsed.options.defaultModel).toBe("haiku-bedrock");
     const gemma = parsed.models.find((m: { name: string }) => m.name === "gemma4");
-    // DH-0118: gemma4 routes through the "mantle" provider (Amazon Bedrock Mantle, a
-    // separate OpenAI-compatible endpoint), not the standard "bedrock" Converse path.
-    expect(gemma.provider).toBe("mantle");
+    // DH-0119: gemma4 routes through "mantle-openai" (Amazon Bedrock Mantle's Chat
+    // Completions surface), not the standard "bedrock" Converse path -- live-tested: Mantle
+    // recognizes this exact model id, blocked only on an account-side entitlement, not code.
+    expect(gemma.provider).toBe("mantle-openai");
     expect(gemma.model).not.toBe("gemma4"); // real Bedrock model id, not the DH-0092 mistake shape
     expect(gemma.model).toMatch(/^google\.gemma-/);
 

@@ -143,7 +143,12 @@ export const SAMPLE_DH_JSON = `{
       "provider": "bedrock",
       "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     },
-    { "name": "gemma4", "provider": "mantle", "model": "google.gemma-4-31b" },
+    { "name": "gemma4", "provider": "mantle-openai", "model": "google.gemma-4-31b" },
+    {
+      "name": "haiku-mantle",
+      "provider": "mantle-anthropic",
+      "model": "anthropic.claude-haiku-4-5"
+    },
     { "name": "gpt-oss-20b", "provider": "bedrock", "model": "openai.gpt-oss-20b-1:0" },
     { "name": "gpt-oss-120b", "provider": "bedrock", "model": "openai.gpt-oss-120b-1:0" },
     {
@@ -161,7 +166,13 @@ export const SAMPLE_DH_JSON = `{
     { "name": "anthropic", "type": "anthropic", "apiKey": "$(ANTHROPIC_API_KEY)" },
     { "name": "bedrock", "type": "bedrock", "region": "$(AWS_REGION)" },
     {
-      "name": "mantle",
+      "name": "mantle-anthropic",
+      "type": "anthropic",
+      "baseURL": "https://bedrock-mantle.$(AWS_REGION).api.aws/anthropic",
+      "apiKey": "$(BEDROCK_MANTLE_API_KEY)"
+    },
+    {
+      "name": "mantle-openai",
       "type": "openai-compatible",
       "baseURL": "https://bedrock-mantle.$(AWS_REGION).api.aws/v1",
       "apiKey": "$(BEDROCK_MANTLE_API_KEY)"
@@ -1397,16 +1408,18 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
       initTty,
     ),
   );
-  // DH-0118: "gemma4" now routes through the "mantle" provider (Amazon Bedrock Mantle, a
-  // separate OpenAI-compatible endpoint distinct from bedrock-runtime — see tracking/DH-0118)
-  // rather than the standard bedrock Converse path, which real Gemma 4 model ids don't
-  // support. Needs a BEDROCK_MANTLE_API_KEY, not the AWS SigV4 credential chain the "bedrock"
-  // provider uses. DH-0106's earlier tool-use-reliability claim about "gemma4" predates real
-  // Gemma 4 testing (it was based on gemma3 behavior) and is not re-asserted here — verify
-  // fresh via "dh doctor"'s tool-use column once BEDROCK_MANTLE_API_KEY is set.
+  // DH-0119: real Amazon Bedrock Mantle is a distinct endpoint with two model-vendor-routed
+  // API surfaces, both bearer-apiKey authenticated (not SigV4 — live-tested both ways, same
+  // result either way): "mantle-anthropic" (.../anthropic, Anthropic Messages shape,
+  // live-verified working — see "haiku-mantle") and "mantle-openai" (.../v1, Chat Completions
+  // shape). "gemma4" is correctly wired to "mantle-openai" and Mantle's own catalog lists it
+  // (confirmed via GET /v1/models) — but every live call so far returns
+  // access_denied "Berm is not enabled for this account", a separate AWS-side entitlement
+  // gate on top of base Mantle access, not a code bug. It'll start working the moment that
+  // entitlement is granted; re-run "dh doctor" to check.
   io.stdout(
     cliDim(
-      `dh:   "gemma4" now routes through the "mantle" provider (Amazon Bedrock Mantle) — set BEDROCK_MANTLE_API_KEY to use it; its tool-use reliability hasn't been re-verified against real Gemma 4, check "dh doctor"'s tool-use column yourself.`,
+      `dh:   Amazon Bedrock Mantle needs BEDROCK_MANTLE_API_KEY. "haiku-mantle" is live-verified working; "gemma4" is correctly wired but blocked on an AWS-side "Berm" entitlement not yet granted on this account — see tracking/DH-0119.`,
       initTty,
     ),
   );
