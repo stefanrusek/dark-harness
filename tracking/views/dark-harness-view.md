@@ -53,6 +53,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0120](../DH-0120-openai-compatible-provider-omitted-required-type-function-on-outgoing-tool-calls.md) | openai-compatible provider omitted required type:function on outgoing tool_calls | done |
 | [DH-0119](../DH-0119-real-bedrock-mantle-integration-live-verified-mantle-anthropic-mantle-openai.md) | Real Bedrock Mantle integration, live-verified: mantle-anthropic + mantle-openai | done |
 | [DH-0118](../DH-0118-amazon-bedrock-mantle-is-a-real-separate-endpoint-wire-it-up-as-its-own-provider-not-folded-into-bedrock.md) | Amazon Bedrock Mantle is a real, separate endpoint -- wire it up as its own provider, not folded into bedrock | done |
 | [DH-0117](../DH-0117-web-ui-redraw-storm-composer-textarea-rebuilt-every-second-wiping-focus-and-unsent-text.md) | Web UI redraw-storm: composer textarea rebuilt every second, wiping focus and unsent text | done |
@@ -67,4 +68,3 @@ source: tracking/
 | [DH-0106](../DH-0106-gemma4-bedrock-default-model-hallucinates-tool-calls-instead-of-making-them.md) | dh init's scaffolded "gemma4" is actually Gemma 3 (wrong model), and hallucinates tool calls | done |
 | [DH-0105](../DH-0105-unify-connection-state-and-status-vocabulary-across-tui-and-web.md) | Unify connection-state and status vocabulary across TUI and Web | done |
 | [DH-0104](../DH-0104-unify-number-cost-elapsed-and-token-formatting-across-tui-web-and-cli.md) | Unify number, cost, elapsed, and token formatting across TUI, Web, and CLI | done |
-| [DH-0103](../DH-0103-dh-help-styled-width-aware-visually-structured-output.md) | dh --help: styled, width-aware, visually structured output | done |

@@ -29,7 +29,7 @@ interface OpenAiToolCall {
 interface OpenAiChatMessage {
   role: string;
   content?: string;
-  tool_calls?: { id: string; function: { name: string; arguments: string } }[];
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 }
 
@@ -110,7 +110,8 @@ function toOpenAiMessages(system: string, messages: ProviderMessage[]): OpenAiCh
   const result: OpenAiChatMessage[] = [{ role: "system", content: system }];
   for (const message of messages) {
     const textParts: string[] = [];
-    const toolCalls: { id: string; function: { name: string; arguments: string } }[] = [];
+    const toolCalls: { id: string; type: "function"; function: { name: string; arguments: string } }[] =
+      [];
     const toolResults: { toolUseId: string; content: string }[] = [];
     for (const block of message.content) {
       if (block.type === "text") {
@@ -118,6 +119,7 @@ function toOpenAiMessages(system: string, messages: ProviderMessage[]): OpenAiCh
       } else if (block.type === "tool_use") {
         toolCalls.push({
           id: block.id,
+          type: "function",
           function: { name: block.name, arguments: JSON.stringify(block.input) },
         });
       } else if (block.type === "tool_result") {
