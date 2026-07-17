@@ -190,9 +190,15 @@ describe("renderMarkdownInto — block constructs", () => {
     const { document, root } = createTestDom();
     renderMd(document, root, "| a | b |\n| :-: | -: |\n| 1 | 2 |");
     const cells = [...root.querySelectorAll("th")];
-    expect(cells.map((c) => (c as HTMLTableCellElement).style.textAlign)).toEqual(["center", "right"]);
+    expect(cells.map((c) => (c as HTMLTableCellElement).style.textAlign)).toEqual([
+      "center",
+      "right",
+    ]);
     const bodyCells = [...root.querySelectorAll("td")];
-    expect(bodyCells.map((c) => (c as HTMLTableCellElement).style.textAlign)).toEqual(["center", "right"]);
+    expect(bodyCells.map((c) => (c as HTMLTableCellElement).style.textAlign)).toEqual([
+      "center",
+      "right",
+    ]);
   });
 
   test("GFM table with a header but no body rows renders an empty <tbody>", () => {

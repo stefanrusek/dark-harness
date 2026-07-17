@@ -96,7 +96,7 @@ describe("web UI (dh --web) in a real headless browser", () => {
       "document.querySelector('.agent-transcript .turn-assistant .turn-text')?.textContent === " +
         "'Hello from the web e2e mock!'",
     );
-    expect(await page.locator(".agent-header-title .status-badge").textContent()).toBe("Waiting");
+    expect(await page.locator(".agent-header-title .status-badge").textContent()).toBe("waiting");
     const headerStats = await page.locator(".agent-header-stats").textContent();
     expect(headerStats).toContain("in /");
     expect(headerStats).toContain("out ·");

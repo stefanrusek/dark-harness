@@ -17,7 +17,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-async function run(cmd: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+async function run(
+  cmd: string[],
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -71,9 +74,7 @@ export async function createWorktree(opts: {
   return worktreePath;
 }
 
-export type CleanupOutcome =
-  | { removed: true; reason: string }
-  | { removed: false; reason: string };
+export type CleanupOutcome = { removed: true; reason: string } | { removed: false; reason: string };
 
 export async function cleanupWorktree(opts: {
   repo: string;
@@ -115,7 +116,9 @@ export async function cleanupWorktree(opts: {
     }
   }
 
-  const removeArgs = opts.force ? ["worktree", "remove", "--force", worktreePath] : ["worktree", "remove", worktreePath];
+  const removeArgs = opts.force
+    ? ["worktree", "remove", "--force", worktreePath]
+    : ["worktree", "remove", worktreePath];
   const remove = await run(["git", ...removeArgs], repo);
   if (remove.code !== 0) {
     return { removed: false, reason: `git worktree remove failed: ${remove.stderr.trim()}` };

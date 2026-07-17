@@ -98,7 +98,7 @@ describe("--connect --web: a real web client process against a real remote dh --
     // Per Core Round 5's interactive semantics (DH-0059), a root agent with no tool call in
     // its turn parks at "waiting" rather than reaching "done"/session end on its own — see
     // e2e/web.test.ts (DH-0062) for the same fix against the local --web scenario.
-    expect(await page.locator(".agent-header-title .status-badge").textContent()).toBe("Waiting");
+    expect(await page.locator(".agent-header-title .status-badge").textContent()).toBe("waiting");
 
     // The remote server itself also saw the real request (not just the client's own render) —
     // a plain fetch against its API, independent of the browser, confirms the tree updated.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { dispatch } from "./dispatch.ts";
 /**
  * Combined flow for User Story 1: create (or reuse) a git worktree, dispatch a real `claude`
  * subprocess into it with the given prompt, then apply Workflow-style cleanup discipline —
@@ -20,8 +21,7 @@
  * Process exit code mirrors the subprocess's exit code (0 = the sub-agent's claude run
  * completed successfully; nonzero = it failed or errored) so this composes with shell `&&`.
  */
-import { createWorktree, cleanupWorktree } from "./worktree.ts";
-import { dispatch } from "./dispatch.ts";
+import { cleanupWorktree, createWorktree } from "./worktree.ts";
 
 function parseFlags(argv: string[]): Record<string, string | boolean> {
   const out: Record<string, string | boolean> = {};

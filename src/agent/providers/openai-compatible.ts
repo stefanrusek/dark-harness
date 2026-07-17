@@ -110,8 +110,11 @@ function toOpenAiMessages(system: string, messages: ProviderMessage[]): OpenAiCh
   const result: OpenAiChatMessage[] = [{ role: "system", content: system }];
   for (const message of messages) {
     const textParts: string[] = [];
-    const toolCalls: { id: string; type: "function"; function: { name: string; arguments: string } }[] =
-      [];
+    const toolCalls: {
+      id: string;
+      type: "function";
+      function: { name: string; arguments: string };
+    }[] = [];
     const toolResults: { toolUseId: string; content: string }[] = [];
     for (const block of message.content) {
       if (block.type === "text") {

@@ -218,7 +218,11 @@ describe("OpenAiCompatibleProvider", () => {
         // tool_calls missing "type": "function" -- caught live, this test previously didn't
         // assert it and would have passed a broken request shape silently.
         tool_calls: [
-          { id: "tu_1", type: "function", function: { name: "Bash", arguments: '{"command":"ls"}' } },
+          {
+            id: "tu_1",
+            type: "function",
+            function: { name: "Bash", arguments: '{"command":"ls"}' },
+          },
         ],
       },
       { role: "tool", tool_call_id: "tu_1", content: "ok" },

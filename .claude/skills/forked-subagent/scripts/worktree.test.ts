@@ -1,8 +1,8 @@
-import { describe, test, expect, afterAll } from "bun:test";
-import { mkdtempSync, existsSync, appendFileSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { appendFileSync, existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createWorktree, cleanupWorktree, defaultWorktreePath } from "./worktree.ts";
+import { cleanupWorktree, createWorktree, defaultWorktreePath } from "./worktree.ts";
 
 async function run(cmd: string[], cwd: string): Promise<string> {
   const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });

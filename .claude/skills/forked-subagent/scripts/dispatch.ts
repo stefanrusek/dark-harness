@@ -87,8 +87,9 @@ function parseArgs(argv: string[]): {
   if (promptFile) {
     prompt = require("node:fs").readFileSync(promptFile, "utf8");
   }
+  if (!prompt) throw new Error("--prompt or --prompt-file is required");
 
-  return { dir: dir!, prompt: prompt!, model, permissionMode, timeoutMs };
+  return { dir, prompt, model, permissionMode, timeoutMs };
 }
 
 export async function dispatch(opts: {

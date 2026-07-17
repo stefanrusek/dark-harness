@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -31,7 +31,8 @@ describe("dispatch (integration — real claude subprocess)", () => {
 
     const result = await dispatch({
       dir,
-      prompt: "Create a file named marker.txt in the current directory containing the text: proof. Then reply with exactly: DONE",
+      prompt:
+        "Create a file named marker.txt in the current directory containing the text: proof. Then reply with exactly: DONE",
     });
 
     expect(result.success).toBe(true);
