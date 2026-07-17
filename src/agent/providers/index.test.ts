@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { AnthropicProvider } from "./anthropic.ts";
 import { BedrockProvider } from "./bedrock.ts";
 import { createProvider } from "./index.ts";
+import { OpenAiCompatibleProvider } from "./openai-compatible.ts";
 
 describe("createProvider", () => {
   test("builds an AnthropicProvider for type 'anthropic'", () => {
@@ -12,5 +13,10 @@ describe("createProvider", () => {
   test("builds a BedrockProvider for type 'bedrock'", () => {
     const provider = createProvider({ name: "bedrock", type: "bedrock" });
     expect(provider).toBeInstanceOf(BedrockProvider);
+  });
+
+  test("builds an OpenAiCompatibleProvider for type 'openai-compatible'", () => {
+    const provider = createProvider({ name: "mantle", type: "openai-compatible" });
+    expect(provider).toBeInstanceOf(OpenAiCompatibleProvider);
   });
 });

@@ -335,6 +335,24 @@ describe("validateConfig — rejections", () => {
     expect(config.provider[0]?.region).toBe("us-west-2");
   });
 
+  test("DH-0107: accepts baseURL and apiKey on an openai-compatible-type provider", () => {
+    const config = validateConfig(
+      baseConfig({
+        options: { defaultModel: "gemma4" },
+        models: [{ name: "gemma4", provider: "mantle", model: "google.gemma-4-31b" }],
+        provider: [
+          {
+            name: "mantle",
+            type: "openai-compatible",
+            baseURL: "https://bedrock-mantle.us-east-1.api.aws/openai/v1",
+            apiKey: "key",
+          },
+        ],
+      }),
+    );
+    expect(config.provider[0]?.baseURL).toBe("https://bedrock-mantle.us-east-1.api.aws/openai/v1");
+  });
+
   test("DH-0009: accepts a well-formed provider retry config", () => {
     const config = validateConfig(
       baseConfig({
