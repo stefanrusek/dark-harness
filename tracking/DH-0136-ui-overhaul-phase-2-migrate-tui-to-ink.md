@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0136
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: ["blocked on DH-0133a (Core toolchain) landing first"]
 created: 2026-07-17
 relations:

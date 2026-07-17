@@ -232,8 +232,11 @@ describe("state reducer", () => {
     state = applyEvent(state, statusEvent("a1", "running"));
     state = applyEvent(state, output("a1", "Root coordinated two levels of sub-agents."));
     const transcript = state.agents.get("a1")?.transcript ?? [];
+    // DH-0130: the "done" transition in the middle of this sequence now also appends its own
+    // terminal-status marker turn -- real, expected new behavior, not a regression.
     expect(transcript.map((t) => ({ role: t.role, text: t.text }))).toEqual([
       { role: "assistant", text: "Root coordinated two levels of sub-agents." },
+      { role: "tool", text: "Agent done" },
       { role: "assistant", text: "Root coordinated two levels of sub-agents." },
     ]);
   });
@@ -245,6 +248,32 @@ describe("state reducer", () => {
     expect(state.agents.get("a1")?.status).toBe("running");
     state = applyEvent(state, statusEvent("a1", "done"));
     expect(state.agents.get("a1")?.status).toBe("done");
+  });
+
+  test("DH-0130: reaching a terminal status appends a terminalStatus-tagged transcript marker", () => {
+    let state = createInitialState();
+    state = applyEvent(state, statusEvent("a1", "running"));
+    state = applyEvent(state, statusEvent("a1", "failed"));
+    const transcript = state.agents.get("a1")?.transcript ?? [];
+    const marker = transcript.at(-1);
+    expect(marker?.role).toBe("tool");
+    expect(marker?.terminalStatus).toBe("failed");
+    expect(marker?.text).toBe("Agent failed");
+  });
+
+  test("DH-0130: repeating the same terminal status does not append a second marker", () => {
+    let state = createInitialState();
+    state = applyEvent(state, statusEvent("a1", "done"));
+    const afterFirst = state.agents.get("a1")?.transcript.length ?? 0;
+    state = applyEvent(state, statusEvent("a1", "done"));
+    expect(state.agents.get("a1")?.transcript.length).toBe(afterFirst);
+  });
+
+  test("DH-0130: a non-terminal status (running/waiting) never appends a marker", () => {
+    let state = createInitialState();
+    state = applyEvent(state, statusEvent("a1", "waiting"));
+    state = applyEvent(state, statusEvent("a1", "running"));
+    expect(state.agents.get("a1")?.transcript).toEqual([]);
   });
 
   test("token_usage sums deltas across multiple events for the same agent", () => {

@@ -142,4 +142,33 @@ describe("Transcript", () => {
     const toolTurn = container.querySelector(".turn-tool");
     expect(toolTurn?.textContent).toContain("Bash: bun test");
   });
+
+  test("DH-0130: a terminal-status marker turn renders with STATUS_TOKENS styling, not the generic tool style", () => {
+    let state = createInitialState();
+    state = applyEvent(state, {
+      version: 1,
+      id: "e1",
+      timestamp: "2026-01-01T00:00:00Z",
+      type: "agent_spawned",
+      agentId: "root-1",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    state = applyEvent(state, {
+      version: 1,
+      id: "e2",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "agent_status",
+      agentId: "root-1",
+      status: "failed",
+    });
+    const { container } = render(
+      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+    );
+    const marker = container.querySelector(".turn-terminal-status");
+    expect(marker).not.toBeNull();
+    expect(marker?.textContent).toContain("Agent failed");
+    expect((marker as HTMLElement).style.color).toBe("#f2545b");
+    expect(container.querySelector(".turn-tool")).toBeNull();
+  });
 });

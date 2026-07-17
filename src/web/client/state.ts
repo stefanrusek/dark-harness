@@ -38,6 +38,11 @@ export interface Turn {
   /** DH-0089: set on a `"tool"` turn once its matching `tool_result` reports `isError: true`.
    * Meaningless on every other role. */
   toolError?: boolean;
+  /** DH-0130: set on a `"tool"` marker turn synthesized when an agent reaches a terminal
+   * status (done/failed/stopped), so the render layer can style it via DH-0137's status
+   * tokens instead of the generic dim tool-marker styling. Mirrors src/tui/state.ts's
+   * identical field. */
+  terminalStatus?: AgentStatus;
 }
 
 export interface AgentNode {
@@ -452,6 +457,7 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     }
     case "agent_status": {
       const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
+      const priorStatus = node.status;
       if (node.status !== event.status) {
         node.statusSince = event.timestamp;
       }
@@ -460,6 +466,20 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       // next agent_output chunk (a new turn, whenever the agent goes running again) opens a
       // fresh turn instead of silently concatenating onto the previous one.
       if (event.status !== "running") node.turnOpen = false;
+      // DH-0130: a newly-reached terminal status gets an in-transcript marker turn, mirroring
+      // src/tui/state.ts's appendTerminalMarker -- previously only the sidebar/tree reflected
+      // a terminal status, with nothing visible in the agent's own transcript.
+      if (TERMINAL_STATUSES.has(event.status) && priorStatus !== event.status) {
+        node.transcript = [
+          ...node.transcript,
+          {
+            role: "tool",
+            text: `Agent ${event.status}`,
+            timestamp: event.timestamp,
+            terminalStatus: event.status,
+          },
+        ];
+      }
       next.agents.set(event.agentId, node);
       // DH-0012: only a status change can newly make an agent terminal, so eviction only
       // needs to run here (matching the TUI's placement in `src/tui/state.ts`).

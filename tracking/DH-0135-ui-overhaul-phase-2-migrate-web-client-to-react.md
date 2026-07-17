@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0135
 type: feature
-status: implementing
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: ["blocked on DH-0133a (Core toolchain) landing first"]
 created: 2026-07-17
 relations:
@@ -219,3 +219,28 @@ Updated by Muriel (design crew) 2026-07-17 per the owner's request for a felt-ex
   Story in this ticket has a passing test naming it per CLAUDE.md §9. Everything else —
   sidebar/transcript/header/model-picker/banners migration, DH-0127/DH-0129, the
   `<AppHeader>` slot, `state.ts` unchanged — is fully implemented and proven.
+
+### 2026-07-17 — DH-0130 closed out: `state.ts` derives the marker, `Transcript` renders it
+
+- `state.ts`'s `agent_status` handler now appends a `terminalStatus`-tagged `"tool"` marker
+  turn when an agent newly reaches `done`/`failed`/`stopped` (mirroring
+  `src/tui/state.ts`'s `appendTerminalMarker`, built in DH-0136's own round). `Turn` gained
+  the `terminalStatus?: AgentStatus` field.
+- `Transcript.tsx`'s `TurnRow` renders a `terminalStatus`-tagged turn with DH-0137's
+  `STATUS_TOKENS` glyph+color (`.turn-terminal-status`, distinct from the generic
+  `.turn-tool` styling) instead of falling through to the generic tool-marker path.
+- New tests: `state.test.ts` (marker appended once on a genuine terminal transition, not
+  repeated on a same-status re-emit, never appended for running/waiting) and
+  `Transcript.test.tsx` (marker renders with the correct glyph/color, distinct from
+  `.turn-tool`). One pre-existing `state.test.ts` case
+  ("agent_output after the agent leaves running...") updated to include the now-real marker
+  turn its own scripted "done" transition produces — a correct behavior change, not a
+  relaxed assertion.
+- User Stories → tests: DH-0130 render-side story →
+  `Transcript.test.tsx` "DH-0130: a terminal-status marker turn renders with STATUS_TOKENS
+  styling...". Every User Story in this ticket now has a passing, named test.
+- Gates: `bun run typecheck` clean; `bun test src/web/client/state.test.ts
+  src/web/client/components/Transcript.test.tsx` 79/79 pass; full `bun run test:coverage`
+  2114/2114 pass, 100% coverage on `state.ts`. Real compiled binary (`bun run build`) builds
+  and runs (`dh --version`) cleanly.
+- **Status: `verifying`** — every User Story now has a proving test, per CLAUDE.md §9.

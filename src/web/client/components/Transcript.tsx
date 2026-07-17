@@ -5,12 +5,11 @@
 // - DH-0129 (auto-scroll only when at bottom): an effect below scrolls to the bottom on new
 //   content only when the region was already scrolled to (near) the bottom before the update;
 //   otherwise it reveals the jump-to-latest button instead of yanking the view.
-// - DH-0130 (per-agent terminal-status transcript marker): render-side plumbing is included
-//   (see `TERMINAL_MARKER_ROLE` handling below) but state.ts does not yet derive a terminal
-//   marker Turn — that reducer-side half is still unimplemented upstream (out of scope for
-//   this ticket per the "state.ts stays as-is" constraint), so this story remains unproven
-//   until state.ts grows it.
+// - DH-0130 (per-agent terminal-status transcript marker): state.ts now derives a
+//   `terminalStatus`-tagged marker Turn when an agent reaches done/failed/stopped (mirroring
+//   src/tui/state.ts's appendTerminalMarker) -- styled here via DH-0137's shared STATUS_TOKENS.
 import { type ReactElement, useEffect, useRef, useState } from "react";
+import { STATUS_TOKENS } from "../../../design-tokens.ts";
 import { formatExitCode } from "../format.ts";
 import type { AgentNode, Turn } from "../state.ts";
 import { JumpToLatestButton } from "./JumpToLatestButton.tsx";
@@ -26,6 +25,16 @@ function turnRoleLabel(role: Turn["role"]): string {
 
 function TurnRow({ turn }: { turn: Turn }): ReactElement {
   if (turn.role === "tool") {
+    if (turn.terminalStatus) {
+      const token = STATUS_TOKENS[turn.terminalStatus];
+      return (
+        <div className="turn turn-terminal-status" style={{ color: token.webHex }}>
+          <div className="turn-text">
+            {token.glyph} {turn.text}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className={`turn turn-tool${turn.toolError ? " turn-tool-error" : ""}`}>
         <div className="turn-text">{turn.toolError ? `⚙ ${turn.text} ✗` : `⚙ ${turn.text}`}</div>
