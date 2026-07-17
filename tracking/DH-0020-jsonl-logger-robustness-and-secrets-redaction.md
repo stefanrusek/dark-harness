@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0020
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -246,3 +246,36 @@ satisfied as written.
 > finding #13 (provider error messages could leak diagnostic detail) and finding #18 (Bash env
 > inheritance) — see **DH-0040** for the Bash/provider-error-message side of the same secrets-
 > hygiene theme; this ticket is specifically about the logger's own redaction responsibility.
+
+### 2026-07-17 — gate-check verdict: FAIL
+
+Ran per CLAUDE.md §5/§9 from the worktree root.
+
+- typecheck: PASS
+- lint: FAIL — 9 pre-existing errors, all in `.claude/skills/forked-subagent/scripts/*`
+  (format/organizeImports); zero lint errors in `src/server/logger.ts` or
+  `src/server/redact.ts` (this ticket's changed files). Gate command still exits non-zero
+  overall, so per CLAUDE.md §5 this gate fails.
+- test:coverage: PASS — 2040 pass / 0 fail; `src/server/logger.ts` and `src/server/redact.ts`
+  both 100% funcs/lines.
+- e2e: FAIL — 12 failing tests (23 pass / 12 fail) across
+  `e2e/markdown-rendering.test.ts` (tmux pane not found), `e2e/server-protocol.test.ts` and
+  `e2e/exit-codes.test.ts` (provider callCount mismatches, expected 1 got 2), and
+  `e2e/slash-commands.test.ts` (tmux pane not found) — none touch `src/server/logger.ts` or
+  `src/server/redact.ts`, but a failing gate command is a failing gate per the prompt's
+  strict rule (no averaging).
+
+Acceptance-criteria → test mapping (CLAUDE.md §9): all User Story and Functional Requirement
+bullets have a located test in `src/server/logger.test.ts` and `src/server/redact.test.ts`
+(write-failure/drop/recovery, fsync tier split, known-value + JSON-escaped redaction,
+pattern-table positive/negative cases, non-redaction of ordinary identifiers, valid-JSON
+replacement tokens) — criteria coverage itself is COMPLETE. The one FR bullet about the
+rewritten doc comment's wording has no corresponding test (it's prose, not behavior);
+verified instead by direct inspection of `src/server/logger.ts`'s header comment, which does
+state the two-tier guarantee as specified.
+
+**Overall verdict: FAIL** — driven entirely by lint and e2e gate command failures, both of
+which are pre-existing/unrelated to this ticket's changed files (`src/server/logger.ts`,
+`src/server/redact.ts` are lint-clean and 100% covered). Criteria coverage is complete. Not
+this sub-agent's call to fix — routing back per gate-check's design (report only, no
+patching).
