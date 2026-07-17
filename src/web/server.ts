@@ -140,10 +140,32 @@ async function renderIndex(development: boolean): Promise<Response> {
   return proxyToInner("/", development);
 }
 
+// DH-0128: `targetBaseUrl` in the common `dh --web` (non-`--connect`) case is always built
+// by the caller (src/cli.ts) as `http://localhost:<boundPort>` — correct only when the
+// browser loading this UI happens to be on the *same* machine as the dh process. Bun.serve
+// binds all interfaces by default (DH-0022), so a browser on a different machine on the LAN
+// loads the page (proxied assets don't care about host) but then dials `dh-config.json`'s
+// literal `baseUrl`, which points at *its own* loopback — nothing listens there, so the SSE
+// stream never connects and the pill sticks on "Reconnecting...". Fix: when the configured
+// target host is loopback, re-resolve it per-request against the Host the browser actually
+// used to reach this server, keeping the configured scheme/port. `--connect <host>`'s
+// `targetBaseUrl` already names a real, non-loopback remote host (or an operator-chosen
+// non-loopback address) and is passed through untouched — only a loopback host is ever
+// rewritten, so this can't redirect traffic to an address the caller didn't already trust.
+function resolveConfig(
+  targetBaseUrl: string,
+  token: string | undefined,
+  req: Request,
+): WebConfigResponse {
+  const target = new URL(targetBaseUrl);
+  if (target.hostname === "localhost" || target.hostname === "127.0.0.1") {
+    target.hostname = new URL(req.url).hostname;
+  }
+  const baseUrl = target.toString().replace(/\/$/, "");
+  return token ? { baseUrl, token } : { baseUrl };
+}
+
 export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
-  const config: WebConfigResponse = options.token
-    ? { baseUrl: options.targetBaseUrl, token: options.token }
-    : { baseUrl: options.targetBaseUrl };
   const development = options.development ?? false;
 
   const server = Bun.serve({
@@ -152,7 +174,10 @@ export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
     development,
     routes: {
       "/": () => renderIndex(development),
-      [WEB_CONFIG_PATH]: () => withSecurityHeaders(Response.json(config)),
+      [WEB_CONFIG_PATH]: (req: Request) =>
+        withSecurityHeaders(
+          Response.json(resolveConfig(options.targetBaseUrl, options.token, req)),
+        ),
     },
     // DH-0110: everything Bun's HTML-bundler generated for `/` (asset chunks, source maps,
     // etc.) but didn't register as an explicit outer route lands here — proxy it to the inner
