@@ -54,6 +54,11 @@ export interface Turn {
    * would be stripped by `sanitizeText`'s defensive escape-stripping before wrapping).
    * Meaningless on `"user"`/`"assistant"` turns. */
   toolError?: boolean;
+  /** DH-0130: set on a `"tool"` turn synthesized when an agent (root or sub-agent) reaches a
+   * terminal status (done/failed/stopped) — lets the transcript pane render this marker using
+   * DH-0137's status tokens (glyph/color/word) instead of the generic dim "⚙" tool-call
+   * styling, so a sub-agent's failure is visible in its own transcript, not just the sidebar. */
+  terminalStatus?: AgentStatus;
 }
 
 export interface AgentInfo {

@@ -45,11 +45,16 @@ describe("App", () => {
     expect(rows.length).toBe(state.size.rows);
   });
 
-  test("<StatusRow> is positioned directly after the composer in the root view", () => {
-    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    const composerIndex = source.indexOf("<Composer");
-    const statusRowIndex = source.indexOf("<StatusRow");
-    expect(composerIndex).toBeGreaterThan(-1);
-    expect(statusRowIndex).toBeGreaterThan(composerIndex);
+  test("<StatusRow> is positioned directly after the root view (which owns the composer)", () => {
+    // Composer now lives inside RootView.tsx, not inlined in App.tsx directly — confirm both
+    // halves of the contract: RootView renders <Composer>, and App renders <StatusRow> after
+    // <RootView>.
+    const rootViewSource = readFileSync(new URL("./RootView.tsx", import.meta.url), "utf8");
+    expect(rootViewSource).toMatch(/<Composer\b/);
+    const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const rootViewIndex = appSource.indexOf("<RootView");
+    const statusRowIndex = appSource.indexOf("<StatusRow");
+    expect(rootViewIndex).toBeGreaterThan(-1);
+    expect(statusRowIndex).toBeGreaterThan(rootViewIndex);
   });
 });

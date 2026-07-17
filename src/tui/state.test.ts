@@ -255,6 +255,53 @@ describe("reducer: sse_event agent_status", () => {
     expect(agent?.status).toBe("done");
     expect(agent?.model).toBe("sonnet");
   });
+
+  test("DH-0130: transitioning into a terminal status appends a transcript marker tagged with terminalStatus", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "sub", parentAgentId: "root" }),
+    }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: statusEvent({ agentId: "sub", status: "failed" }),
+    }));
+    const transcript = state.agents.get("sub")?.transcript ?? [];
+    const marker = transcript[transcript.length - 1];
+    expect(marker?.role).toBe("tool");
+    expect(marker?.terminalStatus).toBe("failed");
+  });
+
+  test("DH-0130: re-sending the same terminal status does not append a duplicate marker", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "sub", parentAgentId: "root" }),
+    }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: statusEvent({ agentId: "sub", status: "done" }),
+    }));
+    const countAfterFirst = state.agents.get("sub")?.transcript.length ?? 0;
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: statusEvent({ agentId: "sub", status: "done" }),
+    }));
+    expect(state.agents.get("sub")?.transcript.length).toBe(countAfterFirst);
+  });
+
+  test("DH-0130: a non-terminal status transition (e.g. waiting -> running) appends no marker", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: spawned({ agentId: "sub", parentAgentId: "root" }),
+    }));
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: statusEvent({ agentId: "sub", status: "running" }),
+    }));
+    expect(state.agents.get("sub")?.transcript.length).toBe(0);
+  });
 });
 
 describe("reducer: sse_event agent_thinking (DH-0045 exhaustiveness case)", () => {

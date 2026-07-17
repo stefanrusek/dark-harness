@@ -70,13 +70,12 @@ describe("CONNECTION_TOKENS", () => {
 describe("no competing status-record declarations (regression guard)", () => {
   // Walks src/ looking for any file (other than this module and its test) declaring a
   // `Record<AgentStatus, ...>`-shaped literal — the exact pattern that let src/tui/render.ts's
-  // STATUS_COLOR and src/web/client/format.ts's STATUS_STYLES independently drift from this
-  // module's canonical table. Those two files are pre-migration and still exist (DH-0135/
-  // DH-0136 own removing them) — the ticket's intent is "no *new* competing record", not
-  // "the two pre-migration ones don't exist yet" — so they're explicitly allowlisted here as
+  // (removed, DH-0136) STATUS_COLOR and src/web/client/format.ts's STATUS_STYLES independently
+  // drift from this module's canonical table. src/web/client/format.ts is still pre-migration
+  // (DH-0135 owns removing it) — the ticket's intent is "no *new* competing record", not "the
+  // one pre-migration file doesn't exist yet" — so it's explicitly allowlisted here as
   // known-existing debt slated for removal, not a false pass.
   const PRE_MIGRATION_ALLOWLIST = new Set([
-    join("src", "tui", "render.ts"),
     join("src", "web", "client", "format.ts"),
     // dh logs' offline dump — out of scope for DH-0135/DH-0136's React/Ink migration
     // (neither ticket touches src/cli.ts); left as known debt for a future ticket.
