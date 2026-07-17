@@ -63,7 +63,7 @@ source: tracking/
 | [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker 🔒 | bug | stefan |
 | [DH-0132](../DH-0132-adopt-a-convention-of-writing-acceptance-tests-as-prompts-run-via-dh-job-for-real-end-to-end-verification.md) | Adopt a convention of writing acceptance tests as prompts run via dh --job for real end-to-end verification | feature | stefan |
 
-### ready
+### implementing
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
