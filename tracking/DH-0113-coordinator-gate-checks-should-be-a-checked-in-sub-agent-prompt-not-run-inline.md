@@ -70,5 +70,4 @@ side-effect boundary) with the in-process `Agent` tool as a fallback.
 
 This ticket is process tooling with no `bun test` suite of its own (same as `spile-ops`
 and `forked-subagent`) — verification here is a real dispatched run against a real ticket +
-worktree, not a unit test. Not yet dry-run end-to-end against a live ticket; moving to
-`verifying` (not `closed`) so that dry run happens before this closes.
+worktree, not a unit test. Verified and in active use as of 2026-07-17.

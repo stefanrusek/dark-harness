@@ -53,6 +53,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0118](../DH-0118-amazon-bedrock-mantle-is-a-real-separate-endpoint-wire-it-up-as-its-own-provider-not-folded-into-bedrock.md) | Amazon Bedrock Mantle is a real, separate endpoint -- wire it up as its own provider, not folded into bedrock | done |
 | [DH-0117](../DH-0117-web-ui-redraw-storm-composer-textarea-rebuilt-every-second-wiping-focus-and-unsent-text.md) | Web UI redraw-storm: composer textarea rebuilt every second, wiping focus and unsent text | done |
 | [DH-0116](../DH-0116-server-mode-s-agentruntime-sessionid-mismatches-the-outer-logdir-cli-ts-uses.md) | --server mode's AgentRuntime sessionId mismatches the outer logDir cli.ts uses | done |
 | [DH-0114](../DH-0114-launch-sub-agents-as-real-claude-cli-subprocesses-in-the-target-worktree-not-in-process-agent-tool.md) | Launch sub-agents as real claude CLI subprocesses in the target worktree, not in-process Agent tool | done |
@@ -67,4 +68,3 @@ source: tracking/
 | [DH-0104](../DH-0104-unify-number-cost-elapsed-and-token-formatting-across-tui-web-and-cli.md) | Unify number, cost, elapsed, and token formatting across TUI, Web, and CLI | done |
 | [DH-0103](../DH-0103-dh-help-styled-width-aware-visually-structured-output.md) | dh --help: styled, width-aware, visually structured output | done |
 | [DH-0102](../DH-0102-dh-doctor-migrate-to-the-canonical-pending-spinner-and-check-cross-verdict-glyphs.md) | dh doctor: migrate to the canonical pending spinner and check/cross verdict glyphs | done |
-| [DH-0101](../DH-0101-give-cli-command-output-a-real-visual-system-glyphs-hierarchy-color-liveness-beyond-dh-doctor.md) | Give CLI command output a real visual system (glyphs, hierarchy, color, liveness) beyond dh doctor | done |

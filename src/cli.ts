@@ -143,7 +143,7 @@ export const SAMPLE_DH_JSON = `{
       "provider": "bedrock",
       "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     },
-    { "name": "gemma4", "provider": "bedrock", "model": "google.gemma-3-12b-it" },
+    { "name": "gemma4", "provider": "mantle", "model": "google.gemma-4-31b" },
     { "name": "gpt-oss-20b", "provider": "bedrock", "model": "openai.gpt-oss-20b-1:0" },
     { "name": "gpt-oss-120b", "provider": "bedrock", "model": "openai.gpt-oss-120b-1:0" },
     {
@@ -160,6 +160,12 @@ export const SAMPLE_DH_JSON = `{
   "provider": [
     { "name": "anthropic", "type": "anthropic", "apiKey": "$(ANTHROPIC_API_KEY)" },
     { "name": "bedrock", "type": "bedrock", "region": "$(AWS_REGION)" },
+    {
+      "name": "mantle",
+      "type": "openai-compatible",
+      "baseURL": "https://bedrock-mantle.$(AWS_REGION).api.aws/v1",
+      "apiKey": "$(BEDROCK_MANTLE_API_KEY)"
+    },
     { "name": "local", "type": "anthropic", "baseURL": "$(LOCAL_AI_PROVIDER)" }
   ],
   "skillPaths": ["./skills"],
@@ -1391,14 +1397,16 @@ async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeType> {
       initTty,
     ),
   );
-  // DH-0106: "gemma4" is a real, connectable model (dh doctor PASSes it) but reliably
-  // hallucinates tool calls instead of making them — flagged here so an operator who
-  // deliberately switches defaultModel to it isn't surprised later. JSON has no comment
-  // syntax, so this can't live inline in the scaffold itself; the stdout caveat is the next
-  // best place, alongside the other menu caveats above.
+  // DH-0118: "gemma4" now routes through the "mantle" provider (Amazon Bedrock Mantle, a
+  // separate OpenAI-compatible endpoint distinct from bedrock-runtime — see tracking/DH-0118)
+  // rather than the standard bedrock Converse path, which real Gemma 4 model ids don't
+  // support. Needs a BEDROCK_MANTLE_API_KEY, not the AWS SigV4 credential chain the "bedrock"
+  // provider uses. DH-0106's earlier tool-use-reliability claim about "gemma4" predates real
+  // Gemma 4 testing (it was based on gemma3 behavior) and is not re-asserted here — verify
+  // fresh via "dh doctor"'s tool-use column once BEDROCK_MANTLE_API_KEY is set.
   io.stdout(
     cliDim(
-      `dh:   "gemma4" in that menu connects fine but is chat-only — it does not reliably make real tool calls, so it's not the default; see "dh doctor"'s tool-use column.`,
+      `dh:   "gemma4" now routes through the "mantle" provider (Amazon Bedrock Mantle) — set BEDROCK_MANTLE_API_KEY to use it; its tool-use reliability hasn't been re-verified against real Gemma 4, check "dh doctor"'s tool-use column yourself.`,
       initTty,
     ),
   );

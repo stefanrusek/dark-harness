@@ -2582,6 +2582,21 @@ describe("main — dh init", () => {
     expect(local.region).toBeUndefined();
   });
 
+  // DH-0118: Amazon Bedrock Mantle is a separate OpenAI-compatible endpoint from
+  // bedrock-runtime (distinct hostname, own quota pool, API-key auth not SigV4) — the
+  // scaffold needs its own provider entry, not folded into "bedrock".
+  test("scaffolds a mantle provider entry (openai-compatible type) alongside bedrock", () => {
+    const parsed = JSON.parse(SAMPLE_DH_JSON);
+    const mantle = parsed.provider.find((p: { name: string }) => p.name === "mantle");
+    expect(mantle).toBeDefined();
+    expect(mantle.type).toBe("openai-compatible");
+    expect(mantle.baseURL).toContain("bedrock-mantle");
+    expect(mantle.apiKey).toBe("$(BEDROCK_MANTLE_API_KEY)");
+
+    const gemma = parsed.models.find((m: { name: string }) => m.name === "gemma4");
+    expect(gemma.provider).toBe("mantle");
+  });
+
   // DH-0096: the scaffolded catalog should cover all four Claude tiers on both providers,
   // a working default gemma model on Bedrock, a few OpenAI-on-Bedrock and open-weight
   // Bedrock models, and the local provider's baseURL as an env-var interpolation placeholder
@@ -2598,11 +2613,13 @@ describe("main — dh init", () => {
       expect(names).toContain(`${tier}-bedrock`);
     }
 
-    // DH-0106: default model swapped off gemma4/Gemma 3 (reliably hallucinates tool calls)
-    // to a Claude tier confirmed reliable for agentic tool use.
+    // DH-0106: default model kept on a Claude tier confirmed reliable for agentic tool use,
+    // not gemma4 (whose tool-use reliability is unverified against real Gemma 4 — DH-0118).
     expect(parsed.options.defaultModel).toBe("haiku-bedrock");
     const gemma = parsed.models.find((m: { name: string }) => m.name === "gemma4");
-    expect(gemma.provider).toBe("bedrock");
+    // DH-0118: gemma4 routes through the "mantle" provider (Amazon Bedrock Mantle, a
+    // separate OpenAI-compatible endpoint), not the standard "bedrock" Converse path.
+    expect(gemma.provider).toBe("mantle");
     expect(gemma.model).not.toBe("gemma4"); // real Bedrock model id, not the DH-0092 mistake shape
     expect(gemma.model).toMatch(/^google\.gemma-/);
 
@@ -2640,10 +2657,13 @@ describe("main — dh init", () => {
     const prevApiKey = process.env.ANTHROPIC_API_KEY;
     const prevRegion = process.env.AWS_REGION;
     const prevLocalProvider = process.env.LOCAL_AI_PROVIDER;
+    const prevMantleKey = process.env.BEDROCK_MANTLE_API_KEY;
     process.env.ANTHROPIC_API_KEY = "test-key";
     process.env.AWS_REGION = "us-west-2";
     // DH-0096: the local provider's baseURL is now a $(LOCAL_AI_PROVIDER) placeholder too.
     process.env.LOCAL_AI_PROVIDER = "http://localhost:8080";
+    // DH-0118: the mantle provider's apiKey is a $(BEDROCK_MANTLE_API_KEY) placeholder too.
+    process.env.BEDROCK_MANTLE_API_KEY = "test-mantle-key";
     try {
       const config = await loadConfig(target);
       expect(config.options.defaultModel).toBe("haiku-bedrock");
@@ -2657,6 +2677,9 @@ describe("main — dh init", () => {
       // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevLocalProvider === undefined) delete process.env.LOCAL_AI_PROVIDER;
       else process.env.LOCAL_AI_PROVIDER = prevLocalProvider;
+      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
+      if (prevMantleKey === undefined) delete process.env.BEDROCK_MANTLE_API_KEY;
+      else process.env.BEDROCK_MANTLE_API_KEY = prevMantleKey;
     }
   });
 
