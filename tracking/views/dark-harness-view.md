@@ -60,7 +60,8 @@ source: tracking/
 | [DH-0143](../DH-0143-web-commands-should-autocomplete.md) | Web: / commands should autocomplete | feature | stefan |
 | [DH-0144](../DH-0144-all-recognized-skills-should-be-accessible-as-commands.md) | All recognized skills should be accessible as / commands | feature | stefan |
 | [DH-0146](../DH-0146-app-test-ts-intermittently-fails-in-ci-root-cause-unconfirmed.md) | src/tui/app.test.ts intermittently fails in real GitHub Actions CI -- root cause still unconfirmed | bug | stefan |
-| [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode, and print a markdown transcript instead of just final output | feature | stefan |
+| [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
+| [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
 
 ### implementing
 
