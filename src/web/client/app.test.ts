@@ -278,8 +278,11 @@ describe("AppView interactive bootstrap (Round 2 — fresh-session deadlock fix)
 describe("AppView construction and rendering", () => {
   test("renders the shell immediately without opening a connection", async () => {
     const { root, calls } = harness();
-    expect(root.querySelector(".sidebar")).not.toBeNull();
+    // DH-0135: the shell is now a single React root render, committed via React's scheduler
+    // (a macrotask under happy-dom) rather than synchronous DOM mutation — a tick is needed
+    // before asserting on the committed DOM, unlike the old imperative `buildShell` call.
     await flush();
+    expect(root.querySelector(".sidebar")).not.toBeNull();
     expect(calls).toHaveLength(0);
   });
 
@@ -312,6 +315,7 @@ describe("AppView construction and rendering", () => {
 
     h.clock.now += 65_000; // 1m 05s later, no new event.
     h.intervalCalls[0]?.(); // Fire the injected tick directly instead of sleeping for real.
+    await flush();
 
     const elapsedAfter = h.root.querySelector(".status-elapsed")?.textContent;
     expect(elapsedAfter).toBe("for 1m 05s");
@@ -464,6 +468,7 @@ describe("AppView construction and rendering", () => {
 
     const rows = h.root.querySelectorAll(".agent-row");
     h.dispatch(rows[1] as HTMLElement, "click");
+    await flush();
     expect(h.app.getState().selectedAgentId).toBe("child-1");
     const turns = h.root.querySelectorAll(".turn-assistant");
     expect(turns).toHaveLength(1);
@@ -500,10 +505,12 @@ describe("AppView commands", () => {
     textarea.value = "hello from the operator";
     h.dispatch(form, "submit", { cancelable: true });
 
-    // Deliberately no `await flush()` here: the whole point of local echo
-    // (docs/handoffs/web.md Round 4) is that the operator's turn renders synchronously at
-    // send time, without waiting on the send_message fetch (which hasn't resolved yet at
-    // this point in the test) to come back from the server.
+    // DH-0135: state is still updated synchronously at send time (local echo, unchanged) —
+    // only the committed DOM now needs one macrotask tick to catch up, since React's
+    // scheduler (not synchronous DOM mutation) owns the render pass. The point of this test
+    // (the echoed turn exists before any server round-trip completes) still holds: the fake
+    // `send_message` fetch hasn't been awaited by anything here.
+    await flush();
     const userTurns = h.root.querySelectorAll(".turn-user");
     expect(userTurns).toHaveLength(1);
     expect(userTurns[0]?.querySelector(".turn-text")?.textContent).toBe("hello from the operator");
@@ -603,6 +610,7 @@ describe("AppView commands", () => {
     // error banner's auto-hide timer, which is the one this test cares about.
     expect(h.timeoutCalls).toHaveLength(4);
     h.timeoutCalls[3]?.();
+    await flush();
     const banner = h.root.querySelector(".error-banner");
     expect(banner?.classList.contains("hidden")).toBe(true);
   });
@@ -724,7 +732,8 @@ describe("AppView connection status", () => {
 
     const dismissBtn = banner?.querySelector(".gap-banner-dismiss") as HTMLElement;
     h.dispatch(dismissBtn, "click");
-    expect(banner?.classList.contains("hidden")).toBe(true);
+    await flush();
+    expect(h.root.querySelector(".gap-banner")?.classList.contains("hidden")).toBe(true);
   });
 });
 
