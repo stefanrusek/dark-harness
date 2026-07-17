@@ -293,6 +293,36 @@ correct, lifeless. Conventions to close that:
 
 ---
 
+## 6.1 Component architecture conventions (React/Web, Ink/TUI — added 2026-07-17, DH-0133)
+
+With DH-0133's migration of Web to React and TUI to Ink, both surfaces become component
+trees (different renderers, not a shared component library — see DH-0133's Notes on why
+components themselves can't be shared across DOM and terminal host environments). Two
+conventions apply to both trees going forward:
+
+- **Design tokens are a shared module, not per-surface constants.** Status/connection
+  color+glyph+word (§1/§1.2/§2.3) is imported by both React and Ink components from one
+  module (`src/design-tokens.ts`, DH-0137) rather than each surface re-declaring its own
+  `STATUS_COLOR`/`STATUS_STYLES`-shaped record. This mirrors the precedent `src/format.ts`
+  already set for numeric formatting (DH-0104) — a genuinely cross-surface constant belongs
+  in one root-level `src/` module both `src/web/client/` and `src/tui/` import, not
+  duplicated by hand. This does **not** extend to spacing/typography — Web's `--space-*`/
+  `--radius-*`/font tokens stay CSS-only; a terminal has no analogous unit and inventing a
+  shared one would be speculative, not a real need.
+- **Reserve slots for known-upcoming content before it's designed.** When a ticket is known
+  to be queued right behind a structural change (as DH-0121/0122/0124/0125 were queued
+  behind DH-0133), the structural change's component tree should reserve an inert slot for
+  it — a component that mounts, renders zero visible output/rows, and takes typed props —
+  rather than requiring the tree to be re-shaped again when the follow-up ticket lands. The
+  slot's existence and "renders nothing until populated" behavior is testable and owned by
+  the structural ticket (DH-0135/DH-0136 reserve `<AppHeader>`/`<Header>`/`<StatusRow>` for
+  DH-0122/DH-0124/DH-0125); the slot's *content* stays the follow-up ticket's own design and
+  implementation work. Don't over-apply this — only reserve for asks that are already a real
+  ticket on the books, not speculative future features (see MEMORY.md "defer speculative
+  work").
+
+---
+
 ## 7. How to use this doc
 
 - **Implementers:** cite the section (`per style-guide §1`) in status logs; don't re-derive.

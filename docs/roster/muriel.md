@@ -50,3 +50,51 @@ DH-0095, DH-0098, DH-0099 before touching anything — they are the calibration 
   (`src/contracts/events.ts` only has agent-level events). That's a contracts change too.
 - Did NOT ticket a full TUI theming/config-of-colors system — speculative, no ask. Deferred
   per MEMORY.md "defer speculative work."
+
+### 2026-07-17 — round 2: felt-experience design pass on DH-0133 (React/Ink overhaul)
+
+Fable did the architecture-level design on DH-0133 (framework choice, migration strategy,
+contracts impact — confirmed no `src/contracts/` change). Owner asked for my pass —
+component/design-system architecture and anticipating the blocked follow-up tickets
+(DH-0121/0122/0124/0125) — before implementation starts.
+
+**Judgment calls made this round:**
+- Found real duplication Fable's pass didn't flag: `src/tui/render.ts`'s `STATUS_COLOR` and
+  `src/web/client/format.ts`'s `STATUS_STYLES` independently re-derive the same canonical
+  table this doc already states as law (§1/§1.2/§2.3) — unlike numeric formatting, which
+  `src/format.ts` already centralizes (DH-0104). Minted **DH-0137** (new ticket, owner Grace)
+  to extract a shared `src/design-tokens.ts` module both the new React and Ink component
+  trees import, following the `src/format.ts` precedent. This is real infra work, not a
+  silent fold-in — it gets its own User Stories/tests and DH-0135/DH-0136 depend on it.
+  Explicitly scoped it to status/connection tokens only, not spacing/typography (Web CSS
+  vars have no terminal analog — inventing one would be speculative).
+- Decided the component architecture *should* reserve inert slots now for the four blocked
+  tickets' known content: `<AppHeader>` (Web, DH-0135) / `<Header>` (Ink, DH-0136) for
+  DH-0122's app header (with a `variant="full"|"empty"` prop anticipating DH-0124's lighter
+  empty-state variant so it doesn't need a second component), and `<StatusRow>` (Ink,
+  DH-0136) for DH-0125's model/progress/git-branch row, positioned directly under the
+  composer per DH-0125's own explicit ask. Rule: a reserved slot renders **zero** visible
+  output/rows until its content ticket lands — tested explicitly (frame-height/DOM-node
+  tests), not just assumed inert. Wrote this convention up in style-guide.md §6.1 as durable
+  (it'll recur any time a structural ticket is known to have follow-ups queued behind it).
+- Did NOT invent slot content or field lists for DH-0121/0122/0124/0125 themselves — those
+  stay each ticket's own design pass. This round only commits DH-0135/0136 to slot
+  *existence* and the inert-until-populated contract, not to what fills them.
+- Wrote real Given/When/Then User Stories into DH-0135 and DH-0136 (were TODO skeletons),
+  restating DH-0133's stories plus adding the token-module and slot-reservation stories
+  above, and explicitly folding DH-0127/DH-0129/DH-0130's acceptance criteria into DH-0135's
+  transcript-section stories and DH-0130's TUI half + DH-0126's scroll-viewport remainder
+  (privateer's `scroll-viewport.ts` shape, per Fable's research) into DH-0136's
+  transcript-pane stories, per DH-0133's own recommendation that those tickets close/fold in
+  rather than being implemented twice.
+- Did not touch DH-0126 or DH-0127 per the task boundary (already finalized/closed).
+
+**Open threads for next round:**
+- DH-0121 (logo, SVG+ASCII) is still fully unticketed content-wise — explicitly routes
+  through me per its own Summary, but I did not scope it this round (out of this pass's
+  brief, which was DH-0133/135/136 plus anticipating slots, not authoring the logo itself).
+  Pick up next: SVG mark + ASCII banner design, once DH-0135/DH-0136's header slots are
+  concrete enough to know the space budget (terminal width constraints especially).
+- DH-0122/DH-0124/DH-0125 still need their own full design passes (exact header fields,
+  non-TTY/--json degrade behavior, status-row field list and narrow-width behavior) — the
+  slots are reserved but empty by design; don't let "slot exists" be mistaken for "designed."
