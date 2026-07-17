@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0134
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
