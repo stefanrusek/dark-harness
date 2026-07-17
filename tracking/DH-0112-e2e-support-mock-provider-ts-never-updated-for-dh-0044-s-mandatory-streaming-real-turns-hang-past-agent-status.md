@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0112
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -74,3 +74,35 @@ e2e/support/mock-provider.ts (the shared mock Anthropic-compatible provider most
 > the moment DH-0044 made streaming mandatory. Filed, not dispatched — new-work dispatch is
 > paused 2026-07-16 while the owner works on a separate Slack integration; see the
 > `dispatch_paused_2026-07-16` memory note for full context on resuming.
+
+> [!NOTE]
+> 2026-07-16 (verifying): Fixed. `e2e/support/mock-provider.ts` now serves real
+> `text/event-stream` responses (`message_start`/`content_block_start`/`content_block_delta`/
+> `content_block_stop`/`message_delta`/`message_stop`) for successful turns, reusing the same
+> event-construction pattern as `sseMessageResponse()`
+> (`src/agent/runtime.test.ts`/`src/cli.test.ts`) and `streamOf()`
+> (`src/agent/providers/anthropic.test.ts`). Also fixed the DH-0033 malformed-response
+> (`malformedTurn()`) case for 200-status garbage bodies: since the request now always asks
+> for `stream: true`, a bare non-SSE garbage body was silently parsed as an empty, eventless
+> stream (turn "succeeds" with no content) instead of erroring — now wrapped as a malformed
+> `event: content_block_delta` / `data:` SSE line so the SDK's decoder hits real garbage
+> mid-stream and throws, matching a genuinely corrupted upstream stream.
+>
+> `bun run e2e` after the fix: **30 pass, 5 fail** (up from a baseline of only 9 pass on
+> `main` before touching the mock — see the diff's original 3-of-7
+> `e2e/server-protocol.test.ts` failures, now down to 6-of-7 passing). All 5 remaining
+> failures are one unrelated, pre-existing root cause, not a DH-0044/streaming regression:
+> DH-0050's `ReportOutcome` self-report tool nudges a non-interactive turn that ends in plain
+> text with an extra reminder turn, which the shared `successTurn()`/`taskFailedTurn()` mock
+> helpers (`e2e/support/mock-provider.ts`, and `mock-bedrock-provider.ts`'s `successTurn()`)
+> never account for — doubling `callCount` and, for a few exit-code assertions, producing the
+> wrong exit code. Confirmed independent of this ticket via `git stash` against the pre-fix
+> mock: the same nudge/exit-code mismatch was already present on `main`, just masked by the
+> streaming hang in most cases. Filed as **DH-0115** (ready, unblocked, Hedy/E2E) rather than
+> folded in here — different root cause, different fix shape. Affected today: 2 of 4 tests in
+> `e2e/exit-codes.test.ts`, 1 of 7 in `e2e/server-protocol.test.ts` (sub-agent-spawn
+> scenario), all 3 in `e2e/bedrock-provider.test.ts`.
+>
+> Verified: `bun run typecheck` clean, `bun run lint` clean for `mock-provider.ts` (repo has
+> 9 pre-existing, unrelated lint errors in `.claude/skills/forked-subagent/`, untouched by
+> this change).
