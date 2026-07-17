@@ -18,6 +18,7 @@ async function boot(): Promise<void> {
     doc: document,
     target: { baseUrl: config.baseUrl, token: config.token },
     downloadEnv: domDownloadEnv(document),
+    ...(config.headerInfo ? { headerInfo: config.headerInfo } : {}),
   });
   app.start();
 }

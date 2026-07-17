@@ -17,7 +17,10 @@ export interface AppProps {
   state: TuiState;
 }
 
-const HEADER_ROWS = 2;
+// DH-0136 reserved 2 for `<TitleBar>` (title line + divider); DH-0122 adds 1 for `<Header>`'s
+// now-populated single version-line row (see Header.tsx) so `contentRows` doesn't overflow
+// the terminal by that extra row.
+const HEADER_ROWS = 3;
 const MARGIN = 1;
 
 export function App({ state }: AppProps) {

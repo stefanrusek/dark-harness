@@ -34,6 +34,12 @@ import type {
   SkillInfo,
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
+import {
+  type HeaderInfo,
+  buildHeaderInfo,
+  formatHeaderLines,
+  formatVersionString,
+} from "./header-info.ts";
 import { loadSystemPrompt } from "./prompt/system-prompt.ts";
 import {
   type AgentLoopEventListener,
@@ -393,16 +399,6 @@ export function renderHelpText(columns: number, tty: boolean): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** Round 8: same motivation as the whole round — "which build produced this?" shouldn't
- * require digging through a log directory. Format: `dh <version> (<sha|unstamped>[
- * dirty][, <releaseTag>])`. */
-export function formatVersionString(build: BuildInfo): string {
-  let inner = build.gitSha ?? "unstamped";
-  if (build.dirty) inner += " dirty";
-  if (build.releaseTag) inner += `, ${build.releaseTag}`;
-  return `dh ${build.version} (${inner})`;
-}
-
 // ---------------------------------------------------------------------------------------
 // DH-0101: shared CLI styling helpers — docs/design/style-guide.md §1 (status colors),
 // §1.1 (liveness), §2.2/§2.3 (SGR palette), §3 (glyphs), §5 (CLI conventions). Every
@@ -479,6 +475,23 @@ function cliBold(text: string, tty: boolean): string {
 export function buildStartupPostureNote(security: SecurityConfig | undefined): string | undefined {
   if (security?.token || security?.tls) return undefined;
   return "dh: plaintext HTTP, no auth — see README security posture.";
+}
+
+/** DH-0122: the app header every `dh` invocation prints — name/version/build identity plus
+ * `dh.json`'s config status (model count, bind address, whether a token/TLS is required —
+ * the bits an operator connecting from another process/machine needs). Shares its content
+ * with the TUI's `<Header>` and Web's `<AppHeader>` via `buildHeaderInfo`/`formatHeaderLines`
+ * (header-info.ts) so all three surfaces agree on the same facts. Non-TTY output stays plain
+ * (no logo, no color) so a piped/CI run isn't polluted with ASCII art; a real terminal gets
+ * the full logo and a bolded version line, matching the style guide §5 "startup blocks read
+ * as a panel" convention already used by the rest of this file's startup output. */
+function printAppHeader(config: DhConfig, configPath: string, io: CliIo): void {
+  const tty = process.stdout.isTTY === true;
+  const info = buildHeaderInfo(config, configPath, BUILD_INFO);
+  const lines = formatHeaderLines(info, { compact: !tty });
+  for (const line of lines) {
+    io.stdout(line === formatVersionString(info.build) ? cliBold(line, tty) : line);
+  }
 }
 
 /**
@@ -942,6 +955,8 @@ export interface CliDeps {
     token?: string;
     /** DH-0022: opt-in bind address, sourced from `dh.json`'s `security.hostname`. */
     hostname?: string;
+    /** DH-0122: app header content forwarded to the browser via `WEB_CONFIG_PATH`. */
+    headerInfo?: HeaderInfo;
   }) => WebUiHandleLike;
   io: CliIo;
   /**
@@ -1116,12 +1131,20 @@ export function buildResumeNotice(resumeResult: ResumeResult): string {
 async function runInteractiveMode(
   mode: RunMode,
   config: DhConfig,
+  configPath: string,
   systemPrompt: string,
   deps: CliDeps,
   resumeResult?: ResumeResult,
   quiet = false,
 ): Promise<ExitCodeType> {
   const { io } = deps;
+  // DH-0122: the app header prints once per invocation, before anything else — including
+  // before the TUI takes the alt-screen — so it's visible in scrollback on every run mode,
+  // not just the console-only ones (--server, --web, --connect). Ink's own `<Header>` (see
+  // src/tui/ink/Header.tsx) additionally keeps a compact form of the same content live
+  // inside the full-screen TUI view itself.
+  printAppHeader(config, configPath, io);
+  const headerInfo = buildHeaderInfo(config, configPath, BUILD_INFO);
   try {
     if (mode.kind === "connect") {
       const scheme = config.security?.tls ? "https" : "http";
@@ -1136,6 +1159,7 @@ async function runInteractiveMode(
         const handle = deps.serveWebUi({
           port: 0,
           targetBaseUrl,
+          headerInfo,
           ...(config.security?.token ? { token: config.security.token } : {}),
           ...(config.security?.hostname ? { hostname: config.security.hostname } : {}),
         });
@@ -1299,6 +1323,7 @@ async function runInteractiveMode(
       webHandle = deps.serveWebUi({
         port: 0,
         targetBaseUrl: baseUrl,
+        headerInfo,
         ...(config.security?.token ? { token: config.security.token } : {}),
         ...(config.security?.hostname ? { hostname: config.security.hostname } : {}),
       });
@@ -1525,8 +1550,13 @@ export function formatDoctorReport(results: DoctorResult[], color: boolean): str
  * a blank terminal wondering whether anything is happening. Piped/non-TTY output (CI, logs)
  * is untouched: no row is printed until every model has been checked, and the whole report is
  * printed once via the ordinary `io.stdout` path exactly as before this ticket. */
-async function runDoctor(config: DhConfig, deps: CliDeps): Promise<ExitCodeType> {
+async function runDoctor(
+  config: DhConfig,
+  configPath: string,
+  deps: CliDeps,
+): Promise<ExitCodeType> {
   const { io } = deps;
+  printAppHeader(config, configPath, io);
   const providersByName = new Map(config.provider.map((p) => [p.name, p]));
   const results: DoctorResult[] = [];
   const isTTY = process.stdout.isTTY === true;
@@ -1783,7 +1813,7 @@ export async function main(
   // already validated by this point, and neither mode ever enters the interactive/standalone
   // agent loop below.
   if (options.check) {
-    return runDoctor(config, deps);
+    return runDoctor(config, options.config, deps);
   }
   if (options.dryRun) {
     return runDryRun(options, config, deps);
@@ -1819,7 +1849,15 @@ export async function main(
   }
 
   if (options.instructions === null) {
-    return runInteractiveMode(mode, config, systemPrompt, deps, resumeResult, options.quiet);
+    return runInteractiveMode(
+      mode,
+      config,
+      options.config,
+      systemPrompt,
+      deps,
+      resumeResult,
+      options.quiet,
+    );
   }
 
   // Standalone dark-factory path: deliberately bypasses Server/TUI/Web entirely, even in
@@ -1964,7 +2002,15 @@ export async function main(
     io.stdout(
       "dh: job complete; starting a new interactive session (prior context is not preserved)",
     );
-    return runInteractiveMode(mode, config, systemPrompt, deps, undefined, options.quiet);
+    return runInteractiveMode(
+      mode,
+      config,
+      options.config,
+      systemPrompt,
+      deps,
+      undefined,
+      options.quiet,
+    );
   }
 
   const jobResultLine = buildJobResultLine();

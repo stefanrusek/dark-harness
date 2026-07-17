@@ -18,12 +18,12 @@ import {
   buildStartupPostureNote,
   composeMode,
   formatDoctorReport,
-  formatVersionString,
   main,
   parseArgs,
   parseEnvFile,
   renderHelpText,
 } from "./cli.ts";
+import { BUILD_INFO } from "./config/build-info.ts";
 import type {
   DhConfig,
   JobResultLine,
@@ -31,6 +31,7 @@ import type {
   ServerSentEvent,
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
+import { buildHeaderInfo, formatHeaderLines, formatVersionString } from "./header-info.ts";
 import { REQUIRED_CONTRACT, buildDefaultSystemPrompt } from "./prompt/system-prompt.ts";
 import { DhServer, waitForExitCode } from "./server/index.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
@@ -40,6 +41,21 @@ const TEST_CONFIG: DhConfig = {
   models: [{ name: "sonnet", provider: "anthropic", model: "sonnet-5" }],
   provider: [{ name: "anthropic", type: "anthropic" }],
 };
+
+/** DH-0122: every `main()` run now prints the shared app header first (see `printAppHeader`
+ * in cli.ts) — these two helpers build the exact lines it prints for a given config on a
+ * non-TTY (`compact`, no logo/color) and TTY (full logo, bold version line) stdout, so tests
+ * asserting on `io.stdoutLines`/`process.stdout.write` calls can account for it without
+ * hand-duplicating `formatHeaderLines`'s output. */
+function expectedHeaderLines(config: DhConfig, configPath = "dh.json"): string[] {
+  return formatHeaderLines(buildHeaderInfo(config, configPath, BUILD_INFO), { compact: true });
+}
+function expectedHeaderLinesTty(config: DhConfig, configPath = "dh.json"): string[] {
+  const info = buildHeaderInfo(config, configPath, BUILD_INFO);
+  return formatHeaderLines(info).map((line) =>
+    line === formatVersionString(info.build) ? `\x1b[1m${line}\x1b[0m` : line,
+  );
+}
 
 /** Builds a fake Anthropic-shaped SSE streaming HTTP response, matching what DH-0044's real
  * `AnthropicProvider` now decodes (`stream: true` always) — mirrors the identically-named
@@ -584,48 +600,6 @@ describe("main — --version", () => {
   });
 });
 
-describe("formatVersionString", () => {
-  test("unstamped build", () => {
-    expect(
-      formatVersionString({ version: "0.1.0", gitSha: null, dirty: false, releaseTag: null }),
-    ).toBe("dh 0.1.0 (unstamped)");
-  });
-
-  test("stamped clean build", () => {
-    expect(
-      formatVersionString({ version: "0.1.0", gitSha: "abc123", dirty: false, releaseTag: null }),
-    ).toBe("dh 0.1.0 (abc123)");
-  });
-
-  test("stamped dirty build", () => {
-    expect(
-      formatVersionString({ version: "0.1.0", gitSha: "abc123", dirty: true, releaseTag: null }),
-    ).toBe("dh 0.1.0 (abc123 dirty)");
-  });
-
-  test("stamped release build", () => {
-    expect(
-      formatVersionString({
-        version: "0.1.0",
-        gitSha: "abc123",
-        dirty: false,
-        releaseTag: "v0.1.0",
-      }),
-    ).toBe("dh 0.1.0 (abc123, v0.1.0)");
-  });
-
-  test("stamped dirty release build", () => {
-    expect(
-      formatVersionString({
-        version: "0.1.0",
-        gitSha: "abc123",
-        dirty: true,
-        releaseTag: "v0.1.0",
-      }),
-    ).toBe("dh 0.1.0 (abc123 dirty, v0.1.0)");
-  });
-});
-
 describe("main — usage/config/systemPrompt failures", () => {
   test("a usage error returns HarnessError without touching config", async () => {
     const io = fakeIo();
@@ -708,7 +682,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     });
     expect(code).toBe(ExitCode.Success);
     expect(receivedTargetBaseUrl).toBe("http://localhost:55124");
-    expect(io.stdoutLines[0]).toContain("http://localhost:60001");
+    expect(io.stdoutLines.some((l) => l.includes("http://localhost:60001"))).toBe(true);
     expect(startTuiCalled).toBe(false);
   });
 
@@ -731,7 +705,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines[0]).toContain("5050");
+    expect(io.stdoutLines.some((l) => l.includes("5050"))).toBe(true);
     expect(startTuiCalled).toBe(false);
     expect(serveWebUiCalled).toBe(false);
   });
@@ -747,7 +721,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(receivedPort).toBe(DEFAULT_PORT);
-    expect(io.stdoutLines[0]).toContain(String(DEFAULT_PORT));
+    expect(io.stdoutLines.some((l) => l.includes(String(DEFAULT_PORT)))).toBe(true);
   });
 
   // DH-0011: a `--server` process is the canonical long-lived container deployment
@@ -861,8 +835,9 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(receivedTargetBaseUrl).toBe("http://example.com:9000");
-    expect(io.stdoutLines[0]).toContain("http://localhost:60002");
-    expect(io.stdoutLines[0]).toContain("http://example.com:9000");
+    const readyLine = io.stdoutLines.find((l) => l.includes("http://localhost:60002"));
+    expect(readyLine).toContain("http://localhost:60002");
+    expect(readyLine).toContain("http://example.com:9000");
   });
 
   test("DH-0111: --connect strips an http:// scheme the caller already included, avoiding a doubled scheme", async () => {
@@ -1924,7 +1899,9 @@ describe("main — real filesystem-backed default deps", () => {
       installSignalHandlers: fakeInstallSignalHandlers(),
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines[0]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
+    expect(
+      io.stdoutLines.some((l) => /^dh: web UI ready at http:\/\/localhost:\d+\.$/.test(l)),
+    ).toBe(true);
     // Deliberately left running: main() doesn't expose the handle for cleanup (interactive
     // "--web" mode never stops itself in production either — the process just keeps the
     // socket open). Ephemeral port, harmless for the rest of this test run.
@@ -2862,6 +2839,7 @@ describe("main — dh doctor / --check", () => {
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines).toEqual([
+      ...expectedHeaderLines(TEST_CONFIG),
       'PASS sonnet (provider "anthropic")',
       "1 model: 1 pass, 0 fail",
     ]);
@@ -2897,6 +2875,7 @@ describe("main — dh doctor / --check", () => {
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines).toEqual([
+      ...expectedHeaderLines(TEST_CONFIG),
       'PASS (no tool-use) sonnet (provider "anthropic")',
       "1 model: 1 pass, 0 fail",
     ]);
@@ -2922,6 +2901,7 @@ describe("main — dh doctor / --check", () => {
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines).toEqual([
+      ...expectedHeaderLines(TEST_CONFIG),
       'PASS (no tool-use) sonnet (provider "anthropic")',
       "1 model: 1 pass, 0 fail",
     ]);
@@ -2935,6 +2915,7 @@ describe("main — dh doctor / --check", () => {
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.stdoutLines).toEqual([
+      ...expectedHeaderLines(TEST_CONFIG),
       'PASS sonnet (provider "anthropic")',
       "1 model: 1 pass, 0 fail",
     ]);
@@ -2968,6 +2949,7 @@ describe("main — dh doctor / --check", () => {
     });
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stdoutLines).toEqual([
+      ...expectedHeaderLines(TEST_CONFIG),
       'FAIL sonnet (provider "anthropic"): 401 unauthorized',
       "1 model: 0 pass, 1 fail",
     ]);
@@ -2975,17 +2957,19 @@ describe("main — dh doctor / --check", () => {
 
   test("reports FAIL per model without throwing when a model references an unknown provider", async () => {
     const io = fakeIo();
+    const ghostConfig: DhConfig = {
+      options: { defaultModel: "sonnet" },
+      models: [{ name: "sonnet", provider: "ghost", model: "sonnet-5" }],
+      provider: [{ name: "anthropic", type: "anthropic" }],
+    };
     const code = await main(["--check"], {
       ...baseOverrides(io),
-      loadConfig: async () => ({
-        options: { defaultModel: "sonnet" },
-        models: [{ name: "sonnet", provider: "ghost", model: "sonnet-5" }],
-        provider: [{ name: "anthropic", type: "anthropic" }],
-      }),
+      loadConfig: async () => ghostConfig,
       createProvider: () => fakeModelProvider(),
     });
     expect(code).toBe(ExitCode.HarnessError);
     expect(io.stdoutLines).toEqual([
+      ...expectedHeaderLines(ghostConfig),
       'FAIL sonnet: no provider named "ghost" in config',
       "1 model: 0 pass, 1 fail",
     ]);
@@ -3055,8 +3039,9 @@ describe("main — dh doctor / --check", () => {
       expect(writes[1]).toContain("sonnet");
       expect(writes[1]?.endsWith("\n")).toBe(true);
       expect(writes.at(-1)).toContain("1 model: 1 pass, 0 fail");
-      // Non-TTY io.stdout must not also fire — otherwise the report would print twice.
-      expect(io.stdoutLines).toEqual([]);
+      // Non-TTY io.stdout must not also fire the doctor report itself — the app header
+      // (DH-0122) is the only thing that goes through io.stdout on this path.
+      expect(io.stdoutLines).toEqual(expectedHeaderLinesTty(TEST_CONFIG));
     });
 
     test("advances the spinner frame on a timer while a single check is outstanding, and always clears it (DH-0102)", async () => {
@@ -3114,7 +3099,7 @@ describe("main — dh doctor / --check", () => {
       expect(writes[1]).toContain("sonnet");
       expect(writes[1]).toContain("401 unauthorized");
       expect(writes.at(-1)).toContain("0 pass, 1 fail");
-      expect(io.stdoutLines).toEqual([]);
+      expect(io.stdoutLines).toEqual(expectedHeaderLinesTty(TEST_CONFIG));
     });
   });
 });
@@ -3518,22 +3503,27 @@ describe("main — --server startup block (DH-0067)", () => {
       ...interactiveOverrides(io),
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines[0]).toMatch(/^dh: headless server listening on port \d+/);
-    expect(io.stdoutLines[1]).toMatch(
+    const h = expectedHeaderLines(TEST_CONFIG).length;
+    expect(io.stdoutLines[h]).toMatch(/^dh: headless server listening on port \d+/);
+    expect(io.stdoutLines[h + 1]).toMatch(
       /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 0\.0\.0\.0:\d+ — logs: .*\.dh-logs/,
     );
-    expect(io.stdoutLines[2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
-    expect(io.stdoutLines[3]).toBe("dh: plaintext HTTP, no auth — see README security posture.");
+    expect(io.stdoutLines[h + 2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
+    expect(io.stdoutLines[h + 3]).toBe(
+      "dh: plaintext HTTP, no auth — see README security posture.",
+    );
   });
 
   test("DH-0022: a configured security.hostname is reflected in the startup 'bound to' line", async () => {
     const io = fakeIo();
+    const hostConfig = { ...TEST_CONFIG, security: { hostname: "127.0.0.1" } };
     const code = await main(["--server"], {
       ...interactiveOverrides(io),
-      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      loadConfig: async () => hostConfig,
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines[1]).toMatch(
+    const h = expectedHeaderLines(hostConfig).length;
+    expect(io.stdoutLines[h + 1]).toMatch(
       /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 127\.0\.0\.1:\d+ — logs: .*\.dh-logs/,
     );
   });
@@ -3554,8 +3544,9 @@ describe("main — --server startup block (DH-0067)", () => {
       ...interactiveOverrides(io),
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.stdoutLines[0]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
-    expect(io.stdoutLines[1]).toMatch(/^dh: logs: .*\.dh-logs/);
+    const h = expectedHeaderLines(TEST_CONFIG).length;
+    expect(io.stdoutLines[h]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
+    expect(io.stdoutLines[h + 1]).toMatch(/^dh: logs: .*\.dh-logs/);
   });
 
   // DH-0101: on a TTY, styling wraps around the two e2e-grepped substrings without breaking
@@ -3584,13 +3575,14 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      expect(io.stdoutLines[0]).toContain("headless server listening on port");
-      expect(io.stdoutLines[0]).toStartWith(
+      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
+      expect(io.stdoutLines[h]).toContain("headless server listening on port");
+      expect(io.stdoutLines[h]).toStartWith(
         "dh: \x1b[32m✓\x1b[0m headless server listening on port ",
       );
-      expect(io.stdoutLines[1]).toStartWith("dh: \x1b[1mdh ");
-      expect(io.stdoutLines[1]).toContain("\x1b[0m — bound to");
-      expect(io.stdoutLines[3]).toStartWith("dh: \x1b[33m⚠\x1b[0m plaintext HTTP, no auth");
+      expect(io.stdoutLines[h + 1]).toStartWith("dh: \x1b[1mdh ");
+      expect(io.stdoutLines[h + 1]).toContain("\x1b[0m — bound to");
+      expect(io.stdoutLines[h + 3]).toStartWith("dh: \x1b[33m⚠\x1b[0m plaintext HTTP, no auth");
     });
 
     test("--web: 'web UI ready at <url>' substring survives styling intact, URL uncolored", async () => {
@@ -3599,7 +3591,8 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      const line = io.stdoutLines[0] ?? "";
+      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
+      const line = io.stdoutLines[h] ?? "";
       expect(line).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
       expect(line).toEndWith(".");
       // Everything between "ready at " and the trailing "." is the captured URL e2e's own
@@ -3615,8 +3608,9 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      expect(io.stdoutLines[0]).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
-      expect(io.stdoutLines[0]).toContain(" (connected to ");
+      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
+      expect(io.stdoutLines[h]).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
+      expect(io.stdoutLines[h]).toContain(" (connected to ");
     });
   });
 });

@@ -10,6 +10,7 @@
 // The returned `url` is what `--web`'s "open/print the URL" behavior (HANDOFF.md §2) should
 // use; this module does not open a browser itself.
 
+import type { HeaderInfo } from "../header-info.ts";
 import indexHtml from "./client/index.html";
 import { WEB_CONFIG_PATH, type WebConfigResponse } from "./protocol.ts";
 
@@ -26,6 +27,11 @@ export interface ServeWebUiOptions {
    * "127.0.0.1" for loopback-only). Omitted means unchanged default behavior — Bun's own
    * default (all interfaces). Sourced from `dh.json`'s `security.hostname`. */
   hostname?: string;
+  /** DH-0122: app name/version/build identity + `dh.json` config-status summary, built by
+   * the caller (src/cli.ts, which has the real `DhConfig`/`BuildInfo`) via
+   * `buildHeaderInfo` (header-info.ts) — forwarded verbatim to the browser over
+   * `WEB_CONFIG_PATH` for `<AppHeader>` to render. */
+  headerInfo?: HeaderInfo;
 }
 
 export interface WebUiHandle {
@@ -155,6 +161,7 @@ async function renderIndex(development: boolean): Promise<Response> {
 function resolveConfig(
   targetBaseUrl: string,
   token: string | undefined,
+  headerInfo: HeaderInfo | undefined,
   req: Request,
 ): WebConfigResponse {
   const target = new URL(targetBaseUrl);
@@ -162,7 +169,11 @@ function resolveConfig(
     target.hostname = new URL(req.url).hostname;
   }
   const baseUrl = target.toString().replace(/\/$/, "");
-  return token ? { baseUrl, token } : { baseUrl };
+  return {
+    baseUrl,
+    ...(token ? { token } : {}),
+    ...(headerInfo ? { headerInfo } : {}),
+  };
 }
 
 export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
@@ -176,7 +187,9 @@ export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
       "/": () => renderIndex(development),
       [WEB_CONFIG_PATH]: (req: Request) =>
         withSecurityHeaders(
-          Response.json(resolveConfig(options.targetBaseUrl, options.token, req)),
+          Response.json(
+            resolveConfig(options.targetBaseUrl, options.token, options.headerInfo, req),
+          ),
         ),
     },
     // DH-0110: everything Bun's HTML-bundler generated for `/` (asset chunks, source maps,
