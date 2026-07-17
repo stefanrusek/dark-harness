@@ -70,7 +70,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          bun test src --coverage --coverage-reporter=lcov --coverage-reporter=text 2>&1 | tee coverage-report.txt
+          bun test src --coverage --parallel=1 --coverage-reporter=lcov --coverage-reporter=text 2>&1 | tee coverage-report.txt
           TEST_EXIT="${PIPESTATUS[0]}"
           if [ "$TEST_EXIT" -ne 0 ]; then
             echo "::error::bun test failed (exit $TEST_EXIT) — see log above."
