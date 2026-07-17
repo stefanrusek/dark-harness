@@ -63,6 +63,7 @@ source: tracking/
 | [DH-0044](../DH-0044-no-streaming-partial-output.md) | No streaming of partial model output — `agent_output` events only fire once per completed turn | feature | stefan |
 | [DH-0045](../DH-0045-no-extended-thinking-support.md) | No extended-thinking (interleaved/extended thinking blocks) support | feature | stefan |
 | [DH-0089](../DH-0089-no-tool-call-sse-event-tui-web-can-t-show-generic-tool-call-activity-in-the-transcript.md) | No tool_call SSE event — TUI/Web can't show generic tool-call activity in the transcript | feature | stefan |
+| [DH-0112](../DH-0112-e2e-support-mock-provider-ts-never-updated-for-dh-0044-s-mandatory-streaming-real-turns-hang-past-agent-status.md) | e2e/support/mock-provider.ts never updated for DH-0044's mandatory streaming -- real turns hang past agent_status | bug | stefan |
 
 ### implementing
 
