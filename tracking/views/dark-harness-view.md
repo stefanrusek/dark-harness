@@ -23,6 +23,7 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | deferred (2026-07-15): no observed sustained-outage incident, same as DH-0049 |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | deferred (2026-07-16): GitHub issue #7 created to gauge demand |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut | waiting on a real release/binary to exist before this can be written accurately |
+| [DH-0115](../DH-0115-e2e-reportoutcome-nudge-doubling-successturn-taskfailedturn-mock-helpers-predate-dh-0050.md) | e2e ReportOutcome-nudge doubling: successTurn/taskFailedTurn mock helpers predate DH-0050 | status: verifying |
 | [DH-0122](../DH-0122-every-dh-run-should-print-an-application-header-name-logo-version-build-config-status.md) | Every dh run should print an application header (name, logo, version/build, config status) | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
 | [DH-0124](../DH-0124-tui-empty-state-before-first-message-is-misleading-show-app-header-friendlier-prompt.md) | TUI empty-state before first message is misleading -- show app header + friendlier prompt | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
 | [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) | blocked on DH-0133 (UI overhaul: React/Ink migration) -- current-architecture implementation would be redone afterward |
@@ -66,10 +67,15 @@ source: tracking/
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
-| [DH-0115](../DH-0115-e2e-reportoutcome-nudge-doubling-successturn-taskfailedturn-mock-helpers-predate-dh-0050.md) | e2e ReportOutcome-nudge doubling: successTurn/taskFailedTurn mock helpers predate DH-0050 | bug | stefan |
 | [DH-0133](../DH-0133-ui-overhaul-migrate-web-to-react-tui-to-ink.md) | UI overhaul: migrate Web to React, TUI to Ink | feature | stefan |
 | [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React 🔒 | feature | stefan |
 | [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink 🔒 | feature | stefan |
+
+### verifying
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0115](../DH-0115-e2e-reportoutcome-nudge-doubling-successturn-taskfailedturn-mock-helpers-predate-dh-0050.md) | e2e ReportOutcome-nudge doubling: successTurn/taskFailedTurn mock helpers predate DH-0050 | bug | stefan |
 
 ## Recently Closed
 

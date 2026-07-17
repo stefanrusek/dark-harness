@@ -245,12 +245,44 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
   };
 }
 
-/** Shorthand for the common case: one final plain-text completion, no tool calls. */
+/** Shorthand for the common case: one final plain-text completion, no tool calls. Use only
+ * for interactive (server/TUI/Web) scripted turns — `ReportOutcome` is never registered as a
+ * tool there (DH-0050), so a plain-text end_turn is the right shape. For non-interactive
+ * (`--job`/sub-agent) turns, use `jobSuccessTurn` instead: a plain-text turn there gets one
+ * harness-injected `REPORT_OUTCOME_NUDGE_MESSAGE` reminder turn first (loop.ts), doubling the
+ * expected provider call count. */
 export function successTurn(text: string): MockTurn {
   return { text, stopReason: "end_turn" };
 }
 
-/** A self-reported-failure completion per loop.ts's `TASK_FAILED_MARKER` convention. */
+/** A self-reported-failure completion per loop.ts's `TASK_FAILED_MARKER` convention. Same
+ * interactive-only caveat as `successTurn` — use `jobTaskFailedTurn` for non-interactive
+ * runs. */
 export function taskFailedTurn(text = "Could not complete the task. TASK_FAILED"): MockTurn {
   return { text, stopReason: "end_turn" };
+}
+
+/** DH-0115: non-interactive (`--job`/sub-agent) equivalent of `successTurn` — emits an
+ * authoritative `ReportOutcome(status: "success")` tool call alongside the text so the turn
+ * resolves in exactly one provider call (DH-0050 tier 1), instead of `successTurn`'s plain
+ * end_turn, which triggers a harness-injected nudge turn first when `ReportOutcome` is never
+ * called. Do not use for interactive (server/TUI/Web) scripted turns: `ReportOutcome` isn't a
+ * registered tool there and the call would hit an unknown-tool error. */
+export function jobSuccessTurn(text: string): MockTurn {
+  return {
+    text,
+    toolCalls: [{ name: "ReportOutcome", input: { status: "success", summary: text } }],
+    stopReason: "tool_use",
+  };
+}
+
+/** Non-interactive equivalent of `taskFailedTurn` — emits an authoritative
+ * `ReportOutcome(status: "failure")` tool call alongside the text, same rationale and
+ * interactive-mode caveat as `jobSuccessTurn`. */
+export function jobTaskFailedTurn(text = "Could not complete the task. TASK_FAILED"): MockTurn {
+  return {
+    text,
+    toolCalls: [{ name: "ReportOutcome", input: { status: "failure", summary: text } }],
+    stopReason: "tool_use",
+  };
 }

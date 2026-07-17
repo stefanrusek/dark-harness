@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0115
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -76,3 +76,34 @@ e2e/support/mock-provider.ts's successTurn()/taskFailedTurn() helpers (and e2e/s
 > first. Filed as a separate ticket rather than folded into DH-0112 since it's an unrelated
 > root cause (DH-0050's `ReportOutcome` convention vs. DH-0044's mandatory streaming) and a
 > materially different fix shape (tool-call scripting vs. SSE-shape serving).
+
+> [!NOTE]
+> 2026-07-17 — Fixed via opt-in helpers, not a blanket change: added `jobSuccessTurn()` /
+> `jobTaskFailedTurn()` to `e2e/support/mock-provider.ts` and `e2e/support/mock-bedrock-provider.ts`,
+> which emit an authoritative `ReportOutcome` tool_use call (status `success`/`failure`)
+> alongside the scripted text, matching `src/agent/runtime.test.ts`'s `sendMessageToRoot`
+> pattern. `successTurn()`/`taskFailedTurn()` are unchanged and still used as-is by every
+> interactive (server/TUI/Web) call site, where `ReportOutcome` is never registered as a tool.
+> Updated the three affected non-interactive call sites: `e2e/exit-codes.test.ts` (both
+> `--job` tests), `e2e/server-protocol.test.ts` (the sub-agent-spawn scenario's `subProvider`
+> only — root stays on `successTurn` since it's interactive), and
+> `e2e/bedrock-provider.test.ts` (all three `--job` tests).
+>
+> Verification: `bun run typecheck` clean. `bun run test:coverage`: 2110 pass / 0 fail.
+> `bun run e2e`: `exit-codes.test.ts`, `server-protocol.test.ts`, `bedrock-provider.test.ts`
+> now 18/18 pass (was 6 failing pre-fix, matching the ticket's count). Full `bun run e2e` run
+> shows 8 remaining failures, all pre-existing tmux-PTY environment issues (`can't find pane`)
+> in unrelated TUI test files (`tui.test.ts`, `markdown-rendering.test.ts`,
+> `slash-commands.test.ts`) — confirmed identical against unmodified `main` via `git stash`,
+> not a regression from this change. `bun run lint` has pre-existing unrelated failures (two
+> `.claude/skills/forked-subagent` scripts, `src/agent/providers/openai-compatible.ts`/
+> `.test.ts`) not touched by this ticket.
+>
+> Acceptance-criteria → test mapping (CLAUDE.md §9): the ticket's single User Story
+> ("non-interactive e2e mock turns complete in exactly the scripted number of provider calls")
+> is proven by `e2e/exit-codes.test.ts`'s `"success: root agent self-reports completion ->
+> exit 0"` and `"self-reported failure: ReportOutcome(failure) -> exit 1"` (both assert
+> `provider.callCount`), `e2e/server-protocol.test.ts`'s `"Agent tool spawns a real sub-agent:
+> SSE events and getAgentTree() show real nesting"` (asserts `subProvider.callCount === 1`),
+> and `e2e/bedrock-provider.test.ts`'s three tests (assert `provider.callCount` for the
+> success and tool_use cases, exit code 1 for the failure case).

@@ -24,9 +24,10 @@ import type { DhConfig } from "../src/contracts/index.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import {
+  jobSuccessTurn,
+  jobTaskFailedTurn,
   mockBedrockEnv,
   startMockBedrockProvider,
-  successTurn,
 } from "./support/mock-bedrock-provider.ts";
 import { createWorkspace } from "./support/workspace.ts";
 
@@ -49,7 +50,7 @@ function bedrockConfig(): DhConfig {
 
 describe("bedrock-type provider (gap 2b)", () => {
   test("real binary drives the real BedrockProvider against a mock Converse endpoint -> exit 0", async () => {
-    const provider = await startMockBedrockProvider([successTurn("All done via Bedrock.")]);
+    const provider = await startMockBedrockProvider([jobSuccessTurn("All done via Bedrock.")]);
     cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
     cleanups.addWorkspace(ws.cleanup);
@@ -74,9 +75,7 @@ describe("bedrock-type provider (gap 2b)", () => {
   });
 
   test("self-reported failure over Bedrock -> exit 1, same TASK_FAILED convention as Anthropic", async () => {
-    const provider = await startMockBedrockProvider([
-      { text: "Could not complete the task. TASK_FAILED", stopReason: "end_turn" },
-    ]);
+    const provider = await startMockBedrockProvider([jobTaskFailedTurn()]);
     cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
     cleanups.addWorkspace(ws.cleanup);
@@ -104,7 +103,7 @@ describe("bedrock-type provider (gap 2b)", () => {
         toolCalls: [{ name: "Bash", input: { command: "echo hi" } }],
         stopReason: "tool_use",
       },
-      successTurn("Ran the command via Bedrock tool_use."),
+      jobSuccessTurn("Ran the command via Bedrock tool_use."),
     ]);
     cleanups.addProcess(provider.stop);
     const ws = createWorkspace();

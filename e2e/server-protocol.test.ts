@@ -7,7 +7,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { ExitCode } from "../src/contracts/exit-codes.ts";
 import type { AgentTreeResponse, CommandAck } from "../src/contracts/index.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
-import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
+import {
+  jobSuccessTurn,
+  startMockAnthropicProvider,
+  successTurn,
+} from "./support/mock-provider.ts";
 import { startDhServer } from "./support/port.ts";
 import { connectSse } from "./support/sse-client.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
@@ -320,7 +324,7 @@ describe("sub-agent spawning over real HTTP/SSE (Round 2, gap 2a)", () => {
       successTurn("Root heard back from the sub-agent."),
     ]);
     cleanups.addProcess(rootProvider.stop);
-    const subProvider = startMockAnthropicProvider([successTurn("Sub-agent reporting in.")]);
+    const subProvider = startMockAnthropicProvider([jobSuccessTurn("Sub-agent reporting in.")]);
     cleanups.addProcess(subProvider.stop);
 
     const ws = createWorkspace();

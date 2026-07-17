@@ -8,10 +8,10 @@ import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import {
   errorTurn,
+  jobSuccessTurn,
+  jobTaskFailedTurn,
   malformedTurn,
   startMockAnthropicProvider,
-  successTurn,
-  taskFailedTurn,
 } from "./support/mock-provider.ts";
 import { baseConfig, createWorkspace } from "./support/workspace.ts";
 
@@ -20,7 +20,7 @@ afterEach(() => cleanups.runAll());
 
 describe("exit-code matrix (--job)", () => {
   test("success: root agent self-reports completion -> exit 0", async () => {
-    const provider = startMockAnthropicProvider([successTurn("All done, no issues.")]);
+    const provider = startMockAnthropicProvider([jobSuccessTurn("All done, no issues.")]);
     cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
     cleanups.addWorkspace(ws.cleanup);
@@ -38,8 +38,8 @@ describe("exit-code matrix (--job)", () => {
     expect(provider.callCount).toBe(1);
   });
 
-  test("self-reported failure: TASK_FAILED marker -> exit 1", async () => {
-    const provider = startMockAnthropicProvider([taskFailedTurn()]);
+  test("self-reported failure: ReportOutcome(failure) -> exit 1", async () => {
+    const provider = startMockAnthropicProvider([jobTaskFailedTurn()]);
     cleanups.addProcess(provider.stop);
     const ws = createWorkspace();
     cleanups.addWorkspace(ws.cleanup);
@@ -54,6 +54,7 @@ describe("exit-code matrix (--job)", () => {
 
     expect(code).toBe(1);
     expect(proc.stdout()).toContain("TASK_FAILED");
+    expect(provider.callCount).toBe(1);
   });
 
   test("harness error: malformed dh.json -> exit 2+, never a raw crash", async () => {
