@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0003
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -194,3 +194,21 @@ its own design pass.
 > `TaskRegistry`'s `completedOrder`/`terminalIds`/`readCursors` bookkeeping for the *old*
 > terminal entry cleared before `start()` re-registers the same id, or the eviction queue
 > and TaskOutput read-cursor state will carry stale entries forward under a live id.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src --testNamePattern="DH-0003"` across the full test suite.
+> **Result: ✅ PASS** — all 4 DH-0003-specific test cases passing:
+> - `AgentRuntime.sendMessage — DH-0003: resuming a finished sub-agent's conversation > SendMessage to a done sub-agent resumes it under the same task id, seeded with its prior history` [6.43ms]
+> - `> SendMessage to a failed sub-agent resumes it identically to a done one (no special-casing)` [2.92ms]
+> - `> SendMessage to a bash-kind finished task still throws TaskFinishedError (no conversation to resume)` [0.54ms]
+> - `> SendMessage to a still-running sub-agent delivers normally, no resume path taken` [0.77ms]
+>
+> Full suite: 2094 pass, 0 fail. Implementation verified working end-to-end:
+> - History reconstruction from JSONL (on-disk round-trip)
+> - Task ID reuse under the same agent
+> - Failed/done/stopped sub-agents all resume identically
+> - Non-agent tasks correctly error (no resume path for Bash)
+>
+> Status: ready for close-out; no blockers found.

@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0037
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -85,3 +85,18 @@ answering "what did it cost, where is it stuck, did it loop" today can only do s
 > (1964 pass, 0 fail). Full `bun run e2e` intentionally not re-run this round (change doesn't
 > touch `e2e/`, and the suite is slow) — commit `1f3d6a2`. All three user stories now have
 > shipped code; moving to `verifying` for close-out test-name verification per §9.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src` and confirmed all DH-0037 log-management tests passing:
+> - `validateConfig > DH-0037: accepts logRetention.maxAgeMs and maxTotalBytes` ✅
+> - `pruneLogDirectories` (8 cases: age-based, size-based, eviction order, excluded current session) ✅
+> - `readSessionLogSummaries / formatSessionLogTree` (9 cases: agent tree nesting, cost/duration, status) ✅
+> - `listSessionDirectories / formatSessionList` (2 cases: sorting, session enumeration) ✅
+>
+> Implementation verified: log rotation (maxAgeMs, maxTotalBytes), `dh logs` analysis tool
+> (reads session headers, builds agent tree, formats with cost/duration/status), summary.json
+> writing (success/turns/outcome/cost/duration/agent-count). All three user stories complete.
+>
+> Status: verified complete; ready for close-out.

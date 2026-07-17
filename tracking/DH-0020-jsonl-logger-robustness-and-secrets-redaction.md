@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0020
 type: bug
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -279,3 +279,18 @@ which are pre-existing/unrelated to this ticket's changed files (`src/server/log
 `src/server/redact.ts` are lint-clean and 100% covered). Criteria coverage is complete. Not
 this sub-agent's call to fix — routing back per gate-check's design (report only, no
 patching).
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src` and confirmed all DH-0020 logger/redaction tests passing:
+> - `SessionLogger` (10 cases: header/events, redaction, fsync tiers, error handling, recovery) ✅
+> - `redactSecrets` (19 cases: known-value matching, pattern table, JSON escaping) ✅
+> - `collectConfigSecrets` (6 cases: token/apiKey/MCP headers) ✅
+> - `sanitizeEvent` (3 cases: tool_call redaction, pass-through) ✅
+>
+> Implementation verified: write-error handling drops lines + one-time stderr per file,
+> fsync on header/terminal lines only (host-crash-safe), secrets redacted via known-value +
+> pattern matching, valid JSON preservation guaranteed.
+>
+> Status: verified complete; ready for close-out.

@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0116
 type: bug
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
@@ -73,3 +73,15 @@ only in `.claude/skills/`, untouched by this change); `bun test src` — 2041 pa
 coverage unaffected (`src/cli.ts` 90.20%/99.62%, same uncovered lines as before this change).
 
 Moving to `verifying`.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src` and confirmed DH-0116 test passing:
+> - `main — interactive modes > --server passes the same sessionId to createAgentLoop that it reports as its own session` ✅
+>
+> Implementation verified: `runMode()` now generates `sessionId` before constructing the agent loop
+> and threads it through `createAgentLoop()` → `AgentRuntimeLoopAdapter` → `new AgentRuntime({ ..., sessionId })`.
+> Log headers now match their directory sessionId end-to-end.
+>
+> Status: ready for close-out; no blockers found.

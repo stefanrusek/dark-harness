@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0111
 type: bug
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-16
 relations:
@@ -68,3 +68,17 @@ mock-provider round trip, before and after this fix — an existing environment-
 in this worktree, not specific to `--connect` or this bug (it reproduces on non-connect
 `--web` too). Not something this fix changes either way; flagging per the "no silent
 truncation" rule rather than claiming full `bun run e2e` green.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src --testNamePattern="DH-0111"` to verify the URL scheme-stripping fix.
+> **Result: ✅ PASS** — both DH-0111-specific test cases passing:
+> - `main — interactive modes > DH-0111: --connect strips an http:// scheme the caller already included, avoiding a doubled scheme` [0.09ms]
+> - `> DH-0111: --connect --web strips an https:// scheme the caller already included` [0.08ms]
+>
+> Implementation verified: `runInteractiveMode` now strips leading `http://`/`https://` from
+> the `mode.host` CLI argument before prepending the computed scheme, for both console and Web modes.
+> Double-scheme bug fixed: `http://http://localhost:...` no longer occurs.
+>
+> Status: ready for close-out; no blockers found.

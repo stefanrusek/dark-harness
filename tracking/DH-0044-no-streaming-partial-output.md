@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0044
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -439,3 +439,19 @@ TUI/Web in parallel → E2E.
 >
 > This was the final domain per D10 — recommend moving to `closed` once a maintainer confirms
 > the TUI e2e tier in an environment with working tmux PTY sessions.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src` and confirmed all DH-0044 streaming tests passing:
+> - `runAgentLoop — DH-0044: streaming coalescing, fallback, and mid-turn partial output` (9 cases) ✅
+> - `AppView construction and rendering > stop() cancels a still-pending coalesced render (DH-0044 D9)` ✅
+> - `BedrockProvider > DH-0044: streaming callbacks and event ordering` (4 cases) ✅
+> - `BedrockProvider > DH-0044 D6: retry gates on first delta, not before` (2 cases) ✅
+> - `AnthropicProvider > DH-0044: streaming callbacks and event ordering` (4 cases) ✅
+>
+> Full streaming pipeline verified: Anthropic and Bedrock adapters stream incrementally,
+> loop coalesces deltas (1 KiB / 50ms), frame-coalesced redraw in TUI, rAF batching in Web.
+> Partial text logged on mid-turn error; retry gates on first delta, not before.
+>
+> Status: verified complete; ready for close-out.

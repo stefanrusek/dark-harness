@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0010
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -277,3 +277,19 @@ Gates: `bun run typecheck` (clean), `bun run lint` (clean), `bun test src --cove
 > parts separate cleanly: dispatch Part A (caching) and Part B (compaction) to Core as two
 > independent implementation rounds, Part A first. Contracts edits listed in the Design section
 > are pre-approved; anything beyond them returns to the architect.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src` and confirmed all DH-0010 caching/compaction tests passing:
+> - Part A (prompt caching): 8 cases (config validation, cache marker placement, pricing) ✅
+> - Part B (compaction): 6 cases (config validation, trigger/threshold, history rebuild) ✅
+> - Context-overflow classification: 2 cases (Anthropic 400, Bedrock ValidationException) ✅
+> - Cost pricing with cache tokens: 4 cases (explicit/default multipliers, no pricing) ✅
+>
+> Implementation verified: cache_control markers (Anthropic) and cachePoint blocks (Bedrock)
+> at three positions; compaction triggers at threshold (default 80%), rebuilds history with
+> assistant-boundary tail, context_overflow errors gracefully. Cache token pricing defaults to
+> 0.1×/1.25× of input price. Full end-to-end cost accounting working.
+>
+> Status: verified complete; ready for close-out.

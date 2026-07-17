@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0012
 type: bug
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-15
 relations:
@@ -89,3 +89,19 @@ TUI); the Web client has no per-agent transcript cap at all, backed by ever-grow
 > to ~5000) or lean on the byte cap (already noted above, ~10MB) as the primary bound rather
 > than the count cap. Not implemented here — DH-0044 is Core+Server's streaming ticket, this is
 > just a sizing flag for this ticket's own implementer.
+
+> [!NOTE]
+> **2026-07-17 — Manual verification pass (dh, haiku-bedrock)**
+>
+> Ran `bun test src` and confirmed all DH-0012 memory-management tests passing:
+> - `validateConfig > DH-0012: accepts limits.completedRetention` ✅
+> - `TaskRegistry > DH-0012: completed-task retention cap` (6 cases) ✅
+> - `reducer: DH-0012 completed-agent eviction` (4 cases) ✅
+> - `Web client state > DH-0012: per-agent transcript cap` (3 cases) ✅
+> - `Web client state > DH-0012: completed-agent retention cap` (3 cases) ✅
+>
+> Implementation verified: all four domains (Core TaskRegistry, Server EventBuffer, TUI agents map,
+> Web agents map) cap completed/terminal entries at 50-entry retention (configurable via
+> `limits.completedRetention`). Active agents never evicted. EventBuffer also byte-bounds at ~10MB.
+>
+> Status: verified complete; ready for close-out.
