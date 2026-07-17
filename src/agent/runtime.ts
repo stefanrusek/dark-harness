@@ -820,6 +820,7 @@ export class AgentRuntime {
             // be steered mid-conversation while it's actively looping; `interactive` only
             // controls what happens when the model itself produces a non-tool-use turn.
             interactive: false,
+            hasPendingChildren: () => this.tasks.hasNonTerminalChildren(agentId),
             client: this.client,
             ...(this.config.options.maxTurns !== undefined
               ? { maxTurns: this.config.options.maxTurns }
@@ -1050,6 +1051,7 @@ export class AgentRuntime {
         },
         signal: this.rootController.signal,
         interactive: this.interactive,
+        hasPendingChildren: () => this.tasks.hasNonTerminalChildren(ROOT_AGENT_ID),
         client: this.client,
         ...(this.config.options.maxTurns !== undefined
           ? { maxTurns: this.config.options.maxTurns }
@@ -1405,45 +1407,70 @@ export class AgentRuntime {
     const output = snapshot.output.length > 0 ? snapshot.output : "(no output)";
     const message = `[${kindLabel} ${snapshot.id} ${outcome}]\n${output}`;
 
-    const delivered = this.tryDeliverToAgent(snapshot.parentAgentId, message);
+    // DH-0140: routed through the same live-or-resume decision `sendMessage()`/DH-0003 already
+    // makes for explicit operator messages, instead of the old live-only `tryDeliverToAgent()`
+    // — a parent that has already reached a terminal status (the stress-test failure this
+    // ticket reports) is now resumed with this notification as its next instruction, not
+    // silently dropped.
+    const delivery = this.deliverOrResumeAgent(snapshot.parentAgentId, message);
+
+    const content =
+      delivery === "live"
+        ? `Completion notification delivered live to parent agent ${snapshot.parentAgentId}.`
+        : delivery === "resumed"
+          ? `Completion notification delivered via resume to parent agent ${snapshot.parentAgentId} (it had already reached a terminal status; resumed with this notification as its next instruction): ${message}`
+          : `Completion notification could not be delivered (parent agent ${snapshot.parentAgentId} is unreachable) — recorded here only, not lost: ${message}`;
 
     this.onLogLine?.(snapshot.id, {
       version: 1,
       timestamp: new Date().toISOString(),
       type: "message",
       role: "system",
-      content: delivered
-        ? `Completion notification delivered live to parent agent ${snapshot.parentAgentId}.`
-        : `Completion notification could NOT be delivered live (parent agent ${snapshot.parentAgentId} is not currently running/waiting — orphaned or already finished) — recorded here only, not lost: ${message}`,
+      content,
     });
   }
 
-  /** Attempts live delivery of a completion notification into `agentId`'s currently-running
-   * conversation. Returns whether it actually reached a live listener (a genuinely
-   * running/waiting loop), as opposed to a stale or never-registered `sendMessage` sink —
-   * both the root's and a sub-agent task's own `sendMessage` closures remain set after their
-   * loop has already returned (nothing clears them), so a status check is required in
-   * addition to "is a sink registered at all" to tell a live delivery from a message pushed
-   * into a dead, already-abandoned queue nobody will ever drain. */
-  private tryDeliverToAgent(agentId: string, message: string): boolean {
+  /** DH-0140: delivers `message` into `agentId`'s conversation live if it's currently
+   * running/waiting, else resumes it — the root case mirrors `invokeSkill()`'s root-lazy-start
+   * convention (a not-yet-started or terminal root is (re)started fire-and-forget with
+   * `message` as its instruction); the sub-agent case mirrors `sendMessage()`'s
+   * `TaskFinishedError`-triggered `resumeFinishedAgent()` call. Returns `"live"` when a
+   * genuinely running/waiting listener received it directly, `"resumed"` when the target had
+   * already finished (or wasn't started yet) and was (re)started with `message` as its next
+   * instruction, or `"dropped"` only for a case that shouldn't occur given tasks are never
+   * evicted (an unknown task id, or a `bash`-kind task, which has no conversation to resume). */
+  private deliverOrResumeAgent(agentId: string, message: string): "live" | "resumed" | "dropped" {
     if (agentId === ROOT_AGENT_ID) {
       if (this.rootStarted && this.rootSendMessage && this.isLiveStatus(this.rootStatus)) {
         this.rootSendMessage(message);
-        return true;
+        return "live";
       }
-      return false;
+      // Fire-and-forget, mirroring invokeSkill()'s root-lazy-start convention: runRoot()'s own
+      // try/catch already handles a harness-level start failure (updates rootStatus, emits
+      // session_ended), nothing further to do at this call site.
+      this.runRoot(message).catch(() => {});
+      return "resumed";
     }
 
     const parentSnapshot = this.tasks.trySnapshot(agentId);
-    if (!parentSnapshot || !this.isLiveStatus(parentSnapshot.status)) {
-      return false;
+    if (!parentSnapshot) {
+      return "dropped";
     }
-    try {
-      this.tasks.sendMessage(agentId, message);
-      return true;
-    } catch {
-      return false;
+    if (this.isLiveStatus(parentSnapshot.status)) {
+      try {
+        this.tasks.sendMessage(agentId, message);
+        return "live";
+      } catch {
+        // Fell terminal between the snapshot check above and this call — fall through to the
+        // resume path below, same as the plain terminal case.
+      }
     }
+    if (parentSnapshot.kind !== "agent") {
+      return "dropped";
+    }
+    const latest = this.tasks.trySnapshot(agentId) ?? parentSnapshot;
+    this.resumeFinishedAgent(agentId, latest, message);
+    return "resumed";
   }
 
   private isLiveStatus(status: AgentStatus): boolean {

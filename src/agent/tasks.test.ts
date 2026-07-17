@@ -469,4 +469,69 @@ describe("TaskRegistry", () => {
       expect(() => registry.clearTerminal("nope")).toThrow(TaskNotFoundError);
     });
   });
+
+  describe("hasNonTerminalChildren (DH-0140: nudge-suppression check)", () => {
+    test("true while a directly-spawned child (agent-kind) is still running", () => {
+      const registry = new TaskRegistry();
+      registry.start({
+        kind: "agent",
+        parentAgentId: "parent",
+        run: () => new Promise(() => {}),
+      });
+      expect(registry.hasNonTerminalChildren("parent")).toBe(true);
+    });
+
+    test("true while a directly-spawned child (bash-kind) is still running", () => {
+      const registry = new TaskRegistry();
+      registry.start({
+        kind: "bash",
+        parentAgentId: "parent",
+        run: () => new Promise(() => {}),
+      });
+      expect(registry.hasNonTerminalChildren("parent")).toBe(true);
+    });
+
+    test("true while a directly-spawned child is 'waiting' (not just 'running')", () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "agent",
+        parentAgentId: "parent",
+        run: () => new Promise(() => {}),
+      });
+      registry.setStatus(id, "waiting");
+      expect(registry.hasNonTerminalChildren("parent")).toBe(true);
+    });
+
+    test("false once every directly-spawned child has reached a terminal status", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({
+        kind: "bash",
+        parentAgentId: "parent",
+        run: async () => {},
+      });
+      await registry.awaitDone(id);
+      expect(registry.hasNonTerminalChildren("parent")).toBe(false);
+    });
+
+    test("false for a parent with no children at all", () => {
+      const registry = new TaskRegistry();
+      expect(registry.hasNonTerminalChildren("parent")).toBe(false);
+    });
+
+    test("ignores grandchildren — only direct children count", async () => {
+      const registry = new TaskRegistry();
+      const childId = registry.start({
+        kind: "agent",
+        parentAgentId: "parent",
+        run: async () => {},
+      });
+      await registry.awaitDone(childId);
+      registry.start({
+        kind: "bash",
+        parentAgentId: childId,
+        run: () => new Promise(() => {}),
+      });
+      expect(registry.hasNonTerminalChildren("parent")).toBe(false);
+    });
+  });
 });

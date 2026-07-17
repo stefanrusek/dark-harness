@@ -208,6 +208,14 @@ export interface AgentLoopParams {
    * (the whole point of a live switch instead of a fresh session) survives intact. See the
    * mutable `binding` local in `runAgentLoop` below for where this is actually read. */
   registerModelSwitch?: (fn: (binding: ModelBinding) => void) => void;
+  /** DH-0140: threaded from `AgentRuntime`'s `TaskRegistry.hasNonTerminalChildren()` — checked
+   * fresh at each DH-0050 nudge decision point rather than snapshotted once, since a child can
+   * finish between turns. When true, the nudge is skipped for that turn (the agent is treated
+   * as deliberately waiting on its own children, not as having forgotten to self-report) —
+   * see the module doc comment's SELF-REPORT CONVENTION section for the nudge itself. Absent
+   * (root loop invocations outside a full AgentRuntime, e.g. some test harnesses) behaves
+   * exactly as before this ticket — nudge fires unconditionally on the relevant turn. */
+  hasPendingChildren?: () => boolean;
 }
 
 /** DH-0093: the mutable per-loop state a model switch replaces — everything a provider call
@@ -913,6 +921,14 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
         // back to the legacy marker scan. A max_tokens truncation skips the nudge entirely —
         // nudging a model whose response is already being cut off just truncates again, so it
         // goes straight to the unconditional failure it always has.
+        if (completion.stopReason !== "max_tokens" && params.hasPendingChildren?.()) {
+          // DH-0140: this agent has its own spawned children still running/waiting — it's
+          // deliberately waiting on them, not a forgotten self-report. Skip the nudge (and
+          // don't mark `nudged`) and just start another turn; the legacy fallback below still
+          // applies once the children finish, if the agent keeps ending turns with no tool
+          // call after that.
+          continue;
+        }
         if (completion.stopReason !== "max_tokens" && !nudged) {
           nudged = true;
           messages.push({

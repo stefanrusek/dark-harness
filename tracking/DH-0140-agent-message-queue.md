@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0140
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -79,6 +79,77 @@ Status is `ready` for Phase 1 as scoped by the Functional Requirements below. Ph
 - Should FR1's "resume a terminal parent automatically" apply to *every* kind of terminal status equally, or should a `stopped` parent (explicitly stopped by an operator/TaskStop) be treated differently — e.g. respect the stop and log-only rather than auto-resuming? DH-0003 already resumes `stopped` sub-agents identically to `done`/`failed` ones for explicit SendMessage, so this ticket's Assumptions section takes the position "no difference," but it's worth the implementer double-checking this doesn't surprise anyone in review, since an operator-stopped agent silently coming back to life on an unrelated child's completion is a slightly different flavor of "surprising resume" than an operator's own deliberate follow-up message.
 
 ## Notes
+
+### 2026-07-17 — Phase 1 implemented, moved to verifying
+
+Implemented exactly the Phase 1 scope FR1-FR4 describe, no Phase 2 work:
+
+- **FR1**: added `AgentRuntime.deliverOrResumeAgent()` (`src/agent/runtime.ts`), replacing the
+  old live-only `tryDeliverToAgent()` as `handleTaskSettled()`'s delivery path. Root case
+  mirrors `invokeSkill()`'s root-lazy-start convention (live send if running/waiting, else
+  fire-and-forget `runRoot()`); sub-agent case mirrors `sendMessage()`'s
+  `TaskFinishedError`-triggered `resumeFinishedAgent()` call. The JSONL system log line now
+  distinguishes `"delivered live"` / `"delivered via resume"` / (the should-be-unreachable)
+  `"could not be delivered"`.
+- **FR2**: added `TaskRegistry.hasNonTerminalChildren(parentAgentId)` (`src/agent/tasks.ts`) —
+  a plain filter over the existing `list()`, no new indexing structure.
+- **FR3**: `runAgentLoop`'s DH-0050 nudge branch (`src/agent/loop.ts`) now checks a new
+  `AgentLoopParams.hasPendingChildren?: () => boolean` (threaded from `AgentRuntime` via
+  `TaskRegistry.hasNonTerminalChildren()` for both the root and every sub-agent loop
+  invocation) and, when true, skips the nudge entirely for that turn — no nudge injected, no
+  `nudged` flag set, no fall-through to the legacy TASK_FAILED/clean-end determination — just
+  starts another turn. Once children clear, the nudge fires normally on the next non-tool-use
+  turn.
+- **FR4**: no changes to `pendingMessages`/its ordering — confirmed no regression via the
+  existing `src/agent/loop.test.ts` `pendingMessages` coverage (still green, unmodified).
+- No `src/contracts/` changes (FR5) — confirmed nothing new crosses the SSE/JSONL/wire
+  boundary; this is entirely `AgentRuntime`/`TaskRegistry`/`AgentLoopParams` internal.
+
+**Tests** (CLAUDE.md §9 — one per User Story bullet):
+
+- User Story 1 (late notification resumes a terminal sub-agent parent): `src/agent/runtime.test.ts`,
+  `"orphaned grandchild: if the parent has already finished, the notification resumes it
+  instead of being lost"` (rewritten from the old drop-and-log version to use a real
+  `spawnAgent()` + `SessionLogger`-backed runtime so `resumeFinishedAgent()`'s
+  `reconstructSubAgentHistory()` call has a real JSONL file to read, matching how this path is
+  actually reached in production — only `spawnAgent()` ever creates `agent`-kind tasks).
+- User Story 2 (post-session-end root resume): `src/agent/runtime.test.ts`, two cases —
+  `"a background task's completion lazily (re)starts a root that hasn't started yet, instead
+  of being dropped"` and `"a background task's completion resumes the root after its own
+  session has already concluded"`.
+- User Story 3 (nudge suppressed while children outstanding) and its "fires normally once
+  children finish" counterpart: `src/agent/loop.test.ts`, `"DH-0140: the nudge is skipped (not
+  just deferred) while hasPendingChildren() reports outstanding children..."` and `"DH-0140:
+  once hasPendingChildren() reports no more outstanding children, the nudge fires normally on
+  the next non-tool-use turn"`.
+- User Story 4 (`pendingMessages` regression check): existing `src/agent/loop.test.ts`
+  `pendingMessages` cases, unmodified and still passing — no new test needed per the ticket's
+  own text.
+- `TaskRegistry.hasNonTerminalChildren()` itself: `src/agent/tasks.test.ts`, new
+  `describe("hasNonTerminalChildren (DH-0140: nudge-suppression check)")` block (6 cases:
+  agent-kind child running, bash-kind child running, `waiting`-status child, all-terminal,
+  no-children, grandchildren-excluded).
+
+**Pre-existing test updates required by the new (correct) behavior**: two existing
+`runtime.test.ts` cases previously asserted the old drop-on-terminal-parent /
+drop-on-unstarted-root behavior (`"...could NOT be delivered live..."`) — updated in place to
+assert the new resume/lazy-start behavior instead (see the "orphaned grandchild" rewrite
+above and the lazy-root-start test). One unrelated `getAgentTree()` test
+(`"nests agent-kind sub-agents under their parent, excluding bash-kind tasks"`) started
+exercising the new lazy-root-start path as a side effect of its own fixture (a background
+task/sub-agent parented to `ROOT_AGENT_ID`) — fixed by marking those two fixture tasks
+`background: false`, since the test is about tree structure, not completion notifications.
+
+**Gates**: `bun run typecheck` clean; `bun x biome check` clean on all touched files (full
+`bun run lint` has 12 pre-existing formatter-only failures in unrelated files, confirmed
+present on `main` before this change); `bun test src --coverage` — 2120 pass / 3 fail, the 3
+failures (`AnthropicProvider`/`createProvider` real-SDK-client construction) confirmed
+pre-existing on `main` unmodified (env-dependent, unrelated to this ticket); `bun run e2e` — 36
+pass / 2 fail, both failures (a `.status-badge` text-casing assertion in `web.test.ts`/
+`connect-web.test.ts`) confirmed pre-existing on `main` unmodified.
+
+Commit: (see git log — committed with explicit pathspec covering only
+`src/agent/{runtime,loop,tasks}.ts` and their `.test.ts` files).
 
 ### Validating the owner's two-queue proposal against the actual architecture
 
