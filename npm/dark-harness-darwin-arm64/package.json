@@ -1,0 +1,9 @@
+{
+  "name": "dark-harness-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Dark Harness (dh) precompiled binary for darwin/arm64. Installed automatically as an optionalDependency of the main \"dark-harness\" package — not intended for direct use.",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["dh"]
+}

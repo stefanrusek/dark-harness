@@ -1,0 +1,45 @@
+{
+  "$comment": "Canonical list of the 5 released targets and their per-platform npm package shape (esbuild/swc-style optionalDependencies). Source of truth for scripts/generate-npm-platform-packages.ts, npm/resolve-platform.mjs, and .github/workflows/release.yml's publish-npm job. DH-0004.",
+  "targets": [
+    {
+      "buildTarget": "bun-linux-x64",
+      "artifact": "dh-linux-x64",
+      "packageName": "dark-harness-linux-x64",
+      "os": "linux",
+      "cpu": "x64",
+      "binaryName": "dh"
+    },
+    {
+      "buildTarget": "bun-linux-arm64",
+      "artifact": "dh-linux-arm64",
+      "packageName": "dark-harness-linux-arm64",
+      "os": "linux",
+      "cpu": "arm64",
+      "binaryName": "dh"
+    },
+    {
+      "buildTarget": "bun-darwin-x64",
+      "artifact": "dh-darwin-x64",
+      "packageName": "dark-harness-darwin-x64",
+      "os": "darwin",
+      "cpu": "x64",
+      "binaryName": "dh"
+    },
+    {
+      "buildTarget": "bun-darwin-arm64",
+      "artifact": "dh-darwin-arm64",
+      "packageName": "dark-harness-darwin-arm64",
+      "os": "darwin",
+      "cpu": "arm64",
+      "binaryName": "dh"
+    },
+    {
+      "buildTarget": "bun-windows-x64",
+      "artifact": "dh-windows-x64.exe",
+      "packageName": "dark-harness-windows-x64",
+      "os": "win32",
+      "cpu": "x64",
+      "binaryName": "dh.exe"
+    }
+  ]
+}

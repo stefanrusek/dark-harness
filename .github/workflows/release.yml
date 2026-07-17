@@ -276,6 +276,18 @@ jobs:
     name: Publish to npm
     needs: release
     runs-on: ubuntu-latest
+    # DH-0004: esbuild/swc-style optionalDependencies packaging — replaces the old
+    # linux-x64-only single-package publish. Each of the 5 platform packages under npm/ is
+    # published first (they carry only a binary + a minimal os/cpu-scoped package.json, no
+    # dependency on the main package), then the main "dark-harness" package, whose
+    # optionalDependencies pin all 5 by exact version. Publishing platform packages before
+    # the main package means a fresh `npm install dark-harness` never briefly resolves an
+    # optionalDependency version that doesn't exist on the registry yet.
+    #
+    # No version bump happens here: package.json's "version" (and the matching
+    # optionalDependencies pins, kept in sync by scripts/generate-npm-platform-packages.ts)
+    # is source-controlled, same convention the single-package flow already used — bump it
+    # in a commit before tagging, this job just publishes whatever's checked in at the tag.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -288,25 +300,31 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Download linux-x64 binary
+      - name: Verify npm/ platform packages are not stale
+        run: bun scripts/generate-npm-platform-packages.ts --check
+
+      - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dh-linux-x64
           path: dist-download
 
-      - name: Stage npm package binary
+      - name: Stage per-platform package binaries
         run: |
-          mkdir -p dist
-          cp dist-download/dh-linux-x64 dist/dh
-          chmod +x dist/dh
-          # KNOWN v0.1 LIMITATION: package.json's "bin" currently points at a single
-          # binary (dist/dh), so this publishes a linux-x64-only npm package —
-          # `bunx dark-harness` will not work correctly on macOS/Windows. Real
-          # multi-platform npm distribution (per-platform optionalDependencies
-          # packages, or a postinstall downloader hitting this release's GitHub
-          # assets) is a package.json/packaging shape change outside this domain's
-          # ownership (.github/workflows/ only). Flagged in docs/handoffs/ci-release.md
-          # status log as a request to Core/coordinator rather than forked here.
+          set -euo pipefail
+          declare -A ARTIFACT_TO_PKG=(
+            [dh-linux-x64]=dark-harness-linux-x64
+            [dh-linux-arm64]=dark-harness-linux-arm64
+            [dh-darwin-x64]=dark-harness-darwin-x64
+            [dh-darwin-arm64]=dark-harness-darwin-arm64
+            [dh-windows-x64.exe]=dark-harness-windows-x64
+          )
+          for artifact in "${!ARTIFACT_TO_PKG[@]}"; do
+            pkg="${ARTIFACT_TO_PKG[$artifact]}"
+            binary_name="dh"
+            [ "$artifact" = "dh-windows-x64.exe" ] && binary_name="dh.exe"
+            cp "dist-download/${artifact}/${artifact}" "npm/${pkg}/${binary_name}"
+            chmod +x "npm/${pkg}/${binary_name}"
+          done
 
       - name: Require NPM_TOKEN
         env:
@@ -315,13 +333,24 @@ jobs:
           if [ -z "${NPM_TOKEN:-}" ]; then
             echo "::error::secrets.NPM_TOKEN is not set on this repository — npm publish cannot proceed."
             echo "::error::This is an owner-authority gap: the CI/Release domain lead cannot create or set repository secrets (per its handoff constraints). An owner must add an npm automation token as the NPM_TOKEN repository secret (Settings > Secrets and variables > Actions) before this job can succeed."
+            echo "::error::DH-0004: as of this release, that token must also have publish rights on the 5 new dark-harness-<platform> packages, not just the original dark-harness package."
             exit 1
           fi
 
       - name: Configure npm auth
         run: echo "//registry.npmjs.org/:_authToken=\${NPM_TOKEN}" > .npmrc
 
-      - name: Publish
+      - name: Publish platform packages
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          for pkg in dark-harness-linux-x64 dark-harness-linux-arm64 dark-harness-darwin-x64 dark-harness-darwin-arm64 dark-harness-windows-x64; do
+            cp .npmrc "npm/${pkg}/.npmrc"
+            (cd "npm/${pkg}" && npm publish --access public)
+          done
+
+      - name: Publish main package
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun publish
