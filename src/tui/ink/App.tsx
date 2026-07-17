@@ -21,7 +21,10 @@ export interface AppProps {
   scrollBus?: ScrollBus;
 }
 
-const HEADER_ROWS = 2;
+// DH-0136 reserved 2 for `<TitleBar>` (title line + divider); DH-0122 adds 1 for `<Header>`'s
+// now-populated single version-line row (see Header.tsx) so `contentRows` doesn't overflow
+// the terminal by that extra row.
+const HEADER_ROWS = 3;
 const MARGIN = 1;
 // DH-0125: StatusRow now renders one real line (model / progress / git branch+cwd) instead
 // of DH-0136's placeholder zero rows — content height must shrink by this much to keep the

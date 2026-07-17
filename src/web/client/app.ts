@@ -7,6 +7,7 @@
 import { createElement } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import type { ServerSentEvent } from "../../contracts/index.ts";
+import type { HeaderInfo } from "../../header-info.ts";
 import type { ServerTarget } from "../protocol.ts";
 import {
   CommandError,
@@ -88,6 +89,10 @@ export interface AppDeps {
    *  to an immediate macrotask outside a browser — see `defaultRaf`). */
   rafImpl?: (cb: FrameRequestCallback) => number;
   cancelRafImpl?: (handle: number) => void;
+  /** DH-0122: app name/version/build identity + `dh.json` config-status summary, fetched
+   *  from `WEB_CONFIG_PATH` alongside `target` (see main.ts) — static for the process
+   *  lifetime, so it's threaded straight into every render rather than through `WebState`. */
+  headerInfo?: HeaderInfo;
 }
 
 export class AppView {
@@ -412,6 +417,7 @@ export class AppView {
       this.root.render(
         createElement(App, {
           state: this.state,
+          ...(this.deps.headerInfo ? { headerInfo: this.deps.headerInfo } : {}),
           now,
           errorMessage: this.errorMessage,
           onSelectAgent: (agentId) => {

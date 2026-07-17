@@ -2,6 +2,7 @@
 // once per state change via a single `react-dom` root, replacing render.ts's hand-written
 // `buildShell` + per-section imperative render functions.
 import type { ReactElement } from "react";
+import type { HeaderInfo } from "../../../header-info.ts";
 import { type WebState, selectedAgent } from "../state.ts";
 import { AgentHeaderPanel } from "./AgentHeaderPanel.tsx";
 import { AppHeader } from "./AppHeader.tsx";
@@ -17,6 +18,7 @@ import { Transcript } from "./Transcript.tsx";
 
 export interface AppProps {
   state: WebState;
+  headerInfo?: HeaderInfo;
   now: number;
   errorMessage: string | null;
   onSelectAgent: (agentId: string) => void;
@@ -31,6 +33,7 @@ export interface AppProps {
 
 export function App({
   state,
+  headerInfo,
   now,
   errorMessage,
   onSelectAgent,
@@ -47,7 +50,7 @@ export function App({
   return (
     <div className="dh-app">
       <div className="app-header-slot">
-        <AppHeader />
+        <AppHeader {...(headerInfo ? { headerInfo } : {})} />
       </div>
       <nav className="sidebar">
         <div className="brand">Dark Harness</div>

@@ -17,6 +17,8 @@
 // from this client is therefore cross-origin by default; Server sends permissive CORS
 // headers and answers `OPTIONS` preflight to make this work.
 
+import type { HeaderInfo } from "../header-info.ts";
+
 export const SSE_PATH = "/api/events";
 export const COMMAND_PATH = "/api/commands";
 
@@ -46,4 +48,9 @@ export const WEB_CONFIG_PATH = "/dh-config.json";
 export interface WebConfigResponse {
   baseUrl: string;
   token?: string;
+  /** DH-0122: app name/version/build identity + `dh.json` config-status summary, sourced
+   * from `header-info.ts` (the same shared builder the CLI/TUI use) — only the client
+   * process (this same process serving `WEB_CONFIG_PATH`) has the `DhConfig` needed to build
+   * it, so it's threaded over the wire here rather than the browser re-deriving it. */
+  headerInfo?: HeaderInfo;
 }

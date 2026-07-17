@@ -1,11 +1,20 @@
-// DH-0136: reserved `<Header>` slot per Muriel's design pass (docs/design/style-guide.md
-// §5) — positioned above the agent tree/transcript in the Ink component tree so DH-0122's
-// full startup header and DH-0124's lighter empty-state variant can slot in later without
-// restructuring the tree. Both `variant`s are TODO content-wise until those tickets land;
-// this component deliberately renders zero rows in the meantime (no placeholder text, no
-// blank reserved lines) so it doesn't eat vertical space in an already height-constrained
-// terminal view.
+// DH-0136/DH-0122: reserved `<Header>` slot per Muriel's design pass (docs/design/
+// style-guide.md §5) — positioned above the agent tree/transcript in the Ink component tree.
+// DH-0122 fills the `"full"` variant with the app's version/build identity, sourced from
+// `header-info.ts` (the same shared builder CLI's `printAppHeader` and Web's `<AppHeader>`
+// use), kept to one dim row so it doesn't eat into the already height-constrained terminal
+// view alongside `<TitleBar>`. No `dh.json` config-status line here: the TUI client only
+// ever knows a `baseUrl`/token (see `startTui` in src/tui/app.ts), never the config that
+// produced them — including for a `--connect`ed remote server, which has no local `dh.json`
+// at all — so that summary is printed once, up front, by the CLI's own startup header
+// (`printAppHeader`, src/cli.ts) instead. DH-0124's `"empty"` variant is still TODO
+// content-wise and deliberately renders nothing in the meantime, per this file's original
+// contract.
+import { Text } from "ink";
+import { BUILD_INFO } from "../../config/build-info.ts";
+import { formatVersionString } from "../../header-info.ts";
 import type { AgentInfo } from "../types.ts";
+import { dim } from "./tokens.ts";
 
 export interface HeaderProps {
   agentState?: AgentInfo | null;
@@ -13,9 +22,10 @@ export interface HeaderProps {
   variant: "full" | "empty";
 }
 
-/** Renders nothing until DH-0122 (`variant: "full"`) / DH-0124 (`variant: "empty"`) land —
- * see this file's header comment for why an empty render is the deliberate contract, not a
- * placeholder omission. */
-export function Header(_props: HeaderProps): null {
-  return null;
+/** `variant: "full"` (DH-0122) renders a single dim version/build-identity line;
+ * `variant: "empty"` stays a zero-row render until DH-0124 populates it — see this file's
+ * header comment for why that's a deliberate contract, not a placeholder omission. */
+export function Header({ variant }: HeaderProps) {
+  if (variant !== "full") return null;
+  return <Text>{dim(formatVersionString(BUILD_INFO))}</Text>;
 }
