@@ -56,12 +56,42 @@ scopes. Air-gapping remains the strongest posture even with both enabled. Full r
 
 ## Quick start
 
-```bash
-# Run it directly, no install
-bunx dark-harness
+### Download a prebuilt binary
 
-# ...or build from source
-git clone https://github.com/<org>/dark-harness.git
+Grab the binary for your platform from the [latest release](https://github.com/stefanrusek/dark-harness/releases/latest):
+
+| OS | Arch | Asset |
+| --- | --- | --- |
+| Linux | x64 | `dh-linux-x64` |
+| Linux | arm64 | `dh-linux-arm64` |
+| macOS | x64 | `dh-darwin-x64` |
+| macOS | arm64 (Apple Silicon) | `dh-darwin-arm64` |
+| Windows | x64 | `dh-windows-x64.exe` |
+
+Each release also ships `SHA256SUMS.txt`. Verify your download before running it:
+
+```bash
+sha256sum -c SHA256SUMS.txt --ignore-missing   # linux
+shasum -a 256 -c SHA256SUMS.txt --ignore-missing   # macOS
+```
+
+Then make it executable (linux/macOS) and run it directly — no install step, no runtime to
+set up:
+
+```bash
+chmod +x dh-linux-x64   # or your platform's asset
+./dh-linux-x64
+```
+
+> **npm install (`bunx dark-harness`)**: not yet available — the published package currently
+> only covers the original single-platform build. Multi-platform `optionalDependencies`
+> packages exist and are wired into the release pipeline (see `tracking/DH-0004-*.md`) but
+> haven't been published yet. Use a downloaded binary or build from source until that lands.
+
+### Build from source
+
+```bash
+git clone https://github.com/stefanrusek/dark-harness.git
 cd dark-harness
 bun install
 bun run build        # produces ./dist/dh
