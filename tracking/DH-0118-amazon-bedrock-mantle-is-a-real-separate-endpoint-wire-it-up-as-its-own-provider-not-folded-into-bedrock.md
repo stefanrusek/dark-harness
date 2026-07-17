@@ -38,3 +38,18 @@ Deep research (2026-07-17) confirmed Amazon Bedrock Mantle ("Project Mantle") is
 ## Open Questions
 
 ## Notes
+
+> [!NOTE]
+> Live-tested 2026-07-17 via `dh doctor` with a real `BEDROCK_MANTLE_API_KEY`: the plumbing
+> works correctly end-to-end -- a real HTTPS request reached the real `bedrock-mantle`
+> endpoint and a real, structured JSON error was captured and surfaced by `dh doctor`:
+> `HTTP 401: {"error":{"code":"access_denied","message":"Berm is not enabled for this
+> account","param":null,"type":"permission_denied_error"}}`. This confirms the
+> `openai-compatible` adapter, the `mantle` provider config, and the endpoint URL shape are
+> all correct -- the remaining blocker is AWS-side account enablement (the operator's account
+> does not have Mantle access granted), not a code issue. Notably the error message says
+> "Berm" rather than "Mantle" -- possibly an internal/legacy service name lagging the
+> customer-facing branding, worth mentioning if requesting access from AWS Support since
+> their tooling may only recognize one name. No further code action needed until Mantle
+> access is granted on the account; then re-run `dh doctor` to confirm gemma4 actually works
+> end-to-end (connectivity + tool-use).
