@@ -409,6 +409,13 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
     case "tool_call":
     case "tool_result":
       return next;
+    // DH-0045: `agent_thinking` is a new additive SSE event type (Core's piece of DH-0045)
+    // not yet consumed here — full display (collapsed `<details>` turn, redaction
+    // placeholder) is Web's own ticket (see DH-0045 §7/§8). No-op here for the same reason
+    // as tool_call/tool_result above: keeps `assertNever` guarding real unhandled variants
+    // without blocking Core's typecheck gate.
+    case "agent_thinking":
+      return next;
     // DH-0093: this round's real consumption of `model_switched` — updates the switched
     // agent's displayed model (the backend round only added the no-op exhaustiveness case
     // above's predecessor comment). No dedicated UI element shows "model" today beyond the

@@ -646,6 +646,154 @@ describe("runAgentLoop — DH-0093: mid-session model switch via registerModelSw
   });
 });
 
+describe("runAgentLoop — DH-0045: extended thinking threading + emission", () => {
+  test("threads params.thinking into every provider.complete() request", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider, thinking: { type: "adaptive" } });
+    await runAgentLoop(params);
+    expect(provider.calls[0]?.thinking).toEqual({ type: "adaptive" });
+    expect(provider.calls[1]?.thinking).toEqual({ type: "adaptive" });
+  });
+
+  test("no thinking param is sent when params.thinking is absent (no regression)", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params } = baseParams({ provider });
+    await runAgentLoop(params);
+    expect(provider.calls[0]?.thinking).toBeUndefined();
+  });
+
+  test("a non-empty thinking block emits SSE agent_thinking and JSONL thinking, before the text output", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [
+          { type: "thinking", thinking: "reasoning through it", signature: "sig-1" },
+          { type: "text", text: "done, task succeeded." },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, events, logLines } = baseParams({ provider, thinking: { type: "adaptive" } });
+    await runAgentLoop(params);
+
+    const thinkingEvent = events.find((e) => e.type === "agent_thinking");
+    expect(thinkingEvent).toMatchObject({
+      type: "agent_thinking",
+      agentId: "agent-root",
+      chunk: "reasoning through it",
+    });
+    expect(
+      thinkingEvent && "redacted" in thinkingEvent ? thinkingEvent.redacted : undefined,
+    ).toBeUndefined();
+
+    const thinkingLine = logLines.find((l) => l.type === "thinking");
+    expect(thinkingLine).toEqual({
+      version: 1,
+      timestamp: expect.any(String),
+      type: "thinking",
+      content: "reasoning through it",
+      redacted: false,
+    });
+
+    // Ordering: the thinking event/line precede the output event/line for the same turn.
+    const thinkingEventIdx = events.findIndex((e) => e.type === "agent_thinking");
+    const outputEventIdx = events.findIndex(
+      (e) => e.type === "agent_output" && e.chunk.includes("done, task succeeded"),
+    );
+    expect(thinkingEventIdx).toBeLessThan(outputEventIdx);
+  });
+
+  test("a redacted_thinking block emits agent_thinking/thinking with redacted:true and empty content — ciphertext never reaches SSE or JSONL", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [
+          { type: "redacted_thinking", data: "supersecretciphertext==" },
+          { type: "text", text: "done, task succeeded." },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, events, logLines } = baseParams({ provider, thinking: { type: "adaptive" } });
+    await runAgentLoop(params);
+
+    const thinkingEvent = events.find((e) => e.type === "agent_thinking");
+    expect(thinkingEvent).toMatchObject({ type: "agent_thinking", chunk: "", redacted: true });
+
+    const thinkingLine = logLines.find((l) => l.type === "thinking");
+    expect(thinkingLine).toEqual({
+      version: 1,
+      timestamp: expect.any(String),
+      type: "thinking",
+      content: "",
+      redacted: true,
+    });
+
+    // No event/log line anywhere carries the ciphertext.
+    expect(JSON.stringify(events)).not.toContain("supersecretciphertext");
+    expect(JSON.stringify(logLines)).not.toContain("supersecretciphertext");
+  });
+
+  test("an empty-text thinking block (display: omitted) emits nothing", async () => {
+    const provider = scriptedProvider([
+      {
+        stopReason: "end_turn",
+        content: [
+          { type: "thinking", thinking: "", signature: "sig-empty" },
+          { type: "text", text: "done, task succeeded." },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, events, logLines } = baseParams({
+      provider,
+      thinking: { type: "adaptive", display: "omitted" },
+    });
+    await runAgentLoop(params);
+
+    expect(events.some((e) => e.type === "agent_thinking")).toBe(false);
+    expect(logLines.some((l) => l.type === "thinking")).toBe(false);
+  });
+});
+
 describe("runAgentLoop — Round 3: cooperative cancellation via AbortSignal", () => {
   test("an already-aborted signal stops before the first turn, without ever calling the provider", async () => {
     const controller = new AbortController();

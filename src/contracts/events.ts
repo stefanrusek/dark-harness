@@ -131,6 +131,21 @@ export interface ModelSwitchedEvent extends SseEventBase {
   to: string;
 }
 
+/**
+ * DH-0045 (tracking/DH-0045-no-extended-thinking-support.md §6): extended-thinking content.
+ * A distinct event type (not a `blockType` discriminator on `AgentOutputEvent`) so an
+ * unaware client degrades to *invisible* rather than rendering the model's private reasoning
+ * as answer text.
+ */
+export interface AgentThinkingEvent extends SseEventBase {
+  type: "agent_thinking";
+  agentId: string;
+  /** Thinking text; empty string when redacted. Never ciphertext. */
+  chunk: string;
+  /** Present and true for redacted_thinking blocks — client renders a placeholder. */
+  redacted?: true;
+}
+
 export type ServerSentEvent =
   | AgentOutputEvent
   | AgentStatusEvent
@@ -140,4 +155,5 @@ export type ServerSentEvent =
   | ToolResultEvent
   | SessionEndedEvent
   | ResyncEvent
-  | ModelSwitchedEvent;
+  | ModelSwitchedEvent
+  | AgentThinkingEvent;

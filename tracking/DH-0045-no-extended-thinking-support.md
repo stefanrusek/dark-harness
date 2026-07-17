@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0045
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -232,3 +232,18 @@ non-collapsible placeholder div: `[redacted thinking]`. Ciphertext never reaches
 > Architect design pass complete (2026-07-15, Fable). Contracts changes in §2/§6 carry
 > architect sign-off per CLAUDE.md §6 trigger #2 — Core may land them without a second review
 > round, provided the shapes match this ticket.
+
+> [!NOTE]
+> Core (Grace) implementation complete (2026-07-16). Landed: `ThinkingConfig`
+> (`src/contracts/config.ts`) + `ModelConfig.thinking`, config validation
+> (`src/config/validate.ts`), `ProviderContentBlock` `thinking`/`redacted_thinking` variants
+> and `ProviderCompletionRequest.thinking` (`src/agent/providers/types.ts`), both adapters'
+> request/response/echo mapping (`anthropic.ts`, `bedrock.ts`) — this also fixes the real
+> silent-drop bug (`fromAnthropicContent()`/`fromBedrockContent()` previously returned `null`
+> for these block types), `loop.ts`/`runtime.ts` threading + post-turn SSE `agent_thinking` /
+> JSONL `thinking` emission per §5, and `AgentThinkingEvent`/`LogThinkingEvent`
+> (`src/contracts/events.ts`, `log.ts`) per §6. `bun run typecheck`, `bun run lint`, and
+> `bun run test:coverage` all pass clean (1995 tests, 100% coverage on every touched file
+> except one pre-existing uncovered line in `loop.ts` unrelated to this change). TUI/Web/
+> Prompt/E2E work (§8 rows 2-5) remains for their respective domain owners. Status →
+> verifying.

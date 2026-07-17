@@ -141,6 +141,15 @@ function pricingOverride(
   return { pricing };
 }
 
+/** DH-0045: `{ thinking: ... }` when configured, `{}` otherwise — same spreadable-helper
+ * pattern as `pricingOverride` above, for the same `exactOptionalPropertyTypes` reason. */
+function thinkingOverride(
+  model: ModelConfig,
+): { thinking: NonNullable<ModelConfig["thinking"]> } | Record<string, never> {
+  if (model.thinking === undefined) return {};
+  return { thinking: model.thinking };
+}
+
 export class ConfigModelError extends Error {
   constructor(message: string) {
     super(message);
@@ -760,6 +769,7 @@ export class AgentRuntime {
               ? { maxTurns: this.config.options.maxTurns }
               : {}),
             ...pricingOverride(model),
+            ...thinkingOverride(model),
             onEvent: (event) => {
               if (event.type === "agent_output") handle.append(event.chunk);
               // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
@@ -936,6 +946,7 @@ export class AgentRuntime {
           ? { maxTurns: this.config.options.maxTurns }
           : {}),
         ...pricingOverride(model),
+        ...thinkingOverride(model),
         ...(this.resume
           ? { resume: { messages: this.resume.messages, fromSessionId: this.resume.fromSessionId } }
           : {}),
@@ -1120,6 +1131,7 @@ export class AgentRuntime {
       providerModel: model.model,
       provider,
       ...pricingOverride(model),
+      ...thinkingOverride(model),
     });
   }
 

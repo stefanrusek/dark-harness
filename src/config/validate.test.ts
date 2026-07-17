@@ -108,6 +108,207 @@ describe("validateConfig — happy paths", () => {
     expect(config.models[0]?.outputPricePerMToken).toBeUndefined();
   });
 
+  // DH-0045: opt-in extended thinking — see src/contracts/config.ts's ThinkingConfig doc
+  // comment for the adaptive/enabled distinction.
+  test("accepts models[].thinking with type adaptive (no budgetTokens)", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "sonnet-5",
+            thinking: { type: "adaptive" },
+          },
+        ],
+      }),
+    );
+    expect(config.models[0]?.thinking).toEqual({ type: "adaptive" });
+  });
+
+  test("accepts models[].thinking with type adaptive and a display value", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "sonnet-5",
+            thinking: { type: "adaptive", display: "omitted" },
+          },
+        ],
+      }),
+    );
+    expect(config.models[0]?.thinking).toEqual({ type: "adaptive", display: "omitted" });
+  });
+
+  test("accepts models[].thinking with type enabled and a valid budgetTokens", () => {
+    const config = validateConfig(
+      baseConfig({
+        models: [
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "sonnet-5",
+            thinking: { type: "enabled", budgetTokens: 2048, display: "summarized" },
+          },
+        ],
+      }),
+    );
+    expect(config.models[0]?.thinking).toEqual({
+      type: "enabled",
+      budgetTokens: 2048,
+      display: "summarized",
+    });
+  });
+
+  test("models[].thinking is omitted (not defaulted) when unset", () => {
+    const config = validateConfig(baseConfig());
+    expect(config.models[0]?.thinking).toBeUndefined();
+  });
+
+  test("rejects models[].thinking.type that is neither adaptive nor enabled", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              thinking: { type: "bogus" },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking.type must be one of adaptive, enabled/);
+  });
+
+  test("rejects models[].thinking with type enabled and no budgetTokens", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              thinking: { type: "enabled" },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking.budgetTokens must be an integer >= 1024/);
+  });
+
+  test("rejects models[].thinking with type enabled and budgetTokens below 1024", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              thinking: { type: "enabled", budgetTokens: 1023 },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking.budgetTokens must be an integer >= 1024/);
+  });
+
+  test("rejects models[].thinking with type enabled and a non-integer budgetTokens", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              thinking: { type: "enabled", budgetTokens: 2048.5 },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking.budgetTokens must be an integer >= 1024/);
+  });
+
+  test("rejects models[].thinking with type adaptive and a present budgetTokens", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              thinking: { type: "adaptive", budgetTokens: 2048 },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking.budgetTokens must be absent when type is "adaptive"/);
+  });
+
+  test("rejects models[].thinking.display that is neither summarized nor omitted", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              thinking: { type: "adaptive", display: "verbose" },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking.display must be one of summarized, omitted/);
+  });
+
+  test("rejects models[].thinking with an unknown key", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            {
+              name: "sonnet",
+              provider: "anthropic",
+              model: "sonnet-5",
+              thinking: { type: "adaptive", bogusKey: true },
+            },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking has unknown key "bogusKey"/);
+  });
+
+  test("rejects models[].thinking that is not an object", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", thinking: "adaptive" },
+          ],
+        }),
+      ),
+    ).toThrow(/models\[0\].thinking must be an object/);
+  });
+
+  test("no provider-type restriction: thinking is valid on a bedrock model too", () => {
+    const config = validateConfig({
+      options: { defaultModel: "gemma4" },
+      models: [
+        { name: "gemma4", provider: "bedrock", model: "gemma4", thinking: { type: "adaptive" } },
+      ],
+      provider: [{ name: "bedrock", type: "bedrock" }],
+    });
+    expect(config.models[0]?.thinking).toEqual({ type: "adaptive" });
+  });
+
   test("provider entries may carry extra type-specific fields", () => {
     const config = validateConfig(
       baseConfig({

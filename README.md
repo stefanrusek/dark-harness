@@ -231,6 +231,13 @@ below).
   these fields. If only one of the pair is set, the other side of that model's cost is
   treated as `$0`; if neither is set, cost stays unreported (`undefined`) for that model
   rather than showing a misleading `$0.00`.
+  Optional **`thinking`** opts a model into extended thinking. `{ "type": "adaptive" }` is the
+  form for Claude 4.6+ (Opus 4.7/4.8, Sonnet 5, Fable 5) — no `budgetTokens`. `{ "type":
+  "enabled", "budgetTokens": 4096 }` is the legacy fixed-budget form for pre-4.6 models —
+  `budgetTokens` required, integer, >= 1024. Both accept an optional `"display": "summarized"
+  | "omitted"`. Omitted entirely (the default) means no `thinking` parameter is sent at all —
+  dh does no capability gating, so requesting the wrong form for a given model surfaces as
+  that provider's own 400 error.
 - **`provider`** — `type: "anthropic"` (the Anthropic SDK; supports a custom `baseURL`, which
   is how the `"local"` provider above points at any Anthropic-compatible endpoint, e.g.
   LM Studio) or `type: "bedrock"` (AWS Bedrock via the standard AWS credential chain — see

@@ -453,6 +453,165 @@ describe("BedrockProvider", () => {
     });
   });
 
+  describe("DH-0045: extended thinking", () => {
+    function reasoningTextBlock(
+      index: number,
+      text: string,
+      signature: string,
+    ): ConverseStreamOutput[] {
+      return [
+        {
+          contentBlockDelta: { contentBlockIndex: index, delta: { reasoningContent: { text } } },
+        } as unknown as ConverseStreamOutput,
+        {
+          contentBlockDelta: {
+            contentBlockIndex: index,
+            delta: { reasoningContent: { signature } },
+          },
+        } as unknown as ConverseStreamOutput,
+        { contentBlockStop: { contentBlockIndex: index } } as unknown as ConverseStreamOutput,
+      ];
+    }
+
+    function reasoningRedactedBlock(
+      index: number,
+      redactedContent: Uint8Array,
+    ): ConverseStreamOutput[] {
+      return [
+        {
+          contentBlockDelta: {
+            contentBlockIndex: index,
+            delta: { reasoningContent: { redactedContent } },
+          },
+        } as unknown as ConverseStreamOutput,
+        { contentBlockStop: { contentBlockIndex: index } } as unknown as ConverseStreamOutput,
+      ];
+    }
+
+    test("maps reasoningText deltas (text + signature) into a thinking block", async () => {
+      const client = fakeClient([
+        ...reasoningTextBlock(0, "let me think...", "sig123"),
+        ...textBlock(1, "the answer"),
+        messageStop("end_turn"),
+      ]);
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([
+        { type: "thinking", thinking: "let me think...", signature: "sig123" },
+        { type: "text", text: "the answer" },
+      ]);
+    });
+
+    test("maps redactedContent into a base64-encoded redacted_thinking block", async () => {
+      const bytes = new Uint8Array([1, 2, 3, 4]);
+      const client = fakeClient([...reasoningRedactedBlock(0, bytes), messageStop("end_turn")]);
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([
+        { type: "redacted_thinking", data: Buffer.from(bytes).toString("base64") },
+      ]);
+    });
+
+    test("echoes thinking and redacted_thinking blocks back verbatim (byte-identical signature/data)", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "reasoning text", signature: "sig-abc" },
+              { type: "redacted_thinking", data: "cipher-xyz" },
+            ],
+          },
+        ],
+      });
+      expect(captured?.input.messages?.[0]?.content).toEqual([
+        { reasoningContent: { reasoningText: { text: "reasoning text", signature: "sig-abc" } } },
+        { reasoningContent: { redactedContent: Buffer.from("cipher-xyz", "base64") } },
+      ]);
+    });
+
+    test("echoing a thinking block with an empty signature omits the signature field", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "reasoning", signature: "" }],
+          },
+        ],
+      });
+      expect(captured?.input.messages?.[0]?.content).toEqual([
+        { reasoningContent: { reasoningText: { text: "reasoning" } } },
+      ]);
+    });
+
+    test("passes the thinking param via additionalModelRequestFields when configured (adaptive)", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        thinking: { type: "adaptive", display: "omitted" },
+      });
+      expect(captured?.input.additionalModelRequestFields).toEqual({
+        thinking: { type: "adaptive", display: "omitted" },
+      });
+    });
+
+    test("passes the thinking param via additionalModelRequestFields when configured (enabled)", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        thinking: { type: "enabled", budgetTokens: 2048 },
+      });
+      expect(captured?.input.additionalModelRequestFields).toEqual({
+        thinking: { type: "enabled", budget_tokens: 2048 },
+      });
+    });
+
+    test("no additionalModelRequestFields is sent when request.thinking is absent", async () => {
+      let captured: ConverseStreamCommand | undefined;
+      const client: BedrockClientLike = {
+        send: async (command) => {
+          captured = command;
+          return { stream: streamOf([messageStop("end_turn")]) };
+        },
+      };
+      const provider = new BedrockProvider({ name: "bedrock", type: "bedrock" }, client);
+      await provider.complete(BASE_REQUEST);
+      expect(captured?.input.additionalModelRequestFields).toBeUndefined();
+    });
+  });
+
   test("constructs a real Bedrock SDK client when none is injected", () => {
     const provider = new BedrockProvider({ name: "bedrock", type: "bedrock", region: "us-east-1" });
     expect(provider).toBeInstanceOf(BedrockProvider);

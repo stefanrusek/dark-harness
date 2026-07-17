@@ -9,6 +9,7 @@ import {
   ConverseStreamCommand,
   type ConverseStreamOutput,
 } from "@aws-sdk/client-bedrock-runtime";
+import type { DocumentType } from "@smithy/types";
 import type { ProviderConfig } from "../../contracts/index.ts";
 import { withRetry } from "./retry.ts";
 import type {
@@ -53,7 +54,43 @@ function toBedrockContent(block: ProviderContentBlock): BedrockContentBlock {
           ...(block.isError !== undefined ? { status: block.isError ? "error" : "success" } : {}),
         },
       };
+    case "thinking":
+      // DH-0045 §4: reverse of fromBedrockContent's reasoningText mapping — signature is
+      // included only when non-empty (Bedrock's ReasoningTextBlock.signature is optional).
+      return {
+        reasoningContent: {
+          reasoningText: {
+            text: block.thinking,
+            ...(block.signature.length > 0 ? { signature: block.signature } : {}),
+          },
+        },
+      } as unknown as BedrockContentBlock;
+    case "redacted_thinking":
+      return {
+        reasoningContent: {
+          redactedContent: Buffer.from(block.data, "base64"),
+        },
+      } as unknown as BedrockContentBlock;
   }
+}
+
+/** DH-0045 §4: Converse has no first-class thinking field; the documented Anthropic-on-
+ * Bedrock mechanism is passthrough via `additionalModelRequestFields`, same snake_case wire
+ * shape the Anthropic adapter sends directly. */
+function toBedrockThinkingField(
+  thinking: NonNullable<ProviderCompletionRequest["thinking"]>,
+): Record<string, unknown> {
+  if (thinking.type === "adaptive") {
+    return {
+      type: "adaptive",
+      ...(thinking.display !== undefined ? { display: thinking.display } : {}),
+    };
+  }
+  return {
+    type: "enabled",
+    budget_tokens: thinking.budgetTokens,
+    ...(thinking.display !== undefined ? { display: thinking.display } : {}),
+  };
 }
 
 function mapStopReason(reason: BedrockStopReason | undefined): ProviderStopReason {
@@ -145,6 +182,13 @@ export class BedrockProvider implements ModelProvider {
                 content: m.content.map(toBedrockContent),
               })),
               ...(tools.length > 0 ? { toolConfig: { tools } } : {}),
+              ...(request.thinking !== undefined
+                ? {
+                    additionalModelRequestFields: {
+                      thinking: toBedrockThinkingField(request.thinking),
+                    } as unknown as DocumentType,
+                  }
+                : {}),
             }),
             signal ? { abortSignal: signal } : undefined,
           );
@@ -206,7 +250,8 @@ async function consumeBedrockStream(
       }
       // No accumulator opened for an unrecognized/unsupported block-start kind (e.g. image)
       // — finalized as skipped at contentBlockStop, same as fromBedrockContent's existing
-      // null-for-unrecognized-block handling.
+      // null-for-unrecognized-block handling. reasoningContent (DH-0045) has no explicit
+      // block-start either — like text, it's implicitly opened by its first delta below.
     } else if (event.contentBlockDelta) {
       const { contentBlockIndex, delta } = event.contentBlockDelta;
       if (contentBlockIndex === undefined || !delta) continue;
@@ -225,6 +270,40 @@ async function consumeBedrockStream(
         const buffered = toolJsonBuffers.get(contentBlockIndex);
         if (buffered !== undefined) {
           toolJsonBuffers.set(contentBlockIndex, buffered + delta.toolUse.input);
+        }
+      } else if (delta.reasoningContent !== undefined) {
+        // DH-0045 §4: `ContentBlock.reasoningContent` union — `text`/`signature` deltas
+        // accumulate a `thinking` block; `redactedContent` arrives whole in one delta and
+        // maps straight to a `redacted_thinking` block (base64-encoded, mirroring
+        // fromAnthropicContent's redacted_thinking handling).
+        const reasoning = delta.reasoningContent;
+        if (reasoning.text !== undefined) {
+          const existing = blocks.get(contentBlockIndex);
+          if (existing && existing.type === "thinking") {
+            existing.thinking += reasoning.text;
+          } else if (!existing) {
+            blocks.set(contentBlockIndex, {
+              type: "thinking",
+              thinking: reasoning.text,
+              signature: "",
+            });
+          }
+        } else if (reasoning.signature !== undefined) {
+          const existing = blocks.get(contentBlockIndex);
+          if (existing && existing.type === "thinking") {
+            existing.signature += reasoning.signature;
+          } else if (!existing) {
+            blocks.set(contentBlockIndex, {
+              type: "thinking",
+              thinking: "",
+              signature: reasoning.signature,
+            });
+          }
+        } else if (reasoning.redactedContent !== undefined) {
+          blocks.set(contentBlockIndex, {
+            type: "redacted_thinking",
+            data: Buffer.from(reasoning.redactedContent).toString("base64"),
+          });
         }
       }
     } else if (event.contentBlockStop) {

@@ -557,6 +557,201 @@ describe("AnthropicProvider", () => {
     expect(receivedOptions?.signal).toBe(controller.signal);
   });
 
+  describe("DH-0045: extended thinking", () => {
+    function thinkingBlock(
+      index: number,
+      thinking: string,
+      signature: string,
+    ): Anthropic.RawMessageStreamEvent[] {
+      return [
+        {
+          type: "content_block_start",
+          index,
+          content_block: { type: "thinking", thinking: "", signature: "" },
+        } as unknown as Anthropic.RawMessageStreamEvent,
+        {
+          type: "content_block_delta",
+          index,
+          delta: { type: "thinking_delta", thinking },
+        } as unknown as Anthropic.RawMessageStreamEvent,
+        {
+          type: "content_block_delta",
+          index,
+          delta: { type: "signature_delta", signature },
+        } as unknown as Anthropic.RawMessageStreamEvent,
+        { type: "content_block_stop", index } as unknown as Anthropic.RawMessageStreamEvent,
+      ];
+    }
+
+    function redactedThinkingBlock(index: number, data: string): Anthropic.RawMessageStreamEvent[] {
+      return [
+        {
+          type: "content_block_start",
+          index,
+          content_block: { type: "redacted_thinking", data },
+        } as unknown as Anthropic.RawMessageStreamEvent,
+        { type: "content_block_stop", index } as unknown as Anthropic.RawMessageStreamEvent,
+      ];
+    }
+
+    test("maps a thinking block (thinking_delta + signature_delta) into a ProviderContentBlock", async () => {
+      const client = fakeClient([
+        messageStart(),
+        ...thinkingBlock(0, "let me think...", "sig123"),
+        ...textBlock(1, "the answer"),
+        messageDelta("end_turn", 3),
+        messageStop,
+      ]);
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([
+        { type: "thinking", thinking: "let me think...", signature: "sig123" },
+        { type: "text", text: "the answer" },
+      ]);
+    });
+
+    test("maps a redacted_thinking block, preserving opaque data unmodified", async () => {
+      const client = fakeClient([
+        messageStart(),
+        ...redactedThinkingBlock(0, "b64ciphertext=="),
+        messageDelta("end_turn", 1),
+        messageStop,
+      ]);
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      const result = await provider.complete(BASE_REQUEST);
+      expect(result.content).toEqual([{ type: "redacted_thinking", data: "b64ciphertext==" }]);
+    });
+
+    test("echoes thinking and redacted_thinking blocks back verbatim (byte-identical signature/data)", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "reasoning text", signature: "sig-abc" },
+              { type: "redacted_thinking", data: "cipher-xyz" },
+            ],
+          },
+        ],
+      });
+      expect((captured as Anthropic.MessageCreateParamsStreaming).messages[0]?.content).toEqual([
+        { type: "thinking", thinking: "reasoning text", signature: "sig-abc" },
+        { type: "redacted_thinking", data: "cipher-xyz" },
+      ]);
+    });
+
+    test("adaptive thinking config is sent as-is, with display omitted when unset", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({ ...BASE_REQUEST, thinking: { type: "adaptive" } });
+      expect((captured as Anthropic.MessageCreateParamsStreaming).thinking).toEqual({
+        type: "adaptive",
+      });
+      expect((captured as Anthropic.MessageCreateParamsStreaming).max_tokens).toBe(8192);
+    });
+
+    test("adaptive thinking config forwards display when set", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        thinking: { type: "adaptive", display: "omitted" },
+      });
+      expect((captured as Anthropic.MessageCreateParamsStreaming).thinking).toEqual({
+        type: "adaptive",
+        display: "omitted",
+      });
+    });
+
+    test("enabled thinking config sends budget_tokens and guarantees max_tokens headroom", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        thinking: { type: "enabled", budgetTokens: 4096, display: "summarized" },
+      });
+      const params = captured as Anthropic.MessageCreateParamsStreaming;
+      expect(params.thinking).toEqual({
+        type: "enabled",
+        budget_tokens: 4096,
+        display: "summarized",
+      });
+      // DEFAULT_MAX_TOKENS (8192) < budgetTokens (4096) + DEFAULT_MAX_TOKENS (8192) = 12288,
+      // so the guaranteed floor wins over the plain default.
+      expect(params.max_tokens).toBe(12288);
+    });
+
+    test("enabled thinking config never shrinks an explicit maxTokens above the guaranteed floor", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete({
+        ...BASE_REQUEST,
+        maxTokens: 50000,
+        thinking: { type: "enabled", budgetTokens: 4096 },
+      });
+      expect((captured as Anthropic.MessageCreateParamsStreaming).max_tokens).toBe(50000);
+    });
+
+    test("no thinking param is sent when request.thinking is absent", async () => {
+      let captured: unknown;
+      const client: AnthropicClientLike = {
+        messages: {
+          create: async (params) => {
+            captured = params;
+            return streamOf([messageStart(), messageDelta("end_turn", 1), messageStop]);
+          },
+        },
+      };
+      const provider = new AnthropicProvider({ name: "anthropic", type: "anthropic" }, client);
+      await provider.complete(BASE_REQUEST);
+      expect((captured as Anthropic.MessageCreateParamsStreaming).thinking).toBeUndefined();
+      expect((captured as Anthropic.MessageCreateParamsStreaming).max_tokens).toBe(8192);
+    });
+  });
+
   test("passes no options (rather than {signal: undefined}) when no signal is given", async () => {
     let receivedOptions: { signal?: AbortSignal } | undefined;
     let wasCalled = false;

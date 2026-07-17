@@ -19,6 +19,25 @@ export interface ModelConfig {
    */
   inputPricePerMToken?: number;
   outputPricePerMToken?: number;
+  /** DH-0045: opt-in extended thinking for this model. Omitted means off — no `thinking`
+   * parameter sent to the provider, today's behavior unchanged. No provider-type
+   * restriction: valid on both `anthropic` and `bedrock` models. */
+  thinking?: ThinkingConfig;
+}
+
+/** DH-0045 (tracking/DH-0045-no-extended-thinking-support.md): opt-in extended thinking for
+ * a model. Absent = off (no thinking parameter is sent to the provider at all — today's
+ * behavior, matching this project's default-off pattern for new capability knobs; see
+ * LimitsConfig / LogRetentionConfig). */
+export interface ThinkingConfig {
+  /** "adaptive" — Claude 4.6+ family form; budgetTokens must be absent.
+   *  "enabled"  — legacy fixed-budget form for pre-4.6 models; budgetTokens required. */
+  type: "adaptive" | "enabled";
+  /** Required iff type === "enabled". Integer, >= 1024 (API minimum). */
+  budgetTokens?: number;
+  /** Optional visibility control, passed through verbatim. "omitted" still returns (empty)
+   * thinking blocks with signatures for multi-turn continuity. */
+  display?: "summarized" | "omitted";
 }
 
 export type ProviderType = "anthropic" | "bedrock" | "openai-compatible";

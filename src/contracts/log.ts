@@ -148,6 +148,17 @@ export interface LogModelSwitchedEvent extends LogEventBase {
   to: string;
 }
 
+/** DH-0045 (tracking/DH-0045-no-extended-thinking-support.md §6): durable record of
+ * extended-thinking content. Not a `message` role — reasoning is not part of the message
+ * record. Ciphertext (`redacted_thinking` blocks) is never logged; `content` is empty when
+ * `redacted` is true. */
+export interface LogThinkingEvent extends LogEventBase {
+  type: "thinking";
+  /** Thinking text; empty string when redacted. Ciphertext is never logged. */
+  content: string;
+  redacted: boolean;
+}
+
 export type LogEvent =
   | LogMessageEvent
   | LogToolCallEvent
@@ -156,7 +167,8 @@ export type LogEvent =
   | LogStatusChangeEvent
   | LogCompletedEvent
   | LogFailedEvent
-  | LogModelSwitchedEvent;
+  | LogModelSwitchedEvent
+  | LogThinkingEvent;
 
 /** The union of every line type that can appear in an agent's JSONL file. */
 export type LogLine = LogHeader | LogEvent;

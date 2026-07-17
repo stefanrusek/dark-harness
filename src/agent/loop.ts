@@ -58,6 +58,7 @@ import {
   type ReportedOutcome,
   type ServerSentEvent,
   type SessionClientKind,
+  type ThinkingConfig,
 } from "../contracts/index.ts";
 import type {
   ModelProvider,
@@ -158,6 +159,10 @@ export interface AgentLoopParams {
    * case).
    */
   pricing?: { inputPricePerMToken?: number; outputPricePerMToken?: number };
+  /** DH-0045: opt-in extended thinking, threaded from `ModelConfig.thinking` via runtime.ts
+   * (same pattern as `pricing`/`providerModel`). Absent means off — no `thinking` param sent
+   * to the provider. */
+  thinking?: ThinkingConfig;
   /** Round 8 (ADR 0005 amendment): how the process that owns this session was invoked — see
    * SessionClientKind's own doc comment in src/contracts/log.ts. Required (not defaulted) so
    * no call site can silently record a wrong value; threaded from AgentRuntimeOptions.client
@@ -190,6 +195,7 @@ export interface ModelBinding {
   providerModel: string;
   provider: ModelProvider;
   pricing?: AgentLoopParams["pricing"];
+  thinking?: AgentLoopParams["thinking"];
 }
 
 /** Computes a `token_usage` event's `costUsd`, or undefined if pricing wasn't configured at
@@ -390,6 +396,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     providerModel: params.providerModel,
     provider: params.provider,
     pricing: params.pricing,
+    thinking: params.thinking,
   };
   params.registerModelSwitch?.((newBinding: ModelBinding) => {
     const from = binding.model;
@@ -397,6 +404,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     binding.providerModel = newBinding.providerModel;
     binding.provider = newBinding.provider;
     binding.pricing = newBinding.pricing;
+    binding.thinking = newBinding.thinking;
     binding.model = to;
     emitEvent(params, {
       version: 1,
@@ -574,6 +582,7 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
           system: params.systemPrompt,
           messages,
           tools: toolDefs,
+          ...(binding.thinking !== undefined ? { thinking: binding.thinking } : {}),
         },
         params.signal,
         { onTextDelta },
@@ -608,6 +617,47 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
     // turn emits (token_usage, agent_status, or the next turn's tool_call) — so no later
     // event can ever precede this turn's last streamed chunk.
     flushStreamBuffer();
+
+    // DH-0045 §5: walk this turn's content blocks in order — a non-empty `thinking` block
+    // emits SSE `agent_thinking` + JSONL `thinking`; a `redacted_thinking` block emits both
+    // with `redacted: true` and empty content (ciphertext never enters the SSE stream or the
+    // JSONL log); an empty-text thinking block (`display: "omitted"`) emits nothing.
+    for (const block of completion.content) {
+      if (block.type === "thinking" && block.thinking.length > 0) {
+        emitEvent(params, {
+          version: 1,
+          id: randomUUID(),
+          timestamp: nowIso(),
+          type: "agent_thinking",
+          agentId: params.agentId,
+          chunk: block.thinking,
+        });
+        emitLog(params, {
+          version: 1,
+          timestamp: nowIso(),
+          type: "thinking",
+          content: block.thinking,
+          redacted: false,
+        });
+      } else if (block.type === "redacted_thinking") {
+        emitEvent(params, {
+          version: 1,
+          id: randomUUID(),
+          timestamp: nowIso(),
+          type: "agent_thinking",
+          agentId: params.agentId,
+          chunk: "",
+          redacted: true,
+        });
+        emitLog(params, {
+          version: 1,
+          timestamp: nowIso(),
+          type: "thinking",
+          content: "",
+          redacted: true,
+        });
+      }
+    }
 
     const text = textOf(completion.content);
     if (text.length > 0) {
