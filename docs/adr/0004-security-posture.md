@@ -11,6 +11,14 @@ boundary is the only real security control. Some operators need more than air-ga
 (e.g. a shared network, a server reachable beyond a single trusted host) without wanting a
 full auth/user-account system.
 
+Concretely, the Bash tool (`src/agent/tools/bash.ts`) spawns commands with no explicit `env`,
+so it inherits the full harness process environment, including any provider API key or
+`DH_TOKEN` referenced via `$(VAR)` in `dh.json`. Given the "everything is allowed" permission
+model, an agent that reads attacker-controlled content (a poisoned README, a malicious repo
+file) can be directed to read `process.env` and exfiltrate those credentials over the network
+in a non-air-gapped deployment. This is intentional parity with real Claude Code's own Bash
+tool behavior, not a gap to be closed — air-gapping is the mitigation, tracked below.
+
 ## Decision
 
 **Default remains plaintext HTTP with no auth.** Securing `dh` is primarily the operator's

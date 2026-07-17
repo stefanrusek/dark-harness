@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0040
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -71,3 +71,16 @@ real evidence behind it, not a revival of this story.
 > documentation story is in scope for this ticket now; ready to implement (state the
 > exfiltration risk plainly in the security posture docs). The redaction story is deferred,
 > per the note above — don't implement it as part of closing this ticket.
+
+> [!NOTE]
+> 2026-07-16: Docs-only implementation complete. `README.md` and
+> `docs/adr/0004-security-posture.md` now state the `process.env` exfiltration risk via Bash
+> plainly; the redaction story remains deferred per the 2026-07-15 owner decision above.
+> Verified by new test `src/prompt/security-docs.test.ts` (2 pass, asserting both docs
+> contain the risk language). Full quality gates run: `bun run typecheck` clean;
+> `bun run lint` clean on touched files (pre-existing failures exist only in unrelated
+> `.claude/skills/` files, out of scope); `bun run test:coverage` — 1961 pass / 0 fail, 100%
+> coverage on touched files; `bun run e2e` — 18 pre-existing failures (PTY/SSE timing,
+> unrelated to this change) since this diff touches no `e2e/`, agent, or runtime code —
+> README.md, docs/adr/0004-security-posture.md, and the new test file only. Moving to
+> `verifying`.
