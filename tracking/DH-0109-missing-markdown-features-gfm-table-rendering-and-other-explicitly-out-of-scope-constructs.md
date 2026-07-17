@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0109
 type: feature
-status: draft
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -77,3 +77,45 @@ DH-0056 (Render agent output as Markdown, TUI+Web) deliberately scoped out sever
 > ticket, three independent user stories (per Spile's one-ticket-per-related-story-group
 > convention) rather than three separate tickets, since they share the same root cause
 > (constructs DH-0056 explicitly deferred) and the same test infrastructure (DH-0108).
+
+> [!NOTE]
+> 2026-07-17: All three user stories implemented in `src/markdown/index.ts` (shared AST +
+> parser), `src/tui/markdown-ansi.ts` (TUI renderer), and `src/web/client/markdown-dom.ts` +
+> `styles.css` (Web renderer), extending DH-0108's shared `rendering-fixtures.ts` per the
+> ticket's assumption.
+>
+> - **GFM tables**: new `BlockNode` kind `table` (`align`/`header`/`rows`), parsed from a
+>   pipe-delimited header row + `---`/`:---`/`---:`/`:---:` delimiter row, with row-length
+>   normalization (pad short rows, truncate long ones) and escaped-pipe (`\|`) cell support.
+>   TUI renders a box-drawing bordered table with alignment-aware padding
+>   (`renderTableBlock`/`renderTableRow` in `markdown-ansi.ts`); Web renders a real
+>   `<table><thead>/<tbody>` with `text-align` styles, plus new `.turn-text table/th/td` CSS.
+>   Acceptance criteria proven by: `src/markdown/index.test.ts` ("GFM tables parse to a table
+>   node (DH-0109)", "GFM table alignment markers (DH-0109)", escaped-pipe/row-normalization
+>   tests), the shared fixtures "GFM table" / "GFM table with alignment markers" in
+>   `src/markdown/rendering-fixtures.ts` (run by both `src/tui/markdown-ansi.test.ts` and
+>   `src/web/client/markdown-dom.test.ts`), plus dedicated Web tests in
+>   `markdown-dom.test.ts` for alignment/empty-body rendering.
+> - **Setext headings**: `Title\n===` / `Subtitle\n---` now parse as h1/h2 (`matchSetextUnderline`
+>   in `index.ts`), taking precedence over a bare `-` thematic break only when it directly
+>   follows in-progress paragraph text (matches CommonMark precedence). Proven by:
+>   `index.test.ts` ("setext-style headings parse as h1/h2 (DH-0109)", "a standalone thematic
+>   break with no preceding paragraph stays a thematic break") and the shared fixtures
+>   "setext h1" / "setext h2".
+> - **Reference-style links/images**: `[ref]: url` definitions are extracted up front
+>   (`extractReferenceDefinitions`) into a label→url map threaded through `parseInline`,
+>   resolving `[text][ref]` and the collapsed `[ref][]` form; images degrade to links as
+>   before. Proven by: `index.test.ts` ("reference-style links resolve...", "collapsed
+>   reference-style links...", "an unresolved reference-style link stays literal text") and
+>   the shared fixtures "reference-style link" / "excluded: unresolved reference-style links
+>   degrade to literal text".
+>
+> Gates: `bun run typecheck` clean; `bun run lint` clean for all touched files (pre-existing
+> unrelated lint failures in `src/agent/providers/openai-compatible.ts` and
+> `.claude/skills/forked-subagent/` left untouched, out of this ticket's scope);
+> `bun test src --coverage` — 100% funcs/lines on every touched file
+> (`src/markdown/index.ts`, `src/markdown/rendering-fixtures.ts`, `src/tui/markdown-ansi.ts`,
+> `src/web/client/markdown-dom.ts`), 2128 pass / 0 fail repo-wide; `bun run e2e` — the 13
+> failures present (tmux-PTY-pane + exit-code-matrix issues) are pre-existing on the
+> unmodified tree, confirmed via `git stash` A/B before touching this ticket's files, not
+> caused by this change.

@@ -333,14 +333,58 @@ describe("parseMarkdown — block structure", () => {
     });
   });
 
-  test("tables degrade to literal text (no table node type)", () => {
+  test("GFM tables parse to a table node (DH-0109)", () => {
     const blocks = parseMarkdown("| a | b |\n| - | - |\n| 1 | 2 |");
-    for (const block of blocks) {
-      expect(block.kind).not.toBe("list" as unknown as string);
-    }
-    // Every pipe character survives as plain text somewhere in the output.
-    const rendered = JSON.stringify(blocks);
-    expect(rendered).toContain("|");
+    expect(blocks).toEqual([
+      {
+        kind: "table",
+        align: [null, null],
+        header: [[{ kind: "text", text: "a" }], [{ kind: "text", text: "b" }]],
+        rows: [[[{ kind: "text", text: "1" }], [{ kind: "text", text: "2" }]]],
+      },
+    ]);
+  });
+
+  test("GFM table alignment markers (DH-0109)", () => {
+    const blocks = parseMarkdown("| a | b | c |\n| :- | :-: | -: |\n| 1 | 2 | 3 |");
+    expect(blocks).toEqual([
+      expect.objectContaining({ kind: "table", align: ["left", "center", "right"] }),
+    ]);
+  });
+
+  test("a bare pipe-containing line without a delimiter row is not a table", () => {
+    const blocks = parseMarkdown("a | b");
+    expect(blocks).toEqual([{ kind: "paragraph", children: [{ kind: "text", text: "a | b" }] }]);
+  });
+
+  test("an escaped pipe stays a literal `|` within a table cell", () => {
+    const blocks = parseMarkdown("| a | b |\n| - | - |\n| x\\|y | z |");
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: "table",
+        rows: [[[{ kind: "text", text: "x|y" }], [{ kind: "text", text: "z" }]]],
+      }),
+    ]);
+  });
+
+  test("a table row with fewer cells than the header is padded with empty cells", () => {
+    const blocks = parseMarkdown("| a | b | c |\n| - | - | - |\n| 1 |");
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: "table",
+        rows: [[[{ kind: "text", text: "1" }], [], []]],
+      }),
+    ]);
+  });
+
+  test("a table row with more cells than the header has the extras dropped", () => {
+    const blocks = parseMarkdown("| a | b |\n| - | - |\n| 1 | 2 | 3 |");
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: "table",
+        rows: [[[{ kind: "text", text: "1" }], [{ kind: "text", text: "2" }]]],
+      }),
+    ]);
   });
 
   test("raw HTML in a paragraph renders as literal text, never a markup node", () => {
@@ -350,13 +394,47 @@ describe("parseMarkdown — block structure", () => {
     ]);
   });
 
-  test("setext-style headings degrade to a paragraph plus a thematic break", () => {
-    // dh Markdown doesn't recognize setext headings; "Title\n===" parses as its own
-    // constructs (paragraph "Title", then a line of "=" which isn't a recognized thematic
-    // break character either — so it stays part of the paragraph). The key requirement is
-    // just that nothing throws and no heading node is fabricated.
-    const blocks = parseMarkdown("Title\n===");
-    for (const block of blocks) expect(block.kind).not.toBe("heading");
+  test("setext-style headings parse as h1/h2 (DH-0109)", () => {
+    expect(parseMarkdown("Title\n===")).toEqual([
+      { kind: "heading", level: 1, children: [{ kind: "text", text: "Title" }] },
+    ]);
+    expect(parseMarkdown("Subtitle\n---")).toEqual([
+      { kind: "heading", level: 2, children: [{ kind: "text", text: "Subtitle" }] },
+    ]);
+  });
+
+  test("a standalone thematic break with no preceding paragraph stays a thematic break", () => {
+    expect(parseMarkdown("---")).toEqual([{ kind: "thematicBreak" }]);
+  });
+
+  test("reference-style links resolve against a definition anywhere in the input (DH-0109)", () => {
+    const blocks = parseMarkdown("[text][ref]\n\n[ref]: https://example.com");
+    expect(blocks).toEqual([
+      {
+        kind: "paragraph",
+        children: [
+          { kind: "link", children: [{ kind: "text", text: "text" }], url: "https://example.com" },
+        ],
+      },
+    ]);
+  });
+
+  test("collapsed reference-style links ([label][]) reuse the label as the ref key", () => {
+    const blocks = parseMarkdown("[ref][]\n\n[ref]: https://example.com");
+    expect(blocks).toEqual([
+      {
+        kind: "paragraph",
+        children: [
+          { kind: "link", children: [{ kind: "text", text: "ref" }], url: "https://example.com" },
+        ],
+      },
+    ]);
+  });
+
+  test("an unresolved reference-style link stays literal text", () => {
+    expect(parseMarkdown("[text][missing]")).toEqual([
+      { kind: "paragraph", children: [{ kind: "text", text: "[text][missing]" }] },
+    ]);
   });
 
   test("empty input parses to no blocks", () => {
