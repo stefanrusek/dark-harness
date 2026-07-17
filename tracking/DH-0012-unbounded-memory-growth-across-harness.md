@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0012
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -60,6 +60,17 @@ TUI); the Web client has no per-agent transcript cap at all, backed by ever-grow
   as the count-based eviction.
 
 ## Notes
+
+> [!NOTE]
+> 2026-07-17: All four scoped fixes verified present — Core (`TaskRegistry`'s
+> `completedRetention` cap on tasks + `readCursors`, wired from `dh.json`'s
+> `limits.completedRetention` via `AgentRuntime`/`config/validate.ts`, commit `3d182f4`),
+> Server (`EventBuffer` byte-bound, `src/server/event-buffer.ts`/`server.ts`), TUI (`agents`
+> map cap, `src/tui/state.ts`), and Web (`agents` map cap, `src/web/client/state.ts`) all
+> carry `DH-0012` references and matching tests. Ran this session: `bun run typecheck` clean,
+> `bun test src` 2040/2040 passing, `bun run lint` clean for all `src/agent` files (the only
+> lint failures are pre-existing, unrelated formatting issues in `.claude/skills/` scripts).
+> Moving to `verifying`.
 
 > [!NOTE]
 > Source: Core sweep findings #5 and #6 (TaskRegistry + readCursors); Server sweep finding #1
