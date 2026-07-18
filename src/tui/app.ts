@@ -160,7 +160,6 @@ export async function startTui(
     // Declared here (ahead of `draw`/`cleanup`, which close over it) and assigned later,
     // after the alt-screen write below — `const` can't express "declared now, initialized a
     // few lines down".
-    // biome-ignore lint/style/useConst: see comment above.
     let inkInstance: InkMount;
 
     // DH-0126: SGR mouse reporting (see mouse.ts) is enabled/disabled through the same

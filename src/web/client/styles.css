@@ -100,8 +100,12 @@ button {
   font-size: inherit;
 }
 
+/* `.hidden` is a utility class that must win over any same-specificity `display` rule
+ * regardless of source order (e.g. `.model-picker-overlay { display: flex; }`) — removing
+ * `!important` here caused hidden overlays to still intercept clicks (DH-0151 e2e regression). */
 .hidden {
-  display: none;
+  /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
+  display: none !important;
 }
 
 /* ---------- App shell ---------- */
@@ -259,15 +263,15 @@ button {
   outline-offset: -2px;
 }
 
-.agent-row.root .agent-label {
-  font-weight: 600;
-}
-
 .agent-label {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-row.root .agent-label {
+  font-weight: 600;
 }
 
 .agent-tokens {
@@ -963,11 +967,17 @@ button {
   }
 }
 
+/* The universal selector's specificity (0,0,1) loses to every class-selector transition rule
+ * elsewhere in this file — without `!important` this accessibility override is silently
+ * defeated for most elements. */
 @media (prefers-reduced-motion: reduce) {
   * {
-    animation-duration: 0.01ms;
-    transition-duration: 0.01ms;
-    scroll-behavior: auto;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
+    transition-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
+    scroll-behavior: auto !important;
   }
 }
 

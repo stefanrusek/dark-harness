@@ -12,8 +12,8 @@ export function ErrorLogPanel({ state }: ErrorLogPanelProps): ReactElement {
     <details className={`error-log-panel${entries.length === 0 ? " hidden" : ""}`}>
       <summary className="error-log-summary">Errors</summary>
       <ul className="error-log-list" role="log">
-        {entries.map((entry, i) => (
-          <li className="error-log-entry" key={`${entry.timestamp}-${i}`}>
+        {entries.map((entry) => (
+          <li className="error-log-entry" key={entry.id}>
             <span className="error-log-time">{new Date(entry.timestamp).toLocaleTimeString()}</span>
             <span className="error-log-message">{entry.message}</span>
           </li>

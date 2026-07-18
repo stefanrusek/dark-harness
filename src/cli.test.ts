@@ -593,7 +593,6 @@ describe("main — --version", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     }
@@ -2702,16 +2701,12 @@ describe("main — dh init", () => {
       const config = await loadConfig(target);
       expect(config.options.defaultModel).toBe("haiku-bedrock");
     } finally {
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = prevApiKey;
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevRegion === undefined) delete process.env.AWS_REGION;
       else process.env.AWS_REGION = prevRegion;
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevLocalProvider === undefined) delete process.env.LOCAL_AI_PROVIDER;
       else process.env.LOCAL_AI_PROVIDER = prevLocalProvider;
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevMantleKey === undefined) delete process.env.BEDROCK_MANTLE_API_KEY;
       else process.env.BEDROCK_MANTLE_API_KEY = prevMantleKey;
     }
@@ -2770,7 +2765,6 @@ describe("main — dh init", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     });
@@ -3013,7 +3007,6 @@ describe("main — dh doctor / --check", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     });
@@ -3153,7 +3146,6 @@ describe("main — --dry-run", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     }
@@ -3573,7 +3565,6 @@ describe("main — --server startup block (DH-0067)", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     });

@@ -154,7 +154,12 @@ export interface WebState {
 export interface ErrorLogEntry {
   message: string;
   timestamp: string;
+  /** DH-0151: monotonic id for stable React keys — timestamp+message alone can collide when
+   * two errors land in the same millisecond with the same text. */
+  id: number;
 }
+
+let nextErrorLogId = 0;
 
 const MAX_ERROR_LOG_ENTRIES = 50;
 
@@ -631,7 +636,7 @@ export function logError(
   message: string,
   timestamp: string = new Date().toISOString(),
 ): WebState {
-  const entries = [...state.errorLog, { message, timestamp }];
+  const entries = [...state.errorLog, { message, timestamp, id: nextErrorLogId++ }];
   const errorLog =
     entries.length > MAX_ERROR_LOG_ENTRIES
       ? entries.slice(entries.length - MAX_ERROR_LOG_ENTRIES)

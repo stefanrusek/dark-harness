@@ -27,6 +27,7 @@ const RICH_MARKDOWN = [
   "",
   "```typescript",
   "export async function verify(node: string): Promise<boolean> {",
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: literal example code text, not an interpolation bug.
   "  const res = await fetch(`https://${node}/healthz`);",
   '  return res.ok && (await res.json()).status === "green";',
   "}",

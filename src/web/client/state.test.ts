@@ -466,7 +466,9 @@ describe("logError (DH-0029)", () => {
   test("appends an entry with the given message and timestamp", () => {
     const state = createInitialState();
     const next = logError(state, "boom", "2026-01-01T00:00:00Z");
-    expect(next.errorLog).toEqual([{ message: "boom", timestamp: "2026-01-01T00:00:00Z" }]);
+    expect(next.errorLog).toEqual([
+      { message: "boom", timestamp: "2026-01-01T00:00:00Z", id: expect.any(Number) },
+    ]);
   });
 
   test("defaults the timestamp to now when omitted", () => {

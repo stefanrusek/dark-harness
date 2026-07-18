@@ -57,7 +57,7 @@ function ThinkingIndicator(): ReactElement {
   return (
     <div className="turn turn-assistant turn-thinking">
       <div className="turn-role">{turnRoleLabel("assistant")}</div>
-      <div className="turn-text thinking-dots" aria-label="Agent is thinking">
+      <div className="turn-text thinking-dots" role="status" aria-label="Agent is thinking">
         <span className="thinking-dot" />
         <span className="thinking-dot" />
         <span className="thinking-dot" />
