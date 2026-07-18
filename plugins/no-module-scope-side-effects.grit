@@ -1,13 +1,54 @@
 language js(typescript, jsx)
 
 or {
+  JsVariableStatement(declaration=JsVariableDeclaration(declarators=[
+    JsVariableDeclarator(initializer=JsInitializerClause(expression=$val))
+  ])) as $s where {
+    not $s <: within JsFunctionBody() ,
+    not $val <: or {
+      JsNumberLiteralExpression(),
+      JsStringLiteralExpression(),
+      JsBooleanLiteralExpression(),
+      JsNullLiteralExpression(),
+      `undefined`,
+      TsAsExpression(expression=or {
+        JsObjectExpression(),
+        JsArrayExpression()
+      }, ty=TsReferenceType(name=`const`))
+    },
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+  },
   JsVariableStatement() as $s where {
     not $s <: within JsFunctionBody() ,
+    not $s <: JsVariableStatement(declaration=JsVariableDeclaration(declarators=[
+      JsVariableDeclarator(initializer=JsInitializerClause())
+    ])),
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+  },
+  JsExport(export_clause=$c) as $s where {
+    $c <: JsVariableDeclarationClause(declaration=JsVariableDeclaration(declarators=[
+      JsVariableDeclarator(initializer=JsInitializerClause(expression=$val))
+    ])),
+    not $s <: within JsFunctionBody() ,
+    not $val <: or {
+      JsNumberLiteralExpression(),
+      JsStringLiteralExpression(),
+      JsBooleanLiteralExpression(),
+      JsNullLiteralExpression(),
+      `undefined`,
+      TsAsExpression(expression=or {
+        JsObjectExpression(),
+        JsArrayExpression()
+      }, ty=TsReferenceType(name=`const`))
+    },
     register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
   },
   JsExport(export_clause=$c) as $s where {
     $c <: JsVariableDeclarationClause(),
     not $s <: within JsFunctionBody() ,
+    not $c <: JsVariableDeclarationClause(declaration=JsVariableDeclaration(declarators=[
+      JsVariableDeclarator(initializer=JsInitializerClause())
+    ])),
     register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
   },
   JsExpressionStatement() as $s where {
