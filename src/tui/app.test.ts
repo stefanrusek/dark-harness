@@ -602,7 +602,7 @@ describe("startTui", () => {
     await done;
   });
 
-  test.skip("resize events trigger a re-render at the new size — DH-0146: flaky in real CI, root cause unconfirmed", async () => {
+  test("resize events trigger a re-render at the new size — DH-0146: root cause fixed, confirmed passing reliably (DH-0163)", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
     const server = makeFakeServer();
@@ -776,7 +776,7 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
     expect(server.commands).not.toContainEqual({ type: "stop_agent", agentId: "agent-root" });
   });
 
-  test.skip("ownsServer: true with an active root sends stop_agent, shows a stopping hint, then quits on session_ended — DH-0146: flaky in real CI, root cause unconfirmed", async () => {
+  test("ownsServer: true with an active root sends stop_agent, shows a stopping hint, then quits on session_ended — DH-0146: root cause fixed, confirmed passing reliably (DH-0163)", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
     const server = makeFakeServer();
@@ -859,6 +859,28 @@ describe("startTui: DH-0093 slash-command wiring", () => {
 
     expect(server.commands).toContainEqual({ type: "request_agent_tree" });
     expect(server.commands).toContainEqual({ type: "list_skills" });
+
+    stdin.type("\x03");
+    await done;
+  });
+
+  test("a successful list_skills response is dispatched as skills_response, not surfaced as a command error", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    server.commandResponses.push({ ok: true, tree: [] });
+    server.commandResponses.push({
+      ok: true,
+      skills: [{ name: "test-skill", description: "a skill" }],
+    });
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush(5, stdout);
+
+    expect(server.commands).toContainEqual({ type: "list_skills" });
+    expect(stdout.allWrites()).not.toContain("command failed");
 
     stdin.type("\x03");
     await done;

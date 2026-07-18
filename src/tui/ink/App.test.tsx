@@ -45,6 +45,43 @@ describe("App", () => {
     expect(rows.length).toBe(state.size.rows);
   });
 
+  test("agent view: <AgentView> renders in place of <RootView>/<AgentTree>, layout still fits the frame exactly", () => {
+    let state = rootState();
+    state = reducer(state, {
+      type: "tree_response",
+      tree: [
+        { agentId: "root", parentAgentId: null, model: "sonnet", status: "running", children: [] },
+      ],
+    }).state;
+    state = { ...state, view: { kind: "agent", agentId: "root" } };
+    const { lastFrame } = render(React.createElement(App, { state }));
+    const rows = (lastFrame() ?? "").split("\n");
+    expect(rows.length).toBe(state.size.rows);
+  });
+
+  test("picker view: <PickerView> renders in place of <RootView>, layout still fits the frame exactly", () => {
+    let state = rootState();
+    state = {
+      ...state,
+      view: {
+        kind: "picker",
+        options: [
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "claude-sonnet",
+            isDefault: true,
+            isActive: true,
+          },
+        ],
+        selectedIndex: 0,
+      },
+    };
+    const { lastFrame } = render(React.createElement(App, { state }));
+    const rows = (lastFrame() ?? "").split("\n");
+    expect(rows.length).toBe(state.size.rows);
+  });
+
   test("<StatusRow> is positioned directly after the root view (which owns the composer)", () => {
     // Composer now lives inside RootView.tsx, not inlined in App.tsx directly — confirm both
     // halves of the contract: RootView renders <Composer>, and App renders <StatusRow> after
