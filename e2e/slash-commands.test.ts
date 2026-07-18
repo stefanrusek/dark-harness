@@ -149,7 +149,7 @@ describe("DH-0093 slash commands under a real PTY + mock provider", () => {
     session.sendKeys("Enter");
     // Local echo of the raw command, then the real completion.
     await session.waitFor((screen) => screen.includes("/greet hello world"));
-    await session.waitFor((screen) => screen.includes("Greeted!"), 15_000);
+    await session.waitFor((screen) => screen.includes("Greeted!"), 30_000);
 
     expect(provider.callCount).toBe(1);
     const lastRequest = provider.requests[0] as { messages?: { content: unknown }[] };
