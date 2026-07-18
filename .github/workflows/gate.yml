@@ -80,6 +80,15 @@ jobs:
       # `lcov.info` into one coverage/lcov.info via the standard `lcov` CLI.
       - name: Test with coverage gate (100% required)
         shell: bash
+        # DH-0149 follow-up: capping concurrency below the runner's reported core count is
+        # a live experiment — a first CI run at the default (os.cpus().length, uncapped) hit
+        # several real-timeout-boundary tests (e.g. src/agent/mcp/connection.test.ts's
+        # per-call-timeout test) racing against CPU contention from many concurrent `bun
+        # test` processes, not the DH-0145/DH-0146 Yoga crash this ticket set out to fix
+        # (confirmed absent in that same run). Lowering this is the cheap thing to rule out
+        # before assuming those are real test-design bugs.
+        env:
+          TEST_ISOLATED_CONCURRENCY: "2"
         run: |
           set -o pipefail
           bun run test:coverage 2>&1 | tee coverage-report.txt
