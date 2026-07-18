@@ -38,6 +38,7 @@ source: tracking/
 | [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | status: verifying |
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | status: verifying |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: verifying |
+| [DH-0164](../DH-0164-gate-yml-never-installs-playwright-s-chromium-e2e-web-tests-fail-closed-with-no-chromium-found.md) | gate.yml never installs Playwright's Chromium, e2e web tests fail closed with No Chromium found | status: verifying |
 
 ## Board
 
@@ -88,6 +89,7 @@ source: tracking/
 | [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | feature | stefan |
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | feature | stefan |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | bug | stefan |
+| [DH-0164](../DH-0164-gate-yml-never-installs-playwright-s-chromium-e2e-web-tests-fail-closed-with-no-chromium-found.md) | gate.yml never installs Playwright's Chromium, e2e web tests fail closed with No Chromium found | bug | stefan |
 
 ## Recently Closed
 

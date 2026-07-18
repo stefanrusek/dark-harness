@@ -64,6 +64,15 @@ jobs:
       - name: Install lcov
         run: sudo apt-get update && sudo apt-get install -y lcov
 
+      # DH-0164: e2e/spikes/web/support.ts's resolveChromiumExecutable() has no fallback that
+      # works on a fresh runner (it checks a few conventional cache paths, none of which exist
+      # until something actually downloads a browser) -- this step was always missing, just
+      # masked by the gate consistently failing on an earlier step first. --with-deps also
+      # installs the system libraries (fonts, libnss, etc.) ubuntu-latest doesn't ship by
+      # default, which a bare `playwright install chromium` would silently need at launch time.
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
       - name: Typecheck
         run: bun run typecheck
 
