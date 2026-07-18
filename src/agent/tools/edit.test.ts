@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { editTool } from "./edit.ts";
 import { readTool } from "./read.ts";
 import { makeToolContext } from "./test-helpers.ts";
-import type { ToolContext } from "./types.ts";
+import type { ToolContext } from "./types.type.ts";
 
 let dir: string;
 

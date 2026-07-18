@@ -11,7 +11,7 @@
 
 import type { WebSearchConfig } from "../../contracts/index.ts";
 import { hostMatchesSuffix } from "./net-guard.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESULTS = 10;

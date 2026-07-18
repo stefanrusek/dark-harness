@@ -6,7 +6,7 @@
 // (src/agent/runtime.ts's buildToolContext) and handed to the pure functions below, which
 // contain the entire grammar and are unit-testable without any MCP/runtime plumbing.
 
-import type { JsonSchema, Tool, ToolContext, ToolResult } from "./types.ts";
+import type { JsonSchema, Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const DEFAULT_MAX_RESULTS = 5;
 

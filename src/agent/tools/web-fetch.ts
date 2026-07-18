@@ -19,7 +19,7 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import type { WebFetchConfig } from "../../contracts/index.ts";
 import { hostMatchesSuffix, isPrivateAddress } from "./net-guard.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;

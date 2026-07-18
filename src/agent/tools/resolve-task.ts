@@ -5,7 +5,7 @@
 // visible tasks (`ctx.tasks.list()` filtered to `parentAgentId === ctx.agentId`) — per the
 // ticket's own Assumptions, not a global namespace across the whole run.
 
-import type { ToolContext } from "./types.ts";
+import type { ToolContext } from "./types.type.ts";
 
 export type TaskIdResolution = { id: string } | { error: string };
 

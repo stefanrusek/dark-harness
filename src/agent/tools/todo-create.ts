@@ -3,7 +3,7 @@
 // from TaskRegistry).
 
 import { TodoCapExceededError, TodoNotFoundError } from "../todos.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const todoCreateTool: Tool = {
   name: "TodoCreate",

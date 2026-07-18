@@ -2,7 +2,7 @@
 
 import type { TodoRecord } from "../todos.ts";
 import { TodoNotFoundError } from "../todos.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 function formatRecord(record: TodoRecord): string {
   const lines = [

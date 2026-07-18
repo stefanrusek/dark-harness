@@ -7,7 +7,7 @@
 // conformance audit that raised this.
 
 import { stat } from "node:fs/promises";
-import type { ToolContext } from "./types.ts";
+import type { ToolContext } from "./types.type.ts";
 
 export interface ReadGuardError {
   error: string;

@@ -15,7 +15,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { getDocumentProxy } from "unpdf";
 import { recordRead } from "./read-guard.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 const DEFAULT_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;

@@ -8,7 +8,7 @@
 
 import { TaskNotFoundError } from "../tasks.ts";
 import { resolveByName } from "./resolve-task.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const monitorTool: Tool = {
   name: "Monitor",

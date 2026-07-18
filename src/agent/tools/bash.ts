@@ -20,7 +20,7 @@
 // (e.g. the process already exited, or already reaped its own children).
 
 import { capOutputWithSavedFile } from "./output-cap.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;

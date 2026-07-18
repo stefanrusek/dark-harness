@@ -4,7 +4,7 @@
 import type { DhConfig } from "../../contracts/index.ts";
 import { TaskRegistry } from "../tasks.ts";
 import { TodoStore } from "../todos.ts";
-import type { ToolContext } from "./types.ts";
+import type { ToolContext } from "./types.type.ts";
 
 export const TEST_CONFIG: DhConfig = {
   options: { defaultModel: "sonnet" },

@@ -70,7 +70,7 @@ import {
 } from "./providers/types.ts";
 import { summarizeToolInput } from "./tool-summary.ts";
 import { parseReportedOutcome } from "./tools/report-outcome.ts";
-import type { Tool, ToolContext } from "./tools/types.ts";
+import type { Tool, ToolContext } from "./tools/types.type.ts";
 
 export const TASK_FAILED_MARKER = "TASK_FAILED";
 const DEFAULT_MAX_TURNS = 100;

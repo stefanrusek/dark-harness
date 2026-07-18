@@ -9,7 +9,7 @@
 
 import { TaskNotFoundError } from "../tasks.ts";
 import { capOutput } from "./output-cap.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const taskOutputTool: Tool = {
   name: "TaskOutput",

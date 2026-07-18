@@ -36,7 +36,7 @@ import { TaskFinishedError, TaskRegistry, type TaskSnapshot } from "./tasks.ts";
 import { TodoStore } from "./todos.ts";
 import { buildToolMap, composeTools, reportOutcomeTool } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
-import type { Tool, ToolContext } from "./tools/types.ts";
+import type { Tool, ToolContext } from "./tools/types.type.ts";
 import {
   type CreatedWorktree,
   createWorktree,

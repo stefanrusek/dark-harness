@@ -2,7 +2,7 @@
 // (DH-0076). Zero parameters: rereading current ground truth costs a few dozen tokens.
 
 import type { TodoRecord } from "../todos.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 function formatLine(record: TodoRecord): string {
   const suffix =

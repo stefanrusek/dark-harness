@@ -9,7 +9,7 @@
 // being silently omitted, so the model gets an actionable message instead of an unknown-tool
 // failure. Full implementation (device/browser OAuth flow, token storage) is future work.
 
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const mcpAuthTool: Tool = {
   name: "McpAuth",

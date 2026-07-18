@@ -6,7 +6,7 @@
 // SendMessage/TaskStop. When false, the tool blocks until the sub-agent finishes and returns
 // its final output directly.
 
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 function resolveModelName(
   input: Record<string, unknown>,

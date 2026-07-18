@@ -1,7 +1,7 @@
 // TaskStop tool — stops a background task or sub-agent by id (HANDOFF.md §4).
 
 import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const taskStopTool: Tool = {
   name: "TaskStop",

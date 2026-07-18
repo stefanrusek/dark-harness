@@ -9,7 +9,7 @@
 
 import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
 import { resolveTaskId } from "./resolve-task.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const sendMessageTool: Tool = {
   name: "SendMessage",

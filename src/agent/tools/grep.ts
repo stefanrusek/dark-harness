@@ -14,7 +14,7 @@
 import { stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { capOutput } from "./output-cap.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const BINARY_SNIFF_BYTES = 8_000;

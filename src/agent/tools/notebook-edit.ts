@@ -11,7 +11,7 @@
 import { isAbsolute, resolve } from "node:path";
 import type { NotebookCell, NotebookJson } from "./read.ts";
 import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);

@@ -2,7 +2,7 @@
 // (DH-0076; mirrors real Claude Code, where TaskUpdate is the one mutation surface).
 
 import { TodoNotFoundError } from "../todos.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 const VALID_STATUSES = new Set(["pending", "in_progress", "completed", "deleted"]);
 

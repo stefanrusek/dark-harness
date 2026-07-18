@@ -1,6 +1,6 @@
 // Skill tool — loads a skill by name from configured skillPaths (HANDOFF.md §4, §5).
 
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const skillTool: Tool = {
   name: "Skill",

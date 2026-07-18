@@ -7,7 +7,7 @@
 import { stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { capOutput } from "./output-cap.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 function resolvePath(path: string, cwd: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);
