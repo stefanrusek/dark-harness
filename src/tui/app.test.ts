@@ -1,3 +1,7 @@
+// DH-0146: MUST be the first import — clears CI env vars before Ink is loaded so Ink renders
+// interactively (and actually writes frames to the fake stdout) in CI, exactly as it does
+// locally. See the module's own header for the full mechanism. Import ordering is load-bearing.
+import "./ink/render-interactive-in-tests.ts";
 import { describe, expect, test } from "bun:test";
 import type {
   AgentTreeResponse,

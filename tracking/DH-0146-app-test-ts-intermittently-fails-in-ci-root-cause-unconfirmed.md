@@ -74,3 +74,25 @@ Blocked the v0.1.0-alpha.1 release gate intermittently. Real symptom (seen 2026-
 > app.test.ts pass across repeated runs (though local never reproduced the failure, so the
 > real GitHub Actions run is the actual proof). The two `test.skip`'d resize/tick tests are
 > left skipped for now (out of scope for this recurrence; can be revisited separately).
+
+> [!NOTE]
+> CORRECTION — the note above was wrong; the flush-timing theory did **not** hold. Pushing the
+> flush change triggered a real CI run (2026-07-18) that failed identically, with every failing
+> test now hitting the **exact 5000ms test timeout** — proving the render never lands *at all*
+> in CI (not "late"), so no amount of polling can help. The **definitive, proven root cause**
+> (found by reading `node_modules/ink/build/ink.js`): Ink's `onRender` has a hard
+> `if (isInCi) { this.lastOutput = output; return; }` branch — in CI it stores each frame but
+> **never writes it to stdout**, flushing only on `unmount()`. `isInCi` comes from `is-in-ci`,
+> evaluated once at import time from `process.env.CI` / `CONTINUOUS_INTEGRATION`. So under
+> GitHub Actions (`CI=true`) a mounted-but-not-unmounted TUI writes only the synchronous startup
+> preamble — exactly the observed `Received: "[?1049h[?25l[?2004h[?1000h[?1002h[?1006h"`. This
+> is 100% deterministic on the env var, which is precisely why it never reproduced locally or in
+> the Docker repro (neither set `CI`), and it now reproduces on demand locally with
+> `CI=true bun test src/tui/app.test.ts` (13 fail without the fix, 0 with it).
+>
+> Fix: `src/tui/ink/render-interactive-in-tests.ts` — a tiny module imported first by
+> app.test.ts that deletes `CI`/`CONTINUOUS_INTEGRATION` before Ink loads, so Ink uses its
+> normal interactive path and actually writes frames. Safe because DH-0149's per-file process
+> isolation gives app.test.ts its own OS process — no other test file's env is touched. The
+> flush-poll hardening from the first commit is kept (it correctly distinguishes "render not
+> started" from "settled") but is defensive, not the fix. Pending the confirming CI run on PR #10.
