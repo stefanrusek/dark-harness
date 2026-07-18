@@ -121,5 +121,12 @@ describe("--connect --web: a real web client process against a real remote dh --
       body: JSON.stringify({ type: "request_agent_tree" }),
     });
     expect(treeRes.status).toBe(200);
-  }, 30_000);
+    // DH-0165: CI's gate.yml groups this file's Chromium launch back-to-back with
+    // e2e/web.test.ts's and e2e/streaming.test.ts's own browser launches in the same
+    // `bun test` invocation (see gate.yml's "E2E (web/browser — Chromium)" step) — by the
+    // time this test's own two `dh` processes (server + connected --web client) and browser
+    // launch, the runner has already spent real wall-clock time on two prior full browser
+    // sessions. 30s was tight enough to time out in real CI even though this test passes
+    // comfortably (and quickly) run in isolation, locally.
+  }, 45_000);
 });
