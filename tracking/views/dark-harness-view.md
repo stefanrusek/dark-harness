@@ -61,7 +61,6 @@ source: tracking/
 | [DH-0144](../DH-0144-all-recognized-skills-should-be-accessible-as-commands.md) | All recognized skills should be accessible as / commands | feature | stefan |
 | [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
 | [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
-| [DH-0165](../DH-0165-e2e-web-browser-chromium-fails-in-real-ci-headless-chromium-can-t-connect-to-d-bus-dom-assertions-never-satisfied.md) | E2E (web/browser — Chromium) fails in real CI: headless Chromium can't connect to D-Bus, DOM assertions never satisfied | bug | stefan |
 
 ### implementing
 
@@ -94,6 +93,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0165](../DH-0165-e2e-web-browser-chromium-fails-in-real-ci-headless-chromium-can-t-connect-to-d-bus-dom-assertions-never-satisfied.md) | E2E (web/browser — Chromium) fails in real CI: headless Chromium can't connect to D-Bus, DOM assertions never satisfied | done |
 | [DH-0164](../DH-0164-gate-yml-never-installs-playwright-s-chromium-e2e-web-tests-fail-closed-with-no-chromium-found.md) | gate.yml never installs Playwright's Chromium, e2e web tests fail closed with No Chromium found | done |
 | [DH-0163](../DH-0163-coverage-backfill-close-the-pre-existing-30-line-gap-across-12-files-99-76-100.md) | Coverage backfill: close the pre-existing ~30-line gap across 12 files (99.76% -> 100%) | done |
 | [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | done |
@@ -108,4 +108,3 @@ source: tracking/
 | [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | done |
 | [DH-0152](../DH-0152-coverage-exclusion-mechanism-for-future-type-ts-constant-ts-files-fix-contracts-index-test-ts-fake-import-workaround.md) | Coverage-exclusion mechanism for future .type.ts / .constant.ts files, fix contracts/index.test.ts fake-import workaround | done |
 | [DH-0151](../DH-0151-upgrade-biome-1-9-4-to-2-x-migrate-config-absorb-import-sort-baseline-reformat.md) | Upgrade Biome 1.9.4 to 2.x, migrate config, absorb import-sort baseline reformat | done |
-| [DH-0150](../DH-0150-dh-0149-follow-up-per-file-lcov-merge-inflates-lf-with-comment-line-pollution-replace-lcov-a-with-max-lh-part-merge.md) | DH-0149 follow-up: per-file lcov merge inflates LF with comment-line pollution, replace lcov -a with max-LH-part merge | done |
