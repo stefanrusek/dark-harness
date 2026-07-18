@@ -118,6 +118,23 @@ export async function startTui(
   token?: string,
   opts: StartTuiOptions = {},
 ): Promise<void> {
+  // DH-0164: Ink's `is-in-ci` check (node_modules/ink/build/ink.js) snapshots `process.env.CI`
+  // / `CONTINUOUS_INTEGRATION` once, at the moment `ink` itself is first imported, and when
+  // true it silently stops writing rendered frames to stdout (they're buffered and flushed
+  // only on unmount — see DH-0146's `render-interactive-in-tests.ts` for the full mechanism,
+  // which fixed this same issue for `src/tui/app.test.ts` but *only* for that unit-test
+  // process). The real compiled `dh` binary hits the identical bug when launched under a
+  // genuine PTY inside GitHub Actions (e2e's tmux harness, ADR 0008): the runner always sets
+  // `CI=true` in the job environment, tmux's spawned pane inherits it, and Ink then never
+  // renders anything to the real terminal — every PTY e2e test timed out waiting for content
+  // that Ink had computed but was withholding, not a tmux/process problem at all. `CI=true` is
+  // meaningless once we're actually attached to a real interactive terminal (a non-interactive
+  // CI run never reaches this function — `src/cli.ts` only calls `startTui` for the real
+  // interactive TUI), so clear it before the dynamic import below pulls in `ink` for the first
+  // time (import-order matters: `is-in-ci` must not have evaluated yet).
+  delete process.env.CI;
+  delete process.env.CONTINUOUS_INTEGRATION;
+
   // DH-0145: yoga-layout (an ink dependency) loads its WASM binary via a top-level await in
   // its own entry module, and ink's DOM layer calls `Yoga.Node.create()` synchronously inside
   // `mountInk()` below. Whether that WASM load has settled by the time `mountInk()` reaches it

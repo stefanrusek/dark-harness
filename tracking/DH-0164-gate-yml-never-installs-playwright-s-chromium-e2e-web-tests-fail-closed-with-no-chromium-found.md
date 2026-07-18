@@ -50,3 +50,40 @@ Real, previously-masked CI gap: .github/workflows/gate.yml has never had a Playw
 > Playwright Chromium, so the "fresh runner, nothing cached" failure mode this fix targets
 > can't be reproduced locally) — real GitHub Actions CI is the verification of record, per
 > this project's established pattern for CI-environment-only issues.
+
+> [!NOTE]
+> 2026-07-18 (round 2): Chromium install + tmux install + the 3-way resource-scoped e2e split
+> did NOT fix the remaining red `E2E (TUI/PTY — tmux)` step (real CI run 29653054252). Root-
+> caused by reading that run's full raw log (`gh run view <id> --log`), not just
+> `--log-failed`: EVERY PTY test across all 3 files timed out at the full 30000ms, starting
+> with the very first test in the run (`slash-commands.test.ts`'s first case) — not an
+> intermittent slow one. tmux itself was fine; the wrapped `dh` process under the real PTY
+> never rendered a single frame, so `waitFor` spun for the full timeout, and only *afterward*
+> did a stray `capture-pane` (from the next test's setup racing the previous session's actual
+> teardown) surface as the misleading "can't find pane"/"no server running" secondary error —
+> a symptom of the real failure, not the cause.
+>
+> Real root cause: Ink (`node_modules/ink/build/ink.js`) imports the `is-in-ci` package and
+> checks its module-scope `isInCi` boolean in `onRender` — when true, Ink computes each frame
+> but withholds writing it to stdout until `unmount()`, by design (avoids CI log spam from
+> repeated ANSI-erase redraws). DH-0146 already found and fixed this exact mechanism for
+> `src/tui/app.test.ts` (see `src/tui/ink/render-interactive-in-tests.ts`), but that fix only
+> clears `CI`/`CONTINUOUS_INTEGRATION` for that one unit-test process — it never touched
+> production. GitHub Actions sets `CI=true` in the job environment; `tmux new-session`
+> inherits it into the pane it spawns; the real compiled `dh` binary run interactively under
+> that pane is therefore genuinely attached to a real PTY (`isTTY` true) *and* has `CI=true`
+> set, and Ink's `is-in-ci` check only looks at the env var, never at whether stdout is
+> actually a terminal — so the real interactive TUI silently stopped rendering anything,
+> exactly like the DH-0146 unit-test bug, but in production this time.
+>
+> Fix: `src/tui/app.ts`'s `startTui` (the one call site both `src/cli.ts` and every TUI test
+> go through) now deletes `process.env.CI`/`CONTINUOUS_INTEGRATION` immediately before its
+> existing `await import("./ink/mount.ts")` — before `ink` (and therefore `is-in-ci`) is ever
+> imported for the first time, so the module-scope check always evaluates against a cleared
+> env. Safe: `startTui` is only ever called for the real interactive TUI (headless `--job`
+> mode never renders Ink), so a real terminal's presence is the only ground truth that
+> matters here, not an env var meant to distinguish "is this a CI log" from "is this a real
+> terminal" — which under a real PTY (interactively or via tmux in e2e) it always is. Verified
+> locally that `CI=true bun test src/tui/app.test.ts` still passes (22 pass/2 skip) since that
+> test file's own DH-0146 env-clear already runs first and this change is idempotent with it.
+> Pushed for real CI verification.
