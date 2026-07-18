@@ -87,3 +87,44 @@ Real, previously-masked CI gap: .github/workflows/gate.yml has never had a Playw
 > locally that `CI=true bun test src/tui/app.test.ts` still passes (22 pass/2 skip) since that
 > test file's own DH-0146 env-clear already runs first and this change is idempotent with it.
 > Pushed for real CI verification.
+
+> [!NOTE]
+> 2026-07-18 (round 3): The round-2 fix (deleting `process.env.CI` inside `startTui`'s function
+> body in `src/tui/app.ts`) did NOT fix real CI (run 29653565918 — identical failure signature,
+> every PTY test still timed out at the full 30000ms). Reproduced locally to find out why:
+> built `dist/dh-test` from that commit, ran it under a real local `tmux` session with
+> `CI=true` in its env, and `tmux capture-pane` showed only `dh: client connected from ::1`
+> and a blank screen — never the "Dark Harness" banner — confirming the underlying `is-in-ci`
+> bug was still live even with that delete in place, and that the earlier "verified locally"
+> note only ever exercised the *unit test* (which has its own separate, working env-clear via
+> `render-interactive-in-tests.ts`), not the actual production render path.
+>
+> Actual bug: `src/tui/app.ts` already has a **static** top-of-file
+> `import { mountInk } from "./ink/mount.ts"` (needed for its type, `InkMount`), and
+> `./ink/mount.ts` statically imports `ink`. ESM evaluates a module's static imports before
+> any of that module's own code — including function bodies — ever runs. So by the time
+> `startTui()`'s function body executed my `delete process.env.CI` line, `ink` (and therefore
+> `is-in-ci`, which snapshots the env once at its own import time) had *already* been imported
+> and evaluated, as part of evaluating `src/cli.ts`'s import graph at process startup — long
+> before `startTui()` is ever called. The `await import("./ink/mount.ts")` a few lines below
+> that delete (DH-0145's WASM-ordering fix) is a no-op re-import of an already-loaded module;
+> it does not re-trigger `is-in-ci`'s check and never did.
+>
+> Real fix: added `src/tui/ink/clear-ci-env-for-interactive-render.ts`, a side-effect-only
+> module (same shape as DH-0146's `render-interactive-in-tests.ts`, but for production) that
+> deletes `CI`/`CONTINUOUS_INTEGRATION` at module-evaluation time. Imported it as the literal
+> **first** import statement in `src/cli.ts` (the actual `bun build --compile` entry point per
+> `scripts/build.ts`) — ESM evaluates each of an entry module's own top-level import statements
+> fully, in source order, before moving to the next one, so this runs to completion before the
+> `./tui/index.ts` → `./tui/app.ts` → `./tui/ink/mount.ts` → `ink` chain is ever reached.
+> Reverted the now-dead `delete` call in `app.ts`'s `startTui` (left a comment pointing at the
+> real fix, so nobody re-adds it there believing it does something).
+>
+> Re-verified with the exact same manual repro as above (build `dist/dh-test`, real local
+> `tmux` session, `CI=true` in the pane's env): `tmux capture-pane` now shows the full rendered
+> frame — "Dark Harness — Root Agent — live", the input box, "[Enter] send" footer — exactly
+> matching a non-CI run. `bun run typecheck`, `bun run lint`, and `bun test src --coverage`
+> (2205 pass, 100% coverage including the new file) all still pass. Pushed for real CI
+> verification (this class of bug has now twice looked fixed locally-by-unit-test while still
+> broken in the actual production render path, so real CI is the only verification that
+> counts here, per this ticket's own established pattern).

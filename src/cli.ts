@@ -9,6 +9,11 @@
 //     for exactly this purpose (src/server/agent-loop.type.ts's doc comment, and Grace's own
 //     round-1 status-log note, both call this out as the intended integration point).
 
+// DH-0164: MUST be the first import in this file — see its own comment for why. Clears
+// CI/CONTINUOUS_INTEGRATION before anything later in this file's import graph (including
+// `./tui/index.ts` -> `./ink/mount.ts` -> `ink`) gets a chance to evaluate `is-in-ci`.
+import "./tui/ink/clear-ci-env-for-interactive-render.ts";
+
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
