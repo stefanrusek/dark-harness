@@ -19,8 +19,8 @@ import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import * as discoveryFailFixture from "./fake-stdio-server-discovery-fails.ts";
 import * as goodFixture from "./fake-stdio-server.ts";
+import * as discoveryFailFixture from "./fake-stdio-server-discovery-fails.ts";
 
 describe("MCP stdio fixtures (DH-0149 coverage closure)", () => {
   test("fake-stdio-server.ts: registered tools behave as expected when driven in-process", async () => {

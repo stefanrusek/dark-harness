@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { CONNECTION_STATUSES } from "./types.ts";
 import type { ConnectionStatus } from "./types.ts";
+import { CONNECTION_STATUSES } from "./types.ts";
 
 // DH-0149: this module is otherwise pure type-only declarations (interfaces/type aliases —
 // `Turn`, `AgentInfo`, `TuiState`, `Action`, `Effect`, `ReducerResult`, `ViewState`), and
