@@ -3,8 +3,8 @@ import { readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
 import type { ModelProvider } from "./agent/providers/types.ts";
-import { ROOT_AGENT_ID } from "./agent/runtime.ts";
 import {
   ActivityFeed,
   AgentRuntimeLoopAdapter,

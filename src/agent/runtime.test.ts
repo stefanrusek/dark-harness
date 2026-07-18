@@ -28,11 +28,11 @@ import {
   type ServerSentEvent,
 } from "../contracts/index.ts";
 import { SessionLogger } from "../server/index.ts";
+import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import {
   AgentRuntime,
   type AgentRuntimeOptions,
   ConfigModelError,
-  ROOT_AGENT_ID,
   RootNotListeningError,
   RootOnlyModelSwitchError,
   UnknownSkillError,

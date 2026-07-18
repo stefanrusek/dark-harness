@@ -11,10 +11,11 @@
 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
 import { createProvider } from "./agent/providers/index.ts";
 import type { ModelProvider, ProviderToolDefinition } from "./agent/providers/types.ts";
 import { type ResumeResult, loadResumeSession } from "./agent/resume.ts";
-import { AgentRuntime, type AgentRuntimeOptions, ROOT_AGENT_ID } from "./agent/runtime.ts";
+import { AgentRuntime, type AgentRuntimeOptions } from "./agent/runtime.ts";
 import { BUILD_INFO } from "./config/build-info.ts";
 import { ConfigError, DEFAULT_CONFIG_PATH, loadConfig } from "./config/index.ts";
 import type {

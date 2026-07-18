@@ -23,8 +23,8 @@ import {
   readAgentLogLines,
   readSessionLogSummaries,
 } from "../server/index.ts";
+import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import type { ProviderContentBlock, ProviderMessage } from "./providers/types.ts";
-import { ROOT_AGENT_ID } from "./runtime.ts";
 
 /** A chain of more than this many resumed-from hops is treated as corrupt (D6) — real usage
  * is expected to be a handful of hops at most; this is a sanity backstop against a cycle that

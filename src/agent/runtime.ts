@@ -23,6 +23,7 @@ import {
 import { composeSkillInvocation } from "../prompt/index.ts";
 import { type Skill, discoverSkills } from "../prompt/skills.ts";
 import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
+import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import { type AgentLoopResult, type ModelBinding, computeCostUsd, runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { loadProjectMcpServers } from "./mcp/project-config.ts";
@@ -44,12 +45,6 @@ import {
   isGitRepo,
   removeWorktree,
 } from "./worktree.ts";
-
-/** The root agent's fixed identifier — used both as the loop's own `agentId` (its SSE
- * events/log lines) and as the "agentId" `AgentLoopHandle`'s wire-facing operations
- * (sendMessage/stopAgent/the tree) address it by, exactly like every sub-agent's task id
- * (see spawnAgent()'s doc comment for why those two id spaces are now unified). */
-export const ROOT_AGENT_ID = "agent-root";
 
 /** DH-0077: default cap on concurrently-live isolation worktrees when `options.
  * maxConcurrentAgents` is left unset — worktree creation has real disk/git overhead a plain
