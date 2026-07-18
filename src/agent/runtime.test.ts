@@ -28,6 +28,7 @@ import {
   type ServerSentEvent,
 } from "../contracts/index.ts";
 import { SessionLogger } from "../server/index.ts";
+import { withProcessMutationLock } from "../test-process-lock.ts";
 import {
   AgentRuntime,
   type AgentRuntimeOptions,
@@ -37,7 +38,6 @@ import {
   RootOnlyModelSwitchError,
   UnknownSkillError,
 } from "./runtime.ts";
-import { withProcessMutationLock } from "../test-process-lock.ts";
 import { bashTool } from "./tools/bash.ts";
 
 /** Round 8: `AgentRuntimeOptions.client` is required (no default) so no real call site can

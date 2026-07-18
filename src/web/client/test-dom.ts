@@ -6,14 +6,13 @@ import { afterAll, beforeAll } from "bun:test";
 import { Window } from "happy-dom";
 
 const TEST_DOM_GLOBALS_KEY = Symbol.for("dh.testDom.globals");
+type TestGlobalKey = "window" | "document" | "HTMLElement" | "navigator";
 
-const globalAny = globalThis as typeof globalThis & {
+type GlobalWithTestDom = Omit<typeof globalThis, TestGlobalKey> & {
   [TEST_DOM_GLOBALS_KEY]?: RegisteredGlobals;
-  window?: unknown;
-  document?: unknown;
-  HTMLElement?: unknown;
-  navigator?: unknown;
-};
+} & Partial<Record<TestGlobalKey, unknown>>;
+
+const globalAny = globalThis as GlobalWithTestDom;
 
 type RegisteredGlobals = {
   refs: number;
@@ -46,11 +45,7 @@ function getRegisteredGlobals(): RegisteredGlobals {
   return state;
 }
 
-function restoreOrDelete(
-  key: "window" | "document" | "HTMLElement" | "navigator",
-  present: boolean,
-  value: unknown,
-): void {
+function restoreOrDelete(key: TestGlobalKey, present: boolean, value: unknown): void {
   if (present) globalAny[key] = value;
   else delete globalAny[key];
 }
