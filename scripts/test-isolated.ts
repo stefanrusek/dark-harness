@@ -96,6 +96,57 @@ async function runPool(
   return results;
 }
 
+// DH-0150: Bun's per-file lcov line data is execution-path-dependent, not a
+// static property of the source file. A function a given test file never
+// executes falls back to marking every physical line — including comments —
+// as `DA:line,0`; a function it does execute gets real basic-block data that
+// omits comment lines. Plain `lcov -a` unions the *worst* (most
+// comment-polluted) line set per file across all merged parts, inflating LF
+// and tanking the reported percentage even though the union of *hit* lines
+// was always correct. Fix: per source file, take the DA line-set from the
+// part with the maximum LH (most executed, cleanest data) as the
+// authoritative set of instrumentable lines, then mark a line hit if any
+// part reports it hit. This also preserves LF:0 records for type-only files
+// instead of `lcov -a --ignore-errors empty` silently dropping them.
+interface FileCoverage {
+  /** line number -> hit count, from this one part's DA records */
+  lines: Map<number, number>;
+  /** this part's own reported LH for the file */
+  lh: number;
+}
+
+async function parseLcovParts(path: string): Promise<Map<string, FileCoverage>> {
+  const text = await Bun.file(path).text();
+  const files = new Map<string, FileCoverage>();
+  let currentFile: string | null = null;
+  let currentLines: Map<number, number> = new Map();
+  let currentLH = 0;
+
+  for (const line of text.split("\n")) {
+    if (line.startsWith("SF:")) {
+      currentFile = line.slice(3).trim();
+      currentLines = new Map();
+      currentLH = 0;
+    } else if (line.startsWith("DA:")) {
+      const [lineNumStr, hitStr] = line.slice(3).split(",");
+      const lineNum = Number.parseInt(lineNumStr ?? "", 10);
+      const hit = Number.parseInt(hitStr ?? "", 10);
+      if (Number.isFinite(lineNum) && Number.isFinite(hit)) {
+        currentLines.set(lineNum, (currentLines.get(lineNum) ?? 0) + hit);
+      }
+    } else if (line.startsWith("LH:")) {
+      currentLH = Number.parseInt(line.slice(3).trim(), 10);
+    } else if (line.startsWith("end_of_record")) {
+      if (currentFile !== null) {
+        files.set(currentFile, { lines: currentLines, lh: currentLH });
+      }
+      currentFile = null;
+    }
+  }
+
+  return files;
+}
+
 async function mergeLcov(parts: string[]): Promise<void> {
   const existingParts: string[] = [];
   for (const part of parts) {
@@ -110,29 +161,61 @@ async function mergeLcov(parts: string[]): Promise<void> {
     return;
   }
 
-  const args = ["lcov", "--ignore-errors", "empty"];
+  const perFile = new Map<string, FileCoverage[]>();
   for (const part of existingParts) {
-    args.push("-a", part);
-  }
-  args.push("-o", MERGED_LCOV);
-
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-
-  if (stdout) console.log(stdout);
-  if (stderr) console.error(stderr);
-
-  if (exitCode !== 0) {
-    console.error(`::error::lcov merge failed (exit ${exitCode}).`);
-    process.exitCode = exitCode;
-    return;
+    const parsed = await parseLcovParts(part);
+    for (const [file, cov] of parsed) {
+      const arr = perFile.get(file);
+      if (arr) {
+        arr.push(cov);
+      } else {
+        perFile.set(file, [cov]);
+      }
+    }
   }
 
-  // Print a readable human summary since the reporter is now per-file.
+  const output: string[] = [];
+  let totalLF = 0;
+  let totalLH = 0;
+
+  for (const file of [...perFile.keys()].sort()) {
+    const covs = perFile.get(file) as FileCoverage[];
+
+    let authoritative = covs[0] as FileCoverage;
+    for (const cov of covs) {
+      if (cov.lh > authoritative.lh) authoritative = cov;
+    }
+
+    const hitLines = new Set<number>();
+    for (const cov of covs) {
+      for (const [ln, hits] of cov.lines) {
+        if (hits > 0) hitLines.add(ln);
+      }
+    }
+
+    const authoritativeLines = [...authoritative.lines.keys()].sort((a, b) => a - b);
+    let fileLF = 0;
+    let fileLH = 0;
+    output.push("TN:", `SF:${file}`, "FNF:0", "FNH:0");
+    for (const ln of authoritativeLines) {
+      const hit = hitLines.has(ln) ? 1 : 0;
+      output.push(`DA:${ln},${hit}`);
+      fileLF += 1;
+      fileLH += hit;
+    }
+    output.push(`LF:${fileLF}`, `LH:${fileLH}`, "end_of_record");
+
+    totalLF += fileLF;
+    totalLH += fileLH;
+  }
+
+  await Bun.write(MERGED_LCOV, `${output.join("\n")}\n`);
+
+  const pct = totalLF > 0 ? ((totalLH / totalLF) * 100).toFixed(2) : "0.00";
+  console.log(`Merged coverage: lines=${pct}% (${totalLH}/${totalLF})`);
+
+  // Print a readable human summary via the real lcov CLI (informational only —
+  // gate.yml's own LH/LF sum over coverage/lcov.info is authoritative for the gate).
   const summaryProc = Bun.spawn(["lcov", "--summary", MERGED_LCOV], {
     stdout: "pipe",
     stderr: "pipe",
