@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0158
 type: feature
-status: implementing
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -23,13 +23,21 @@ Fourth wave of Fable's leaf-to-root dependency-tree migration plan. These files 
 
 ## User Stories
 
-### As a TODO, I want TODO
+### As the coding-standards overhaul, I want agent/runtime.ts (now unblocked by DH-0153) and the rest of layer-3 correctly classified
 
-- Given TODO, when TODO, then TODO.
+- Given `agent/runtime.ts`, when checked, then it imports `ROOT_AGENT_ID` from
+  `agent-id.constant.ts` (not `resume.ts`), confirming DH-0153's cycle-break holds and the
+  file classifies cleanly as regular (real orchestration class logic).
+- Given every other layer-3 file, when classified, then it correctly stays regular — proven
+  by 2 sub-wave agents' independent review.
 
 ## Functional Requirements
 
-- TODO
+- No renames were warranted anywhere in this wave. All 13 files — `agent/loop.ts`,
+  `agent/runtime.ts`, the `agent/tools/index.ts` barrel (paths verified correct),
+  `config/load.ts`, `server/server.ts`, `server/fake-agent-loop.ts` (4A), plus
+  `mcp/project-config.ts`, `web/client/download.ts`, and 6 Ink/React composite components
+  (4B) — have real logic disqualifying them from `.type.ts`/`.constant.ts`.
 
 ## Assumptions
 
@@ -38,3 +46,9 @@ Fourth wave of Fable's leaf-to-root dependency-tree migration plan. These files 
 ## Open Questions
 
 ## Notes
+
+> [!NOTE]
+> 2026-07-18: Both sub-waves (4A, 4B) complete. Zero file changes — every layer-3 file
+> correctly stays regular, same pattern as Wave 2. `bun run typecheck` clean, `bun run lint`
+> exits 0 (258 warnings, unchanged since nothing here qualified for renaming).
+> `bun run test:coverage` 125/125 (99.75%), unaffected.
