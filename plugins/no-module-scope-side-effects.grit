@@ -1,0 +1,24 @@
+language js(typescript, jsx)
+
+or {
+  JsVariableStatement() as $s where {
+    not $s <: within JsFunctionBody() ,
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+  },
+  JsExport(export_clause=$c) as $s where {
+    $c <: JsVariableDeclarationClause(),
+    not $s <: within JsFunctionBody() ,
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+  },
+  JsExpressionStatement() as $s where {
+    not $s <: within JsFunctionBody() ,
+    not $s <: `import.meta.main && $call;`,
+    not $s <: within `if (import.meta.main) { $body }` ,
+    register_diagnostic(span=$s, message="no top-level side-effecting expressions (except an `import.meta.main && call()` entrypoint guard)", severity="warn")
+  },
+  JsIfStatement() as $s where {
+    not $s <: within JsFunctionBody() ,
+    not $s <: `if (import.meta.main) { $body }`,
+    register_diagnostic(span=$s, message="no top-level if-statements (except an `if (import.meta.main) { ... }` entrypoint guard)", severity="warn")
+  }
+}

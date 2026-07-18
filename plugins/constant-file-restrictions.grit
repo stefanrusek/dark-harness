@@ -1,0 +1,46 @@
+language js(typescript, jsx)
+
+or {
+  JsVariableStatement(declaration=$decl) as $s where {
+    $decl <: contains JsCallExpression(),
+    register_diagnostic(span=$s, message=".constant.ts files may only hold literal const data, not computed/function-call values", severity="warn")
+  },
+  JsExport(export_clause=$c) as $s where {
+    $c <: JsVariableDeclarationClause(declaration=$decl),
+    $decl <: contains JsCallExpression(),
+    register_diagnostic(span=$s, message=".constant.ts files may only hold literal const data, not computed/function-call values", severity="warn")
+  },
+  TsTypeAliasDeclaration() as $s where {
+    not $s <: within JsExport() ,
+    not $s <: contains TsTypeofType(),
+    register_diagnostic(span=$s, message=".constant.ts type aliases may only reference a same-file const via typeof/keyof typeof", severity="warn")
+  },
+  JsExport(export_clause=$c) as $s where {
+    $c <: TsTypeAliasDeclaration(),
+    not $c <: contains TsTypeofType(),
+    register_diagnostic(span=$s, message=".constant.ts type aliases may only reference a same-file const via typeof/keyof typeof", severity="warn")
+  },
+  JsFunctionDeclaration() as $s where {
+    not $s <: within JsExport() ,
+    register_diagnostic(span=$s, message=".constant.ts files may only contain const declarations and typeof-derived types", severity="warn")
+  },
+  JsClassDeclaration() as $s where {
+    not $s <: within JsExport() ,
+    register_diagnostic(span=$s, message=".constant.ts files may only contain const declarations and typeof-derived types", severity="warn")
+  },
+  TsInterfaceDeclaration() as $s where {
+    not $s <: within JsExport() ,
+    register_diagnostic(span=$s, message=".constant.ts files may only contain const declarations and typeof-derived types", severity="warn")
+  },
+  JsExport(export_clause=$c) as $s where {
+    or {
+      $c <: JsFunctionDeclaration(),
+      $c <: JsClassDeclaration(),
+      $c <: TsInterfaceDeclaration()
+    },
+    register_diagnostic(span=$s, message=".constant.ts files may only contain const declarations and typeof-derived types", severity="warn")
+  },
+  JsExpressionStatement() as $s where {
+    register_diagnostic(span=$s, message=".constant.ts files may only contain const declarations and typeof-derived types", severity="warn")
+  }
+}

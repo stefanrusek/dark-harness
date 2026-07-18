@@ -21,6 +21,28 @@
       "preset": "recommended"
     }
   },
+  "plugins": [
+    {
+      "path": "./plugins/type-file-restrictions.grit",
+      "includes": ["**/src/**/*.type.ts"]
+    },
+    {
+      "path": "./plugins/constant-file-restrictions.grit",
+      "includes": ["**/src/**/*.constant.ts"]
+    },
+    {
+      "path": "./plugins/no-module-scope-side-effects.grit",
+      "includes": [
+        "**/src/**/*.ts",
+        "**/src/**/*.tsx",
+        "!**/src/**/*.test.ts",
+        "!**/src/**/*.test.tsx",
+        "!**/src/**/*.d.ts",
+        "!**/src/**/*.type.ts",
+        "!**/src/**/*.constant.ts"
+      ]
+    }
+  ],
   "overrides": [
     {
       "includes": ["**/src/web/client/components/**/*.tsx"],
