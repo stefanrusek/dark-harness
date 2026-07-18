@@ -38,7 +38,7 @@ export interface AgentLoopHandle {
    * handler (src/server/commands.ts) is responsible for translating that into a 400 ack. */
   switchModel(agentId: string, model: string): void;
   /** DH-0093: the currently-known skill catalog, wire-shaped (list_skills command). */
-  listSkills(): SkillInfo[];
+  listSkills(): Promise<SkillInfo[]>;
   /** DH-0093: composes and delivers a `/skillname [args]` invocation into the given agent's
    * conversation (invoke_skill command). May reject/throw for an unknown skill name; Server's
    * own handler is responsible for translating that into a 404 ack. */

@@ -166,7 +166,7 @@ function fakeAgentLoop(
     getAgentTree: () => [],
     listModels: () => [],
     switchModel: () => {},
-    listSkills: () => [],
+    listSkills: async () => [],
     invokeSkill: () => {},
     ...overrides,
   };
@@ -2093,7 +2093,7 @@ describe("AgentRuntimeLoopAdapter", () => {
       expect(() => adapter.switchModel(ROOT_AGENT_ID, "test-model")).not.toThrow();
 
       // Builtin cli-tools skill is always present (runtime.ts's skillsCache seed).
-      expect(adapter.listSkills().some((s) => s.name === "cli-tools")).toBe(true);
+      expect((await adapter.listSkills()).some((s) => s.name === "cli-tools")).toBe(true);
 
       // An unknown skill name throws UnknownSkillError before any message delivery is
       // attempted, so this delegation is provable without spinning up the root agent.

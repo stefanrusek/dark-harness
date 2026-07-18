@@ -2504,13 +2504,13 @@ describe("AgentRuntime.listModels/switchModel (DH-0093)", () => {
 });
 
 describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
-  test("listSkills() includes the builtin cli-tools entry even with no skillPaths configured", () => {
+  test("listSkills() includes the builtin cli-tools entry even with no skillPaths configured", async () => {
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
-    const skills = runtime.listSkills();
+    const skills = await runtime.listSkills();
     expect(skills.some((s) => s.name === "cli-tools" && s.description.length > 0)).toBe(true);
   });
 
-  test("listSkills() eventually includes an on-disk skillPaths skill alongside the builtin", async () => {
+  test("listSkills() includes an on-disk skillPaths skill alongside the builtin", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dh-runtime-skills-"));
     const { mkdirSync, writeFileSync: writeFile } = await import("node:fs");
     mkdirSync(join(dir, "reviewer"));
@@ -2522,9 +2522,11 @@ describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
       config: baseConfig({ skillPaths: [dir] }),
       systemPrompt: "sp",
     });
-    // The eager discoverSkills() scan is fire-and-forget at construction — give it a beat.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const skills = runtime.listSkills();
+    // DH-0165: listSkills() itself now awaits the eager discoverSkills() scan's completion
+    // (see runtime.ts's `skillsReady` field) — no more fixed-delay poll needed here, and this
+    // is exactly the real-world race that fix closes: a caller that asks before the scan
+    // resolves used to see only the builtin entry.
+    const skills = await runtime.listSkills();
     expect(skills.some((s) => s.name === "cli-tools")).toBe(true);
     expect(skills.some((s) => s.name === "reviewer" && s.description === "Reviews things.")).toBe(
       true,

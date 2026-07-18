@@ -73,7 +73,7 @@ export class FakeAgentLoop implements AgentLoopHandle {
     this.switchedModels.push({ agentId, model });
   }
 
-  listSkills(): SkillInfo[] {
+  async listSkills(): Promise<SkillInfo[]> {
     return this.skills;
   }
 

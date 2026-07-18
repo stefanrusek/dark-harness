@@ -328,6 +328,17 @@ export class AgentRuntime {
    * before the on-disk scan resolves; `discoverSkills()`'s own results are prepended by (never
    * shadow) it once ready. */
   private skillsCache: Skill[] = [BUILTIN_CLI_TOOLS_SKILL];
+  /** DH-0165: resolves once the eager `discoverSkills()` scan above has populated
+   * `skillsCache` with the real on-disk results — `listSkills()` awaits this before reading
+   * the cache. Without it, a `list_skills` command that lands before the scan resolves (a
+   * real, CI-reproduced race: TUI/Web fire `list_skills` once at startup, right after the
+   * "ready" banner, which can beat an async `readdir`-based scan on a loaded/slow-disk CI
+   * runner) sees only the builtin `cli-tools` entry — every on-disk skill (e.g. an operator's
+   * own `/greet`) looks "unknown" to the client's local skills cache, which never even
+   * attempts the wire round-trip that would otherwise re-check the server (src/tui/state.ts's
+   * `handleSlashCommand`). Invisible locally, where the scan resolves in well under a
+   * millisecond. */
+  private skillsReady: Promise<void>;
 
   constructor(options: AgentRuntimeOptions) {
     this.config = options.config;
@@ -374,7 +385,7 @@ export class AgentRuntime {
     // connectAll() above. discoverSkills() never throws (per-directory failures are swallowed
     // internally), so this can't produce an unhandled rejection; listSkills() just sees the
     // builtin-only cache until this resolves.
-    void discoverSkills(options.config.skillPaths).then((discovered) => {
+    this.skillsReady = discoverSkills(options.config.skillPaths).then((discovered) => {
       this.skillsCache = [BUILTIN_CLI_TOOLS_SKILL, ...discovered];
     });
     this.onEvent = options.onEvent;
@@ -1282,7 +1293,8 @@ export class AgentRuntime {
    * `source` field `Skill` (src/prompt/skills.ts) carries internally, which isn't part of the
    * wire `SkillInfo` shape. Backed by the eager `skillsCache` scan (see its own doc comment),
    * never re-scanned per call. */
-  listSkills(): SkillInfo[] {
+  async listSkills(): Promise<SkillInfo[]> {
+    await this.skillsReady;
     return this.skillsCache.map(({ name, description }) => ({ name, description }));
   }
 

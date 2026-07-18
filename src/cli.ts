@@ -847,7 +847,7 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
     this.runtime.switchModel(agentId, model);
   }
 
-  listSkills(): SkillInfo[] {
+  listSkills(): Promise<SkillInfo[]> {
     return this.runtime.listSkills();
   }
 

@@ -132,14 +132,14 @@ describe("AgentLoopHandle contract (via FakeAgentLoop)", () => {
     expect(loop.switchedModels).toEqual([{ agentId: "root", model: "fast-model" }]);
   });
 
-  test("listSkills returns the configured skill catalog", () => {
+  test("listSkills returns the configured skill catalog", async () => {
     const loop = new FakeAgentLoop();
     const handle: AgentLoopHandle = loop;
-    expect(handle.listSkills()).toEqual([]);
+    expect(await handle.listSkills()).toEqual([]);
 
     const skills: SkillInfo[] = [{ name: "sm", description: "Sugar Maple filestore" }];
     loop.setSkills(skills);
-    expect(handle.listSkills()).toBe(skills);
+    expect(await handle.listSkills()).toBe(skills);
   });
 
   test("invokeSkill forwards agentId, skill, and optional args through the handle", async () => {

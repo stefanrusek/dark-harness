@@ -159,7 +159,11 @@ export async function handleCommand(command: unknown, ctx: CommandContext): Prom
         };
       }
     case "list_skills":
-      return { kind: "json", status: 200, body: { ok: true, skills: ctx.agentLoop.listSkills() } };
+      return {
+        kind: "json",
+        status: 200,
+        body: { ok: true, skills: await ctx.agentLoop.listSkills() },
+      };
     case "invoke_skill":
       // DH-0093: an unknown skill name (UnknownSkillError) is the one error class this
       // command can reject with — surfaced as a 404 ack, per the ticket's design.
