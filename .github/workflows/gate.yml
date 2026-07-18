@@ -67,11 +67,17 @@ jobs:
       # DH-0164: e2e/spikes/web/support.ts's resolveChromiumExecutable() has no fallback that
       # works on a fresh runner (it checks a few conventional cache paths, none of which exist
       # until something actually downloads a browser) -- this step was always missing, just
-      # masked by the gate consistently failing on an earlier step first. --with-deps also
-      # installs the system libraries (fonts, libnss, etc.) ubuntu-latest doesn't ship by
-      # default, which a bare `playwright install chromium` would silently need at launch time.
+      # masked by the gate consistently failing on an earlier step first.
+      #
+      # Deliberately NOT --with-deps: a first attempt used it, and the resulting apt-get
+      # install of ~20 system packages correlated with previously-passing PTY/tmux-based TUI
+      # e2e tests (untouched by this change, not browser-related at all) suddenly timing out
+      # in the same run. Trying the bare install first -- ubuntu-latest's image is fairly
+      # complete and may already have what headless Chromium needs; revisit with a narrower
+      # apt-get list (just the libs Chromium actually reports missing, if any) if this alone
+      # isn't enough, rather than reaching back for --with-deps's full package set.
       - name: Install Playwright Chromium
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       - name: Typecheck
         run: bun run typecheck
