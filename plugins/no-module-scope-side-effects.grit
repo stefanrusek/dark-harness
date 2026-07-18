@@ -14,9 +14,11 @@ or {
       TsAsExpression(expression=or {
         JsObjectExpression(),
         JsArrayExpression()
-      }, ty=TsReferenceType(name=`const`))
+      }, ty=TsReferenceType(name=`const`)),
+      `Object.freeze($_)`
     },
-    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts (wrap the initializer in Object.freeze(...) to mark it safe)", severity="warn", fix_kind="safe"),
+    $val => `Object.freeze($val)`
   },
   JsVariableStatement() as $s where {
     not $s <: within JsFunctionBody() ,
@@ -39,9 +41,11 @@ or {
       TsAsExpression(expression=or {
         JsObjectExpression(),
         JsArrayExpression()
-      }, ty=TsReferenceType(name=`const`))
+      }, ty=TsReferenceType(name=`const`)),
+      `Object.freeze($_)`
     },
-    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts (wrap the initializer in Object.freeze(...) to mark it safe)", severity="warn", fix_kind="safe"),
+    $val => `Object.freeze($val)`
   },
   JsExport(export_clause=$c) as $s where {
     $c <: JsVariableDeclarationClause(),
