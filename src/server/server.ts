@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { BUILD_INFO } from "../config/build-info.ts";
 import type { ClientCommand, SecurityConfig, ServerSentEvent } from "../contracts/index.ts";
-import type { AgentLoopHandle } from "./agent-loop.ts";
+import type { AgentLoopHandle } from "./agent-loop.type.ts";
 import { isAuthorized } from "./auth.ts";
 import { handleCommand } from "./commands.ts";
 import { EventBuffer } from "./event-buffer.ts";

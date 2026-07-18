@@ -8,7 +8,7 @@ import type {
   ListModelsResponse,
   ListSkillsResponse,
 } from "../contracts/index.ts";
-import type { AgentLoopHandle } from "./agent-loop.ts";
+import type { AgentLoopHandle } from "./agent-loop.type.ts";
 import type { SessionLogger } from "./logger.ts";
 import { buildTar } from "./tar.ts";
 

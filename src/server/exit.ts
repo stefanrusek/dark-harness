@@ -1,5 +1,5 @@
 import { ExitCode } from "../contracts/index.ts";
-import type { AgentLoopHandle } from "./agent-loop.ts";
+import type { AgentLoopHandle } from "./agent-loop.type.ts";
 
 function normalizeExitCode(raw: number): ExitCode {
   if (raw === ExitCode.Success || raw === ExitCode.TaskFailure) return raw;

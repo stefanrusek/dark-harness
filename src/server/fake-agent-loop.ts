@@ -14,7 +14,7 @@ import type {
   AgentLoopEventListener,
   AgentLoopHandle,
   AgentLoopLogListener,
-} from "./agent-loop.ts";
+} from "./agent-loop.type.ts";
 
 export class FakeAgentLoop implements AgentLoopHandle {
   private readonly eventListeners = new Set<AgentLoopEventListener>();

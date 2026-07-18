@@ -6,7 +6,7 @@
 //   - wires up the real Server/TUI/Web domains for the four interactive run modes (`--server`,
 //     local console, local `--web`, `--connect [--web]`), via a thin AgentLoopHandle adapter
 //     (AgentRuntimeLoopAdapter below) bridging Core's AgentRuntime to Server's own interface
-//     for exactly this purpose (src/server/agent-loop.ts's doc comment, and Grace's own
+//     for exactly this purpose (src/server/agent-loop.type.ts's doc comment, and Grace's own
 //     round-1 status-log note, both call this out as the intended integration point).
 
 import { randomUUID } from "node:crypto";
@@ -727,7 +727,7 @@ export function parseEnvFile(content: string): Record<string, string> {
  * Bridges Core's AgentRuntime (a single fixed onEvent/onLogLine callback pair, set at
  * construction) to Server's AgentLoopHandle (multi-subscriber onEvent/onLog, plus
  * sendMessage/stopAgent/getAgentTree) — the integration point flagged in both
- * src/server/agent-loop.ts's doc comment and Grace's round-1 status-log note ("(b) a thin
+ * src/server/agent-loop.type.ts's doc comment and Grace's round-1 status-log note ("(b) a thin
  * wrapper in src/cli.ts bridges Core's actual shape to this one").
  *
  * Identifier space (docs/handoffs/core.md Round 2 status log): "agentId" here is always the
@@ -931,7 +931,7 @@ export interface CliDeps {
    * which in turn closes the shared McpManager, terminating any stdio MCP child processes)
    * — is called from this module's own SIGTERM/SIGINT handling below, coordinating with the
    * existing shutdown path (DH-0011) rather than adding a second one; `AgentLoopHandle`
-   * itself (Server's own cross-domain contract, src/server/agent-loop.ts) is untouched. */
+   * itself (Server's own cross-domain contract, src/server/agent-loop.type.ts) is untouched. */
   createAgentLoop: (
     config: DhConfig,
     systemPrompt: string,

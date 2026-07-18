@@ -6,7 +6,7 @@ export type {
   AgentLoopHandle,
   AgentLoopLogListener,
   Unsubscribe,
-} from "./agent-loop.ts";
+} from "./agent-loop.type.ts";
 export { constantTimeEqual, extractBearerToken, isAuthorized } from "./auth.ts";
 export { type CommandContext, type CommandResult, handleCommand } from "./commands.ts";
 export { EventBuffer } from "./event-buffer.ts";
