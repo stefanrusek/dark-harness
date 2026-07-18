@@ -190,7 +190,7 @@ jobs:
 
           echo "All src files are exercised by at least one test."
 
-      - name: E2E (real compiled binary — fails closed if e2e/ has no tests)
+      - name: E2E test-file count (fails closed if e2e/ has no tests)
         shell: bash
         run: |
           # DH-0030: this used to auto-detect e2e test files and downgrade to a
@@ -206,4 +206,19 @@ jobs:
             echo "::error::No e2e test files found under e2e/ — this is a hard gate failure, not a bootstrap notice, now that the E2E domain has landed test files. If e2e/ was intentionally emptied, that decision needs sign-off (CLAUDE.md §6), not a silent gate downgrade."
             exit 1
           fi
-          bun run e2e
+
+      # DH-0164: split by resource profile rather than one `bun run e2e` step. Chromium
+      # (web.test.ts/connect-web.test.ts/streaming.test.ts) and real tmux+PTY sessions
+      # (tui.test.ts/slash-commands.test.ts/markdown-rendering.test.ts) coexisting in one
+      # process tree exhausted the runner badly enough that the tmux SERVER itself died mid-run
+      # ("no server running" — not just a slow individual wait) once both kinds of e2e test
+      # actually got to execute against real CI for the first time. Structural fix: never let
+      # both resource-heavy categories share a job step's process tree at the same time.
+      - name: E2E (core/protocol — no browser or PTY)
+        run: bun test e2e/bedrock-provider.test.ts e2e/build-stamp.test.ts e2e/exit-codes.test.ts e2e/security.test.ts e2e/server-protocol.test.ts --parallel=1
+
+      - name: E2E (TUI/PTY — tmux)
+        run: bun test e2e/tui.test.ts e2e/slash-commands.test.ts e2e/markdown-rendering.test.ts --parallel=1
+
+      - name: E2E (web/browser — Chromium)
+        run: bun test e2e/connect-web.test.ts e2e/web.test.ts e2e/streaming.test.ts --parallel=1
