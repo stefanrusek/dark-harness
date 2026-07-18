@@ -147,6 +147,20 @@ async function parseLcovParts(path: string): Promise<Map<string, FileCoverage>> 
   return files;
 }
 
+// DH-0151: a future wave-based migration will rename existing type-only /
+// constant-only source files to `*.type.ts` / `*.constant.ts` so they read as
+// intentionally-untested-by-design rather than as coverage gaps. Those files
+// carry no runtime logic, so they're excluded from the merged lcov output
+// entirely (neither counted as covered nor flagged as missing) rather than
+// forced through a fake-import just to appear in the report. gate.yml's
+// completeness check (`grep ^SF:` vs `git ls-files`) applies the same glob
+// exclusion on its side so it doesn't flag them as "missing" once this merge
+// no longer emits them. No such files exist yet — this only builds the
+// mechanism ahead of that migration.
+function isExcludedFromCoverage(file: string): boolean {
+  return file.endsWith(".type.ts") || file.endsWith(".constant.ts");
+}
+
 async function mergeLcov(parts: string[]): Promise<void> {
   const existingParts: string[] = [];
   for (const part of parts) {
@@ -179,6 +193,7 @@ async function mergeLcov(parts: string[]): Promise<void> {
   let totalLH = 0;
 
   for (const file of [...perFile.keys()].sort()) {
+    if (isExcludedFromCoverage(file)) continue;
     const covs = perFile.get(file) as FileCoverage[];
 
     let authoritative = covs[0] as FileCoverage;

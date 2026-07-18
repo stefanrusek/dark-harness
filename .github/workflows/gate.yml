@@ -153,9 +153,16 @@ jobs:
           set -euo pipefail
           REPORTED_FILES="$(grep '^SF:' coverage/lcov.info | sed 's/^SF://' | sort -u)"
 
+          # DH-0151: *.type.ts / *.constant.ts files (a future wave-based
+          # migration will rename existing type-only/constant-only files to
+          # these suffixes) are deliberately excluded from the merged lcov
+          # output by scripts/test-isolated.ts's mergeLcov — mirror that
+          # exclusion here so this check doesn't flag them as "missing" once
+          # they stop appearing as SF: records. None exist yet.
           ALL_SRC="$(git ls-files 'src/*.ts' 'src/**/*.ts' 'src/*.tsx' 'src/**/*.tsx' 2>/dev/null \
             | grep -vE '\.(test|spec)\.(ts|tsx)$' \
             | grep -vE '\.d\.ts$' \
+            | grep -vE '\.(type|constant)\.ts$' \
             | sort -u)"
 
           MISSING="$(comm -23 <(echo "$ALL_SRC") <(echo "$REPORTED_FILES") | sed '/^$/d')"
