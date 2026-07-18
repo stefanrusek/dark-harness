@@ -396,11 +396,11 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
     // they weren't the one who triggered it (e.g. a future non-interactive trigger).
     case "model_switched": {
       const next = withAgent(state, event.agentId, at, { model: event.to });
-      return noEffects(
+      const withStatus =
         event.agentId === state.rootAgentId
           ? { ...next, statusMessage: `model switched to ${event.to}` }
-          : next,
-      );
+          : next;
+      return noEffects(withStatus);
     }
     case "tool_call":
       return noEffects(handleToolCall(state, event, at));

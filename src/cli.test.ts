@@ -2078,6 +2078,33 @@ describe("AgentRuntimeLoopAdapter", () => {
     }
   });
 
+  test("listModels()/switchModel()/listSkills()/invokeSkill() delegate to the wrapped AgentRuntime", async () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+        client: "tui",
+      });
+      expect(adapter.listModels().map((m) => m.name)).toEqual(["test-model"]);
+
+      // Round-trips through AgentRuntime.switchModel() — root hasn't started yet, so this
+      // exercises the pending-switch path rather than a live binding swap.
+      expect(() => adapter.switchModel(ROOT_AGENT_ID, "test-model")).not.toThrow();
+
+      // Builtin cli-tools skill is always present (runtime.ts's skillsCache seed).
+      expect(adapter.listSkills().some((s) => s.name === "cli-tools")).toBe(true);
+
+      // An unknown skill name throws UnknownSkillError before any message delivery is
+      // attempted, so this delegation is provable without spinning up the root agent.
+      await expect(
+        adapter.invokeSkill(ROOT_AGENT_ID, "no-such-skill", undefined),
+      ).rejects.toThrow();
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test("sendMessage(ROOT_AGENT_ID, ...) lazily starts the root agent on the first call", async () => {
     const server = startMockAnthropicServer();
     const adapter = new AgentRuntimeLoopAdapter({

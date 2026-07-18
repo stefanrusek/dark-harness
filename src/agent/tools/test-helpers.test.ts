@@ -15,6 +15,13 @@ describe("makeToolContext defaults", () => {
     expect(() => ctx.spawnAgent({ model: "sonnet", prompt: "hi" })).toThrow(/not wired/);
   });
 
+  test("default completeWithModel throws (must be overridden by tests exercising it)", async () => {
+    const ctx = makeToolContext();
+    await expect(
+      ctx.completeWithModel("sonnet", { system: "", messages: [], tools: [] }),
+    ).rejects.toThrow(/not wired/);
+  });
+
   test("default loadSkill resolves null", async () => {
     const ctx = makeToolContext();
     await expect(ctx.loadSkill("whatever")).resolves.toBeNull();

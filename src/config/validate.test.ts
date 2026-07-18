@@ -1089,6 +1089,19 @@ describe("DH-0010 Part B: compaction config + models[].contextWindow", () => {
     ).toThrow(/compaction.enabled must be a boolean/);
   });
 
+  test("rejects a non-object compaction value", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+          ],
+          compaction: "enabled",
+        }),
+      ),
+    ).toThrow(/compaction must be an object/);
+  });
+
   test("rejects an unknown compaction key", () => {
     expect(() =>
       validateConfig(

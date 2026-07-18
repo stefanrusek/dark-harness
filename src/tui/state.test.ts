@@ -1343,6 +1343,14 @@ describe("reducer: slash commands (DH-0093)", () => {
     ]);
   });
 
+  test("picker: enter with no selectable option (empty model list) returns to root without a command", () => {
+    let state = rootedState("");
+    ({ state } = reducer(state, { type: "models_response", models: [] }));
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.view).toEqual({ kind: "root" });
+    expect(effects).toEqual([]);
+  });
+
   test("picker: escape/left cancel back to root with no command sent", () => {
     let state = rootedState("");
     ({ state } = reducer(state, {

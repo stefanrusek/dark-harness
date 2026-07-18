@@ -47,7 +47,7 @@ async function pipeToBuffer(
  * leader for any reason). `detached: true` at spawn time (below) is what makes `proc.pid` the
  * leader of its own process group in the first place, so `-pid` addresses that whole group,
  * POSIX's convention for "negative pid" in `kill(2)`. */
-function killProcessGroup(proc: { pid: number; kill: () => void }): void {
+export function killProcessGroup(proc: { pid: number; kill: () => void }): void {
   try {
     process.kill(-proc.pid, "SIGTERM");
   } catch {

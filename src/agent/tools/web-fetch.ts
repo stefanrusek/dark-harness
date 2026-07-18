@@ -48,10 +48,16 @@ function htmlToText(html: string): string {
         currentHref = el.getAttribute("href") ?? undefined;
         currentLinkText = "";
         el.onEndTag(() => {
+          // No separate "text but no usable href" fallback here: currentLinkText only ever
+          // accumulates below when currentHref !== undefined (see the "*" text handler), and
+          // Bun's HTMLRewriter normalizes an absent/empty href attribute to null (verified
+          // directly — `getAttribute("href")` returns null for `href`, `href=""`, and
+          // `href=''`, never `""`), which `?? undefined` turns into undefined. So whenever
+          // currentLinkText is non-empty here, currentHref is guaranteed to be a truthy,
+          // non-empty string; a text-only anchor's content is instead pushed straight to
+          // textParts by the plain-text branch below, bypassing currentLinkText entirely.
           if (currentHref && currentLinkText.trim().length > 0) {
             textParts.push(`${currentLinkText.trim()} (${currentHref})`);
-          } else if (currentLinkText.trim().length > 0) {
-            textParts.push(currentLinkText.trim());
           }
           currentHref = undefined;
           currentLinkText = "";

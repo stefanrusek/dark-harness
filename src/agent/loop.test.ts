@@ -2072,6 +2072,65 @@ describe("DH-0010 Part B: context-window compaction", () => {
     const firstBlock = postCompactionCall?.messages[0]?.content[0];
     expect(firstBlock?.type).toBe("text");
   });
+
+  test("the trigger check is skipped on the turn immediately after a compaction (one-shot guard)", async () => {
+    // Turn 1 ends non-tool-use, so the DH-0050 nudge fires and consumes it as "nudged" before
+    // compaction ever gets a chance to look at usage — this matters because the standard
+    // compaction test above relies on the *second* non-tool-use turn to finalize via the
+    // legacy marker scan, which never leaves a further turn for the post-compaction guard
+    // (loop.ts's `if (justCompacted) { justCompacted = false; }` branch) to run. Here, the
+    // post-compaction turn returns a tool_use instead, forcing a genuine next turn — which is
+    // exactly where that one-shot guard is exercised: it must reset `justCompacted` without
+    // re-triggering compaction, even though contextTokens is still nominally over threshold.
+    const provider = scriptedProvider([
+      // Turn 1: non-tool-use, nudged (compaction can't see usage yet: no lastUsage).
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "turn one done" }],
+        usage: { inputTokens: 80, outputTokens: 15 },
+      },
+      // Turn 2 top: lastUsage (95) is now >= 80% of the 100-token window -> compacts. The
+      // summarization call itself (no tools).
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "SUMMARY TEXT" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // Turn 2's real (post-compaction) call: a tool_use, so turn 3 is unavoidable — this is
+      // what lets the one-shot guard on turn 3's trigger check actually run.
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo hi", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // Turn 3: justCompacted is reset here without a second compaction attempt, then the
+      // agent finishes normally.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({
+      provider,
+      contextWindow: 100,
+      compaction: { enabled: true, thresholdPercent: 80 },
+    });
+    const result = await runAgentLoop(params);
+
+    expect(result.success).toBe(true);
+    // Exactly one compaction line — the one-shot guard must have prevented a second attempt
+    // on turn 3, even though nothing lowered contextTokens back below threshold in this test.
+    expect(logLines.filter((l) => l.type === "compaction")).toHaveLength(1);
+    expect(provider.calls).toHaveLength(4);
+  });
 });
 
 describe("DH-0010 Part B: context_overflow graceful failure", () => {

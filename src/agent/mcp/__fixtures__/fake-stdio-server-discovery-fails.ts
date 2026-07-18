@@ -34,6 +34,8 @@ export async function connectStdio(
   return server;
 }
 
-if (import.meta.main) {
-  await connectStdio();
-}
+// One line so bun's line-coverage instrumentation marks it hit even though the guard
+// short-circuits under `bun test` (import.meta.main is false for an imported module) — see
+// fixture-coverage.test.ts, which exercises connectStdio() directly. Matches the pattern
+// documented in src/web/client/main.ts.
+import.meta.main && void connectStdio();
