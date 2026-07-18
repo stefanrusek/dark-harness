@@ -183,7 +183,14 @@ export async function launchWebUi(turns: MockTurn[]): Promise<WebUiSession> {
 
   const executablePath = await resolveChromiumExecutable();
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ executablePath, headless: true });
+  // DH-0165: see e2e/web.test.ts's identical chromium.launch call for why these args exist —
+  // GitHub Actions' runners have no D-Bus session bus, which some headless Chromium subsystems
+  // reach for on launch and hang/crash waiting on.
+  const browser = await chromium.launch({
+    executablePath,
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  });
   const page = await browser.newPage();
   await page.goto(webUrl);
   await page.waitForSelector(".dh-app");
