@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0154
 type: feature
-status: implementing
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -23,18 +23,55 @@ Part of the coding-standards overhaul (dependency-tree wave plan by Fable). Now 
 
 ## User Stories
 
-### As a TODO, I want TODO
+### As the lint gate, I want the three standing export rules enforced mechanically at warn severity
 
-- Given TODO, when TODO, then TODO.
+- Given a `.type.ts` file with a non-type export, when `bun run lint` runs, then it's flagged
+  — proven via throwaway fixtures (`good.type.ts` clean, `bad.type.ts` flagged), deleted after.
+- Given a `.constant.ts` file with a computed (non-literal) const or an arbitrary standalone
+  type, when `bun run lint` runs, then it's flagged — proven the same way.
+- Given any other non-test `src/` file with top-level code beyond type/interface/function/class
+  declarations and imports/exports (excluding one `import.meta.main`-guarded call), when
+  `bun run lint` runs, then it's flagged at `warn` — proven against the real tree (270
+  warnings, all genuine: pre-existing module-level `const`s to migrate in future waves, plus
+  one real ungated side effect in `test-dom.ts`).
+- Given the whole rule set, when `bun run lint` runs, then it still exits 0 (warnings don't
+  fail the build) — proven directly.
 
 ## Functional Requirements
 
-- TODO
+1. Three `.grit` files under `plugins/`: `type-file-restrictions.grit`,
+   `constant-file-restrictions.grit`, `no-module-scope-side-effects.grit`.
+2. Wired into `biome.json`'s `plugins` array, each scoped via `includes` globs
+   (`**/src/**/...` convention, matching the existing `overrides` entry already in this repo's
+   config).
+3. All three fire at `severity="warn"` (set per-diagnostic inside each `.grit` file's
+   `register_diagnostic(...)` call, not via biome.json).
+4. Scoped to exclude `*.test.ts(x)` and `*.d.ts` files.
 
 ## Assumptions
 
 ## Risks
 
+- The 270 current warnings must all be resolved (via the wave-based migration) before the
+  rule can be flipped to `error` (task 8/final step) — until then this is advisory only.
+
 ## Open Questions
 
 ## Notes
+
+> [!NOTE]
+> 2026-07-18: Implemented and merged. Key GritQL gotchas worked through: `export const x = ...`
+> parses as `JsExport(export_clause=$c)` wrapping `JsVariableDeclarationClause`, not a directly
+> matchable `JsVariableStatement` — every rule needs a parallel exported-form branch. TS-level
+> `typeof X` is `TsTypeofType`, not the JS-expression snippet form. `includes` globs need a
+> leading `**/` to match (bare `src/**/*.ts` matched nothing). "Not nested in a function/class
+> body" is `not $s <: within JsFunctionBody()`, uniform across function/arrow/method bodies.
+>
+> Verified: rules 1/2 via throwaway fixtures (good/bad pairs for each), deleted before commit.
+> Rule 3 run against the real tree: 270 warnings — 265 pre-existing module-level `const`s
+> across ~30+ files (spot-checked `src/cli.ts`'s `DEFAULT_PORT` and color constants — genuine,
+> exactly what the wave migration will move into `.constant.ts`), plus 4 side-effect + 1
+> if-statement finding, all in `src/web/client/test-dom.ts` (genuine ungated module-scope
+> side effect installing `globalThis.window`/`document` — a known, pre-existing case, not a
+> new bug). `bun run lint` exits 0 (zero errors, 270 warnings). `bun run typecheck` clean.
+> `bun run test:coverage` 125/125 (99.75%, unaffected).
