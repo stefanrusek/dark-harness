@@ -19,7 +19,7 @@
     "format": "biome format --write .",
     "test": "bun scripts/test-isolated.ts",
     "test:coverage": "bun scripts/test-isolated.ts --coverage",
-    "e2e": "bun test e2e",
+    "e2e": "bun test e2e --parallel=1",
     "build": "bun scripts/build.ts",
     "generate:npm-platform-packages": "bun scripts/generate-npm-platform-packages.ts"
   },
