@@ -8,20 +8,20 @@ import type { ModelProvider } from "./agent/providers/types.ts";
 import {
   ActivityFeed,
   AgentRuntimeLoopAdapter,
+  buildStartupPostureNote,
   type CliDeps,
   type CliIo,
   CliUsageError,
+  composeMode,
   DEFAULT_PORT,
   type DhServerLike,
-  SAMPLE_DH_JSON,
-  type WebUiHandleLike,
-  buildStartupPostureNote,
-  composeMode,
   formatDoctorReport,
   main,
   parseArgs,
   parseEnvFile,
   renderHelpText,
+  SAMPLE_DH_JSON,
+  type WebUiHandleLike,
 } from "./cli.ts";
 import { BUILD_INFO } from "./config/build-info.ts";
 import type {
@@ -32,9 +32,9 @@ import type {
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
 import { buildHeaderInfo, formatHeaderLines, formatVersionString } from "./header-info.ts";
-import { REQUIRED_CONTRACT, buildDefaultSystemPrompt } from "./prompt/system-prompt.ts";
-import { DhServer, waitForExitCode } from "./server/index.ts";
+import { buildDefaultSystemPrompt, REQUIRED_CONTRACT } from "./prompt/system-prompt.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
+import { DhServer, waitForExitCode } from "./server/index.ts";
 
 const TEST_CONFIG: DhConfig = {
   options: { defaultModel: "sonnet" },
@@ -762,28 +762,31 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(io.exitCodes).toContain(ExitCode.Success);
   });
 
-  test("DH-0002: SIGTERM on a --server process also closes the agent loop's MCP manager " +
-    "via the handle's optional close()", async () => {
-    const io = fakeIo();
-    let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
-    let closeCalled = false;
-    await main(["--server"], {
-      ...interactiveOverrides(io),
-      installSignalHandlers: (onSignal) => {
-        capturedOnSignal = onSignal;
-        return () => {};
-      },
-      createAgentLoop: () =>
-        fakeAgentLoop({
-          close: async () => {
-            closeCalled = true;
-          },
-        }),
-    });
-    capturedOnSignal?.("SIGTERM");
-    await Promise.resolve();
-    expect(closeCalled).toBe(true);
-  });
+  test(
+    "DH-0002: SIGTERM on a --server process also closes the agent loop's MCP manager " +
+      "via the handle's optional close()",
+    async () => {
+      const io = fakeIo();
+      let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
+      let closeCalled = false;
+      await main(["--server"], {
+        ...interactiveOverrides(io),
+        installSignalHandlers: (onSignal) => {
+          capturedOnSignal = onSignal;
+          return () => {};
+        },
+        createAgentLoop: () =>
+          fakeAgentLoop({
+            close: async () => {
+              closeCalled = true;
+            },
+          }),
+      });
+      capturedOnSignal?.("SIGTERM");
+      await Promise.resolve();
+      expect(closeCalled).toBe(true);
+    },
+  );
 
   test("DH-0002: shutdown never throws when the agent loop handle has no close() at all", async () => {
     const io = fakeIo();
@@ -1109,23 +1112,26 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(io.stderrLines[0]).toContain("boom");
   });
 
-  test("DH-0002: a successful standalone --job run closes the runtime's MCP manager via " +
-    "the optional close()", async () => {
-    const io = fakeIo();
-    let closeCalled = false;
-    await main(["--instructions", "plan.md", "--job"], {
-      ...baseOverrides(io),
-      readInstructions: async () => "do the thing",
-      createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
-        stopRoot: () => {},
-        close: async () => {
-          closeCalled = true;
-        },
-      }),
-    });
-    expect(closeCalled).toBe(true);
-  });
+  test(
+    "DH-0002: a successful standalone --job run closes the runtime's MCP manager via " +
+      "the optional close()",
+    async () => {
+      const io = fakeIo();
+      let closeCalled = false;
+      await main(["--instructions", "plan.md", "--job"], {
+        ...baseOverrides(io),
+        readInstructions: async () => "do the thing",
+        createRuntime: () => ({
+          runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
+          stopRoot: () => {},
+          close: async () => {
+            closeCalled = true;
+          },
+        }),
+      });
+      expect(closeCalled).toBe(true);
+    },
+  );
 
   test("DH-0002: a crashed standalone run still closes the runtime's MCP manager", async () => {
     const io = fakeIo();
@@ -1196,60 +1202,63 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     );
   });
 
-  test("--job --json streams every ServerSentEvent as NDJSON then a terminal job_result line, " +
-    "and suppresses the plain-text finalOutput line", async () => {
-    const io = fakeIo();
-    let receivedOnEvent: ((event: ServerSentEvent) => void) | undefined;
-    const code = await main(["--instructions", "plan.md", "--job", "--json"], {
-      ...baseOverrides(io),
-      readInstructions: async () => "do the thing",
-      createRuntime: (_config, _systemPrompt, _client, _resume, onEvent) => {
-        receivedOnEvent = onEvent;
-        return {
-          runRoot: async () => {
-            // Simulate the runtime emitting a couple of real events mid-run, exactly as
-            // AgentRuntime.runRoot() does via its own onEvent callback.
-            receivedOnEvent?.({
-              version: 1,
-              id: "evt-1",
-              timestamp: "2026-07-16T00:00:00.000Z",
-              type: "agent_status",
-              agentId: "agent-root",
-              status: "running",
-            });
-            return {
-              success: true,
-              finalOutput: "the real answer",
-              turns: 3,
-              outcome: { status: "success", summary: "did the thing" },
-              reportedBy: "tool",
-            };
-          },
-          stopRoot: () => {},
-        };
-      },
-    });
-    expect(code).toBe(ExitCode.Success);
-    // The plain-text finalOutput line is suppressed in --json mode.
-    expect(io.stdoutLines.some((l) => l === "the real answer")).toBe(false);
-    const parsed = io.stdoutLines.map((l) => JSON.parse(l) as Record<string, unknown>);
-    expect(parsed[0]).toEqual({
-      version: 1,
-      id: "evt-1",
-      timestamp: "2026-07-16T00:00:00.000Z",
-      type: "agent_status",
-      agentId: "agent-root",
-      status: "running",
-    });
-    const jobResult = parsed[parsed.length - 1] as unknown as JobResultLine;
-    expect(jobResult.type).toBe("job_result");
-    expect(jobResult.success).toBe(true);
-    expect(jobResult.exitCode).toBe(ExitCode.Success);
-    expect(jobResult.reportedBy).toBe("tool");
-    expect(jobResult.turns).toBe(3);
-    expect(jobResult.finalOutput).toBe("the real answer");
-    expect(jobResult.outcome).toEqual({ status: "success", summary: "did the thing" });
-  });
+  test(
+    "--job --json streams every ServerSentEvent as NDJSON then a terminal job_result line, " +
+      "and suppresses the plain-text finalOutput line",
+    async () => {
+      const io = fakeIo();
+      let receivedOnEvent: ((event: ServerSentEvent) => void) | undefined;
+      const code = await main(["--instructions", "plan.md", "--job", "--json"], {
+        ...baseOverrides(io),
+        readInstructions: async () => "do the thing",
+        createRuntime: (_config, _systemPrompt, _client, _resume, onEvent) => {
+          receivedOnEvent = onEvent;
+          return {
+            runRoot: async () => {
+              // Simulate the runtime emitting a couple of real events mid-run, exactly as
+              // AgentRuntime.runRoot() does via its own onEvent callback.
+              receivedOnEvent?.({
+                version: 1,
+                id: "evt-1",
+                timestamp: "2026-07-16T00:00:00.000Z",
+                type: "agent_status",
+                agentId: "agent-root",
+                status: "running",
+              });
+              return {
+                success: true,
+                finalOutput: "the real answer",
+                turns: 3,
+                outcome: { status: "success", summary: "did the thing" },
+                reportedBy: "tool",
+              };
+            },
+            stopRoot: () => {},
+          };
+        },
+      });
+      expect(code).toBe(ExitCode.Success);
+      // The plain-text finalOutput line is suppressed in --json mode.
+      expect(io.stdoutLines.some((l) => l === "the real answer")).toBe(false);
+      const parsed = io.stdoutLines.map((l) => JSON.parse(l) as Record<string, unknown>);
+      expect(parsed[0]).toEqual({
+        version: 1,
+        id: "evt-1",
+        timestamp: "2026-07-16T00:00:00.000Z",
+        type: "agent_status",
+        agentId: "agent-root",
+        status: "running",
+      });
+      const jobResult = parsed[parsed.length - 1] as unknown as JobResultLine;
+      expect(jobResult.type).toBe("job_result");
+      expect(jobResult.success).toBe(true);
+      expect(jobResult.exitCode).toBe(ExitCode.Success);
+      expect(jobResult.reportedBy).toBe("tool");
+      expect(jobResult.turns).toBe(3);
+      expect(jobResult.finalOutput).toBe("the real answer");
+      expect(jobResult.outcome).toEqual({ status: "success", summary: "did the thing" });
+    },
+  );
 
   test("--job --json on a self-reported failure emits a job_result line with exitCode 1", async () => {
     const io = fakeIo();

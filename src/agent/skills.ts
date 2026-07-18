@@ -32,8 +32,8 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { type Skill, parseSkillFrontmatter } from "../prompt/skills.ts";
 import CLI_TOOLS_SKILL_MD from "../prompt/skills/cli-tools/SKILL.md" with { type: "text" };
+import { parseSkillFrontmatter, type Skill } from "../prompt/skills.ts";
 
 export interface LoadedSkill {
   name: string;

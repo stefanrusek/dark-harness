@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LogHeader, LogLine } from "../contracts/index.ts";
-import { ResumeError, loadResumeSession, reconstructSubAgentHistory } from "./resume.ts";
+import { loadResumeSession, ResumeError, reconstructSubAgentHistory } from "./resume.ts";
 
 let logsRoot: string | undefined;
 

@@ -5,18 +5,18 @@
 // fetch/streams — no `EventSource`, see sse.ts).
 
 import { createElement } from "react";
-import { type Root, createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import type { ServerSentEvent } from "../../contracts/index.ts";
 import type { HeaderInfo } from "../../header-info.ts";
 import type { ServerTarget } from "../protocol.ts";
 import {
   CommandError,
   type FetchLike,
-  type SendCommandOptions,
   invokeSkill,
   listModels,
   listSkills,
   requestAgentTree,
+  type SendCommandOptions,
   sendMessage,
   stopAgent,
   switchModel,
@@ -24,13 +24,12 @@ import {
 import { App } from "./components/App.tsx";
 import { type DownloadEnv, downloadLogs } from "./download.ts";
 import { parseSlashCommand } from "./slash-commands.ts";
-import { type SseConnection, connectEvents } from "./sse.ts";
+import { connectEvents, type SseConnection } from "./sse.ts";
 import {
-  type ConnectionStatus,
-  type WebState,
   addSystemTurn,
   addUserTurn,
   applyEvent,
+  type ConnectionStatus,
   clearAllTranscripts,
   closeModelPicker,
   createInitialState,
@@ -44,6 +43,7 @@ import {
   setConnectionStatus,
   setModelsAndOpenPicker,
   setSkills,
+  type WebState,
 } from "./state.ts";
 
 const ERROR_BANNER_DURATION_MS = 5000;
@@ -114,7 +114,7 @@ export class AppView {
   private renderRafHandle: number | undefined;
 
   constructor(
-    private readonly container: HTMLElement,
+    readonly container: HTMLElement,
     private readonly deps: AppDeps,
   ) {
     this.root = createRoot(container);

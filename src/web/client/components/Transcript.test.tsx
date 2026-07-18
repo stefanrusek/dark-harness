@@ -2,8 +2,8 @@ import "../test-dom.ts";
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { applyEvent, createInitialState, selectedAgent } from "../state.ts";
 import type { AgentNode } from "../state.ts";
+import { applyEvent, createInitialState, selectedAgent } from "../state.ts";
 import { Transcript } from "./Transcript.tsx";
 
 afterEach(cleanup);

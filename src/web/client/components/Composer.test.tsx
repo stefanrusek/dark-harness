@@ -9,7 +9,7 @@ import "../test-dom.ts";
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { type WebState, applyEvent, createInitialState } from "../state.ts";
+import { applyEvent, createInitialState, type WebState } from "../state.ts";
 import { Composer } from "./Composer.tsx";
 
 afterEach(cleanup);

@@ -18,7 +18,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnDh } from "../../support/dh-process.ts";
-import { startMockAnthropicProvider, successTurn } from "../../support/mock-provider.ts";
+import { startMockAnthropicProvider } from "../../support/mock-provider.ts";
 import { baseConfig, createWorkspace } from "../../support/workspace.ts";
 import { resolveChromiumExecutable } from "./support.ts";
 

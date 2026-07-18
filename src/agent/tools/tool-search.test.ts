@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { makeToolContext } from "./test-helpers.ts";
 import {
   DEFAULT_MAX_RESULTS,
-  type ToolDescriptor,
   runToolSearch,
+  type ToolDescriptor,
   toolSearchTool,
 } from "./tool-search.ts";
 

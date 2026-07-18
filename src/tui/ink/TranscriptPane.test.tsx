@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
 import type { Turn } from "../types.ts";
-import { TranscriptPane, renderTranscript } from "./TranscriptPane.tsx";
 import { createScrollBus } from "./scroll-bus.ts";
+import { renderTranscript, TranscriptPane } from "./TranscriptPane.tsx";
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 10));

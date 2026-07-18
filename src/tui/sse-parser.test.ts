@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentOutputEvent } from "../contracts/index.ts";
-import { SseFrameParser, parseServerSentEvent } from "./sse-parser.ts";
+import { parseServerSentEvent, SseFrameParser } from "./sse-parser.ts";
 
 function outputEvent(overrides: Partial<AgentOutputEvent> = {}): AgentOutputEvent {
   return {

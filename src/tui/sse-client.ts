@@ -3,7 +3,7 @@
 // against a fake streaming Response without real network I/O.
 
 import type { ServerSentEvent } from "../contracts/index.ts";
-import { SseFrameParser, parseServerSentEvent } from "./sse-parser.ts";
+import { parseServerSentEvent, SseFrameParser } from "./sse-parser.ts";
 import type { ConnectionStatus } from "./types.ts";
 
 // Confirmed against the Server domain's actual route (src/server/server.ts,

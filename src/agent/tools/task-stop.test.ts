@@ -12,7 +12,7 @@ describe("TaskStop tool", () => {
       kind: "bash",
       parentAgentId: ctx.agentId,
       run: (handle) =>
-        new Promise<void>((resolve, reject) => {
+        new Promise<void>((_resolve, reject) => {
           handle.signal.addEventListener("abort", () => {
             aborted = true;
             reject(new Error("aborted"));

@@ -5,7 +5,7 @@ import { BUILD_INFO } from "../../config/build-info.ts";
 import { formatVersionString } from "../../header-info.ts";
 import { DH_ASCII_LOGO_COMPACT } from "../../prompt/banner.ts";
 import { initialState } from "../state.ts";
-import { RootView, buildRootEmptyText } from "./RootView.tsx";
+import { buildRootEmptyText, RootView } from "./RootView.tsx";
 
 function rootState() {
   return initialState({ rows: 24, cols: 80 }, { ownsServer: false });

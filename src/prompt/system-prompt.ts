@@ -13,8 +13,8 @@
 
 import { BUILD_INFO } from "../config/build-info.ts";
 import type { BuildInfo, DhConfig, ModelConfig } from "../contracts/index.ts";
-import { type Skill, discoverSkills, parseSkillFrontmatter } from "./skills.ts";
 import CLI_TOOLS_SKILL_MD from "./skills/cli-tools/SKILL.md" with { type: "text" };
+import { discoverSkills, parseSkillFrontmatter, type Skill } from "./skills.ts";
 
 // Fallback used only if the bundled SKILL.md's own frontmatter were ever malformed — kept
 // so a single typo in that file can't take down prompt loading. The real file is well-formed

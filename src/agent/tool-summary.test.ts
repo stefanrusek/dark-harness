@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TOOL_INPUT_SUMMARY_MAX_CHARS, summarizeToolInput } from "./tool-summary.ts";
+import { summarizeToolInput, TOOL_INPUT_SUMMARY_MAX_CHARS } from "./tool-summary.ts";
 
 describe("summarizeToolInput", () => {
   test("picks the first present priority key, in priority order", () => {

@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test";
 import type { ServerTarget } from "../protocol.ts";
 import {
   type ConnectEventsOptions,
-  SseStreamParser,
   connectEvents,
   parseEventPayload,
+  SseStreamParser,
 } from "./sse.ts";
 import type { ConnectionStatus } from "./state.ts";
 

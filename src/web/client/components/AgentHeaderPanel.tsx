@@ -3,7 +3,7 @@
 import type { ReactElement } from "react";
 import { STATUS_TOKENS } from "../../../design-tokens.ts";
 import { formatCostUsd, formatStatusElapsed, formatTokenCount, shortAgentId } from "../format.ts";
-import { type WebState, isRoot, selectedAgent } from "../state.ts";
+import { isRoot, selectedAgent, type WebState } from "../state.ts";
 
 export interface AgentHeaderPanelProps {
   state: WebState;

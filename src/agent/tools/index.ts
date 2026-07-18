@@ -73,17 +73,6 @@ export function composeTools(config: DhConfig): Tool[] {
   return tools;
 }
 
-/**
- * DH-0050 (architect design, Fable 2026-07-15): `ReportOutcome` is deliberately NOT part of
- * `ALL_TOOLS`/`composeTools()` above — those are shared uniformly by the root and every
- * sub-agent, interactive or not, and an interactive session (server/TUI/Web) has no
- * exit-code/self-report semantics to report into (a conversational turn ending is just
- * "waiting for the next message," see loop.ts's module doc comment). Exported separately so
- * `runtime.ts`'s `AgentRuntime` constructor can add it to `this.toolMap` only when
- * `!this.interactive` — i.e. only for the standalone `--instructions`/`--job` path.
- */
-export { reportOutcomeTool };
-
 export * from "./agent.ts";
 export * from "./bash.ts";
 export * from "./edit.ts";
@@ -107,3 +96,13 @@ export * from "./types.ts";
 export * from "./web-fetch.ts";
 export * from "./web-search.ts";
 export * from "./write.ts";
+/**
+ * DH-0050 (architect design, Fable 2026-07-15): `ReportOutcome` is deliberately NOT part of
+ * `ALL_TOOLS`/`composeTools()` above — those are shared uniformly by the root and every
+ * sub-agent, interactive or not, and an interactive session (server/TUI/Web) has no
+ * exit-code/self-report semantics to report into (a conversational turn ending is just
+ * "waiting for the next message," see loop.ts's module doc comment). Exported separately so
+ * `runtime.ts`'s `AgentRuntime` constructor can add it to `this.toolMap` only when
+ * `!this.interactive` — i.e. only for the standalone `--instructions`/`--job` path.
+ */
+export { reportOutcomeTool };

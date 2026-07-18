@@ -10,7 +10,7 @@ import {
   formatTokenCountFull,
   formatElapsed as sharedFormatElapsed,
 } from "../../format.ts";
-import { SPINNER_FRAMES, SPINNER_FRAME_MS } from "../../terminal.ts";
+import { SPINNER_FRAME_MS, SPINNER_FRAMES } from "../../terminal.ts";
 import type { TuiState } from "../types.ts";
 
 const RESET = "\x1b[0m";

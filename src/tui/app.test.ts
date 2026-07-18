@@ -7,8 +7,8 @@ import type {
   ListSkillsResponse,
   ServerSentEvent,
 } from "../contracts/index.ts";
-import { startTui } from "./app.ts";
 import type { StdinLike, StdoutLike } from "./app.ts";
+import { startTui } from "./app.ts";
 import { COMMAND_PATH } from "./http-client.ts";
 import { EVENTS_PATH } from "./sse-client.ts";
 
@@ -461,47 +461,50 @@ describe("startTui", () => {
     await done;
   });
 
-  test("Round 3: a fresh session can send its first message through the UI, seeded purely by " +
-    "the startup tree fetch — no agent_spawned event ever arrives", async () => {
-    const stdin = new FakeStdin();
-    const stdout = new FakeStdout();
-    const server = makeFakeServer();
-    server.commandResponses.push({
-      ok: true,
-      tree: [
-        {
-          agentId: "agent-root",
-          parentAgentId: null,
-          model: "sonnet",
-          status: "waiting",
-          children: [],
-        },
-      ],
-    });
+  test(
+    "Round 3: a fresh session can send its first message through the UI, seeded purely by " +
+      "the startup tree fetch — no agent_spawned event ever arrives",
+    async () => {
+      const stdin = new FakeStdin();
+      const stdout = new FakeStdout();
+      const server = makeFakeServer();
+      server.commandResponses.push({
+        ok: true,
+        tree: [
+          {
+            agentId: "agent-root",
+            parentAgentId: null,
+            model: "sonnet",
+            status: "waiting",
+            children: [],
+          },
+        ],
+      });
 
-    const done = startTui("http://x", undefined, {
-      io: { stdin, stdout, fetchImpl: server.fetchImpl },
-    });
-    await flush(5, stdout);
+      const done = startTui("http://x", undefined, {
+        io: { stdin, stdout, fetchImpl: server.fetchImpl },
+      });
+      await flush(5, stdout);
 
-    // Deliberately no enqueueSse(...) call here — this is the whole point of the
-    // regression test. Before Round 3's fix, this would sit forever on
-    // "No root agent yet — please wait." since agent_spawned never fires until a first
-    // message is sent, and a first message could never be sent.
-    stdin.type("hello");
-    stdin.type("\r");
-    await flush(5, stdout);
+      // Deliberately no enqueueSse(...) call here — this is the whole point of the
+      // regression test. Before Round 3's fix, this would sit forever on
+      // "No root agent yet — please wait." since agent_spawned never fires until a first
+      // message is sent, and a first message could never be sent.
+      stdin.type("hello");
+      stdin.type("\r");
+      await flush(5, stdout);
 
-    expect(server.commands).toContainEqual({
-      type: "send_message",
-      agentId: "agent-root",
-      message: "hello",
-    });
-    expect(stdout.allWrites()).not.toContain("please wait");
+      expect(server.commands).toContainEqual({
+        type: "send_message",
+        agentId: "agent-root",
+        message: "hello",
+      });
+      expect(stdout.allWrites()).not.toContain("please wait");
 
-    stdin.type("\x03");
-    await done;
-  });
+      stdin.type("\x03");
+      await done;
+    },
+  );
 
   test("a command_error response updates the on-screen status message", async () => {
     const stdin = new FakeStdin();

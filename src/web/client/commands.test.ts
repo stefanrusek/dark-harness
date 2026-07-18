@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import type { AgentTreeResponse, CommandAck } from "../../contracts/index.ts";
 import type { ServerTarget } from "../protocol.ts";
 import {
-  CommandError,
   buildDownloadLogsCommand,
   buildInvokeSkillCommand,
   buildListModelsCommand,
@@ -11,6 +10,7 @@ import {
   buildSendMessageCommand,
   buildStopAgentCommand,
   buildSwitchModelCommand,
+  CommandError,
   invokeSkill,
   listModels,
   listSkills,

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { initialState } from "../state.ts";
 import {
-  CURSOR_MARKER,
   bold,
+  CURSOR_MARKER,
   colorizeStatus,
   dim,
   formatTokenCost,

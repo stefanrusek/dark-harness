@@ -3,7 +3,7 @@
 // `buildShell` + per-section imperative render functions.
 import type { ReactElement } from "react";
 import type { HeaderInfo } from "../../../header-info.ts";
-import { type WebState, selectedAgent } from "../state.ts";
+import { selectedAgent, type WebState } from "../state.ts";
 import { AgentHeaderPanel } from "./AgentHeaderPanel.tsx";
 import { AppHeader } from "./AppHeader.tsx";
 import { Composer } from "./Composer.tsx";

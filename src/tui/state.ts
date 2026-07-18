@@ -2,7 +2,7 @@
 // here — side effects (HTTP commands, process exit) are described as data and executed by
 // app.ts. This is what makes the TUI's core logic fully unit-testable without a terminal.
 
-import type { AgentStatus, ModelInfo, ServerSentEvent, SkillInfo } from "../contracts/index.ts";
+import type { AgentStatus, ModelInfo, ServerSentEvent } from "../contracts/index.ts";
 import { parseSlashCommand } from "./commands.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";

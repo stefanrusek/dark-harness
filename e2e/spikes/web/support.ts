@@ -27,7 +27,7 @@ import {
   type MockTurn,
   startMockAnthropicProvider,
 } from "../../support/mock-provider.ts";
-import { type TestWorkspace, baseConfig, createWorkspace } from "../../support/workspace.ts";
+import { baseConfig, createWorkspace, type TestWorkspace } from "../../support/workspace.ts";
 
 export const ARTIFACTS_DIR = resolve(import.meta.dir, "artifacts");
 

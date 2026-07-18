@@ -9,7 +9,7 @@
 // explicitly sequenced after DH-0050's Core round (see the ticket's owner note) so it can
 // reuse that ticket's field shapes instead of inventing a parallel one.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentStatus, LogEvent, LogLine } from "../contracts/index.ts";
 // DH-0104 (docs/design/style-guide.md §4): elapsed formatting is shared with the TUI/Web via

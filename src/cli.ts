@@ -14,14 +14,13 @@ import { join } from "node:path";
 import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
 import { createProvider } from "./agent/providers/index.ts";
 import type { ModelProvider, ProviderToolDefinition } from "./agent/providers/types.ts";
-import { type ResumeResult, loadResumeSession } from "./agent/resume.ts";
+import { loadResumeSession, type ResumeResult } from "./agent/resume.ts";
 import { AgentRuntime, type AgentRuntimeOptions } from "./agent/runtime.ts";
 import { BUILD_INFO } from "./config/build-info.ts";
 import { ConfigError, DEFAULT_CONFIG_PATH, loadConfig } from "./config/index.ts";
 import type {
   AgentStatus,
   AgentTreeNode,
-  BuildInfo,
   DhConfig,
   ExitCode as ExitCodeType,
   JobResultLine,
@@ -36,27 +35,27 @@ import type {
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
 import {
-  type HeaderInfo,
   buildHeaderInfo,
   formatHeaderLines,
   formatVersionString,
+  type HeaderInfo,
 } from "./header-info.ts";
 import { loadSystemPrompt } from "./prompt/system-prompt.ts";
 import {
   type AgentLoopEventListener,
   type AgentLoopHandle,
   type AgentLoopLogListener,
+  buildSessionSummary,
   DhServer,
   type DhServerOptions,
-  SessionLogger,
-  type Unsubscribe,
-  buildSessionSummary,
   formatSessionList,
   formatSessionLogTree,
   pruneLogDirectories,
+  SessionLogger,
+  type Unsubscribe,
   writeSessionSummary,
 } from "./server/index.ts";
-import { SPINNER_FRAMES, SPINNER_FRAME_MS } from "./terminal.ts";
+import { SPINNER_FRAME_MS, SPINNER_FRAMES } from "./terminal.ts";
 import { startTui as startTuiClient } from "./tui/index.ts";
 // DH-0103: reuse the TUI's word-boundary-aware wrapper for --help's description wrapping
 // rather than a third implementation — a pure text utility (no TUI-specific deps), so a

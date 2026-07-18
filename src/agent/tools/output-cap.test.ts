@@ -3,11 +3,11 @@ import { readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  capOutput,
+  capOutputWithSavedFile,
   HEAD_PREVIEW_CHARS,
   OUTPUT_CAP_CHARS,
   TAIL_PREVIEW_CHARS,
-  capOutput,
-  capOutputWithSavedFile,
 } from "./output-cap.ts";
 
 const SAVE_DIR = join(tmpdir(), "dh-bash-output");

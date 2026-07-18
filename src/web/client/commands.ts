@@ -17,7 +17,7 @@ import type {
   StopAgentCommand,
   SwitchModelCommand,
 } from "../../contracts/index.ts";
-import { type ServerTarget, commandUrl } from "../protocol.ts";
+import { commandUrl, type ServerTarget } from "../protocol.ts";
 
 export function buildSendMessageCommand(agentId: string, message: string): SendMessageCommand {
   return { type: "send_message", agentId, message };

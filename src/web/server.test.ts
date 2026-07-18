@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { WEB_CONFIG_PATH } from "./protocol.ts";
-import { type WebUiHandle, serveWebUi } from "./server.ts";
+import { serveWebUi, type WebUiHandle } from "./server.ts";
 
 let handle: WebUiHandle | undefined;
 

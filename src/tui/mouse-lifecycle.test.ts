@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { MouseLifecycle } from "./mouse-lifecycle.ts";
 import { MOUSE_DISABLE, MOUSE_ENABLE } from "./mouse.ts";
+import { MouseLifecycle } from "./mouse-lifecycle.ts";
 
 describe("MouseLifecycle", () => {
   test("enable() writes the enable sequence once", () => {

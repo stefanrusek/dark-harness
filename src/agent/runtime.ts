@@ -21,10 +21,10 @@ import {
   type SkillInfo,
 } from "../contracts/index.ts";
 import { composeSkillInvocation } from "../prompt/index.ts";
-import { type Skill, discoverSkills } from "../prompt/skills.ts";
+import { discoverSkills, type Skill } from "../prompt/skills.ts";
 import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
 import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
-import { type AgentLoopResult, type ModelBinding, computeCostUsd, runAgentLoop } from "./loop.ts";
+import { type AgentLoopResult, computeCostUsd, type ModelBinding, runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { loadProjectMcpServers } from "./mcp/project-config.ts";
 import { buildMcpTools } from "./mcp/tools.ts";
@@ -39,11 +39,11 @@ import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.ts";
 import {
   type CreatedWorktree,
-  WorktreeError,
   createWorktree,
   hasChanges,
   isGitRepo,
   removeWorktree,
+  WorktreeError,
 } from "./worktree.ts";
 
 /** DH-0077: default cap on concurrently-live isolation worktrees when `options.

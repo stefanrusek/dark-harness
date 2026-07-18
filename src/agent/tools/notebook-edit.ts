@@ -9,8 +9,8 @@
 // file mutation.
 
 import { isAbsolute, resolve } from "node:path";
-import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
 import type { NotebookCell, NotebookJson } from "./read.ts";
+import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.ts";
 
 function resolvePath(filePath: string, cwd: string): string {

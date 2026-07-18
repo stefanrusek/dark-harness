@@ -11,8 +11,8 @@ import { Header } from "./Header.tsx";
 import { PickerView } from "./PickerView.tsx";
 import { RootView } from "./RootView.tsx";
 import { StatusRow } from "./StatusRow.tsx";
-import { TitleBar } from "./TitleBar.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
+import { TitleBar } from "./TitleBar.tsx";
 
 export interface AppProps {
   state: TuiState;

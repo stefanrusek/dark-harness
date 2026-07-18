@@ -6,11 +6,11 @@ import { BUILD_INFO } from "../config/build-info.ts";
 import type { DhConfig, ModelConfig } from "../contracts/index.ts";
 import type { Skill } from "./skills.ts";
 import {
+  buildDefaultSystemPrompt,
   CLAUDE_MD_MAX_BYTES,
   CLI_TOOLS_SKILL,
-  REQUIRED_CONTRACT,
-  buildDefaultSystemPrompt,
   loadSystemPrompt,
+  REQUIRED_CONTRACT,
   readProjectClaudeMd,
   renderSelfInfoSection,
   renderSkillsSection,

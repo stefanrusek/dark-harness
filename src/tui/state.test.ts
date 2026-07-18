@@ -10,7 +10,7 @@ import type {
   ToolCallEvent,
   ToolResultEvent,
 } from "../contracts/index.ts";
-import { MAX_OUTPUT_CHARS, initialState, reducer } from "./state.ts";
+import { initialState, MAX_OUTPUT_CHARS, reducer } from "./state.ts";
 import type { TuiState } from "./types.ts";
 
 function size() {

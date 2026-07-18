@@ -11,7 +11,7 @@
 // on submit, clear it after send) and keeps it directly driveable by tests that set
 // `textarea.value` and dispatch a native `submit`/`keydown` event, same as before.
 import { type ReactElement, useRef } from "react";
-import { type WebState, isRoot, selectedAgent } from "../state.ts";
+import { isRoot, selectedAgent, type WebState } from "../state.ts";
 
 export interface ComposerProps {
   state: WebState;
