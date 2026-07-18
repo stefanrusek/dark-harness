@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0146
 type: bug
-status: draft
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -40,3 +40,37 @@ Blocked the v0.1.0-alpha.1 release gate intermittently. Real symptom (seen 2026-
 ## Open Questions
 
 ## Notes
+
+> [!NOTE]
+> Root cause found and fixed 2026-07-18 (Fable, architect-on-call). This is a **genuine
+> mechanistic root cause**, not another mitigation — the prior "poll until writes stop
+> growing" hardening (2026-07-17) had a real bug in its termination condition that *was* the
+> failure:
+>
+> The `flush()` poll loop captured `lastLength` at loop entry and broke on the **first**
+> 100ms interval showing no growth. But at loop entry, `stdout.writes` contains only the
+> **synchronous** startup preamble that `startTui` writes inline (alt-screen enter + hide
+> cursor + bracketed-paste enable, then the SGR mouse-enable sequences) — Ink's first real
+> render write has not landed yet, because Ink's `render()` schedules its write asynchronously
+> (throttled log-update on top of yoga-layout WASM init). So "no growth this interval" was
+> **indistinguishable from "Ink hasn't started rendering yet"**: on a resource-constrained
+> GitHub Actions runner where Ink's initial render takes longer than the fixed 100ms sleep
+> preceding the loop, the loop's first check saw no growth, broke immediately, and the
+> assertion fired against preamble-only output — exactly the observed symptom
+> (`Received: "[?1049h[?25l[?2004h[?1000h[?1002h[?1006h"`). It never reproduced locally
+> because a fast machine always flushed Ink's initial render inside that fixed 100ms sleep,
+> before the poll loop ever ran. This is the same "GitHub Actions runners are resource-
+> constrained enough to stretch a real async gap wide" class DH-0149's concurrency work
+> surfaced — here it stretched the render-scheduling gap past the flush's fixed pre-sleep.
+>
+> Fix (`src/tui/app.test.ts`): `startTui` always mounts Ink and paints at least one frame, so
+> a healthy render **must** grow `stdout.writes` past the entry baseline. The poll now keeps
+> waiting (up to a 40×100ms ceiling) until it observes that first growth past baseline, and
+> only *then* accepts a stable interval as "render settled" — so "not started yet" can no
+> longer be misread as "settled". This is deterministic on the mechanism, independent of the
+> exact runner speed. Per-file process isolation (DH-0149) already ruled out all cross-file
+> module-load-order theories, which is what let this be pinned to app.test.ts's own flush
+> timing. Local: typecheck/lint clean, the previously-recurring "root (sonnet)" test and full
+> app.test.ts pass across repeated runs (though local never reproduced the failure, so the
+> real GitHub Actions run is the actual proof). The two `test.skip`'d resize/tick tests are
+> left skipped for now (out of scope for this recurrence; can be revisited separately).

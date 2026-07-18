@@ -934,8 +934,17 @@ describe("AgentRuntime", () => {
       "another agent's or the process's — per-agent cwd is captured at spawn time, not read " +
       "from one shared runtime-wide field",
     async () => {
-      const dirA = realpathSync("/tmp");
+      // Three genuinely-distinct real directories: one per runtime, plus one the *process*
+      // is chdir'd into below. They must never collide, or the assertions contradict each
+      // other. The old code used realpathSync("/tmp") for dirA, which is fine on macOS (where
+      // /tmp is a symlink to /private/tmp, so it differs from tmpdir()) but on Linux CI
+      // realpathSync("/tmp") === tmpdir() === "/tmp", making dirA === the process cwd — so
+      // "sees its own cwd" (== dirA) and "never sees the process cwd" (!= tmpdir) became
+      // mutually exclusive and the test failed only in CI. Using fresh mkdtemp dirs for all
+      // three removes that platform-dependent collision entirely.
+      const dirA = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-a-")));
       const dirB = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-b-")));
+      const procDir = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-proc-")));
       const { logLines: logLinesA, onLogLine: onLogLineA } = collectors();
       const { logLines: logLinesB, onLogLine: onLogLineB } = collectors();
       const runtimeA = newAgentRuntime({
@@ -955,7 +964,7 @@ describe("AgentRuntime", () => {
       // one runtime's cwd leaks into the other's sub-agent, and that a real process.cwd()
       // change (below) doesn't silently become either agent's effective cwd.
       const originalProcessCwd = process.cwd();
-      process.chdir(tmpdir());
+      process.chdir(procDir);
       try {
         const [taskIdA, taskIdB] = [
           runtimeA.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
@@ -977,8 +986,8 @@ describe("AgentRuntime", () => {
       // sibling runtime's cwd.
       expect(pwdOutput(logLinesA)).not.toBe(dirB);
       expect(pwdOutput(logLinesB)).not.toBe(dirA);
-      expect(pwdOutput(logLinesA)).not.toBe(tmpdir());
-      expect(pwdOutput(logLinesB)).not.toBe(tmpdir());
+      expect(pwdOutput(logLinesA)).not.toBe(procDir);
+      expect(pwdOutput(logLinesB)).not.toBe(procDir);
     },
   );
 

@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0070
 type: bug
-status: implementing
+status: verifying
 owner: stefan
 resolution: done
-blocked_by: ["regressed: identical CI failure recurred 2026-07-18 under DH-0149's per-file isolation"]
+blocked_by: []
 created: 2026-07-16
 relations:
   depends_on: []
@@ -96,3 +96,27 @@ file, conversation history).
 > typecheck/lint clean, `bun test src --coverage` 1390 pass/0 fail with 100% coverage on
 > `runtime.ts`, `bun run e2e` 30 pass/2 fail (both pre-existing headless-Chromium-unavailable-
 > in-sandbox failures noted by prior rounds, unrelated to this change).
+
+> [!NOTE]
+> Regression diagnosed and fixed 2026-07-18 (Fable, architect-on-call). The recurring CI
+> failure was **not** a regression of the production DH-0070 fix — that fix is fully intact
+> (`agentCwd` map, per-agent capture at spawn time, `buildToolContext` reading it). The
+> failure was a **latent test bug** in `runtime.test.ts`'s "each concurrently-spawned
+> sub-agent sees its own agent's cwd" test:
+>
+> - The test set `dirA = realpathSync("/tmp")` and separately chdir'd the process to
+>   `tmpdir()`, then asserted the sub-agent's pwd both **equals** `dirA` and **does not
+>   equal** `tmpdir()`.
+> - On macOS `/tmp` is a symlink to `/private/tmp`, so `realpathSync("/tmp")` (= `/private/tmp`)
+>   differs from `tmpdir()` — no contradiction, passes locally.
+> - On Linux CI `/tmp` is real and `tmpdir()` returns `/tmp`, so `dirA === tmpdir() === "/tmp"`.
+>   The two assertions (`toBe(dirA)` and `not.toBe(tmpdir())`) then directly contradict each
+>   other and the test fails — deterministically on Linux, never on macOS. This matches the
+>   "CI-only, never reproduces locally" signature, but the cause was platform-dependent path
+>   resolution in the test fixtures, not any timing/scheduling race.
+>
+> Fix: use three genuinely-distinct freshly-created `mkdtemp` directories (one per runtime,
+> one the process chdir's into) so no fixture can collide with another on any platform, and
+> assert against the real process dir (`procDir`) instead of `tmpdir()`. Production code
+> untouched. Local: typecheck/lint clean, target test passes; full `runtime.test.ts` +
+> `app.test.ts` green across repeated runs. Moved to `verifying` pending the real CI run.

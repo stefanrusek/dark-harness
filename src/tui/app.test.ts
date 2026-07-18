@@ -199,12 +199,34 @@ async function flush(times = 5, stdout?: FakeStdout): Promise<void> {
   // provided, poll until writes stop growing (render has caught up and stabilized) instead
   // of trusting a single fixed sleep, up to a generous ceiling so a genuinely broken render
   // still fails fast rather than hanging.
+  //
+  // The subtle bug this loop had (the actual root cause of the recurring CI failure, found
+  // 2026-07-18): the previous version captured `lastLength` at loop entry and broke on the
+  // FIRST interval showing no growth. On a constrained runner, `lastLength` at entry is still
+  // just the SYNCHRONOUS startup preamble (alt-screen + SGR mouse-enable escape sequences) —
+  // Ink's first real render write has not landed yet. "No growth this interval" is then
+  // indistinguishable from "Ink hasn't started rendering yet", so the loop broke immediately
+  // and the assertion fired against preamble-only output. This never reproduced locally
+  // because a fast machine always flushed Ink's initial render inside the fixed 100ms sleep
+  // above, before this loop ever ran. Fix: `startTui` always mounts Ink and paints at least
+  // one frame, so a healthy render MUST grow writes past the entry baseline — keep polling
+  // until that first growth is observed, and only then treat a stable interval as "settled".
   if (stdout) {
-    let lastLength = stdout.writes.length;
-    for (let i = 0; i < 20; i++) {
+    const baseline = stdout.writes.length;
+    let lastLength = baseline;
+    let grewPastBaseline = false;
+    for (let i = 0; i < 40; i++) {
       await new Promise((resolve) => setTimeout(resolve, 100));
-      if (stdout.writes.length === lastLength) break;
-      lastLength = stdout.writes.length;
+      const len = stdout.writes.length;
+      if (len > lastLength) {
+        grewPastBaseline = grewPastBaseline || len > baseline;
+        lastLength = len;
+        continue;
+      }
+      // No growth this interval. Only accept it as "render settled" once a real render has
+      // actually landed (writes grew past the synchronous-preamble baseline); otherwise Ink
+      // simply hasn't started yet on this (slow) runner — keep waiting up to the ceiling.
+      if (grewPastBaseline) break;
     }
   }
 }
