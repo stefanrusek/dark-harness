@@ -3,7 +3,7 @@
 // same value the same way, instead of three hand-kept-in-sync copies quietly drifting apart
 // (which is exactly how this ticket got filed — see the ticket's survey table). Pure
 // functions only, no DOM/node/process access, so every surface (including the browser-
-// bundled Web client) can import it unmodified — same pattern as `src/terminal.ts`'s shared
+// bundled Web client) can import it unmodified — same pattern as `src/terminal.constant.ts`'s shared
 // spinner constants.
 //
 // Two-tier rules, per the owner's 2026-07-16 ruling (recorded in the style guide):

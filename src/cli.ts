@@ -55,7 +55,7 @@ import {
   type Unsubscribe,
   writeSessionSummary,
 } from "./server/index.ts";
-import { SPINNER_FRAME_MS, SPINNER_FRAMES } from "./terminal.ts";
+import { SPINNER_FRAME_MS, SPINNER_FRAMES } from "./terminal.constant.ts";
 import { startTui as startTuiClient } from "./tui/index.ts";
 // DH-0103: reuse the TUI's word-boundary-aware wrapper for --help's description wrapping
 // rather than a third implementation — a pure text utility (no TUI-specific deps), so a
@@ -1508,7 +1508,7 @@ function formatDoctorRow(r: DoctorResult, nameWidth: number, color: boolean): st
  * later `\r` + clear-to-end-of-line rewrite lands in exactly the same place. Never used
  * outside a TTY (there's no "in flight" concept for a piped/CI run that only prints once at
  * the end). DH-0102: the marker is now the canonical braille spinner frame (shared with the
- * TUI via `../terminal.ts`, not a bespoke `....`) and the wording is present-progressive
+ * TUI via `../terminal.constant.ts`, not a bespoke `....`) and the wording is present-progressive
  * ("checking…") per the style guide's pending-state vocabulary (§1.1). `frame` is supplied by
  * the caller so `runDoctor` can advance it on a timer while a single check is outstanding. */
 function formatDoctorPendingRow(
