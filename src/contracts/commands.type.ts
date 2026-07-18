@@ -1,7 +1,7 @@
 // ADR 0002. Client -> server commands, sent as HTTP POST bodies. Responses are ordinary
 // HTTP responses (CommandAck or a command-specific payload), not paired to the SSE stream.
 
-import type { AgentStatus } from "./log.ts";
+import type { AgentStatus } from "./log.type.ts";
 
 export interface SendMessageCommand {
   type: "send_message";

@@ -59,7 +59,7 @@ describe("TaskRegistry", () => {
     expect(registry.snapshot(id).status).toBe("done");
   });
 
-  // Round 13: distinct terminal status from "failed" (contracts/log.ts's AgentStatus).
+  // Round 13: distinct terminal status from "failed" (contracts/log.type.ts's AgentStatus).
   test("stop() on a running task marks it 'stopped', not 'failed'", async () => {
     const registry = new TaskRegistry();
     const id = registry.start({

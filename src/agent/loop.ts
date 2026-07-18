@@ -188,7 +188,7 @@ export interface AgentLoopParams {
    * check below never runs — today's unbounded-growth behavior, unchanged. */
   compaction?: { enabled: boolean; thresholdPercent?: number };
   /** Round 8 (ADR 0005 amendment): how the process that owns this session was invoked — see
-   * SessionClientKind's own doc comment in src/contracts/log.ts. Required (not defaulted) so
+   * SessionClientKind's own doc comment in src/contracts/log.type.ts. Required (not defaulted) so
    * no call site can silently record a wrong value; threaded from AgentRuntimeOptions.client
    * via runtime.ts into every runAgentLoop() call (root and every sub-agent alike — a
    * session's client kind doesn't vary per agent within it). */

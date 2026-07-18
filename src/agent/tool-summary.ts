@@ -1,5 +1,5 @@
 // DH-0089: produces the display-only `inputSummary` field carried on the `tool_call` SSE
-// event (src/contracts/events.ts). Never the full arguments — the JSONL log's `tool_call`
+// event (src/contracts/events.type.ts). Never the full arguments — the JSONL log's `tool_call`
 // line (already redacted per DH-0020) is the durable, complete record; this exists solely to
 // drive a compact "agent is running X" live indicator in the TUI/Web transcript.
 //

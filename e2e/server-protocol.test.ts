@@ -4,7 +4,7 @@
 // (src/server/server.test.ts), which never cross a real process boundary at all.
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { ExitCode } from "../src/contracts/exit-codes.ts";
+import { ExitCode } from "../src/contracts/exit-codes.constant.ts";
 import type { AgentTreeResponse, CommandAck } from "../src/contracts/index.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
 import {

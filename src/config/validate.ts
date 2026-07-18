@@ -1,5 +1,5 @@
 // Validates a parsed (and already $(VAR)-interpolated) config object against the DhConfig
-// wire shape (src/contracts/config.ts). Throws ConfigError with an actionable message on
+// wire shape (src/contracts/config.type.ts). Throws ConfigError with an actionable message on
 // any violation — this is the harness-error path per ADR 0006, never a raw crash.
 
 import type {
@@ -48,11 +48,11 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   "compaction",
 ]);
 
-// DH-0010 Part B: opt-in context-window compaction — see src/contracts/config.ts's
+// DH-0010 Part B: opt-in context-window compaction — see src/contracts/config.type.ts's
 // `CompactionConfig` doc comment.
 const KNOWN_COMPACTION_KEYS = new Set(["enabled", "thresholdPercent"]);
 
-// DH-0074: `web.fetch`/`web.search` opt-in blocks — see src/contracts/config.ts's WebConfig
+// DH-0074: `web.fetch`/`web.search` opt-in blocks — see src/contracts/config.type.ts's WebConfig
 // doc comment for the "presence registers the tool, absence means it doesn't exist" semantics.
 const KNOWN_WEB_FETCH_KEYS = new Set([
   "timeoutMs",
@@ -65,7 +65,7 @@ const KNOWN_WEB_FETCH_KEYS = new Set([
 const KNOWN_WEB_SEARCH_KEYS = new Set(["provider", "apiKey", "timeoutMs", "maxResults"]);
 const WEB_SEARCH_PROVIDERS = new Set(["brave"]);
 
-// DH-0045: opt-in extended thinking — see src/contracts/config.ts's `ThinkingConfig` doc
+// DH-0045: opt-in extended thinking — see src/contracts/config.type.ts's `ThinkingConfig` doc
 // comment for the adaptive/enabled distinction.
 const KNOWN_THINKING_KEYS = new Set(["type", "budgetTokens", "display"]);
 const THINKING_TYPES = new Set(["adaptive", "enabled"]);
@@ -73,7 +73,7 @@ const THINKING_DISPLAYS = new Set(["summarized", "omitted"]);
 
 const KNOWN_LIMITS_KEYS = new Set(["completedRetention"]);
 
-// DH-0037: `.dh-logs/` rotation/prune policy — see src/contracts/config.ts's
+// DH-0037: `.dh-logs/` rotation/prune policy — see src/contracts/config.type.ts's
 // `LogRetentionConfig` doc comment.
 const KNOWN_LOG_RETENTION_KEYS = new Set(["maxAgeMs", "maxTotalBytes"]);
 
@@ -201,7 +201,7 @@ function validateModel(raw: unknown, index: number, providerNames: Set<string>):
 }
 
 /** DH-0045: validates the optional `models[].thinking` block. See
- * src/contracts/config.ts's `ThinkingConfig` doc comment for the adaptive/enabled
+ * src/contracts/config.type.ts's `ThinkingConfig` doc comment for the adaptive/enabled
  * distinction — `type: "enabled"` requires `budgetTokens` (integer, >= 1024); `type:
  * "adaptive"` forbids it. `display`, when present, must be "summarized" or "omitted". */
 function validateThinking(raw: unknown, path: string): ThinkingConfig {

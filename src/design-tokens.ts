@@ -8,7 +8,7 @@
 // Casing is a presentation-layer decision left to each consumer (style-guide.md §4): every
 // `word`/label here is the canonical lowercase form; callers apply Title Case on Web
 // themselves.
-import type { AgentStatus } from "./contracts/log.ts";
+import type { AgentStatus } from "./contracts/log.type.ts";
 
 /** The four connection-pill states (style-guide.md §1.2, DH-0105) — TUI's `ConnectionStatus`
  * (src/tui/types.ts) and Web's `ConnectionStatus` (src/web/client/state.ts) are each defined

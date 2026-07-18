@@ -287,7 +287,7 @@ export class TaskRegistry {
 
   /** Round 13 (docs/handoffs/core.md): stopping a task now records a distinct terminal
    * "stopped" status instead of overloading "failed" (see AgentStatus's doc comment in
-   * contracts/log.ts), and throws TaskFinishedError — rather than silently no-oping — when
+   * contracts/log.type.ts), and throws TaskFinishedError — rather than silently no-oping — when
    * the task has already reached a terminal status, so TaskStop's tool layer can report
    * "already finished" instead of a false "Stopped `<id>`" claim. */
   stop(id: string): void {

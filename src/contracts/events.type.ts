@@ -1,7 +1,7 @@
 // ADR 0002. Server -> client SSE event schema. Every event carries an explicit `version`
 // and an `id` usable as the SSE event id for Last-Event-ID resume.
 
-import type { AgentStatus } from "./log.ts";
+import type { AgentStatus } from "./log.type.ts";
 
 export interface SseEventBase {
   version: 1;
@@ -68,7 +68,7 @@ export interface TokenUsageEvent extends SseEventBase {
 /**
  * Emitted immediately before a tool's `execute()` call (see `src/agent/loop.ts`'s
  * `runToolCalls()`). Named to match its JSONL log-line counterpart (`tool_call` in
- * `src/contracts/log.ts`) — precedent: `token_usage` already shares its name across both
+ * `src/contracts/log.type.ts`) — precedent: `token_usage` already shares its name across both
  * schemas. DH-0089.
  */
 export interface ToolCallEvent extends SseEventBase {

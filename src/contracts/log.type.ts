@@ -8,6 +8,8 @@
 // compatible-to-read schema change, not a header format version bump.
 
 import type { ReportedOutcome } from "./outcome.ts";
+// outcome.ts stays a regular .ts file (mixes a runtime const with standalone types not
+// derived from it via typeof/keyof) — see DH-0155 sub-wave 1A classification.
 
 /** How the log-writing process was invoked, per ADR 0001's mode composition — a one-shot
  * fact captured at session start, not an attempt to track every remote client that connects
@@ -138,7 +140,7 @@ export interface LogFailedEvent extends LogEventBase {
 }
 
 /** DH-0093: durable record of a mid-session model switch (`switch_model` command taking
- * effect) — the JSONL counterpart to the SSE `ModelSwitchedEvent` (src/contracts/events.ts).
+ * effect) — the JSONL counterpart to the SSE `ModelSwitchedEvent` (src/contracts/events.type.ts).
  * The header's own `model` field stays the spawn-time value (headers are immutable, see this
  * file's own header comment); replaying a session's true model over time means the header
  * model folded with every `model_switched` line in order. */

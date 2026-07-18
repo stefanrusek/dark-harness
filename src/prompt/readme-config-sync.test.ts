@@ -1,5 +1,5 @@
 // DH-0042: README's config reference is hand-maintained prose, not generated from
-// src/contracts/config.ts — the schema's actual source of truth. That's an acknowledged
+// src/contracts/config.type.ts — the schema's actual source of truth. That's an acknowledged
 // maintenance risk (a field added to DhOptions/ModelConfig can silently go undocumented).
 // This test is a lightweight drift guard, not a full type-checker: it extracts top-level
 // field names from the two interfaces an operator configures directly (DhOptions,
@@ -9,7 +9,9 @@
 // fields existed in the contract with zero README mentions).
 import { describe, expect, test } from "bun:test";
 
-const CONFIG_SOURCE = await Bun.file(new URL("../contracts/config.ts", import.meta.url)).text();
+const CONFIG_SOURCE = await Bun.file(
+  new URL("../contracts/config.type.ts", import.meta.url),
+).text();
 const README_SOURCE = await Bun.file(new URL("../../README.md", import.meta.url)).text();
 
 /**
@@ -21,7 +23,7 @@ const README_SOURCE = await Bun.file(new URL("../../README.md", import.meta.url)
 function fieldNamesOf(source: string, interfaceName: string): string[] {
   const start = source.indexOf(`interface ${interfaceName} `);
   if (start === -1) {
-    throw new Error(`interface ${interfaceName} not found in src/contracts/config.ts`);
+    throw new Error(`interface ${interfaceName} not found in src/contracts/config.type.ts`);
   }
   const openBrace = source.indexOf("{", start);
   const closeBrace = source.indexOf("\n}", openBrace);
@@ -34,7 +36,7 @@ function fieldNamesOf(source: string, interfaceName: string): string[] {
   });
 }
 
-describe("README config reference stays in sync with src/contracts/config.ts", () => {
+describe("README config reference stays in sync with src/contracts/config.type.ts", () => {
   test("every DhOptions field is mentioned in README.md", () => {
     const fields = fieldNamesOf(CONFIG_SOURCE, "DhOptions");
     expect(fields.length).toBeGreaterThan(0);

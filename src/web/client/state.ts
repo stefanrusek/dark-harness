@@ -1,5 +1,5 @@
 // Pure state management for the web UI. No DOM, no network — a reducer over
-// `ServerSentEvent`s (src/contracts/events.ts) plus a few UI-only fields (selection,
+// `ServerSentEvent`s (src/contracts/events.type.ts) plus a few UI-only fields (selection,
 // connection status). Kept framework-free and fully unit-testable.
 
 import type {
@@ -54,7 +54,7 @@ export interface AgentNode {
    * `description` parameter — the sidebar/tree row's primary label, falling back to
    * `model (shortAgentId)` only when absent (the root agent, which was never spawned via the
    * Agent tool, or a pre-DH-0069 logged session). See `AgentSpawnedEvent.description`
-   * (src/contracts/events.ts). */
+   * (src/contracts/events.type.ts). */
   description?: string;
   /** Ordered conversation turns for this agent. See `Turn` above. */
   transcript: Turn[];
@@ -97,7 +97,7 @@ export interface AgentNode {
   /**
    * ISO timestamp of the most recent status transition (or, for a freshly-observed node,
    * the moment it was first seen). Every `ServerSentEvent` already carries a `timestamp`
-   * (src/contracts/events.ts), so this is derived client-side with no wire-protocol change.
+   * (src/contracts/events.type.ts), so this is derived client-side with no wire-protocol change.
    *
    * Purpose (docs/handoffs/web.md Round 3): `running` is otherwise a single undifferentiated
    * status with no elapsed-time signal, and since the Anthropic provider adapter calls

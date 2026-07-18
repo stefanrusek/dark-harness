@@ -99,7 +99,7 @@ describe("runAgentLoop", () => {
     expect(result.finalOutput).toBe("All done, task succeeded.");
     expect(result.turns).toBe(3);
 
-    // Events shaped per src/contracts/events.ts
+    // Events shaped per src/contracts/events.type.ts
     expect(events.some((e) => e.type === "agent_spawned")).toBe(true);
     expect(events.some((e) => e.type === "agent_output" && e.chunk.includes("All done"))).toBe(
       true,
@@ -108,7 +108,7 @@ describe("runAgentLoop", () => {
     const statusEvent = events.find((e) => e.type === "agent_status");
     expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe("done");
 
-    // Log lines shaped per src/contracts/log.ts
+    // Log lines shaped per src/contracts/log.type.ts
     expect(logLines[0]?.type).toBe("header");
     expect(logLines.some((l) => l.type === "tool_call" && l.toolName === "Bash")).toBe(true);
     expect(logLines.some((l) => l.type === "tool_result")).toBe(true);
@@ -121,7 +121,7 @@ describe("runAgentLoop", () => {
     });
 
     // DH-0089: tool_call/tool_result SSE events are emitted, shaped per
-    // src/contracts/events.ts, and appear immediately before their JSONL counterparts.
+    // src/contracts/events.type.ts, and appear immediately before their JSONL counterparts.
     const toolCallEvent = events.find((e) => e.type === "tool_call");
     expect(toolCallEvent).toMatchObject({
       type: "tool_call",

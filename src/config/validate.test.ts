@@ -108,7 +108,7 @@ describe("validateConfig — happy paths", () => {
     expect(config.models[0]?.outputPricePerMToken).toBeUndefined();
   });
 
-  // DH-0045: opt-in extended thinking — see src/contracts/config.ts's ThinkingConfig doc
+  // DH-0045: opt-in extended thinking — see src/contracts/config.type.ts's ThinkingConfig doc
   // comment for the adaptive/enabled distinction.
   test("accepts models[].thinking with type adaptive (no budgetTokens)", () => {
     const config = validateConfig(

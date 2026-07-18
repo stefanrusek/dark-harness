@@ -1890,7 +1890,7 @@ export async function main(
 
   // DH-0050 (`--job --json`): every ServerSentEvent the root runtime emits is written to
   // stdout as one NDJSON line, as-is — no separate incremental schema, the existing
-  // versioned event union (src/contracts/events.ts) is reused verbatim. `undefined` in
+  // versioned event union (src/contracts/events.type.ts) is reused verbatim. `undefined` in
   // every other mode, so createRuntime()/createStandaloneRuntime() behave exactly as before
   // this ticket (no `onEvent` at all) when `--json` wasn't given.
   const onJsonEvent = options.json
