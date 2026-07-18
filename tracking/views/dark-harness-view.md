@@ -46,6 +46,7 @@ source: tracking/
 | [DH-0158](../DH-0158-coding-standards-overhaul-wave-4-layer-3-file-migration-14-files.md) | Coding-standards overhaul Wave 4: layer-3 file migration (14 files) | status: verifying |
 | [DH-0159](../DH-0159-coding-standards-overhaul-waves-5-9-root-layer-file-migration-entrypoint-guards-11-files.md) | Coding-standards overhaul Waves 5-9: root-layer file migration + entrypoint guards (11 files) | status: verifying |
 | [DH-0161](../DH-0161-pilot-add-as-const-decorations-to-config-validate-ts-s-private-lookup-consts-resolve-remaining-gritql-warnings.md) | Pilot: add as-const decorations to config/validate.ts's private lookup consts, resolve remaining GritQL warnings | status: verifying |
+| [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | status: verifying |
 
 ## Board
 
@@ -82,7 +83,6 @@ source: tracking/
 | [DH-0152](../DH-0152-coverage-exclusion-mechanism-for-future-type-ts-constant-ts-files-fix-contracts-index-test-ts-fake-import-workaround.md) | Coverage-exclusion mechanism for future .type.ts / .constant.ts files, fix contracts/index.test.ts fake-import workaround | feature | stefan |
 | [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | bug | stefan |
 | [DH-0160](../DH-0160-refine-no-module-scope-side-effects-gritql-rule-allow-private-consts-with-literal-as-const-initializers.md) | Refine no-module-scope-side-effects GritQL rule: allow private consts with literal/as-const initializers | bug | stefan |
-| [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | feature | stefan |
 
 ### verifying
 
@@ -110,6 +110,7 @@ source: tracking/
 | [DH-0158](../DH-0158-coding-standards-overhaul-wave-4-layer-3-file-migration-14-files.md) | Coding-standards overhaul Wave 4: layer-3 file migration (14 files) | feature | stefan |
 | [DH-0159](../DH-0159-coding-standards-overhaul-waves-5-9-root-layer-file-migration-entrypoint-guards-11-files.md) | Coding-standards overhaul Waves 5-9: root-layer file migration + entrypoint guards (11 files) | feature | stefan |
 | [DH-0161](../DH-0161-pilot-add-as-const-decorations-to-config-validate-ts-s-private-lookup-consts-resolve-remaining-gritql-warnings.md) | Pilot: add as-const decorations to config/validate.ts's private lookup consts, resolve remaining GritQL warnings | bug | stefan |
+| [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | feature | stefan |
 
 ## Recently Closed
 

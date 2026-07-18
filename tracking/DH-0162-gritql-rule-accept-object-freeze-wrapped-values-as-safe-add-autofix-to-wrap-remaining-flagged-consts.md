@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0162
 type: feature
-status: implementing
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -38,3 +38,65 @@ Owner decision, generalizing beyond the new Set()/Map() case DH-0161's pilot fou
 ## Open Questions
 
 ## Notes
+
+> [!NOTE]
+> 2026-07-18: Implemented and verified.
+>
+> **Object.freeze() empirical finding (per the Summary's ask):** confirmed via a real Bun
+> script — `Object.freeze(new Set(["a"]))` does NOT prevent `.add()`/`.delete()`; freeze only
+> locks the frozen object's own enumerable properties, not Set/Map internal slots. `.add()`/
+> `.delete()`/`.set()` all still succeed after freezing. Accepted anyway per the owner's
+> design as a lint-satisfying convention/intent signal for Set/Map specifically, not a
+> runtime mutation guarantee — documented honestly in the rule's commit message, not hidden.
+>
+> **Rule change:** `no-module-scope-side-effects.grit` now accepts `Object.freeze($_)` (and
+> `Object.freeze<$_>($_)`, needed for cases requiring an explicit type argument to keep
+> literal-type narrowing/contextual typing through the freeze) as an additional safe
+> initializer form, alongside primitive literals and `as const` object/array literals. Added
+> a `fix_kind="safe"` rewrite (`$val => Object.freeze($val)`) so `bunx biome check --write .`
+> mechanically applies it.
+>
+> **Fixture verification (before touching the real tree):** a throwaway `src/dh0162-fixture.ts`
+> with already-safe consts (`Object.freeze(new Set(...))`, `as const`, primitives) and
+> not-yet-safe ones (`new Set(...)`, plain object/array literals) confirmed: already-safe
+> consts stay unflagged, unsafe ones get flagged with a suggested fix, and `--write` produces
+> exactly `Object.freeze(...)`-wrapped output that then re-checks clean. Fixture deleted
+> before committing.
+>
+> **Real-tree mechanical pass:** `bunx biome check --write .` touched 55 files. Warnings:
+> 98 -> 2 (both pre-existing/out of scope: `banner.constant.ts`'s computed-template-literal
+> violation of the separate constant-file-restrictions rule, and an uninitialized top-level
+> `let` in `web/server.ts` this rule's initializer-based check doesn't cover).
+>
+> **Two real runtime regressions found and fixed** (this is exactly why the ticket asked for
+> empirical verification, not just a lint-green pass):
+> - `src/tui/mouse.ts` (3 consts) and `src/config/interpolate.ts` (1 const): a global/sticky
+>   `RegExp` mutates its own `lastIndex` during `.replace()`/`.exec()` — freezing the RegExp
+>   object makes that a hard throw in strict mode. Caught by `bun run test:coverage` (mouse
+>   and interpolate test failures). Reverted to unfrozen with a `biome-ignore lint/plugin`
+>   comment explaining why.
+> - `src/agent/tools/read.ts`'s `PDF_MAGIC`: `Object.freeze()` on a `Uint8Array` throws
+>   immediately at module load — TypedArray integer-indexed elements can't be made
+>   non-configurable per spec. Same fix pattern.
+>
+> Also hand-fixed ~15 `tsc` errors the wrap introduced (Object.freeze() loses contextual
+> typing for object literals unless the target type is threaded through explicitly): added
+> `Object.freeze<Tool>(...)` explicit type args to the 22 built-in tool definitions, and
+> widened a handful of declared `Array<T>`/mutable types to `readonly T[]`/`ReadonlyArray<T>`
+> where callers never mutated them (`ALL_TOOLS`, `HELP_USAGE_ITEMS`/`HELP_FLAG_ITEMS`,
+> `renderingFixtures`, `PATTERNS` in redact.ts, `COMBINING_RANGES`/`WIDE_RANGES` in width.ts).
+>
+> **Spot-checked** diffs across `src/cli.ts`, `src/config/build-info.ts`,
+> `src/agent/providers/bedrock.ts`, `src/format.ts`, `src/tui/mouse.ts`, `src/tui/sse-parser.ts`,
+> `src/web/server.ts` — all mechanical, correctly formatted, no logic changes beyond the
+> `Object.freeze(...)` wrap (or its narrow reversal in the two regression cases above). Noted
+> `web/server.ts`'s `assetCache` (a `Map` mutated at runtime via `.set()`) stays functionally
+> correct after freezing, per the empirical Set/Map finding above.
+>
+> **Full verification:** `bun run typecheck` clean. `bun run lint` 98 -> 2 warnings (both
+> pre-existing/out of scope, not new). `bun run test:coverage` 125/125 (99.76%). `bun run e2e`
+> 35/38 — the 3 failures are headless-browser `waitForSelector` timeouts, reproduced
+> identically on the unmodified base commit via `git stash` before re-running e2e, confirming
+> they are pre-existing/environmental, not a regression from this change.
+>
+> Commits: `d6242d5` (rule change + autofix), `bc8b7cf` (mechanical pass + regression fixes).
