@@ -2,31 +2,92 @@
 // can be passed anywhere production code expects a real `Document`/`HTMLElement`. Kept out
 // of the render/app modules themselves so production code never depends on happy-dom.
 
+import { afterAll, beforeAll } from "bun:test";
 import { Window } from "happy-dom";
 
-// DH-0135: `bun test` doesn't strictly finish one file's tests before starting another's —
-// several files can have test bodies in flight in the same process at once — so toggling
-// `globalThis.window`/`document` on and off per-test (set at the top of a test, deleted at
-// the end) is observable by an unrelated concurrently-running test in a half-registered
-// state. Registering once, at module load, for the lifetime of the whole `bun test` process
-// avoids that race entirely — `react-dom` (mounted for the Composer/AppHeader sections, see
-// app.ts) only needs `window`/`document` to exist as *some* object for its few ambient reads
-// (e.g. `getCurrentEventPriority`'s `window.event`); each individual test still gets its own
-// isolated happy-dom `Window`/`Document`/root threaded through explicitly via `createTestDom`
-// below, which is what actually determines what gets rendered where.
-//
-// The one thing that must NOT become ambiently true for the whole process is "looks like a
-// browser": the Anthropic SDK's `isRunningInBrowser()` (src/agent/providers/anthropic.ts)
-// checks `window`/`window.document`/`navigator` together and throws once all three are
-// present — Bun itself always provides a real `navigator`, so `navigator` is overridden to
-// `undefined` here too, permanently, alongside `window`/`document`.
-const globalAny = globalThis as unknown as Record<string, unknown>;
-if (!globalAny.window) {
+const TEST_DOM_GLOBALS_KEY = Symbol.for("dh.testDom.globals");
+
+const globalAny = globalThis as typeof globalThis & {
+  [TEST_DOM_GLOBALS_KEY]?: RegisteredGlobals;
+  window?: unknown;
+  document?: unknown;
+  HTMLElement?: unknown;
+  navigator?: unknown;
+};
+
+type RegisteredGlobals = {
+  refs: number;
+  windowPresent: boolean;
+  windowValue: unknown;
+  documentPresent: boolean;
+  documentValue: unknown;
+  htmlElementPresent: boolean;
+  htmlElementValue: unknown;
+  navigatorPresent: boolean;
+  navigatorValue: unknown;
+};
+
+function getRegisteredGlobals(): RegisteredGlobals {
+  let state = globalAny[TEST_DOM_GLOBALS_KEY];
+  if (!state) {
+    state = {
+      refs: 0,
+      windowPresent: Object.hasOwn(globalAny, "window"),
+      windowValue: globalAny.window,
+      documentPresent: Object.hasOwn(globalAny, "document"),
+      documentValue: globalAny.document,
+      htmlElementPresent: Object.hasOwn(globalAny, "HTMLElement"),
+      htmlElementValue: globalAny.HTMLElement,
+      navigatorPresent: Object.hasOwn(globalAny, "navigator"),
+      navigatorValue: globalAny.navigator,
+    };
+    globalAny[TEST_DOM_GLOBALS_KEY] = state;
+  }
+  return state;
+}
+
+function restoreOrDelete(
+  key: "window" | "document" | "HTMLElement" | "navigator",
+  present: boolean,
+  value: unknown,
+): void {
+  if (present) globalAny[key] = value;
+  else delete globalAny[key];
+}
+
+function installDomGlobals(): void {
   const bootWindow = new Window({ url: "http://localhost/" });
   globalAny.window = bootWindow;
   globalAny.document = bootWindow.document;
   globalAny.HTMLElement = bootWindow.HTMLElement;
   globalAny.navigator = undefined;
+}
+
+function restoreDomGlobals(state: RegisteredGlobals): void {
+  restoreOrDelete("window", state.windowPresent, state.windowValue);
+  restoreOrDelete("document", state.documentPresent, state.documentValue);
+  restoreOrDelete("HTMLElement", state.htmlElementPresent, state.htmlElementValue);
+  restoreOrDelete("navigator", state.navigatorPresent, state.navigatorValue);
+}
+
+// DH-0135/DH-0147: Bun can overlap test files in one process, so toggling DOM globals per
+// individual test races other web-component tests; but leaving them installed for the entire
+// process makes unrelated Ink/TUI tests see a fake browser and crash inside Ink/yoga init.
+// Each importing file registers a beforeAll/afterAll pair here; a process-wide refcount keeps
+// the globals installed while any web test file is actively running, then restores the prior
+// process globals once the last one finishes.
+export function registerDomGlobals(): void {
+  beforeAll(() => {
+    const state = getRegisteredGlobals();
+    if (state.refs === 0) installDomGlobals();
+    state.refs += 1;
+  });
+
+  afterAll(() => {
+    const state = getRegisteredGlobals();
+    state.refs -= 1;
+    if (state.refs === 0) restoreDomGlobals(state);
+  });
 }
 
 export interface TestDom {

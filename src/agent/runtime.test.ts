@@ -37,6 +37,7 @@ import {
   RootOnlyModelSwitchError,
   UnknownSkillError,
 } from "./runtime.ts";
+import { withProcessMutationLock } from "../test-process-lock.ts";
 import { bashTool } from "./tools/bash.ts";
 
 /** Round 8: `AgentRuntimeOptions.client` is required (no default) so no real call site can
@@ -943,17 +944,19 @@ describe("AgentRuntime", () => {
     // cwds genuinely diverge), run concurrently — proving neither the process's own cwd nor
     // one runtime's cwd leaks into the other's sub-agent, and that a real process.cwd()
     // change (below) doesn't silently become either agent's effective cwd.
-    const originalProcessCwd = process.cwd();
-    process.chdir(tmpdir());
-    try {
-      const [taskIdA, taskIdB] = [
-        runtimeA.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
-        runtimeB.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
-      ];
-      await Promise.all([runtimeA.tasks.awaitDone(taskIdA), runtimeB.tasks.awaitDone(taskIdB)]);
-    } finally {
-      process.chdir(originalProcessCwd);
-    }
+    await withProcessMutationLock(async () => {
+      const originalProcessCwd = process.cwd();
+      process.chdir(tmpdir());
+      try {
+        const [taskIdA, taskIdB] = [
+          runtimeA.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
+          runtimeB.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
+        ];
+        await Promise.all([runtimeA.tasks.awaitDone(taskIdA), runtimeB.tasks.awaitDone(taskIdB)]);
+      } finally {
+        process.chdir(originalProcessCwd);
+      }
+    });
 
     const pwdOutput = (lines: LogLine[]) => {
       const toolResult = lines.find((l) => l.type === "tool_result");

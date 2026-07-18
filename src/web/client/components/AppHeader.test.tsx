@@ -1,7 +1,8 @@
 // DH-0122: `<AppHeader>` renders the app name/version/config-status summary once
 // `headerInfo` is supplied (fetched from `WEB_CONFIG_PATH` at boot — see main.ts). Global DOM
 // registration is `test-dom.ts`'s side effect — see its module-level comment.
-import "../test-dom.ts";
+import { registerDomGlobals } from "../test-dom.ts";
+registerDomGlobals();
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConfigError } from "./errors.ts";
 import { loadConfig } from "./load.ts";
+import { withProcessMutationLock } from "../test-process-lock.ts";
 
 let dir: string;
 
@@ -102,21 +103,23 @@ describe("loadConfig", () => {
   });
 
   test("uses DEFAULT_CONFIG_PATH (dh.json in cwd) when no path is given", async () => {
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      await writeConfig(
-        "dh.json",
-        JSON.stringify({
-          options: { defaultModel: "sonnet" },
-          models: [{ name: "sonnet", provider: "anthropic", model: "sonnet-5" }],
-          provider: [{ name: "anthropic", type: "anthropic" }],
-        }),
-      );
-      const config = await loadConfig();
-      expect(config.options.defaultModel).toBe("sonnet");
-    } finally {
-      process.chdir(originalCwd);
-    }
+    await withProcessMutationLock(async () => {
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        await writeConfig(
+          "dh.json",
+          JSON.stringify({
+            options: { defaultModel: "sonnet" },
+            models: [{ name: "sonnet", provider: "anthropic", model: "sonnet-5" }],
+            provider: [{ name: "anthropic", type: "anthropic" }],
+          }),
+        );
+        const config = await loadConfig();
+        expect(config.options.defaultModel).toBe("sonnet");
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
   });
 });

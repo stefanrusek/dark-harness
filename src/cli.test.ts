@@ -35,6 +35,7 @@ import { buildHeaderInfo, formatHeaderLines, formatVersionString } from "./heade
 import { REQUIRED_CONTRACT, buildDefaultSystemPrompt } from "./prompt/system-prompt.ts";
 import { DhServer, waitForExitCode } from "./server/index.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
+import { withProcessMutationLock } from "./test-process-lock.ts";
 
 const TEST_CONFIG: DhConfig = {
   options: { defaultModel: "sonnet" },
@@ -375,57 +376,67 @@ describe("main — dh logs <sessionDir>", () => {
   // whatever `.dh-logs` happens to already exist in the real working directory.
   test("no sessionDir lists sessions under ./.dh-logs instead of failing", async () => {
     const dir = await mkdtemp(join(tmpdir(), "dh-cli-logs-list-"));
-    const originalCwd = process.cwd();
-    process.chdir(dir);
     try {
-      const logsRoot = join(dir, ".dh-logs");
-      const sessionDir = join(logsRoot, "session-1");
-      await Bun.write(
-        join(sessionDir, "agent-root.jsonl"),
-        `${JSON.stringify({
-          version: 1,
-          type: "header",
-          sessionId: "session-1",
-          agentId: "agent-root",
-          parentAgentId: null,
-          spawnedAt: "2026-01-01T00:00:00.000Z",
-          model: "sonnet",
-          instructionsSummary: "x",
-          client: "server",
-        })}\n`,
-      );
-      const io = fakeIo();
-      const code = await main(["logs"], {
-        io,
-        loadConfig: async () => {
-          throw new Error("dh logs must not load config");
-        },
+      await withProcessMutationLock(async () => {
+        const originalCwd = process.cwd();
+        process.chdir(dir);
+        try {
+          const logsRoot = join(dir, ".dh-logs");
+          const sessionDir = join(logsRoot, "session-1");
+          await Bun.write(
+            join(sessionDir, "agent-root.jsonl"),
+            `${JSON.stringify({
+              version: 1,
+              type: "header",
+              sessionId: "session-1",
+              agentId: "agent-root",
+              parentAgentId: null,
+              spawnedAt: "2026-01-01T00:00:00.000Z",
+              model: "sonnet",
+              instructionsSummary: "x",
+              client: "server",
+            })}\n`,
+          );
+          const io = fakeIo();
+          const code = await main(["logs"], {
+            io,
+            loadConfig: async () => {
+              throw new Error("dh logs must not load config");
+            },
+          });
+          expect(code).toBe(ExitCode.Success);
+          expect(io.stdoutLines[0]).toContain("session-1");
+          expect(io.stdoutLines[0]).toContain("agents=1");
+        } finally {
+          process.chdir(originalCwd);
+        }
       });
-      expect(code).toBe(ExitCode.Success);
-      expect(io.stdoutLines[0]).toContain("session-1");
-      expect(io.stdoutLines[0]).toContain("agents=1");
     } finally {
-      process.chdir(originalCwd);
       await rm(dir, { recursive: true, force: true });
     }
   });
 
   test("no sessionDir and no .dh-logs directory at all fails cleanly", async () => {
     const dir = await mkdtemp(join(tmpdir(), "dh-cli-logs-empty-"));
-    const originalCwd = process.cwd();
-    process.chdir(dir); // a fresh temp dir with no ".dh-logs" subdirectory at all.
     try {
-      const io = fakeIo();
-      const code = await main(["logs"], {
-        io,
-        loadConfig: async () => {
-          throw new Error("dh logs must not load config");
-        },
+      await withProcessMutationLock(async () => {
+        const originalCwd = process.cwd();
+        process.chdir(dir); // a fresh temp dir with no ".dh-logs" subdirectory at all.
+        try {
+          const io = fakeIo();
+          const code = await main(["logs"], {
+            io,
+            loadConfig: async () => {
+              throw new Error("dh logs must not load config");
+            },
+          });
+          expect(code).toBe(ExitCode.HarnessError);
+          expect(io.stderrLines[0]).toContain("cannot read logs directory");
+        } finally {
+          process.chdir(originalCwd);
+        }
       });
-      expect(code).toBe(ExitCode.HarnessError);
-      expect(io.stderrLines[0]).toContain("cannot read logs directory");
     } finally {
-      process.chdir(originalCwd);
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -1677,24 +1688,26 @@ describe("main — real filesystem-backed default deps", () => {
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "go");
     let received: unknown;
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      await main(["--instructions", instructionsPath, "--job"], {
-        loadConfig: async () => TEST_CONFIG,
-        createRuntime: (_config, systemPrompt) => {
-          received = systemPrompt;
-          return {
-            runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
-            stopRoot: () => {},
-          };
-        },
-        io,
-        installSignalHandlers: fakeInstallSignalHandlers(),
-      });
-    } finally {
-      process.chdir(originalCwd);
-    }
+    await withProcessMutationLock(async () => {
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        await main(["--instructions", instructionsPath, "--job"], {
+          loadConfig: async () => TEST_CONFIG,
+          createRuntime: (_config, systemPrompt) => {
+            received = systemPrompt;
+            return {
+              runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
+              stopRoot: () => {},
+            };
+          },
+          io,
+          installSignalHandlers: fakeInstallSignalHandlers(),
+        });
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
     expect(received).toBe(await buildDefaultSystemPrompt(TEST_CONFIG));
   });
 
@@ -1706,24 +1719,26 @@ describe("main — real filesystem-backed default deps", () => {
     const systemPromptPath = join(dir, "system.md");
     await Bun.write(systemPromptPath, "custom system prompt");
     let received: unknown;
-    const originalCwd = process.cwd();
-    process.chdir(dir);
-    try {
-      await main(["--instructions", instructionsPath, "--job"], {
-        loadConfig: async () => ({ ...TEST_CONFIG, systemPrompt: systemPromptPath }),
-        createRuntime: (_config, systemPrompt) => {
-          received = systemPrompt;
-          return {
-            runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
-            stopRoot: () => {},
-          };
-        },
-        io,
-        installSignalHandlers: fakeInstallSignalHandlers(),
-      });
-    } finally {
-      process.chdir(originalCwd);
-    }
+    await withProcessMutationLock(async () => {
+      const originalCwd = process.cwd();
+      process.chdir(dir);
+      try {
+        await main(["--instructions", instructionsPath, "--job"], {
+          loadConfig: async () => ({ ...TEST_CONFIG, systemPrompt: systemPromptPath }),
+          createRuntime: (_config, systemPrompt) => {
+            received = systemPrompt;
+            return {
+              runRoot: async () => ({ success: true, finalOutput: "ok", turns: 1 }),
+              stopRoot: () => {},
+            };
+          },
+          io,
+          installSignalHandlers: fakeInstallSignalHandlers(),
+        });
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
     expect(received).toBe(`custom system prompt\n\n${REQUIRED_CONTRACT}`);
   });
 
@@ -1775,42 +1790,47 @@ describe("main — real filesystem-backed default deps", () => {
     });
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "do the thing");
-    const originalCwd = process.cwd();
-    process.chdir(dir);
     try {
-      const io = fakeIo();
-      const code = await main(["--instructions", instructionsPath, "--job"], {
-        loadConfig: async () => ({
-          options: { defaultModel: "mock-model" },
-          models: [{ name: "mock-model", provider: "mock", model: "mock-1" }],
-          provider: [
-            {
-              name: "mock",
-              type: "anthropic",
-              baseURL: mockProvider.url.toString(),
-              apiKey: "sk-test",
-            },
-          ],
-        }),
-        loadSystemPrompt: async () => "sp",
-        io,
-        installSignalHandlers: fakeInstallSignalHandlers(),
-      });
-      expect(code).toBe(ExitCode.Success);
+      await withProcessMutationLock(async () => {
+        const originalCwd = process.cwd();
+        process.chdir(dir);
+        try {
+          const io = fakeIo();
+          const code = await main(["--instructions", instructionsPath, "--job"], {
+            loadConfig: async () => ({
+              options: { defaultModel: "mock-model" },
+              models: [{ name: "mock-model", provider: "mock", model: "mock-1" }],
+              provider: [
+                {
+                  name: "mock",
+                  type: "anthropic",
+                  baseURL: mockProvider.url.toString(),
+                  apiKey: "sk-test",
+                },
+              ],
+            }),
+            loadSystemPrompt: async () => "sp",
+            io,
+            installSignalHandlers: fakeInstallSignalHandlers(),
+          });
+          expect(code).toBe(ExitCode.Success);
 
-      const logsRoot = join(dir, ".dh-logs");
-      const sessions = readdirSync(logsRoot);
-      expect(sessions.length).toBe(1);
-      const rootLogPath = join(logsRoot, sessions[0] ?? "", "agent-root.jsonl");
-      const contents = await Bun.file(rootLogPath).text();
-      const lines = contents
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(lines[0].type).toBe("header");
-      expect(lines.some((line: { type: string }) => line.type === "token_usage")).toBe(true);
+          const logsRoot = join(dir, ".dh-logs");
+          const sessions = readdirSync(logsRoot);
+          expect(sessions.length).toBe(1);
+          const rootLogPath = join(logsRoot, sessions[0] ?? "", "agent-root.jsonl");
+          const contents = await Bun.file(rootLogPath).text();
+          const lines = contents
+            .trim()
+            .split("\n")
+            .map((line) => JSON.parse(line));
+          expect(lines[0].type).toBe("header");
+          expect(lines.some((line: { type: string }) => line.type === "token_usage")).toBe(true);
+        } finally {
+          process.chdir(originalCwd);
+        }
+      });
     } finally {
-      process.chdir(originalCwd);
       mockProvider.stop(true);
     }
   });
@@ -1831,49 +1851,54 @@ describe("main — real filesystem-backed default deps", () => {
     });
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "do the thing");
-    const originalCwd = process.cwd();
-    process.chdir(dir);
     try {
-      const io = fakeIo();
-      const code = await main(["--instructions", instructionsPath, "--job"], {
-        loadConfig: async () => ({
-          options: { defaultModel: "mock-model" },
-          models: [{ name: "mock-model", provider: "mock", model: "mock-1" }],
-          provider: [
-            {
-              name: "mock",
-              type: "anthropic",
-              baseURL: mockProvider.url.toString(),
-              apiKey: "sk-test",
-            },
-          ],
-        }),
-        loadSystemPrompt: async () => "sp",
-        io,
-        installSignalHandlers: fakeInstallSignalHandlers(),
-      });
-      expect(code).toBe(ExitCode.Success);
+      await withProcessMutationLock(async () => {
+        const originalCwd = process.cwd();
+        process.chdir(dir);
+        try {
+          const io = fakeIo();
+          const code = await main(["--instructions", instructionsPath, "--job"], {
+            loadConfig: async () => ({
+              options: { defaultModel: "mock-model" },
+              models: [{ name: "mock-model", provider: "mock", model: "mock-1" }],
+              provider: [
+                {
+                  name: "mock",
+                  type: "anthropic",
+                  baseURL: mockProvider.url.toString(),
+                  apiKey: "sk-test",
+                },
+              ],
+            }),
+            loadSystemPrompt: async () => "sp",
+            io,
+            installSignalHandlers: fakeInstallSignalHandlers(),
+          });
+          expect(code).toBe(ExitCode.Success);
 
-      const logsRoot = join(dir, ".dh-logs");
-      const sessions = readdirSync(logsRoot);
-      expect(sessions.length).toBe(1);
-      const summaryPath = join(logsRoot, sessions[0] ?? "", "summary.json");
-      const summary = JSON.parse(await Bun.file(summaryPath).text());
-      expect(summary.version).toBe(1);
-      expect(summary.sessionId).toBe(sessions[0]);
-      expect(summary.success).toBe(true);
-      expect(summary.exitCode).toBe(0);
-      // 2, not 1: the mock provider's plain-text response never calls ReportOutcome, so
-      // DH-0050's nudge-then-fall-back-to-clean-end path (loop.ts) burns one extra real turn
-      // before accepting the text as a clean finish.
-      expect(summary.turns).toBe(2);
-      expect(summary.agentCount).toBe(1);
-      // costUsd stays undefined: this test's model config has no `pricing`, so
-      // computeCostUsd never has a rate to apply (see loop.ts's costUsd derivation).
-      expect(summary.costUsd).toBeUndefined();
-      expect(typeof summary.durationMs).toBe("number");
+          const logsRoot = join(dir, ".dh-logs");
+          const sessions = readdirSync(logsRoot);
+          expect(sessions.length).toBe(1);
+          const summaryPath = join(logsRoot, sessions[0] ?? "", "summary.json");
+          const summary = JSON.parse(await Bun.file(summaryPath).text());
+          expect(summary.version).toBe(1);
+          expect(summary.sessionId).toBe(sessions[0]);
+          expect(summary.success).toBe(true);
+          expect(summary.exitCode).toBe(0);
+          // 2, not 1: the mock provider's plain-text response never calls ReportOutcome, so
+          // DH-0050's nudge-then-fall-back-to-clean-end path (loop.ts) burns one extra real turn
+          // before accepting the text as a clean finish.
+          expect(summary.turns).toBe(2);
+          expect(summary.agentCount).toBe(1);
+          // costUsd stays undefined: this test's model config has no `pricing`, so
+          // computeCostUsd never has a rate to apply (see loop.ts's costUsd derivation).
+          expect(summary.costUsd).toBeUndefined();
+          expect(typeof summary.durationMs).toBe("number");
+        } finally {
+          process.chdir(originalCwd);
+        }
+      });
     } finally {
-      process.chdir(originalCwd);
       mockProvider.stop(true);
     }
   });

@@ -1,4 +1,5 @@
-import "../test-dom.ts";
+import { registerDomGlobals } from "../test-dom.ts";
+registerDomGlobals();
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";

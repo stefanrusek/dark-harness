@@ -5,7 +5,8 @@
 // (which read ambient `window`/`document`) resolve against a happy-dom realm. Registration
 // itself (once, for the whole `bun test` process, never toggled) is `test-dom.ts`'s side
 // effect — see its module-level comment for why per-test toggling isn't safe here.
-import "../test-dom.ts";
+import { registerDomGlobals } from "../test-dom.ts";
+registerDomGlobals();
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render } from "@testing-library/react";
