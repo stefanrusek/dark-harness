@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0164
 type: bug
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-18
 relations:
@@ -128,3 +128,19 @@ Real, previously-masked CI gap: .github/workflows/gate.yml has never had a Playw
 > verification (this class of bug has now twice looked fixed locally-by-unit-test while still
 > broken in the actual production render path, so real CI is the only verification that
 > counts here, per this ticket's own established pattern).
+
+> [!NOTE]
+> 2026-07-18 (round 4 — closing): Real CI run
+> [29653924839](https://github.com/stefanrusek/dark-harness/actions/runs/29653924839) confirms
+> `E2E (TUI/PTY — tmux)` GREEN — every test in `tui.test.ts`/`slash-commands.test.ts`/
+> `markdown-rendering.test.ts` passed, no timeouts, no `capture-pane`/tmux-server errors. That
+> is this ticket's full scope (Chromium install + the tmux/PTY CI-only failure), so closing
+> here.
+>
+> Same run's `E2E (web/browser — Chromium)` step is red, but on a different, unrelated
+> failure: headless Chromium launches and gets far enough to hit real DOM assertions
+> (`waiting for locator('.dh-app') to be visible` in `web.test.ts`), with a pile of
+> `Failed to connect to the bus`/`dbus` errors in its stderr — a sandboxed-headless-Chromium-
+> on-a-bare-runner problem (missing D-Bus session, not a `dh`/Ink/tmux issue), out of scope for
+> this ticket. Filed as a new follow-up ticket (see DH-0165) rather than folding it in here, so
+> DH-0164's own root-caused-and-fixed CI-only bugs aren't reopened by an unrelated one.
