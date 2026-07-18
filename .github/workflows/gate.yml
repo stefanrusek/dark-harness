@@ -64,6 +64,13 @@ jobs:
       - name: Install lcov
         run: sudo apt-get update && sudo apt-get install -y lcov
 
+      # DH-0164: e2e's PTY-based TUI tests (e2e/support/tmux-pty.ts) depend on a real `tmux`
+      # binary and it was never installed here either -- same masked-gap pattern as the
+      # Chromium install above. "no server running"/"can't find pane" every single time,
+      # not intermittently, is consistent with tmux being absent or broken, not merely slow.
+      - name: Install tmux
+        run: sudo apt-get install -y tmux
+
       # DH-0164: e2e/spikes/web/support.ts's resolveChromiumExecutable() has no fallback that
       # works on a fresh runner (it checks a few conventional cache paths, none of which exist
       # until something actually downloads a browser) -- this step was always missing, just
