@@ -3,7 +3,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { BUILD_INFO } from "../../config/build-info.ts";
 import { formatVersionString } from "../../header-info.ts";
-import { DH_ASCII_LOGO_COMPACT } from "../../prompt/banner.ts";
+import { DH_ASCII_LOGO_COMPACT } from "../../prompt/banner.constant.ts";
 import { initialState } from "../state.ts";
 import { buildRootEmptyText, RootView } from "./RootView.tsx";
 

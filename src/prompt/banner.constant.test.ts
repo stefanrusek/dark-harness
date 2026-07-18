@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DH_ASCII_LOGO, DH_ASCII_LOGO_COMPACT } from "./banner.ts";
+import { DH_ASCII_LOGO, DH_ASCII_LOGO_COMPACT } from "./banner.constant.ts";
 
 describe("DH_ASCII_LOGO", () => {
   test("is plain ASCII (no unicode box-drawing or control bytes)", () => {

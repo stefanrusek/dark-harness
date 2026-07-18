@@ -5,7 +5,7 @@
 // (status colors) and format.ts (number/cost formatters). Pure functions only, no DOM/node/
 // process/ANSI here — TTY color/glyph decisions and DOM/Ink rendering stay in each surface.
 import type { BuildInfo, DhConfig } from "./contracts/index.ts";
-import { DH_ASCII_LOGO, DH_ASCII_LOGO_COMPACT } from "./prompt/banner.ts";
+import { DH_ASCII_LOGO, DH_ASCII_LOGO_COMPACT } from "./prompt/banner.constant.ts";
 
 /**
  * A summary of `dh.json`'s status relevant to an operator connecting from another

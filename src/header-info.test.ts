@@ -8,7 +8,7 @@ import {
   formatHeaderLines,
   formatVersionString,
 } from "./header-info.ts";
-import { DH_ASCII_LOGO_COMPACT } from "./prompt/banner.ts";
+import { DH_ASCII_LOGO_COMPACT } from "./prompt/banner.constant.ts";
 
 function baseConfig(overrides: Partial<DhConfig> = {}): DhConfig {
   return {
