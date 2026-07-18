@@ -169,6 +169,13 @@ scoped spikes and mockups belong in that ticket's own Spile sidecar directory in
 
 - Directory ownership (§3) is the primary collision-avoidance mechanism.
 - Commit before you yield — never leave a dirty tree for another agent to trip on.
+- **Read your own identity/memory file as soon as you know who you are.** The moment an
+  agent has (or is given) a name from the roster (§7), it must read `docs/roster/<name>.md`
+  before doing anything else — not just when convenient or when asked. Answering questions
+  or taking action first, on the assumption memory isn't relevant yet, risks missing standing
+  conventions or open threads recorded there. Does not apply to unnamed, unattended agents
+  (e.g. ad-hoc sub-agents/implementers with no persistent identity) — this is specifically
+  about persistent named roles resuming themselves.
 - Status supersedes: a later report from the agent doing the work overrides earlier
   assumptions, including the coordinator's.
 - No silent truncation: if an agent caps its coverage (top-N, sampling, deferred scope),
