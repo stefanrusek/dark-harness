@@ -149,7 +149,19 @@ describe("DH-0093 slash commands under a real PTY + mock provider", () => {
     session.sendKeys("Enter");
     // Local echo of the raw command, then the real completion.
     await session.waitFor((screen) => screen.includes("/greet hello world"));
-    await session.waitFor((screen) => screen.includes("Greeted!"), 30_000);
+    // DH-0165: give our own wait a shorter budget than the surrounding `test(...)` timeout
+    // below, and log the last screen + provider call count on failure — otherwise bun's own
+    // test-level timeout (which used to be set to the exact same 30_000ms as this wait) fires
+    // first and swallows tmux-pty's own "timed out ... Last screen:" diagnostic before it ever
+    // gets thrown, so a CI failure here rendered no useful information at all about what was
+    // actually on screen or whether the mock provider was ever called.
+    try {
+      await session.waitFor((screen) => screen.includes("Greeted!"), 45_000);
+    } catch (err) {
+      console.error(`/skillname wait failed; provider.callCount=${provider.callCount}`);
+      console.error(`last screen:\n${session.capture()}`);
+      throw err;
+    }
 
     expect(provider.callCount).toBe(1);
     const lastRequest = provider.requests[0] as { messages?: { content: unknown }[] };
@@ -158,5 +170,5 @@ describe("DH-0093 slash commands under a real PTY + mock provider", () => {
     expect(serialized).toContain("<command-name>/greet</command-name>");
     expect(serialized).toContain("<command-args>hello world</command-args>");
     expect(serialized).toContain("Always greet the operator warmly before doing anything else.");
-  }, 30_000);
+  }, 60_000);
 });
