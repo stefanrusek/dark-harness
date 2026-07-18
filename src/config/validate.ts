@@ -16,7 +16,7 @@ import type {
 } from "../contracts/index.ts";
 import { ConfigError } from "./errors.ts";
 
-const PROVIDER_TYPES: ProviderType[] = ["anthropic", "bedrock", "openai-compatible"];
+const PROVIDER_TYPES = ["anthropic", "bedrock", "openai-compatible"] as const;
 
 // DH-0015 fix (tracking/DH-0015-config-validation-gaps.md): provider/mcpServers entries used
 // to spread unknown keys straight through unchecked (`{ ...raw, name, type }`), unlike the
@@ -25,16 +25,22 @@ const PROVIDER_TYPES: ProviderType[] = ["anthropic", "bedrock", "openai-compatib
 // defeating the file's own stated "catch config typos early" goal. Every provider entry
 // accepts `name`/`type` plus `retry` (DH-0009's provider-level retry/backoff config); the
 // remaining keys are type-specific.
-const PROVIDER_COMMON_KEYS = new Set(["name", "type", "retry"]);
+const PROVIDER_COMMON_KEYS: readonly string[] = ["name", "type", "retry"] as const;
 const PROVIDER_TYPE_KEYS: Record<ProviderType, Set<string>> = {
   anthropic: new Set(["baseURL", "apiKey"]),
   bedrock: new Set(["region"]),
   "openai-compatible": new Set(["baseURL", "apiKey"]),
-};
-const KNOWN_MCP_SERVER_KEYS = new Set(["command", "args", "env", "url", "headers"]);
+} as const;
+const KNOWN_MCP_SERVER_KEYS: readonly string[] = [
+  "command",
+  "args",
+  "env",
+  "url",
+  "headers",
+] as const;
 
 /** ADR 0007: unknown top-level keys are rejected to catch config typos early. */
-const KNOWN_TOP_LEVEL_KEYS = new Set([
+const KNOWN_TOP_LEVEL_KEYS: readonly string[] = [
   "options",
   "models",
   "provider",
@@ -46,36 +52,41 @@ const KNOWN_TOP_LEVEL_KEYS = new Set([
   "logRetention",
   "web",
   "compaction",
-]);
+] as const;
 
 // DH-0010 Part B: opt-in context-window compaction — see src/contracts/config.type.ts's
 // `CompactionConfig` doc comment.
-const KNOWN_COMPACTION_KEYS = new Set(["enabled", "thresholdPercent"]);
+const KNOWN_COMPACTION_KEYS: readonly string[] = ["enabled", "thresholdPercent"] as const;
 
 // DH-0074: `web.fetch`/`web.search` opt-in blocks — see src/contracts/config.type.ts's WebConfig
 // doc comment for the "presence registers the tool, absence means it doesn't exist" semantics.
-const KNOWN_WEB_FETCH_KEYS = new Set([
+const KNOWN_WEB_FETCH_KEYS: readonly string[] = [
   "timeoutMs",
   "maxResponseBytes",
   "maxOutputChars",
   "allowPrivateNetwork",
   "allowedHosts",
   "extractionModel",
-]);
-const KNOWN_WEB_SEARCH_KEYS = new Set(["provider", "apiKey", "timeoutMs", "maxResults"]);
-const WEB_SEARCH_PROVIDERS = new Set(["brave"]);
+] as const;
+const KNOWN_WEB_SEARCH_KEYS: readonly string[] = [
+  "provider",
+  "apiKey",
+  "timeoutMs",
+  "maxResults",
+] as const;
+const WEB_SEARCH_PROVIDERS: readonly string[] = ["brave"] as const;
 
 // DH-0045: opt-in extended thinking — see src/contracts/config.type.ts's `ThinkingConfig` doc
 // comment for the adaptive/enabled distinction.
-const KNOWN_THINKING_KEYS = new Set(["type", "budgetTokens", "display"]);
-const THINKING_TYPES = new Set(["adaptive", "enabled"]);
-const THINKING_DISPLAYS = new Set(["summarized", "omitted"]);
+const KNOWN_THINKING_KEYS: readonly string[] = ["type", "budgetTokens", "display"] as const;
+const THINKING_TYPES: readonly string[] = ["adaptive", "enabled"] as const;
+const THINKING_DISPLAYS: readonly string[] = ["summarized", "omitted"] as const;
 
-const KNOWN_LIMITS_KEYS = new Set(["completedRetention"]);
+const KNOWN_LIMITS_KEYS: readonly string[] = ["completedRetention"] as const;
 
 // DH-0037: `.dh-logs/` rotation/prune policy — see src/contracts/config.type.ts's
 // `LogRetentionConfig` doc comment.
-const KNOWN_LOG_RETENTION_KEYS = new Set(["maxAgeMs", "maxTotalBytes"]);
+const KNOWN_LOG_RETENTION_KEYS: readonly string[] = ["maxAgeMs", "maxTotalBytes"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -102,7 +113,7 @@ function validateProvider(raw: unknown, index: number): ProviderConfig {
   const providerType = type as ProviderType;
   const allowedKeys = PROVIDER_TYPE_KEYS[providerType];
   for (const key of Object.keys(raw)) {
-    if (!PROVIDER_COMMON_KEYS.has(key) && !allowedKeys.has(key)) {
+    if (!PROVIDER_COMMON_KEYS.includes(key) && !allowedKeys.has(key)) {
       const known = [...PROVIDER_COMMON_KEYS, ...allowedKeys].join(", ");
       throw new ConfigError(
         `provider[${index}] ("${name}", type "${providerType}") has unknown key "${key}"; known keys for this type: ${known}`,
@@ -209,23 +220,23 @@ function validateThinking(raw: unknown, path: string): ThinkingConfig {
     throw new ConfigError(`${path} must be an object`);
   }
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_THINKING_KEYS.has(key)) {
+    if (!KNOWN_THINKING_KEYS.includes(key)) {
       throw new ConfigError(
-        `${path} has unknown key "${key}"; known keys: ${[...KNOWN_THINKING_KEYS].join(", ")}`,
+        `${path} has unknown key "${key}"; known keys: ${KNOWN_THINKING_KEYS.join(", ")}`,
       );
     }
   }
   const type = raw.type;
-  if (typeof type !== "string" || !THINKING_TYPES.has(type)) {
+  if (typeof type !== "string" || !THINKING_TYPES.includes(type)) {
     throw new ConfigError(
-      `${path}.type must be one of ${[...THINKING_TYPES].join(", ")}, got ${JSON.stringify(type)}`,
+      `${path}.type must be one of ${THINKING_TYPES.join(", ")}, got ${JSON.stringify(type)}`,
     );
   }
   let display: "summarized" | "omitted" | undefined;
   if (raw.display !== undefined) {
-    if (typeof raw.display !== "string" || !THINKING_DISPLAYS.has(raw.display)) {
+    if (typeof raw.display !== "string" || !THINKING_DISPLAYS.includes(raw.display)) {
       throw new ConfigError(
-        `${path}.display must be one of ${[...THINKING_DISPLAYS].join(", ")}, got ${JSON.stringify(raw.display)}`,
+        `${path}.display must be one of ${THINKING_DISPLAYS.join(", ")}, got ${JSON.stringify(raw.display)}`,
       );
     }
     display = raw.display as "summarized" | "omitted";
@@ -292,9 +303,9 @@ function validateLimits(raw: unknown): DhConfig["limits"] {
     throw new ConfigError("limits must be an object");
   }
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_LIMITS_KEYS.has(key)) {
+    if (!KNOWN_LIMITS_KEYS.includes(key)) {
       throw new ConfigError(
-        `limits has unknown key "${key}"; known keys: ${[...KNOWN_LIMITS_KEYS].join(", ")}`,
+        `limits has unknown key "${key}"; known keys: ${KNOWN_LIMITS_KEYS.join(", ")}`,
       );
     }
   }
@@ -315,9 +326,9 @@ function validateLogRetention(raw: unknown): DhConfig["logRetention"] {
     throw new ConfigError("logRetention must be an object");
   }
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_LOG_RETENTION_KEYS.has(key)) {
+    if (!KNOWN_LOG_RETENTION_KEYS.includes(key)) {
       throw new ConfigError(
-        `logRetention has unknown key "${key}"; known keys: ${[...KNOWN_LOG_RETENTION_KEYS].join(", ")}`,
+        `logRetention has unknown key "${key}"; known keys: ${KNOWN_LOG_RETENTION_KEYS.join(", ")}`,
       );
     }
   }
@@ -341,9 +352,9 @@ function validateWebFetch(raw: unknown): WebFetchConfig {
     throw new ConfigError("web.fetch must be an object");
   }
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_WEB_FETCH_KEYS.has(key)) {
+    if (!KNOWN_WEB_FETCH_KEYS.includes(key)) {
       throw new ConfigError(
-        `web.fetch has unknown key "${key}"; known keys: ${[...KNOWN_WEB_FETCH_KEYS].join(", ")}`,
+        `web.fetch has unknown key "${key}"; known keys: ${KNOWN_WEB_FETCH_KEYS.join(", ")}`,
       );
     }
   }
@@ -394,16 +405,16 @@ function validateWebSearch(raw: unknown): WebSearchConfig {
     throw new ConfigError("web.search must be an object");
   }
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_WEB_SEARCH_KEYS.has(key)) {
+    if (!KNOWN_WEB_SEARCH_KEYS.includes(key)) {
       throw new ConfigError(
-        `web.search has unknown key "${key}"; known keys: ${[...KNOWN_WEB_SEARCH_KEYS].join(", ")}`,
+        `web.search has unknown key "${key}"; known keys: ${KNOWN_WEB_SEARCH_KEYS.join(", ")}`,
       );
     }
   }
   const provider = raw.provider;
-  if (typeof provider !== "string" || !WEB_SEARCH_PROVIDERS.has(provider)) {
+  if (typeof provider !== "string" || !WEB_SEARCH_PROVIDERS.includes(provider)) {
     throw new ConfigError(
-      `web.search.provider must be one of ${[...WEB_SEARCH_PROVIDERS].join(", ")}, got ${JSON.stringify(provider)}`,
+      `web.search.provider must be one of ${WEB_SEARCH_PROVIDERS.join(", ")}, got ${JSON.stringify(provider)}`,
     );
   }
   const apiKey = requireString(raw.apiKey, "web.search.apiKey");
@@ -464,9 +475,9 @@ export function validateMcpServers(raw: unknown): Record<string, McpServerConfig
       );
     }
     for (const key of Object.keys(serverConfig)) {
-      if (!KNOWN_MCP_SERVER_KEYS.has(key)) {
+      if (!KNOWN_MCP_SERVER_KEYS.includes(key)) {
         throw new ConfigError(
-          `mcpServers["${serverName}"] has unknown key "${key}"; known keys: ${[...KNOWN_MCP_SERVER_KEYS].join(", ")}`,
+          `mcpServers["${serverName}"] has unknown key "${key}"; known keys: ${KNOWN_MCP_SERVER_KEYS.join(", ")}`,
         );
       }
     }
@@ -486,9 +497,9 @@ function validateCompaction(raw: unknown): DhConfig["compaction"] {
     throw new ConfigError("compaction must be an object");
   }
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_COMPACTION_KEYS.has(key)) {
+    if (!KNOWN_COMPACTION_KEYS.includes(key)) {
       throw new ConfigError(
-        `compaction has unknown key "${key}"; known keys: ${[...KNOWN_COMPACTION_KEYS].join(", ")}`,
+        `compaction has unknown key "${key}"; known keys: ${KNOWN_COMPACTION_KEYS.join(", ")}`,
       );
     }
   }
@@ -519,9 +530,9 @@ export function validateConfig(raw: unknown): DhConfig {
   }
 
   for (const key of Object.keys(raw)) {
-    if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
+    if (!KNOWN_TOP_LEVEL_KEYS.includes(key)) {
       throw new ConfigError(
-        `unknown config key "${key}"; known keys: ${[...KNOWN_TOP_LEVEL_KEYS].join(", ")}`,
+        `unknown config key "${key}"; known keys: ${KNOWN_TOP_LEVEL_KEYS.join(", ")}`,
       );
     }
   }
