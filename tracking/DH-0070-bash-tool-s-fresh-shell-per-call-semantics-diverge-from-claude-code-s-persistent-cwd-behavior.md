@@ -119,4 +119,9 @@ file, conversation history).
 > one the process chdir's into) so no fixture can collide with another on any platform, and
 > assert against the real process dir (`procDir`) instead of `tmpdir()`. Production code
 > untouched. Local: typecheck/lint clean, target test passes; full `runtime.test.ts` +
-> `app.test.ts` green across repeated runs. Moved to `verifying` pending the real CI run.
+> `app.test.ts` green across repeated runs.
+>
+> **CI-CONFIRMED (2026-07-18, PR #10 run 29643738877):** the runtime.test.ts DH-0070 cwd
+> failure is GONE in real GitHub Actions CI — it no longer appears in the failure set. This
+> regression is closed. (That CI run still fails on a SEPARATE, pre-existing 99.76% coverage-gate
+> gap unrelated to this ticket — see DH-0146's notes.)

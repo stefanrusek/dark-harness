@@ -95,4 +95,19 @@ Blocked the v0.1.0-alpha.1 release gate intermittently. Real symptom (seen 2026-
 > normal interactive path and actually writes frames. Safe because DH-0149's per-file process
 > isolation gives app.test.ts its own OS process — no other test file's env is touched. The
 > flush-poll hardening from the first commit is kept (it correctly distinguishes "render not
-> started" from "settled") but is defensive, not the fix. Pending the confirming CI run on PR #10.
+> started" from "settled") but is defensive, not the fix.
+>
+> **CI-CONFIRMED (2026-07-18, PR #10 run 29643738877):** the app.test.ts preamble-only failures
+> are GONE — the file passes in real GitHub Actions CI. The render-timing root cause is closed.
+> The CI run now fails on a SEPARATE, pre-existing issue: the coverage gate at 99.76% (31
+> uncovered lines across `loop.ts`, `bash.ts`, `web-fetch.ts`, `cli.ts`, `validate.ts`, TUI
+> `app.ts`/`App.tsx`/`state.ts` resize/tick paths, and several `__fixtures__`/test-helper
+> files). This gap is NOT caused by this fix or DH-0070 — it reproduces locally at the identical
+> 99.76% with and without `CI` set, and each uncovered line is genuinely untested even when its
+> own test file runs in isolation (verified for `bash.ts:53`). It was simply masked in CI until
+> now because the app.test.ts failures aborted the run before the coverage step was reached
+> (likely surfaced by DH-0149's coverage-measurement fix). Two of the uncovered TUI clusters
+> (`app.ts` resize/tick, `state.ts`) correspond to the two `test.skip`'d resize/tick tests here;
+> the resize test now passes reliably once this fix is in, but the tick test still needs its own
+> investigation, and the non-TUI lines need separate test authoring across Core/TUI — so the
+> coverage gate is its own follow-up work item, not part of this ticket.
