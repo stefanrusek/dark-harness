@@ -41,6 +41,7 @@ source: tracking/
 | [DH-0151](../DH-0151-upgrade-biome-1-9-4-to-2-x-migrate-config-absorb-import-sort-baseline-reformat.md) | Upgrade Biome 1.9.4 to 2.x, migrate config, absorb import-sort baseline reformat | status: verifying |
 | [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | status: verifying |
 | [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | status: verifying |
+| [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | status: verifying |
 
 ## Board
 
@@ -76,7 +77,6 @@ source: tracking/
 | [DH-0150](../DH-0150-dh-0149-follow-up-per-file-lcov-merge-inflates-lf-with-comment-line-pollution-replace-lcov-a-with-max-lh-part-merge.md) | DH-0149 follow-up: per-file lcov merge inflates LF with comment-line pollution, replace lcov -a with max-LH-part merge | bug | stefan |
 | [DH-0152](../DH-0152-coverage-exclusion-mechanism-for-future-type-ts-constant-ts-files-fix-contracts-index-test-ts-fake-import-workaround.md) | Coverage-exclusion mechanism for future .type.ts / .constant.ts files, fix contracts/index.test.ts fake-import workaround | feature | stefan |
 | [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | bug | stefan |
-| [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | feature | stefan |
 
 ### verifying
 
@@ -99,6 +99,7 @@ source: tracking/
 | [DH-0151](../DH-0151-upgrade-biome-1-9-4-to-2-x-migrate-config-absorb-import-sort-baseline-reformat.md) | Upgrade Biome 1.9.4 to 2.x, migrate config, absorb import-sort baseline reformat | feature | stefan |
 | [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | feature | stefan |
 | [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | feature | stefan |
+| [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | feature | stefan |
 
 ## Recently Closed
 
