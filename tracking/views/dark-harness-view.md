@@ -38,15 +38,6 @@ source: tracking/
 | [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | status: verifying |
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | status: verifying |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: verifying |
-| [DH-0151](../DH-0151-upgrade-biome-1-9-4-to-2-x-migrate-config-absorb-import-sort-baseline-reformat.md) | Upgrade Biome 1.9.4 to 2.x, migrate config, absorb import-sort baseline reformat | status: verifying |
-| [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | status: verifying |
-| [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | status: verifying |
-| [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | status: verifying |
-| [DH-0157](../DH-0157-coding-standards-overhaul-wave-3-layer-2-file-migration-21-files.md) | Coding-standards overhaul Wave 3: layer-2 file migration (21 files) | status: verifying |
-| [DH-0158](../DH-0158-coding-standards-overhaul-wave-4-layer-3-file-migration-14-files.md) | Coding-standards overhaul Wave 4: layer-3 file migration (14 files) | status: verifying |
-| [DH-0159](../DH-0159-coding-standards-overhaul-waves-5-9-root-layer-file-migration-entrypoint-guards-11-files.md) | Coding-standards overhaul Waves 5-9: root-layer file migration + entrypoint guards (11 files) | status: verifying |
-| [DH-0161](../DH-0161-pilot-add-as-const-decorations-to-config-validate-ts-s-private-lookup-consts-resolve-remaining-gritql-warnings.md) | Pilot: add as-const decorations to config/validate.ts's private lookup consts, resolve remaining GritQL warnings | status: verifying |
-| [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | status: verifying |
 
 ## Board
 
@@ -79,10 +70,6 @@ source: tracking/
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
 | [DH-0139](../DH-0139-dh-web-is-unusable-remotely-out-of-the-box-dh-0128-auto-points-the-client-at-the-lan-ip-but-the-server-rejects-that-same-ip-by-default-421.md) | dh --web is unusable remotely out of the box: DH-0128 auto-points the client at the LAN IP, but the server rejects that same IP by default (421) | bug | stefan |
 | [DH-0149](../DH-0149-replace-shared-process-bun-test-with-per-file-process-isolation-orchestrator-standard-lcov-merge.md) | Replace shared-process bun test with per-file process isolation orchestrator + standard lcov merge | bug | stefan |
-| [DH-0150](../DH-0150-dh-0149-follow-up-per-file-lcov-merge-inflates-lf-with-comment-line-pollution-replace-lcov-a-with-max-lh-part-merge.md) | DH-0149 follow-up: per-file lcov merge inflates LF with comment-line pollution, replace lcov -a with max-LH-part merge | bug | stefan |
-| [DH-0152](../DH-0152-coverage-exclusion-mechanism-for-future-type-ts-constant-ts-files-fix-contracts-index-test-ts-fake-import-workaround.md) | Coverage-exclusion mechanism for future .type.ts / .constant.ts files, fix contracts/index.test.ts fake-import workaround | feature | stefan |
-| [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | bug | stefan |
-| [DH-0160](../DH-0160-refine-no-module-scope-side-effects-gritql-rule-allow-private-consts-with-literal-as-const-initializers.md) | Refine no-module-scope-side-effects GritQL rule: allow private consts with literal/as-const initializers | bug | stefan |
 
 ### verifying
 
@@ -102,32 +89,23 @@ source: tracking/
 | [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | feature | stefan |
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | feature | stefan |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | bug | stefan |
-| [DH-0151](../DH-0151-upgrade-biome-1-9-4-to-2-x-migrate-config-absorb-import-sort-baseline-reformat.md) | Upgrade Biome 1.9.4 to 2.x, migrate config, absorb import-sort baseline reformat | feature | stefan |
-| [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | feature | stefan |
-| [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | feature | stefan |
-| [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | feature | stefan |
-| [DH-0157](../DH-0157-coding-standards-overhaul-wave-3-layer-2-file-migration-21-files.md) | Coding-standards overhaul Wave 3: layer-2 file migration (21 files) | feature | stefan |
-| [DH-0158](../DH-0158-coding-standards-overhaul-wave-4-layer-3-file-migration-14-files.md) | Coding-standards overhaul Wave 4: layer-3 file migration (14 files) | feature | stefan |
-| [DH-0159](../DH-0159-coding-standards-overhaul-waves-5-9-root-layer-file-migration-entrypoint-guards-11-files.md) | Coding-standards overhaul Waves 5-9: root-layer file migration + entrypoint guards (11 files) | feature | stefan |
-| [DH-0161](../DH-0161-pilot-add-as-const-decorations-to-config-validate-ts-s-private-lookup-consts-resolve-remaining-gritql-warnings.md) | Pilot: add as-const decorations to config/validate.ts's private lookup consts, resolve remaining GritQL warnings | bug | stefan |
-| [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | feature | stefan |
 
 ## Recently Closed
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | done |
+| [DH-0161](../DH-0161-pilot-add-as-const-decorations-to-config-validate-ts-s-private-lookup-consts-resolve-remaining-gritql-warnings.md) | Pilot: add as-const decorations to config/validate.ts's private lookup consts, resolve remaining GritQL warnings | done |
+| [DH-0160](../DH-0160-refine-no-module-scope-side-effects-gritql-rule-allow-private-consts-with-literal-as-const-initializers.md) | Refine no-module-scope-side-effects GritQL rule: allow private consts with literal/as-const initializers | done |
+| [DH-0159](../DH-0159-coding-standards-overhaul-waves-5-9-root-layer-file-migration-entrypoint-guards-11-files.md) | Coding-standards overhaul Waves 5-9: root-layer file migration + entrypoint guards (11 files) | done |
+| [DH-0158](../DH-0158-coding-standards-overhaul-wave-4-layer-3-file-migration-14-files.md) | Coding-standards overhaul Wave 4: layer-3 file migration (14 files) | done |
+| [DH-0157](../DH-0157-coding-standards-overhaul-wave-3-layer-2-file-migration-21-files.md) | Coding-standards overhaul Wave 3: layer-2 file migration (21 files) | done |
+| [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | done |
+| [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | done |
+| [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | done |
+| [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | done |
+| [DH-0152](../DH-0152-coverage-exclusion-mechanism-for-future-type-ts-constant-ts-files-fix-contracts-index-test-ts-fake-import-workaround.md) | Coverage-exclusion mechanism for future .type.ts / .constant.ts files, fix contracts/index.test.ts fake-import workaround | done |
+| [DH-0151](../DH-0151-upgrade-biome-1-9-4-to-2-x-migrate-config-absorb-import-sort-baseline-reformat.md) | Upgrade Biome 1.9.4 to 2.x, migrate config, absorb import-sort baseline reformat | done |
+| [DH-0150](../DH-0150-dh-0149-follow-up-per-file-lcov-merge-inflates-lf-with-comment-line-pollution-replace-lcov-a-with-max-lh-part-merge.md) | DH-0149 follow-up: per-file lcov merge inflates LF with comment-line pollution, replace lcov -a with max-LH-part merge | done |
 | [DH-0138](../DH-0138-web-fix-flexbox-grid-layout-so-main-pane-fills-remaining-width-next-to-sidebar.md) | Web: fix flexbox/grid layout so main-pane fills remaining width next to sidebar | done |
 | [DH-0137](../DH-0137-shared-design-token-module-for-status-connection-color-glyph-consumed-by-both-react-and-ink-component-trees.md) | Shared design-token module for status/connection color+glyph, consumed by both React and Ink component trees | done |
-| [DH-0136](../DH-0136-ui-overhaul-phase-2-migrate-tui-to-ink.md) | UI overhaul phase 2: migrate TUI to Ink | done |
-| [DH-0135](../DH-0135-ui-overhaul-phase-2-migrate-web-client-to-react.md) | UI overhaul phase 2: migrate Web client to React | done |
-| [DH-0134](../DH-0134-ui-overhaul-phase-1-core-toolchain-integration-for-react-ink.md) | UI overhaul phase 1: Core toolchain integration for React + Ink | done |
-| [DH-0133](../DH-0133-ui-overhaul-migrate-web-to-react-tui-to-ink.md) | UI overhaul: migrate Web to React, TUI to Ink | done |
-| [DH-0130](../DH-0130-sub-agent-terminal-status-failed-done-stopped-has-no-in-transcript-marker.md) | Sub-agent terminal status (failed/done/stopped) has no in-transcript marker | done |
-| [DH-0127](../DH-0127-web-ui-has-heavy-visual-flicker-no-virtual-dom-diffing-sections-fully-rebuilt-on-every-render.md) | Web UI has heavy visual flicker -- no virtual-DOM diffing, sections fully rebuilt on every render | superseded |
-| [DH-0120](../DH-0120-openai-compatible-provider-omitted-required-type-function-on-outgoing-tool-calls.md) | openai-compatible provider omitted required type:function on outgoing tool_calls | done |
-| [DH-0119](../DH-0119-real-bedrock-mantle-integration-live-verified-mantle-anthropic-mantle-openai.md) | Real Bedrock Mantle integration, live-verified: mantle-anthropic + mantle-openai | done |
-| [DH-0118](../DH-0118-amazon-bedrock-mantle-is-a-real-separate-endpoint-wire-it-up-as-its-own-provider-not-folded-into-bedrock.md) | Amazon Bedrock Mantle is a real, separate endpoint -- wire it up as its own provider, not folded into bedrock | done |
-| [DH-0117](../DH-0117-web-ui-redraw-storm-composer-textarea-rebuilt-every-second-wiping-focus-and-unsent-text.md) | Web UI redraw-storm: composer textarea rebuilt every second, wiping focus and unsent text | done |
-| [DH-0116](../DH-0116-server-mode-s-agentruntime-sessionid-mismatches-the-outer-logdir-cli-ts-uses.md) | --server mode's AgentRuntime sessionId mismatches the outer logDir cli.ts uses | done |
-| [DH-0114](../DH-0114-launch-sub-agents-as-real-claude-cli-subprocesses-in-the-target-worktree-not-in-process-agent-tool.md) | Launch sub-agents as real claude CLI subprocesses in the target worktree, not in-process Agent tool | done |
-| [DH-0113](../DH-0113-coordinator-gate-checks-should-be-a-checked-in-sub-agent-prompt-not-run-inline.md) | Coordinator gate checks should be a checked-in sub-agent prompt, not run inline | done |

@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0162
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-18
 relations:
@@ -100,3 +100,19 @@ Owner decision, generalizing beyond the new Set()/Map() case DH-0161's pilot fou
 > they are pre-existing/environmental, not a regression from this change.
 >
 > Commits: `d6242d5` (rule change + autofix), `bc8b7cf` (mechanical pass + regression fixes).
+>
+> **Coordinator follow-up (2026-07-18):** the reported 2 remaining warnings were fixed
+> directly rather than left open: `banner.constant.ts`'s `DH_ASCII_LOGO` had its
+> template-literal-plus-`.replace()` computation replaced with the already-trimmed literal
+> hardcoded directly (verified byte-identical output via a real comparison script).
+> `web/server.ts`'s `innerServer` (a genuine lazy-singleton, uninitialized until first use —
+> `Object.freeze()` doesn't apply and would defeat its purpose) got an explicit
+> `biome-ignore lint/plugin` exception, same class as `test-dom.ts`'s earlier one. `bun run
+> lint` now reports zero warnings and zero errors. Commit: `ac4fe50`.
+>
+> **All three GritQL rules flipped from `warn` to `error`** (commit `055f18e`) — the final
+> step of the overhaul. `bun run lint` confirmed at exit 0, zero errors, zero warnings, at
+> error severity. `bun run typecheck` clean, `bun run test:coverage` 125/125 (99.76%),
+> `bun run e2e` 35/38 (same confirmed pre-existing local-only flake). This closes the
+> owner's original goal: "complete the biome + lint overhaul migration. lint must have no
+> warnings or errors when you finish."

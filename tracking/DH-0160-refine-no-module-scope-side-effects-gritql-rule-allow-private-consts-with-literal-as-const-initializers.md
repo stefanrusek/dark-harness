@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0160
 type: bug
-status: implementing
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-18
 relations:
