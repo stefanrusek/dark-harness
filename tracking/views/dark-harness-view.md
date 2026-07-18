@@ -71,6 +71,9 @@ source: tracking/
 | [DH-0139](../DH-0139-dh-web-is-unusable-remotely-out-of-the-box-dh-0128-auto-points-the-client-at-the-lan-ip-but-the-server-rejects-that-same-ip-by-default-421.md) | dh --web is unusable remotely out of the box: DH-0128 auto-points the client at the LAN IP, but the server rejects that same IP by default (421) | bug | stefan |
 | [DH-0149](../DH-0149-replace-shared-process-bun-test-with-per-file-process-isolation-orchestrator-standard-lcov-merge.md) | Replace shared-process bun test with per-file process isolation orchestrator + standard lcov merge | bug | stefan |
 | [DH-0150](../DH-0150-dh-0149-follow-up-per-file-lcov-merge-inflates-lf-with-comment-line-pollution-replace-lcov-a-with-max-lh-part-merge.md) | DH-0149 follow-up: per-file lcov merge inflates LF with comment-line pollution, replace lcov -a with max-LH-part merge | bug | stefan |
+| [DH-0151](../DH-0151-upgrade-biome-1-9-4-to-2-x-migrate-config-absorb-import-sort-baseline-reformat.md) | Upgrade Biome 1.9.4 to 2.x, migrate config, absorb import-sort baseline reformat | feature | stefan |
+| [DH-0152](../DH-0152-coverage-exclusion-mechanism-for-future-type-ts-constant-ts-files-fix-contracts-index-test-ts-fake-import-workaround.md) | Coverage-exclusion mechanism for future .type.ts / .constant.ts files, fix contracts/index.test.ts fake-import workaround | feature | stefan |
+| [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | bug | stefan |
 
 ### verifying
 
