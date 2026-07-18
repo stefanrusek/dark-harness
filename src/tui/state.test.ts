@@ -11,7 +11,7 @@ import type {
   ToolResultEvent,
 } from "../contracts/index.ts";
 import { initialState, MAX_OUTPUT_CHARS, reducer } from "./state.ts";
-import type { TuiState } from "./types.ts";
+import type { TuiState } from "./types.type.ts";
 
 function size() {
   return { rows: 24, cols: 80 };

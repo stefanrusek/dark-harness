@@ -1,6 +1,6 @@
 // DH-0136: `/model` picker view, ported from render.ts's `renderPicker`.
 import { Box, Text } from "ink";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { wrapText } from "../width.ts";
 import { dim } from "./tokens.ts";
 

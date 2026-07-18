@@ -4,7 +4,7 @@
 // on a tick naturally preserves in-progress typed text (the regression this ticket's first
 // User Story guards against, restated from DH-0133/DH-0135's Web equivalent).
 import { Box, Text } from "ink";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { CURSOR_MARKER } from "./tokens.ts";
 
 export interface ComposerProps {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentOutputEvent, ServerSentEvent } from "../contracts/index.ts";
+import type { ConnectionStatus } from "./connection-status.constant.ts";
 import { EVENTS_PATH, runSseClient } from "./sse-client.ts";
-import type { ConnectionStatus } from "./types.ts";
 
 function asFetch(
   fn: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>,

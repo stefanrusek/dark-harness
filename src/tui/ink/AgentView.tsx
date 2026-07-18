@@ -1,6 +1,6 @@
 // DH-0136: single-agent detail (read-only) view, ported from render.ts's `renderAgent`.
 import { Box, Text } from "ink";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import type { ScrollBus } from "./scroll-bus.ts";
 import { TranscriptPane } from "./TranscriptPane.tsx";
 import { colorizeStatus, dim, formatElapsed, formatTokenCost } from "./tokens.ts";

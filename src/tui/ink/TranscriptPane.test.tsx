@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
-import type { Turn } from "../types.ts";
+import type { Turn } from "../types.type.ts";
 import { createScrollBus } from "./scroll-bus.ts";
 import { renderTranscript, TranscriptPane } from "./TranscriptPane.tsx";
 

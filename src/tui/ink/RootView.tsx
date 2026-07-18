@@ -3,7 +3,7 @@
 import { Box } from "ink";
 import { BUILD_INFO } from "../../config/build-info.ts";
 import { buildHeaderInfo, formatEmptyStateLines } from "../../header-info.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { Composer } from "./Composer.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
 import { TranscriptPane } from "./TranscriptPane.tsx";

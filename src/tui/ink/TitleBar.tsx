@@ -3,7 +3,7 @@
 // slot) — this is existing, already-shipped chrome, not new content.
 import { Text } from "ink";
 import { CONNECTION_TOKENS } from "../../design-tokens.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import {
   bold,
   dim,

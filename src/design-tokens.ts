@@ -11,7 +11,8 @@
 import type { AgentStatus } from "./contracts/log.type.ts";
 
 /** The four connection-pill states (style-guide.md §1.2, DH-0105) — TUI's `ConnectionStatus`
- * (src/tui/types.ts) and Web's `ConnectionStatus` (src/web/client/state.ts) are each defined
+ * (src/tui/connection-status.constant.ts) and Web's `ConnectionStatus`
+ * (src/web/client/state.ts) are each defined
  * independently as this same literal union; this module intentionally doesn't import either
  * (neither owns the other) and instead re-states the shared vocabulary once here. */
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "disconnected";

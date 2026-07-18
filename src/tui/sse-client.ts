@@ -3,8 +3,8 @@
 // against a fake streaming Response without real network I/O.
 
 import type { ServerSentEvent } from "../contracts/index.ts";
+import type { ConnectionStatus } from "./connection-status.constant.ts";
 import { parseServerSentEvent, SseFrameParser } from "./sse-parser.ts";
-import type { ConnectionStatus } from "./types.ts";
 
 // Confirmed against the Server domain's actual route (src/server/server.ts,
 // GET /api/events) — see docs/handoffs/tui.md status log.
@@ -87,7 +87,7 @@ export async function runSseClient(options: SseClientOptions): Promise<void> {
       // The stream ended cleanly (server closed it, no exception) — this is not a fatal
       // condition, the loop immediately retries below just like after a failed attempt, so
       // it's reported the same way the Web client reports it: `reconnecting` (DH-0105; see
-      // the `ConnectionStatus` doc comment in types.ts for why this used to be a
+      // the `ConnectionStatus` doc comment in connection-status.constant.ts for why this used to be a
       // misleadingly-named terminal-sounding `closed`).
       options.onConnectionChange?.("reconnecting");
     } catch {

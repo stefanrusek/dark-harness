@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { Box, Text } from "ink";
 import { STATUS_TOKENS } from "../../design-tokens.ts";
-import type { AgentInfo } from "../types.ts";
+import type { AgentInfo } from "../types.type.ts";
 import { colorizeStatus, dim, formatElapsed, spinnerFrame } from "./tokens.ts";
 
 export interface GitInfo {

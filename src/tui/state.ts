@@ -6,7 +6,7 @@ import type { AgentStatus, ModelInfo, ServerSentEvent } from "../contracts/index
 import { parseSlashCommand } from "./commands.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";
-import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.ts";
+import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.type.ts";
 import { codePointLength, sliceCodePoints } from "./width.ts";
 
 /** Bound per-agent transcript buffer (total chars across all turns) so a very long session

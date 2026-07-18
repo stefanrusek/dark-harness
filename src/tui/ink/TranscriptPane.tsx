@@ -15,7 +15,7 @@ import { STATUS_TOKENS } from "../../design-tokens.ts";
 import { parseMarkdown, sanitizeText } from "../../markdown/index.ts";
 import { renderMarkdownRows } from "../markdown-ansi.ts";
 import { atBottom, scrollBy, toBottom, visibleSlice } from "../scroll-viewport.ts";
-import type { Turn } from "../types.ts";
+import type { Turn } from "../types.type.ts";
 import { wrapText } from "../width.ts";
 import type { ScrollBus } from "./scroll-bus.ts";
 

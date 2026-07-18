@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
-import type { AgentInfo } from "../types.ts";
+import type { AgentInfo } from "../types.type.ts";
 import { detectGitInfo, StatusRow } from "./StatusRow.tsx";
 
 function agent(overrides: Partial<AgentInfo> = {}): AgentInfo {

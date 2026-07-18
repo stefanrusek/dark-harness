@@ -4,7 +4,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { initialState, reducer } from "../state.ts";
 import { flattenTree } from "../tree.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { App } from "./App.tsx";
 
 function rootState(): TuiState {

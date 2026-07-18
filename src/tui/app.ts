@@ -15,7 +15,7 @@ import { parseSgrMouseChunk, stripSgrMouseSequences } from "./mouse.ts";
 import { MouseLifecycle } from "./mouse-lifecycle.ts";
 import { runSseClient } from "./sse-client.ts";
 import { initialState, reducer } from "./state.ts";
-import type { Action, Effect, TuiState } from "./types.ts";
+import type { Action, Effect, TuiState } from "./types.type.ts";
 
 /** DH-0126: lines the transcript scrolls per wheel notch — no per-notch line-count is
  * reported by SGR 1006 (one event = one notch), so this is a fixed, editor-typical step. */

@@ -4,7 +4,7 @@
 // AgentTree.tsx/AgentView.tsx/PickerView.tsx/RootView.tsx/TranscriptPane.tsx. `app.ts` owns
 // only the SSE subscription plus raw-mode/alt-screen lifecycle plus mounting this component.
 import { Box } from "ink";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { AgentTree } from "./AgentTree.tsx";
 import { AgentView } from "./AgentView.tsx";
 import { Header } from "./Header.tsx";

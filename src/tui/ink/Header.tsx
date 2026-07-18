@@ -13,7 +13,7 @@
 import { Text } from "ink";
 import { BUILD_INFO } from "../../config/build-info.ts";
 import { formatVersionString } from "../../header-info.ts";
-import type { AgentInfo } from "../types.ts";
+import type { AgentInfo } from "../types.type.ts";
 import { dim } from "./tokens.ts";
 
 export interface HeaderProps {

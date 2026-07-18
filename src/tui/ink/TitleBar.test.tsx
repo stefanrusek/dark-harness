@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
 import { initialState } from "../state.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { TitleBar, titleBarText } from "./TitleBar.tsx";
 
 function state(overrides: Partial<TuiState> = {}): TuiState {

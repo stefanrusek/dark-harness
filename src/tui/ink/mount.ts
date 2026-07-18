@@ -10,7 +10,7 @@
 // tsconfig.json's comment.)
 import { render as inkRender } from "ink";
 import React from "react";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { App } from "./App.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
 

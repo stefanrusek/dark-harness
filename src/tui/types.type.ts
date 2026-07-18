@@ -1,6 +1,10 @@
 // TUI-internal state types. These are *not* wire types — wire types are imported from
 // src/contracts/ wherever they're needed (see state.ts, render.ts). This module only
 // describes the client's own view/application state and the pure reducer's vocabulary.
+//
+// DH-0157: `ConnectionStatus`/`CONNECTION_STATUSES` moved out to connection-status.constant.ts
+// (this file may only hold type/interface declarations per the .type.ts standing rule; that
+// pair mixed a constant in, which is now split out).
 
 import type {
   AgentStatus,
@@ -10,32 +14,8 @@ import type {
   ServerSentEvent,
   SkillInfo,
 } from "../contracts/index.ts";
+import type { ConnectionStatus } from "./connection-status.constant.ts";
 import type { KeyEvent } from "./keys.ts";
-
-// DH-0105: canonical four-state connection vocabulary shared with the Web client
-// (docs/design/style-guide.md §1/§6). Previously this TUI-only set was
-// "connecting" | "open" | "error" | "closed", with `error` firing transiently after every
-// failed reconnect attempt (the client always keeps retrying — see sse-client.ts) and
-// `closed` firing after every clean stream end (also always followed by a retry). Neither
-// was actually a terminal/fatal state; both were mid-retry blips that the Web's
-// `reconnecting` state already names correctly. `sse-client.ts` now distinguishes the
-// initial connect from a post-drop retry (mirroring the Web's `lastEventId`-presence check)
-// and only reports `disconnected` when the client actually stops trying (the loop exits on
-// abort), matching the Web's `closed` (now `disconnected`), which only fires from an
-// explicit `close()`.
-export type ConnectionStatus = "connecting" | "live" | "reconnecting" | "disconnected";
-
-// Canonical, iterable list of `ConnectionStatus`'s literals, kept in sync with the type
-// above by the exhaustiveness check in types.test.ts. Exists so callers that need to
-// enumerate/validate the vocabulary (e.g. a future `/status` picker, or defensive parsing of
-// a value that crossed a process boundary) have one source of truth instead of re-listing the
-// four strings by hand.
-export const CONNECTION_STATUSES: readonly ConnectionStatus[] = [
-  "connecting",
-  "live",
-  "reconnecting",
-  "disconnected",
-];
 
 // DH-0093: `/model` (no arg) picker view — navigated exactly like the tree view
 // (up/down move, enter selects, escape cancels back to root).

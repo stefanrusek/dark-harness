@@ -3,7 +3,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import type { AgentTreeNode } from "../../contracts/index.ts";
 import { initialState } from "../state.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { AgentTree } from "./AgentTree.tsx";
 
 function treeState(tree: AgentTreeNode[], selectedIndex = 0): TuiState {

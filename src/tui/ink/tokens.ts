@@ -11,7 +11,7 @@ import {
   formatElapsed as sharedFormatElapsed,
 } from "../../format.ts";
 import { SPINNER_FRAME_MS, SPINNER_FRAMES } from "../../terminal.constant.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 
 const RESET = "\x1b[0m";
 const SGR_PREFIX = "\x1b[";
