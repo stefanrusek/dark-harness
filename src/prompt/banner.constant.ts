@@ -4,13 +4,11 @@
 // log aggregators piping raw output must stay byte-plain per that same precedent.
 
 /** Full block wordmark, for splash/startup screens with room to spare (5 lines tall). */
-export const DH_ASCII_LOGO = `
-      _  _
+export const DH_ASCII_LOGO = `      _  _
    __| || |__
   / _\` || '_ \\
  | (_| || | | |
-  \\__,_||_| |_|
-`.replace(/^\n|\n$/g, "");
+  \\__,_||_| |_|`;
 
 /** Single-line mark, for narrow terminals or inline use (status bars, log headers). */
 export const DH_ASCII_LOGO_COMPACT = "[ dh ]";

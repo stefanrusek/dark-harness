@@ -90,6 +90,11 @@ interface InnerServerHandle {
   stop(): void;
 }
 
+// Genuine lazy-singleton state, not a constant -- starts undefined and is reassigned exactly
+// once by getInnerServer() below, on first use. Object.freeze() doesn't apply (nothing to
+// freeze until it's set, and freezing would defeat the lazy-init purpose); this is
+// module-scope mutable state by design, not an oversight.
+// biome-ignore lint/plugin/no-module-scope-side-effects: lazy-singleton, see comment above
 let innerServer: InnerServerHandle | undefined;
 
 function getInnerServer(): InnerServerHandle {
