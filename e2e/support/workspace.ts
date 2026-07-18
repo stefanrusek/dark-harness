@@ -2,9 +2,9 @@
 // isolated cwd so parallel test files never share `.dh-logs/`, a `dh.json`, or a downloaded
 // log bundle.
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { DhConfig } from "../../src/contracts/index.ts";
 
 export interface TestWorkspace {
@@ -22,12 +22,23 @@ export function createWorkspace(prefix = "dh-e2e-"): TestWorkspace {
     dir,
     writeConfig(config, filename = "dh.json") {
       const path = join(dir, filename);
-      Bun.write(path, `${JSON.stringify(config, null, 2)}\n`);
+      // Synchronous, fully-flushed-before-return write (DH-0165): the previous fire-and-forget
+      // `Bun.write(...)` (its returned promise never awaited) let the caller proceed — and, in
+      // these e2e tests, immediately spawn the real `dh` binary against this workspace — before
+      // the write was guaranteed to have landed on disk. Invisible on a fast local SSD where
+      // the write completes well within the time spent waiting for the binary to build/start,
+      // but a real, deterministically-losing race on CI's slower disk, especially for
+      // `writeFile`'s nested-directory case below (mkdir + write vs. a single flat write here).
+      writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
       return path;
     },
     writeFile(relativePath, contents) {
       const path = join(dir, relativePath);
-      Bun.write(path, contents);
+      // Same synchronous-write rationale as writeConfig above, plus: relativePath may include
+      // subdirectories that don't exist yet (e.g. "skills/greet/SKILL.md") — create them first
+      // rather than relying on Bun.write's implicit (and, per the race above, unawaited) mkdir.
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, contents);
       return path;
     },
     cleanup() {
