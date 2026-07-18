@@ -16,10 +16,12 @@
 
 import { expect } from "bun:test";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching a real ESC byte is the point
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
+
 /** Strips ANSI SGR sequences (`ESC [ ... m`), leaving only the plain visible text. */
 export function stripAnsi(text: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching a real ESC byte is the point
-  return text.replace(/\x1b\[[0-9;]*m/g, "");
+  return text.replace(ANSI_SGR_RE, "");
 }
 
 /** Minimal structural subset of `Element`/`HTMLElement` used by the `web` fixture assertions
@@ -269,8 +271,7 @@ export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
       expect(joined).toContain("b");
       expect(joined).toContain("1");
       expect(joined).toContain("2");
-      // Header/body separator uses box-drawing, not literal pipe-and-dash source syntax.
-      expect(joined).not.toContain("| - | - |");
+      expect(joined).not.toContain("| - | - |"); // box-drawing separator, not literal pipe-and-dash
     },
     web: (root) => {
       const table = root.querySelector("table");

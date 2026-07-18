@@ -49,26 +49,17 @@ const WHEEL_BIT = 0b01000000;
 
 // Use RegExp constructor to avoid the no-control-regex lint rule — the ESC byte (0x1B) is a
 // legitimate part of the SGR 1006 protocol.
-// DH-0162: deliberately NOT Object.freeze()-wrapped, unlike most other top-level consts in
-// this codebase — RegExp.prototype.exec()/String.replace() mutate a global/sticky regex's
-// own `lastIndex` property as an intrinsic part of matching, and freezing the object makes
-// that a hard throw in strict mode (verified empirically: SGR_MOUSE_SPLIT_RE's `/g` flag hit
-// exactly this in src/tui/mouse.test.ts). A biome-ignore is the honest way to mark this
-// rather than wrapping in a freeze that would break at runtime.
-// biome-ignore lint/plugin: RegExp with a g/y flag mutates its own lastIndex during matching; Object.freeze() would break that (DH-0162).
 const SGR_MOUSE_RE = new RegExp(`^${String.fromCodePoint(0x1b)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`);
 
 // A global, non-anchored variant for splitting a chunk that may carry several reports
 // (terminals coalesce rapid wheel/motion events into one read) plus interleaved non-mouse
 // bytes.
-// biome-ignore lint/plugin: RegExp with a g/y flag mutates its own lastIndex during matching; Object.freeze() would break that (DH-0162).
 const SGR_MOUSE_SPLIT_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[<\\d+;\\d+;\\d+[Mm]`, "g");
 
 // A trailing, *incomplete* SGR mouse introducer — covers the rare case where a terminal
 // splits one report across two stdin reads (the sequence is short, ~9-12 bytes, but nothing
 // guarantees it lands in a single `data` event). Left unstripped, the fragment's digits would
 // fall through to `parseKeys` as literal characters, same bug as an unstripped whole sequence.
-// biome-ignore lint/plugin: RegExp with a g/y flag mutates its own lastIndex during matching; Object.freeze() would break that (DH-0162).
 const SGR_MOUSE_PARTIAL_TRAILING_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[<[\\d;]*$`);
 
 /**

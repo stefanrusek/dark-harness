@@ -10,6 +10,8 @@ or {
       JsStringLiteralExpression(),
       JsBooleanLiteralExpression(),
       JsNullLiteralExpression(),
+      JsRegexLiteralExpression(),
+      JsNewExpression(callee=$c) where { $c <: `RegExp` },
       `undefined`,
       TsAsExpression(expression=or {
         JsObjectExpression(),
@@ -38,6 +40,8 @@ or {
       JsStringLiteralExpression(),
       JsBooleanLiteralExpression(),
       JsNullLiteralExpression(),
+      JsRegexLiteralExpression(),
+      JsNewExpression(callee=$c) where { $c <: `RegExp` },
       `undefined`,
       TsAsExpression(expression=or {
         JsObjectExpression(),

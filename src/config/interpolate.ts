@@ -12,7 +12,6 @@
 // Matches `$$(...)` (escape) or `$(VAR)` (real reference) in one pass so escape sequences are
 // resolved without a lookbehind (Bun's V8 supports it, but keeping this simple/portable) and
 // without the escape's own `$` being mistaken for the start of a following `$(VAR)`.
-// biome-ignore lint/plugin: RegExp with a g/y flag mutates its own lastIndex during matching; Object.freeze() would break that (DH-0162).
 const TOKEN_PATTERN = /\$(\$)?\(([A-Za-z_][A-Za-z0-9_]*)\)/g;
 
 export function interpolateString(value: string, env: Record<string, string | undefined>): string {
