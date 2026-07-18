@@ -231,4 +231,16 @@ jobs:
         run: bun test e2e/tui.test.ts e2e/slash-commands.test.ts e2e/markdown-rendering.test.ts --parallel=1
 
       - name: E2E (web/browser — Chromium)
-        run: bun test e2e/connect-web.test.ts e2e/web.test.ts e2e/streaming.test.ts --parallel=1
+        run: bun test e2e/web.test.ts e2e/streaming.test.ts --parallel=1
+
+      # DH-0165: split out from the step above — connect-web.test.ts is the heaviest single
+      # e2e scenario in the whole suite (two real `dh` processes, a `--server` plus a
+      # `--connect --web` client, on top of its own Chromium launch) and consistently hung/
+      # timed out in real CI (even at a 90s budget, with zero page console/network/DOM
+      # diagnostic output ever printed — see the test's own DH-0165 comments) specifically
+      # when run third, right after web.test.ts's and streaming.test.ts's own Chromium
+      # sessions in the same process tree. Same structural fix DH-0164 already established
+      # for the tmux/PTY step just above: never let more resource-heavy work pile up in one
+      # job step's process tree than it needs to.
+      - name: E2E (web/browser — connect --web, isolated)
+        run: bun test e2e/connect-web.test.ts
