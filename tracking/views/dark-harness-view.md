@@ -21,6 +21,7 @@ source: tracking/
 | [DH-0051](../DH-0051-no-git-native-artifacts-or-log-replay-tooling.md) | No git-native session artifacts, and no evaluation/replay tooling built on the JSONL logs | deferred (2026-07-15): sweep-sourced, no observed need |
 | [DH-0052](../DH-0052-windows-console-support-unverified.md) | Windows console/TUI support is unverified — no Windows-specific console-mode handling found, and no Windows execution anywhere in CI | deferred, revisit soon (2026-07-15) |
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute | deferred (2026-07-15): no observed sustained-outage incident, same as DH-0049 |
+| [DH-0070](../DH-0070-bash-tool-s-fresh-shell-per-call-semantics-diverge-from-claude-code-s-persistent-cwd-behavior.md) | Agents don't have their own separate working-directory state | regressed: identical CI failure recurred 2026-07-18 under DH-0149's per-file isolation |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | deferred (2026-07-16): GitHub issue #7 created to gauge demand |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut | status: verifying |
 | [DH-0109](../DH-0109-missing-markdown-features-gfm-table-rendering-and-other-explicitly-out-of-scope-constructs.md) | Missing Markdown features: GFM table rendering (and other explicitly-out-of-scope constructs) | status: verifying |
@@ -67,9 +68,11 @@ source: tracking/
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
+| [DH-0070](../DH-0070-bash-tool-s-fresh-shell-per-call-semantics-diverge-from-claude-code-s-persistent-cwd-behavior.md) | Agents don't have their own separate working-directory state 🔒 | bug | stefan |
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
 | [DH-0139](../DH-0139-dh-web-is-unusable-remotely-out-of-the-box-dh-0128-auto-points-the-client-at-the-lan-ip-but-the-server-rejects-that-same-ip-by-default-421.md) | dh --web is unusable remotely out of the box: DH-0128 auto-points the client at the LAN IP, but the server rejects that same IP by default (421) | bug | stefan |
 | [DH-0149](../DH-0149-replace-shared-process-bun-test-with-per-file-process-isolation-orchestrator-standard-lcov-merge.md) | Replace shared-process bun test with per-file process isolation orchestrator + standard lcov merge | bug | stefan |
+| [DH-0163](../DH-0163-coverage-backfill-close-the-pre-existing-30-line-gap-across-12-files-99-76-100.md) | Coverage backfill: close the pre-existing ~30-line gap across 12 files (99.76% -> 100%) | bug | stefan |
 
 ### verifying
 

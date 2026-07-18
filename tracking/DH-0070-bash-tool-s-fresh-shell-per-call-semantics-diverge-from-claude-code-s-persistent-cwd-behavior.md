@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0070
 type: bug
-status: closed
+status: implementing
 owner: stefan
 resolution: done
-blocked_by: []
+blocked_by: ["regressed: identical CI failure recurred 2026-07-18 under DH-0149's per-file isolation"]
 created: 2026-07-16
 relations:
   depends_on: []
