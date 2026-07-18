@@ -25,6 +25,18 @@ import type { KeyEvent } from "./keys.ts";
 // explicit `close()`.
 export type ConnectionStatus = "connecting" | "live" | "reconnecting" | "disconnected";
 
+// Canonical, iterable list of `ConnectionStatus`'s literals, kept in sync with the type
+// above by the exhaustiveness check in types.test.ts. Exists so callers that need to
+// enumerate/validate the vocabulary (e.g. a future `/status` picker, or defensive parsing of
+// a value that crossed a process boundary) have one source of truth instead of re-listing the
+// four strings by hand.
+export const CONNECTION_STATUSES: readonly ConnectionStatus[] = [
+  "connecting",
+  "live",
+  "reconnecting",
+  "disconnected",
+];
+
 // DH-0093: `/model` (no arg) picker view — navigated exactly like the tree view
 // (up/down move, enter selects, escape cancels back to root).
 export type ViewState =
