@@ -13,7 +13,7 @@ function resolvePath(path: string, cwd: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);
 }
 
-export const globTool: Tool = {
+export const globTool: Tool = Object.freeze<Tool>({
   name: "Glob",
   description:
     "Fast file-path glob matching (e.g. '**/*.ts', 'src/**/*.test.ts'). Returns matching " +
@@ -76,4 +76,4 @@ export const globTool: Tool = {
     const capped = capOutput(matches.map((m) => m.path).join("\n"));
     return { output: capped.text, isError: false };
   },
-};
+});

@@ -2,7 +2,7 @@
 
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-export const skillTool: Tool = {
+export const skillTool: Tool = Object.freeze<Tool>({
   name: "Skill",
   description:
     "Load a skill by name from the configured skillPaths (each a directory containing SKILL.md). " +
@@ -49,4 +49,4 @@ export const skillTool: Tool = {
 
     return { output, isError: false };
   },
-};
+});

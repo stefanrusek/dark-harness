@@ -33,7 +33,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000;
 // Backpressure threshold (DH-0019): once a stream controller's `desiredSize` (bytes still
 // wanted under the queue's high-water mark) drops below this, the consumer isn't draining
 // fast enough and the connection is closed rather than left to buffer unboundedly.
-const MAX_NEGATIVE_DESIRED_SIZE = -50;
+const MAX_NEGATIVE_DESIRED_SIZE = Object.freeze(-50);
 
 // DH-0023: `dh --connect <host> --web` runs the web UI as a separate local process/origin
 // talking to a remote `--server` (ADR 0003), so cross-origin browser requests are the
@@ -69,10 +69,10 @@ function corsHeaders(origin: string | null): Record<string, string> {
 // whatever renders on top of it. Both headers say the same thing in old- and new-browser
 // dialects; `frame-ancestors 'none'` is the modern CSP directive, `X-Frame-Options: DENY`
 // covers browsers that only honor the legacy header.
-const CLICKJACKING_HEADERS: Record<string, string> = {
+const CLICKJACKING_HEADERS: Record<string, string> = Object.freeze({
   "x-frame-options": "DENY",
   "content-security-policy": "frame-ancestors 'none'",
-};
+});
 
 /** DH-0023: DNS-rebinding guard. A page on an attacker-controlled domain whose DNS answer
  * flips to a loopback address mid-session can still get the victim's browser to issue

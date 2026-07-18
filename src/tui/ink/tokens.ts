@@ -21,7 +21,7 @@ const DIM = "\x1b[2m";
 
 /** Synthetic cursor marker: an inverse-video space appended after the input text — see the
  * old render.ts's doc comment (ported verbatim). Only the root view's input line is editable. */
-export const CURSOR_MARKER = `${INVERSE} ${RESET}`;
+export const CURSOR_MARKER = Object.freeze(`${INVERSE} ${RESET}`);
 
 export function colorizeStatus(status: AgentStatus, text: string): string {
   return `${SGR_PREFIX}${STATUS_TOKENS[status].sgr}m${text}${RESET}`;
@@ -42,7 +42,7 @@ export function spinnerFrame(now: number): string {
 
 /** DH-0104: re-exported from the shared `src/format.ts` (matches Web's `formatElapsed`
  * byte-for-byte). */
-export const formatElapsed = sharedFormatElapsed;
+export const formatElapsed = Object.freeze(sharedFormatElapsed);
 
 /** Format a token/cost figure — DH-0104's two-tier rule: `"compact"` (`12.3k`) for glanceable
  * chrome, `"full"` (`12,345`) for the detail agent view. */

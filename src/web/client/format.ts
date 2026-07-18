@@ -18,7 +18,7 @@ export interface StatusStyle {
   token: string;
 }
 
-const STATUS_STYLES: Record<AgentStatus, StatusStyle> = {
+const STATUS_STYLES: Record<AgentStatus, StatusStyle> = Object.freeze({
   running: { label: "Running", token: "running" },
   waiting: { label: "Waiting", token: "waiting" },
   done: { label: "Done", token: "done" },
@@ -27,7 +27,7 @@ const STATUS_STYLES: Record<AgentStatus, StatusStyle> = {
   // deliberately-stopped task/agent, not a fault. Web's own token/label call, revisit if
   // Susan wants different styling.
   stopped: { label: "Stopped", token: "stopped" },
-};
+});
 
 export function agentStatusStyle(status: AgentStatus): StatusStyle {
   return STATUS_STYLES[status];
@@ -36,12 +36,12 @@ export function agentStatusStyle(status: AgentStatus): StatusStyle {
 // DH-0105: canonical connection-state labels (docs/design/style-guide.md §1/§6), Title
 // Case per the Web casing rule (DH-0100, §4). Shared word/vocabulary with the TUI —
 // `EXPECTED_CONNECTION_LABEL_WORDS` in the test file asserts this table stays in sync.
-const CONNECTION_LABELS: Record<ConnectionStatus, string> = {
+const CONNECTION_LABELS: Record<ConnectionStatus, string> = Object.freeze({
   connecting: "Connecting…",
   live: "Live",
   reconnecting: "Reconnecting…",
   disconnected: "Disconnected",
-};
+});
 
 export function connectionStatusLabel(status: ConnectionStatus): string {
   return CONNECTION_LABELS[status];
@@ -51,14 +51,14 @@ export function connectionStatusLabel(status: ConnectionStatus): string {
  * uses this compact glanceable-chrome form (badges/strips) today — re-exported from the
  * shared `src/format.ts` (DH-0104) so it stays byte-for-byte identical to the TUI's tree-row
  * rendering rather than a hand-kept-in-sync copy. */
-export const formatTokenCount = formatTokenCountCompact;
+export const formatTokenCount = Object.freeze(formatTokenCountCompact);
 
 /** Canonical cost rendering (DH-0104, docs/design/style-guide.md §4): 2-dp, `<$0.01` for a
  * tiny nonzero amount, `—` for unknown/unpriced — re-exported from the shared
  * `src/format.ts` so Web and the TUI's interactive views render identically. `null`/
  * `undefined` mean "unknown" (see `AgentNode.hasCost`/`SessionTotals.costUsd` in
  * `state.ts`). */
-export const formatCostUsd = sharedFormatCostUsd;
+export const formatCostUsd = Object.freeze(sharedFormatCostUsd);
 
 export function formatExitCode(exitCode: number): string {
   if (exitCode === 0) return "success (exit 0)";
@@ -72,7 +72,7 @@ export function formatExitCode(exitCode: number): string {
  * (drops sub-second precision) since its job is letting an operator eyeball "still a normal
  * turn" vs. "this has been running a suspiciously long time," not precise timing.
  */
-export const formatElapsed = sharedFormatElapsed;
+export const formatElapsed = Object.freeze(sharedFormatElapsed);
 
 /** Short id for display: keeps a stable prefix so identical ids remain visually distinct. */
 export function shortAgentId(agentId: string): string {

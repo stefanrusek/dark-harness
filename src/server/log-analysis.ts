@@ -194,13 +194,13 @@ function formatStatusLabel(status: AgentLogTreeNode["status"]): string {
 
 // DH-0100: canonical status color model (docs/design/style-guide.md §1/§2.3), matching
 // src/tui/render.ts's STATUS_COLOR exactly so `dh logs` and the TUI agree.
-const STATUS_COLOR: Record<AgentLogTreeNode["status"], string> = {
+const STATUS_COLOR: Record<AgentLogTreeNode["status"], string> = Object.freeze({
   running: "\x1b[34m",
   waiting: "\x1b[33m",
   done: "\x1b[32m",
   failed: "\x1b[31m",
   stopped: "\x1b[35m",
-};
+});
 const RESET = "\x1b[0m";
 
 function colorizeStatusLabel(status: AgentLogTreeNode["status"], color: boolean): string {

@@ -3,7 +3,7 @@
 import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-export const taskStopTool: Tool = {
+export const taskStopTool: Tool = Object.freeze<Tool>({
   name: "TaskStop",
   description: "Stop a running background task or sub-agent by task id.",
   inputSchema: {
@@ -41,4 +41,4 @@ export const taskStopTool: Tool = {
 
     return { output: `Stopped ${taskId}.`, isError: false };
   },
-};
+});

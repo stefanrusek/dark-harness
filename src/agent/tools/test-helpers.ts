@@ -6,11 +6,11 @@ import { TaskRegistry } from "../tasks.ts";
 import { TodoStore } from "../todos.ts";
 import type { ToolContext } from "./types.type.ts";
 
-export const TEST_CONFIG: DhConfig = {
+export const TEST_CONFIG: DhConfig = Object.freeze<DhConfig>({
   options: { defaultModel: "sonnet" },
   models: [{ name: "sonnet", provider: "anthropic", model: "sonnet-5" }],
   provider: [{ name: "anthropic", type: "anthropic" }],
-};
+});
 
 export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
   const tasks = overrides.tasks ?? new TaskRegistry();

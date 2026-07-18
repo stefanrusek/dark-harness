@@ -10,7 +10,7 @@ import { TaskNotFoundError } from "../tasks.ts";
 import { resolveByName } from "./resolve-task.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-export const monitorTool: Tool = {
+export const monitorTool: Tool = Object.freeze<Tool>({
   name: "Monitor",
   description:
     "Check the current status of one or more background tasks or sub-agents by task id " +
@@ -91,4 +91,4 @@ export const monitorTool: Tool = {
     }
     return { output: lines.join("\n"), isError: false };
   },
-};
+});

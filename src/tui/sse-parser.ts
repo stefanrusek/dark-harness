@@ -111,15 +111,17 @@ export function parseServerSentEvent(frame: RawSseFrame): ServerSentEvent | null
   return parsed;
 }
 
-const KNOWN_TYPES = new Set([
-  "agent_output",
-  "agent_status",
-  "agent_spawned",
-  "token_usage",
-  "session_ended",
-  "tool_call",
-  "tool_result",
-]);
+const KNOWN_TYPES = Object.freeze(
+  new Set([
+    "agent_output",
+    "agent_status",
+    "agent_spawned",
+    "token_usage",
+    "session_ended",
+    "tool_call",
+    "tool_result",
+  ]),
+);
 
 function isServerSentEvent(value: unknown): value is ServerSentEvent {
   if (typeof value !== "object" || value === null) return false;

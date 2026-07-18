@@ -45,7 +45,7 @@ export interface ConnectionToken {
 /** style-guide.md §1 — five `AgentStatus` values, one canonical glyph+word+color per status,
  * both surface representations from the one shared row so a color assignment can never
  * update on one surface without the other. */
-export const STATUS_TOKENS: Record<AgentStatus, StatusToken> = {
+export const STATUS_TOKENS: Record<AgentStatus, StatusToken> = Object.freeze({
   running: {
     word: "running",
     glyph: "●",
@@ -69,12 +69,12 @@ export const STATUS_TOKENS: Record<AgentStatus, StatusToken> = {
     webHex: "#9a7bd1",
     sgr: "35",
   },
-};
+});
 
 /** style-guide.md §1.2 (DH-0105) — four connection states, shared TUI/Web vocabulary. */
-export const CONNECTION_TOKENS: Record<ConnectionState, ConnectionToken> = {
+export const CONNECTION_TOKENS: Record<ConnectionState, ConnectionToken> = Object.freeze({
   connecting: { webLabel: "Connecting…", tuiLabel: "connecting…", sgr: "33", pending: true },
   live: { webLabel: "Live", tuiLabel: "live", sgr: "32", pending: false },
   reconnecting: { webLabel: "Reconnecting…", tuiLabel: "reconnecting…", sgr: "33", pending: true },
   disconnected: { webLabel: "Disconnected", tuiLabel: "disconnected", sgr: "31", pending: false },
-};
+});

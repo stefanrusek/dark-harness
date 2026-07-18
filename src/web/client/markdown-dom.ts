@@ -12,7 +12,7 @@
 
 import type { BlockNode, InlineNode } from "../../markdown/index.ts";
 
-const ALLOWED_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+const ALLOWED_LINK_SCHEMES = Object.freeze(new Set(["http:", "https:", "mailto:"]));
 
 /** Filters a fenced code block's info string to a safe `language-<info>` class token —
  * `[a-z0-9-]` only, matching the "class-attribute hygiene" rule in the ticket. Returns null

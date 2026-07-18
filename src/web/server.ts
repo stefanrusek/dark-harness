@@ -46,10 +46,10 @@ export interface WebUiHandle {
 // the headers belong here, not just on the API responses in src/server/server.ts.
 // `frame-ancestors 'none'` is the modern CSP directive; `X-Frame-Options: DENY` covers
 // browsers that only honor the legacy header.
-const CLICKJACKING_HEADERS: Record<string, string> = {
+const CLICKJACKING_HEADERS: Record<string, string> = Object.freeze({
   "x-frame-options": "DENY",
   "content-security-policy": "frame-ancestors 'none'",
-};
+});
 
 function withSecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
@@ -109,7 +109,7 @@ function getInnerServer(): InnerServerHandle {
 // A `Response` cached under one typecheck pass mismatches the other's ambient type — same
 // DOM-vs-DOM-less split as proxyToInner() below.
 // biome-ignore lint/suspicious/noExplicitAny: see comment above
-const assetCache = new Map<string, any>();
+const assetCache = Object.freeze(new Map<string, any>());
 
 async function proxyToInner(path: string, development: boolean): Promise<Response> {
   if (!development) {

@@ -106,14 +106,9 @@ export interface CliOptions {
   quiet: boolean;
 }
 
-const FLAGS_WITH_VALUES = new Set([
-  "--connect",
-  "--port",
-  "--instructions",
-  "--config",
-  "--env",
-  "--resume",
-]);
+const FLAGS_WITH_VALUES = Object.freeze(
+  new Set(["--connect", "--port", "--instructions", "--config", "--env", "--resume"]),
+);
 
 /** DH-0035/DH-0096: the `dh.json` scaffolded by `dh init` — kept byte-for-byte in sync with
  * README.md's own sample config so the two never drift apart.
@@ -128,7 +123,7 @@ const FLAGS_WITH_VALUES = new Set([
  * correct here may 404 in another region; re-verify before relying on this list elsewhere.
  * This is a menu of working entries to trim to what you actually use, not a recommendation
  * to run `dh doctor` against all of them by default (see the `dh init` stdout note below). */
-export const SAMPLE_DH_JSON = `{
+export const SAMPLE_DH_JSON = Object.freeze(`{
   "options": { "defaultModel": "haiku-bedrock", "runInBackgroundDefault": true, "maxTurns": 100 },
   "models": [
     { "name": "fable-anthropic", "provider": "anthropic", "model": "claude-fable-5" },
@@ -190,7 +185,7 @@ export const SAMPLE_DH_JSON = `{
   "systemPrompt": null,
   "security": { "token": null, "tls": null }
 }
-`;
+`);
 
 /** Content for `--help`/`-h` (DH-0103): the flag/subcommand names and their descriptions are
  * unchanged from the prior static `HELP_TEXT`, but layout (column width, wrapping, styling)
@@ -202,7 +197,7 @@ interface HelpItem {
 
 const HELP_TITLE = "dh — Dark Harness: an autonomous coding agent harness.";
 
-const HELP_USAGE_ITEMS: HelpItem[] = [
+const HELP_USAGE_ITEMS: readonly HelpItem[] = Object.freeze([
   { name: "dh", desc: "Local server + console TUI, one process." },
   { name: "dh --web", desc: "Local server + locally-served web UI." },
   { name: "dh --server", desc: "Headless server only (port 4000, or --port)." },
@@ -221,9 +216,9 @@ const HELP_USAGE_ITEMS: HelpItem[] = [
     name: "dh logs",
     desc: 'List sessions under "./.dh-logs" (id, start time, agent count) — DH-0067.',
   },
-];
+]);
 
-const HELP_FLAG_ITEMS: HelpItem[] = [
+const HELP_FLAG_ITEMS: readonly HelpItem[] = Object.freeze([
   {
     name: "--web",
     desc: "Serve the web UI instead of (or alongside --connect) the console TUI.",
@@ -284,7 +279,7 @@ const HELP_FLAG_ITEMS: HelpItem[] = [
   },
   { name: "--help, -h", desc: "Show this help and exit." },
   { name: "--version", desc: "Show build identity (version, git sha, dirty flag) and exit." },
-];
+]);
 
 const HELP_FOOTER =
   "Config: dh.json in the working directory (or --config <path>). See README.md for the schema.";
@@ -349,7 +344,7 @@ function renderHelpItemSingleColumn(item: HelpItem, columns: number, tty: boolea
 
 function renderHelpSection(
   title: string,
-  items: HelpItem[],
+  items: readonly HelpItem[],
   columns: number,
   tty: boolean,
 ): string[] {
@@ -424,13 +419,13 @@ const CLI_RESET = "\x1b[0m";
 // imported, matching the existing DH-0100 pattern where src/server/log-analysis.ts and
 // src/tui/render.ts each already keep an independent copy of the same five-entry map — the
 // canonical source of truth is the style-guide table, not any one file.
-const CLI_STATUS_COLOR: Record<AgentStatus, string> = {
+const CLI_STATUS_COLOR: Record<AgentStatus, string> = Object.freeze({
   running: "\x1b[34m",
   waiting: "\x1b[33m",
   done: "\x1b[32m",
   failed: "\x1b[31m",
   stopped: "\x1b[35m",
-};
+});
 
 function cliColorize(text: string, code: string, tty: boolean): string {
   return tty ? `${code}${text}${CLI_RESET}` : text;
@@ -1458,18 +1453,18 @@ interface DoctorResult {
 /** DH-0106: the trivial no-op tool offered to every model during the doctor tool-use capability
  * probe — deliberately as simple as a tool definition gets (no inputs) so a "can't call tools"
  * result reflects the model's own capability/willingness, not a schema it couldn't parse. */
-const DOCTOR_TOOL_PROBE_DEFINITION: ProviderToolDefinition = {
+const DOCTOR_TOOL_PROBE_DEFINITION: ProviderToolDefinition = Object.freeze<ProviderToolDefinition>({
   name: "noop",
   description: "A no-op probe tool. Call it with no arguments to confirm you can call tools.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
-};
+});
 
 // DH-0101: aliases onto the shared CLI styling constants above (was its own copy) — dim
 // still distinguishes "still checking" from a resolved verdict, per style-guide §1.1.
-const DOCTOR_PASS_COLOR = CLI_GREEN;
-const DOCTOR_FAIL_COLOR = CLI_RED;
-const DOCTOR_PENDING_COLOR = CLI_DIM;
-const DOCTOR_RESET = CLI_RESET;
+const DOCTOR_PASS_COLOR = Object.freeze(CLI_GREEN);
+const DOCTOR_FAIL_COLOR = Object.freeze(CLI_RED);
+const DOCTOR_PENDING_COLOR = Object.freeze(CLI_DIM);
+const DOCTOR_RESET = Object.freeze(CLI_RESET);
 
 // DH-0102: verdict word is always 4 chars ("PASS"/"FAIL"); the colorized (TTY) verdict field
 // additionally carries a one-glyph + one-space prefix ("✓ "/"✗ "). The pending row's spinner
@@ -1478,7 +1473,7 @@ const DOCTOR_RESET = CLI_RESET;
 // `\r\x1b[K` rewrite clears the whole line regardless), but it keeps a multi-model run's rows
 // from visibly shifting left/right as each one resolves.
 const DOCTOR_VERDICT_WORD_WIDTH = 4;
-const DOCTOR_VERDICT_LABEL_WIDTH = 2 + DOCTOR_VERDICT_WORD_WIDTH;
+const DOCTOR_VERDICT_LABEL_WIDTH = Object.freeze(2 + DOCTOR_VERDICT_WORD_WIDTH);
 
 /** Formats one resolved (pass/fail) row — shared by `formatDoctorReport` (the non-TTY /
  * final-summary path) and `runDoctor`'s TTY live-update path, so both agree on alignment and

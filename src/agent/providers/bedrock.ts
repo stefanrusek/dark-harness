@@ -137,18 +137,20 @@ function mapStopReason(reason: BedrockStopReason | undefined): ProviderStopReaso
 // DH-0009: AWS SDK errors carry a `.name` (the exception shape name) rather than an HTTP
 // status directly on the error object — these are the Bedrock Converse API's own documented
 // exception names for the relevant categories.
-const RATE_LIMIT_ERROR_NAMES = new Set(["ThrottlingException", "TooManyRequestsException"]);
-const OVERLOADED_ERROR_NAMES = new Set([
-  "ServiceUnavailableException",
-  "InternalServerException",
-  "ModelTimeoutException",
-  "ModelNotReadyException",
-]);
-const AUTH_ERROR_NAMES = new Set([
-  "AccessDeniedException",
-  "UnrecognizedClientException",
-  "ExpiredTokenException",
-]);
+const RATE_LIMIT_ERROR_NAMES = Object.freeze(
+  new Set(["ThrottlingException", "TooManyRequestsException"]),
+);
+const OVERLOADED_ERROR_NAMES = Object.freeze(
+  new Set([
+    "ServiceUnavailableException",
+    "InternalServerException",
+    "ModelTimeoutException",
+    "ModelNotReadyException",
+  ]),
+);
+const AUTH_ERROR_NAMES = Object.freeze(
+  new Set(["AccessDeniedException", "UnrecognizedClientException", "ExpiredTokenException"]),
+);
 
 /** DH-0009: classifies a raw thrown value from the Bedrock SDK by its exception name; a
  * plain error with no recognizable AWS exception name (e.g. a network-level failure that

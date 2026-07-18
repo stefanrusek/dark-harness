@@ -46,7 +46,7 @@ export function detectGitInfo(runGitBranch: () => string = runGitBranchCommand):
   return { branch, cwd: process.cwd() };
 }
 
-const DEFAULT_GIT_INFO = detectGitInfo();
+const DEFAULT_GIT_INFO = Object.freeze(detectGitInfo());
 
 function progressText(agentState: AgentInfo | null | undefined, now: number): string {
   if (!agentState) return dim("—");

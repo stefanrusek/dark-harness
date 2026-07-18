@@ -22,7 +22,7 @@ import { hostMatchesSuffix, isPrivateAddress } from "./net-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = Object.freeze(4 * 1024 * 1024);
 const DEFAULT_MAX_OUTPUT_CHARS = 50_000;
 
 /** Renders HTML to plain text via Bun's built-in `HTMLRewriter` — no new dependency. Drops
@@ -138,7 +138,7 @@ async function readBodyCapped(
   return { text: new TextDecoder().decode(combined), truncated };
 }
 
-export const webFetchTool: Tool = {
+export const webFetchTool: Tool = Object.freeze<Tool>({
   name: "WebFetch",
   description:
     "Fetches content from a http/https URL. Optionally pass 'prompt' describing what to " +
@@ -312,4 +312,4 @@ export const webFetchTool: Tool = {
 
     return { output: truncate(processed, maxOutputChars), isError: false };
   },
-};
+});

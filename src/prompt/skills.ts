@@ -15,8 +15,8 @@ export interface Skill {
   source: string;
 }
 
-const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---/;
-const FIELD_PATTERN = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/;
+const FRONTMATTER_PATTERN = Object.freeze(/^---\r?\n([\s\S]*?)\r?\n---/);
+const FIELD_PATTERN = Object.freeze(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/);
 
 /**
  * Parses the YAML-ish frontmatter block at the top of a SKILL.md file and extracts `name`

@@ -178,7 +178,7 @@ const MAX_TRANSCRIPT_CHARS = 200_000;
  * value is threaded through some other way. */
 export const DEFAULT_COMPLETED_RETENTION = 50;
 
-const TERMINAL_STATUSES = new Set<AgentStatus>(["done", "failed", "stopped"]);
+const TERMINAL_STATUSES = Object.freeze(new Set<AgentStatus>(["done", "failed", "stopped"]));
 
 /** Evict the oldest terminal (done/failed/stopped) agents from `state.agents` beyond
  * `retention` most-recent terminal entries, in first-seen (`spawnOrder`) order. Active agents

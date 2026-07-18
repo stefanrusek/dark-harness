@@ -26,7 +26,7 @@ function resolveModelName(
   return name;
 }
 
-export const agentTool: Tool = {
+export const agentTool: Tool = Object.freeze<Tool>({
   name: "Agent",
   description:
     "Spawn an ad-hoc sub-agent with a model and a prompt. Runs concurrently by default " +
@@ -146,4 +146,4 @@ export const agentTool: Tool = {
     }
     return { output: snapshot.output, isError: false };
   },
-};
+});

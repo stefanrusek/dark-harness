@@ -163,7 +163,7 @@ function consumeStTerminated(s: string, start: number, allowC1St = false): numbe
 
 // --- Block-level parsing -----------------------------------------------------------------
 
-const ATX_RE = /^(#{1,6})(?:\s+(.*))?$/;
+const ATX_RE = Object.freeze(/^(#{1,6})(?:\s+(.*))?$/);
 
 function isBlank(line: string): boolean {
   return line.trim() === "";
@@ -628,7 +628,7 @@ export function parseInline(
   return nodes;
 }
 
-const REF_DEFINITION_RE = /^ {0,3}\[([^\]]+)\]:\s*(\S+)\s*$/;
+const REF_DEFINITION_RE = Object.freeze(/^ {0,3}\[([^\]]+)\]:\s*(\S+)\s*$/);
 
 /** Scans for GFM reference definitions (`[ref]: url`, one per line, at most 3 leading spaces)
  * and pulls them out of the line stream — they're metadata, not their own paragraph — into a

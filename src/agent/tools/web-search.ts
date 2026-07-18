@@ -82,7 +82,7 @@ function hostOf(url: string): string | undefined {
   }
 }
 
-export const webSearchTool: Tool = {
+export const webSearchTool: Tool = Object.freeze<Tool>({
   name: "WebSearch",
   description:
     "Searches the web via the operator-configured backend (dh has no search infrastructure " +
@@ -189,4 +189,4 @@ export const webSearchTool: Tool = {
       isError: false,
     };
   },
-};
+});

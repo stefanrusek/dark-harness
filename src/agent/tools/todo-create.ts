@@ -5,7 +5,7 @@
 import { TodoCapExceededError, TodoNotFoundError } from "../todos.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-export const todoCreateTool: Tool = {
+export const todoCreateTool: Tool = Object.freeze<Tool>({
   name: "TodoCreate",
   description:
     "Add an item to your own structured todo list — a self-authored plan/checklist for " +
@@ -86,4 +86,4 @@ export const todoCreateTool: Tool = {
       throw err;
     }
   },
-};
+});

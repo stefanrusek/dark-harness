@@ -4,13 +4,13 @@
 import { TodoNotFoundError } from "../todos.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-const VALID_STATUSES = new Set(["pending", "in_progress", "completed", "deleted"]);
+const VALID_STATUSES = Object.freeze(new Set(["pending", "in_progress", "completed", "deleted"]));
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === "string");
 }
 
-export const todoUpdateTool: Tool = {
+export const todoUpdateTool: Tool = Object.freeze<Tool>({
   name: "TodoUpdate",
   description:
     "Update, or delete (status: 'deleted'), one item in your own todo list. The sole " +
@@ -117,4 +117,4 @@ export const todoUpdateTool: Tool = {
       return { output: `TodoUpdate tool error: ${err.message}`, isError: true };
     }
   },
-};
+});

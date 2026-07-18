@@ -11,7 +11,7 @@
 
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-export const mcpAuthTool: Tool = {
+export const mcpAuthTool: Tool = Object.freeze<Tool>({
   name: "McpAuth",
   description:
     "Handle MCP OAuth flows for a configured MCP server. NOT IMPLEMENTED this round (stub).",
@@ -34,4 +34,4 @@ export const mcpAuthTool: Tool = {
       isError: true,
     };
   },
-};
+});

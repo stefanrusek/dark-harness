@@ -11,7 +11,7 @@ import { TaskNotFoundError } from "../tasks.ts";
 import { capOutput } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-export const taskOutputTool: Tool = {
+export const taskOutputTool: Tool = Object.freeze<Tool>({
   name: "TaskOutput",
   description:
     "Retrieve new output and status of a background task or sub-agent by id. By default " +
@@ -61,4 +61,4 @@ export const taskOutputTool: Tool = {
       return { output: `TaskOutput tool error: ${err.message}`, isError: true };
     }
   },
-};
+});

@@ -16,13 +16,13 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { capOutput } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const MAX_FILE_BYTES = Object.freeze(5 * 1024 * 1024);
 const BINARY_SNIFF_BYTES = 8_000;
 const DEFAULT_HEAD_LIMIT = 200;
 
 // Curated extension-to-language map for the 'type' filter. Not exhaustive — covers the
 // languages a coding agent is most likely to search for, per DH-0072's brief.
-const TYPE_EXTENSIONS: Record<string, string[]> = {
+const TYPE_EXTENSIONS: Record<string, string[]> = Object.freeze({
   js: [".js", ".jsx", ".mjs", ".cjs"],
   ts: [".ts", ".tsx", ".mts", ".cts"],
   tsx: [".tsx"],
@@ -54,7 +54,7 @@ const TYPE_EXTENSIONS: Record<string, string[]> = {
   md: [".md", ".markdown"],
   markdown: [".md", ".markdown"],
   sql: [".sql"],
-};
+});
 
 function resolvePath(path: string, cwd: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);
@@ -189,7 +189,7 @@ function countNewlines(text: string, upToIndex: number): number {
   return n;
 }
 
-export const grepTool: Tool = {
+export const grepTool: Tool = Object.freeze<Tool>({
   name: "Grep",
   description:
     "Search file contents by regular expression (JS RegExp syntax). Searches a single file, " +
@@ -416,4 +416,4 @@ export const grepTool: Tool = {
     const capped = capOutput(shown.join("\n") + notice);
     return { output: capped.text, isError: false };
   },
-};
+});

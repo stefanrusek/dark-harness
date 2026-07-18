@@ -20,7 +20,7 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
-export const editTool: Tool = {
+export const editTool: Tool = Object.freeze<Tool>({
   name: "Edit",
   description:
     "Replace an exact string match in a file. Fails if old_string is missing, or " +
@@ -93,4 +93,4 @@ export const editTool: Tool = {
       isError: false,
     };
   },
-};
+});

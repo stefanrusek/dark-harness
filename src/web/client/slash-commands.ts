@@ -14,7 +14,7 @@ export interface ParsedSlashCommand {
   args: string;
 }
 
-const SLASH_COMMAND_RE = /^\/(\S+)(?:\s+([\s\S]*))?$/;
+const SLASH_COMMAND_RE = Object.freeze(/^\/(\S+)(?:\s+([\s\S]*))?$/);
 
 export function parseSlashCommand(input: string): ParsedSlashCommand | null {
   const match = SLASH_COMMAND_RE.exec(input);

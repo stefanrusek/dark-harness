@@ -35,7 +35,7 @@ export function parseReportedOutcome(input: unknown): ReportedOutcome | null {
   return outcome;
 }
 
-export const reportOutcomeTool: Tool = {
+export const reportOutcomeTool: Tool = Object.freeze<Tool>({
   name: REPORT_OUTCOME_TOOL_NAME,
   description:
     "Call this tool exactly once, as the very last action of your run, to report whether " +
@@ -67,4 +67,4 @@ export const reportOutcomeTool: Tool = {
       isError: false,
     };
   },
-};
+});

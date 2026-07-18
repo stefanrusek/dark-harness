@@ -15,7 +15,7 @@ export interface ParsedSlashCommand {
 
 // `[\s\S]*` (not `.*`) so `args` can carry embedded newlines (e.g. a bracketed-paste that
 // happens to start with a slash command) without `.`'s no-newline limitation truncating it.
-const SLASH_COMMAND_RE = /^\/(\S+)(?:\s+([\s\S]*))?$/;
+const SLASH_COMMAND_RE = Object.freeze(/^\/(\S+)(?:\s+([\s\S]*))?$/);
 
 export function parseSlashCommand(input: string): ParsedSlashCommand | null {
   const match = SLASH_COMMAND_RE.exec(input);

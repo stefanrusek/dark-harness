@@ -20,19 +20,20 @@ import { discoverSkills, parseSkillFrontmatter, type Skill } from "./skills.ts";
 // so a single typo in that file can't take down prompt loading. The real file is well-formed
 // (asserted by a test that parses it directly), so this path is a safety net, not the
 // intended source of truth.
-const CLI_TOOLS_SKILL_FALLBACK = {
+const CLI_TOOLS_SKILL_FALLBACK = Object.freeze({
   name: "cli-tools",
   description:
     "Reference for domain-specific CLI tools (git, gh, pnpm, tilt, kubectl, jq, doppler, npx/playwright, curl).",
-};
+});
 
 /** The bundled CLI-tools skill, baked into the binary and always enumerated. */
-export const CLI_TOOLS_SKILL: Skill = {
+export const CLI_TOOLS_SKILL: Skill = Object.freeze({
   ...(parseSkillFrontmatter(CLI_TOOLS_SKILL_MD) ?? CLI_TOOLS_SKILL_FALLBACK),
   source: "builtin",
-};
+});
 
-const DISCIPLINE_PROMPT = `You are dh, an autonomous coding agent running inside Dark Harness. You are handed an
+const DISCIPLINE_PROMPT =
+  Object.freeze(`You are dh, an autonomous coding agent running inside Dark Harness. You are handed an
 instructions file (or a message from whoever spawned you) and you work it to completion
 without waiting for a human in the loop, unless you hit something only a human can resolve.
 
@@ -86,7 +87,7 @@ yourself to the same discipline:
   immediate tight loop waiting for it to finish. Either go do other independent work and
   check back once you have something to show for it, or wait a reasonable interval before
   polling again. Spin-polling wastes turns; never checking back (see above) fails the task
-  — the discipline is checking back at a sensible cadence, not as fast as possible.`;
+  — the discipline is checking back at a sensible cadence, not as fast as possible.`);
 
 /**
  * The part of the prompt that is structurally load-bearing for the harness itself — the
@@ -95,7 +96,8 @@ yourself to the same discipline:
  * above came from `DISCIPLINE_PROMPT` or a `config.systemPrompt` override, so a custom prompt
  * can never silently drop the contract the rest of the harness depends on. See DH-0018.
  */
-export const REQUIRED_CONTRACT = `- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
+export const REQUIRED_CONTRACT =
+  Object.freeze(`- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
   If you cannot complete the instructions you were given, explaining that in your own words
   is NOT enough on its own. You MUST ALSO include the exact literal text \`TASK_FAILED\`
   (that precise spelling and casing) somewhere in your final response. Nothing reads or
@@ -131,9 +133,9 @@ Everything you and your sub-agents do — every message, tool call, and result �
 automatically to this session's JSONL log files as a side effect of the harness. You never
 need to call a logging tool or ask anyone to record what you did: your plain-text output
 *is* how you record your reasoning and status, and it is preserved whether or not anyone is
-watching in real time.`;
+watching in real time.`);
 
-const BASE_PROMPT = `${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`;
+const BASE_PROMPT = Object.freeze(`${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`);
 
 /**
  * DH-0094 (tracking/DH-0094-*.md): the "self-awareness" section — concrete facts about this
@@ -234,7 +236,7 @@ const CLAUDE_MD_FILENAME = "CLAUDE.md";
  * `--dry-run`) can tell at a glance that the file was cut rather than assuming full content
  * made it in.
  */
-export const CLAUDE_MD_MAX_BYTES = 32 * 1024;
+export const CLAUDE_MD_MAX_BYTES = Object.freeze(32 * 1024);
 
 /**
  * Reads `CLAUDE.md` from `cwd` if present. Returns `null` (not an error) when the file is

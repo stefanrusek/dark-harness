@@ -52,7 +52,7 @@ const STRIKE = "9";
 const CYAN = "36";
 const BLUE = "34";
 
-export const renderingFixtures: RenderingFixture[] = [
+export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
   // --- Headings 1-6 -------------------------------------------------------------------
   ...([1, 2, 3, 4, 5, 6] as const).map((level) => ({
     name: `heading h${level}`,
@@ -349,4 +349,4 @@ export const renderingFixtures: RenderingFixture[] = [
       expect(root.textContent).toBe("[text][missing]");
     },
   },
-];
+]);

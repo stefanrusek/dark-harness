@@ -10,7 +10,7 @@ function formatLine(record: TodoRecord): string {
   return `${record.id} [${record.status}] ${record.subject}${suffix}`;
 }
 
-export const todoListTool: Tool = {
+export const todoListTool: Tool = Object.freeze<Tool>({
   name: "TodoList",
   description:
     "List every item in your own todo list, compactly, with a count summary. Use this to " +
@@ -39,4 +39,4 @@ export const todoListTool: Tool = {
       isError: false,
     };
   },
-};
+});

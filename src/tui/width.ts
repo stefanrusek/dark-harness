@@ -21,7 +21,7 @@ export function codePoints(text: string): string[] {
   return Array.from(text);
 }
 
-const COMBINING_RANGES: Array<[number, number]> = [
+const COMBINING_RANGES: ReadonlyArray<[number, number]> = Object.freeze([
   [0x0300, 0x036f], // Combining Diacritical Marks
   [0x0483, 0x0489],
   [0x0591, 0x05bd],
@@ -42,9 +42,9 @@ const COMBINING_RANGES: Array<[number, number]> = [
   [0xfe00, 0xfe0f], // variation selectors
   [0xfe20, 0xfe2f],
   [0xfeff, 0xfeff], // BOM / zero width no-break space
-];
+]);
 
-const WIDE_RANGES: Array<[number, number]> = [
+const WIDE_RANGES: ReadonlyArray<[number, number]> = Object.freeze([
   [0x1100, 0x115f], // Hangul Jamo
   [0x2329, 0x232a],
   [0x2e80, 0x303e], // CJK Radicals Supplement .. CJK Symbols and Punctuation
@@ -59,9 +59,9 @@ const WIDE_RANGES: Array<[number, number]> = [
   [0xffe0, 0xffe6],
   [0x1f300, 0x1faff], // emoji blocks (misc symbols/pictographs, transport, supplemental, etc.)
   [0x20000, 0x3fffd], // CJK Unified Ideographs Extension B and beyond / supplementary plane
-];
+]);
 
-function inRanges(code: number, ranges: Array<[number, number]>): boolean {
+function inRanges(code: number, ranges: ReadonlyArray<[number, number]>): boolean {
   for (const [lo, hi] of ranges) {
     if (code >= lo && code <= hi) return true;
   }

@@ -9,7 +9,7 @@ function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
 }
 
-export const writeTool: Tool = {
+export const writeTool: Tool = Object.freeze<Tool>({
   name: "Write",
   description:
     "Create or overwrite a file with the given content, creating parent directories as needed.",
@@ -56,4 +56,4 @@ export const writeTool: Tool = {
 
     return { output: `Wrote ${content.length} bytes to ${absPath}.`, isError: false };
   },
-};
+});

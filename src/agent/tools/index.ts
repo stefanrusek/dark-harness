@@ -30,7 +30,7 @@ import { writeTool } from "./write.ts";
 // tool set alongside Bash — search is no longer entirely informal ("shell out to grep/find
 // via Bash"); Bash's own `grep`/`find` remain available too (the cli-tools skill's "generic
 // POSIX tools" framing), this just gives a structured, cross-platform alternative.
-export const ALL_TOOLS: Tool[] = [
+export const ALL_TOOLS: readonly Tool[] = Object.freeze([
   bashTool,
   readTool,
   editTool,
@@ -50,9 +50,9 @@ export const ALL_TOOLS: Tool[] = [
   todoGetTool,
   todoListTool,
   todoUpdateTool,
-];
+]);
 
-export function buildToolMap(tools: Tool[] = ALL_TOOLS): Map<string, Tool> {
+export function buildToolMap(tools: readonly Tool[] = ALL_TOOLS): Map<string, Tool> {
   return new Map(tools.map((tool) => [tool.name, tool]));
 }
 

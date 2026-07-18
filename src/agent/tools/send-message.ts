@@ -11,7 +11,7 @@ import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
 import { resolveTaskId } from "./resolve-task.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
-export const sendMessageTool: Tool = {
+export const sendMessageTool: Tool = Object.freeze<Tool>({
   name: "SendMessage",
   description:
     "Send a message into a running sub-agent's conversation, addressed by task id or by " +
@@ -76,4 +76,4 @@ export const sendMessageTool: Tool = {
 
     return { output: `Message delivered to ${taskId}.`, isError: false };
   },
-};
+});

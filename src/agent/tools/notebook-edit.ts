@@ -40,7 +40,7 @@ function findCellIndex(
   return { error: "either 'cell_index' or 'cell_id' must be provided" };
 }
 
-export const notebookEditTool: Tool = {
+export const notebookEditTool: Tool = Object.freeze<Tool>({
   name: "NotebookEdit",
   description:
     "Replace a Jupyter notebook cell's source directly by cell index or id — a structured " +
@@ -157,4 +157,4 @@ export const notebookEditTool: Tool = {
       isError: false,
     };
   },
-};
+});

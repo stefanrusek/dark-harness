@@ -19,7 +19,7 @@ function formatRecord(record: TodoRecord): string {
   return lines.join("\n");
 }
 
-export const todoGetTool: Tool = {
+export const todoGetTool: Tool = Object.freeze<Tool>({
   name: "TodoGet",
   description: "Retrieve the full record for one item in your own todo list, by its todo id.",
   inputSchema: {
@@ -48,4 +48,4 @@ export const todoGetTool: Tool = {
       return { output: `TodoGet tool error: ${err.message}`, isError: true };
     }
   },
-};
+});

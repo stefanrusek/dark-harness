@@ -29,7 +29,7 @@ const BINARY_SNIFF_BYTES = 8_000;
 // "just read this file" call. Named distinctly from `MAX_READABLE_BYTES` below: this cap can
 // be bypassed by supplying `offset`/`limit` (an explicit request for a bounded slice), the
 // absolute ceiling below cannot.
-const PRIMARY_WHOLE_FILE_BYTE_CAP = 256 * 1024;
+const PRIMARY_WHOLE_FILE_BYTE_CAP = Object.freeze(256 * 1024);
 // DH-0014: an absolute ceiling — checked from `Bun.file(...).size` (filesystem metadata only,
 // before any byte of the file is read) — that applies unconditionally, even to offset/limit
 // windowed reads, because `streamLines` below still has to walk the entire file byte-by-byte
@@ -38,7 +38,7 @@ const PRIMARY_WHOLE_FILE_BYTE_CAP = 256 * 1024;
 // *whole-file* cap (`PRIMARY_WHOLE_FILE_BYTE_CAP` above) to match real Claude Code, but left
 // this larger absolute ceiling in place for that reason — see this ticket's Notes for the
 // audit of DH-0014's original rationale before reusing this constant's old, larger value here.
-const MAX_READABLE_BYTES = 256 * 1024 * 1024;
+const MAX_READABLE_BYTES = Object.freeze(256 * 1024 * 1024);
 
 /** Human-readable size for error messages, matching real Claude Code's observed format
  * (`256KB`, `3.2MB` — no space between number and unit, one decimal place above 1KB). */
@@ -150,6 +150,7 @@ export function isNotebookPath(path: string): boolean {
 // three candidate PDF-parsing libraries (see the ticket's evaluation table) that survives
 // `bun build --compile` into a standalone binary; the other two pull in a native canvas
 // dependency that crashes with `DOMMatrix is not defined` once compiled.
+// biome-ignore lint/plugin: Object.freeze() on a TypedArray throws immediately at module load — its integer-indexed elements can't be made non-configurable per spec (DH-0162).
 const PDF_MAGIC = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]); // "%PDF-"
 const MAX_PDF_PAGE_SPAN = 20;
 const PDF_PAGES_REQUIRED_ABOVE = 10;
@@ -285,7 +286,7 @@ async function streamLines(
   return { lines, remaining };
 }
 
-export const readTool: Tool = {
+export const readTool: Tool = Object.freeze<Tool>({
   name: "Read",
   description:
     "Read a file from the local filesystem, returned with cat -n style line numbers. " +
@@ -514,4 +515,4 @@ export const readTool: Tool = {
 
     return { output: formatted, isError: false };
   },
-};
+});

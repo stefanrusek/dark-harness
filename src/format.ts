@@ -78,7 +78,7 @@ export function formatElapsed(ms: number): string {
  * same-input -> asserted-identical-output regression guard every surface's test file
  * imports and runs against its own call sites, not just against the functions above
  * directly). */
-export const ELAPSED_VECTORS: ReadonlyArray<readonly [number, string]> = [
+export const ELAPSED_VECTORS: ReadonlyArray<readonly [number, string]> = Object.freeze([
   [0, "just now"],
   [999, "just now"],
   [1000, "1s"],
@@ -88,29 +88,30 @@ export const ELAPSED_VECTORS: ReadonlyArray<readonly [number, string]> = [
   [192_000, "3m 12s"],
   [3_600_000, "1h 00m"],
   [3_900_000, "1h 05m"],
-];
+]);
 
-export const TOKEN_COMPACT_VECTORS: ReadonlyArray<readonly [number, string]> = [
+export const TOKEN_COMPACT_VECTORS: ReadonlyArray<readonly [number, string]> = Object.freeze([
   [0, "0"],
   [950, "950"],
   [12_345, "12.3k"],
   [999_500, "999.5k"],
   [1_234_567, "1.2M"],
-];
+]);
 
-export const TOKEN_FULL_VECTORS: ReadonlyArray<readonly [number, string]> = [
+export const TOKEN_FULL_VECTORS: ReadonlyArray<readonly [number, string]> = Object.freeze([
   [0, "0"],
   [950, "950"],
   [12_345, "12,345"],
   [1_234_567, "1,234,567"],
-];
+]);
 
-export const COST_VECTORS: ReadonlyArray<readonly [number | null | undefined, string]> = [
-  [undefined, "—"],
-  [null, "—"],
-  [0, "$0.00"],
-  [0.001, "<$0.01"],
-  [0.0456, "$0.05"],
-  [1.006, "$1.01"],
-  [12.3, "$12.30"],
-];
+export const COST_VECTORS: ReadonlyArray<readonly [number | null | undefined, string]> =
+  Object.freeze([
+    [undefined, "—"],
+    [null, "—"],
+    [0, "$0.00"],
+    [0.001, "<$0.01"],
+    [0.0456, "$0.05"],
+    [1.006, "$1.01"],
+    [12.3, "$12.30"],
+  ]);

@@ -87,9 +87,10 @@ export const STREAM_FLUSH_INTERVAL_MS = 50;
  * no tool call and no `ReportOutcome` was ever recorded — the "missed-call nudge" that makes
  * a forgotten self-report a detectable, recoverable state instead of silently scoring as
  * success. Exported so e2e fixtures/tests can assert against the exact text. */
-export const REPORT_OUTCOME_NUDGE_MESSAGE =
+export const REPORT_OUTCOME_NUDGE_MESSAGE = Object.freeze(
   "You ended your turn without calling the ReportOutcome tool. Call ReportOutcome now with " +
-  'status "success" or "failure" (plus optional summary/filesChanged/artifacts). Do nothing else.';
+    'status "success" or "failure" (plus optional summary/filesChanged/artifacts). Do nothing else.',
+);
 
 // Round 3 (docs/handoffs/core.md status log): the two distinct points `signal` is checked,
 // each with its own log reason so a "why did this stop" reader can tell which one fired.
@@ -341,10 +342,11 @@ function textOf(content: ProviderContentBlock[]): string {
  * exchanges) — an implementer constant per the ticket's Design section. */
 const COMPACTION_TAIL_SIZE = 4;
 
-export const COMPACTION_SUMMARY_REQUEST =
+export const COMPACTION_SUMMARY_REQUEST = Object.freeze(
   "Summarize this conversation for context compaction: the original task, decisions made " +
-  "and why, current state, files touched, and work remaining. Respond with the summary " +
-  "text only, no preamble.";
+    "and why, current state, files touched, and work remaining. Respond with the summary " +
+    "text only, no preamble.",
+);
 
 /** DH-0010 Part B: finds the first index at or after `messages.length - COMPACTION_TAIL_SIZE`
  * whose message is an `assistant` turn — the tail must start at an assistant-message

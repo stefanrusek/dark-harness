@@ -24,7 +24,7 @@ export const MAX_OUTPUT_CHARS = 200_000;
  * value is threaded through the same way `token` was (see docs/roster/mary.md Round 2). */
 export const DEFAULT_COMPLETED_RETENTION = 50;
 
-const TERMINAL_STATUSES = new Set(["done", "failed", "stopped"]);
+const TERMINAL_STATUSES = Object.freeze(new Set(["done", "failed", "stopped"]));
 
 /** Evict the oldest terminal (done/failed/stopped) agents from `state.agents`/`agentOrder`
  * beyond `retention` most-recent terminal entries. Active agents (running/waiting) are never

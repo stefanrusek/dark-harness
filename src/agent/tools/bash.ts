@@ -110,7 +110,7 @@ function resolveTimeout(input: Record<string, unknown>): number {
   return Math.min(raw, MAX_TIMEOUT_MS);
 }
 
-export const bashTool: Tool = {
+export const bashTool: Tool = Object.freeze<Tool>({
   name: "Bash",
   description:
     "Run a shell command via bash -c in the working directory. Supports run_in_background " +
@@ -196,4 +196,4 @@ export const bashTool: Tool = {
     }
     return { output: capped.text, isError: false };
   },
-};
+});
