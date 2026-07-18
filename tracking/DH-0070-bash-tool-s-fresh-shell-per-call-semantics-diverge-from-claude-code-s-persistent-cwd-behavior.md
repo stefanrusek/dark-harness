@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0070
 type: bug
-status: verifying
+status: closed
 owner: stefan
 resolution: done
 blocked_by: []
