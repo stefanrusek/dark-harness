@@ -18,7 +18,7 @@ or {
       `Object.freeze($_)`,
       `Object.freeze<$_>($_)`
     },
-    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts (wrap the initializer in Object.freeze(...) to mark it safe)", severity="warn", fix_kind="safe"),
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts (wrap the initializer in Object.freeze(...) to mark it safe)", severity="error", fix_kind="safe"),
     $val => `Object.freeze($val)`
   },
   JsVariableStatement() as $s where {
@@ -26,7 +26,7 @@ or {
     not $s <: JsVariableStatement(declaration=JsVariableDeclaration(declarators=[
       JsVariableDeclarator(initializer=JsInitializerClause())
     ])),
-    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="error")
   },
   JsExport(export_clause=$c) as $s where {
     $c <: JsVariableDeclarationClause(declaration=JsVariableDeclaration(declarators=[
@@ -46,7 +46,7 @@ or {
       `Object.freeze($_)`,
       `Object.freeze<$_>($_)`
     },
-    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts (wrap the initializer in Object.freeze(...) to mark it safe)", severity="warn", fix_kind="safe"),
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts (wrap the initializer in Object.freeze(...) to mark it safe)", severity="error", fix_kind="safe"),
     $val => `Object.freeze($val)`
   },
   JsExport(export_clause=$c) as $s where {
@@ -55,17 +55,17 @@ or {
     not $c <: JsVariableDeclarationClause(declaration=JsVariableDeclaration(declarators=[
       JsVariableDeclarator(initializer=JsInitializerClause())
     ])),
-    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="warn")
+    register_diagnostic(span=$s, message="no top-level variable statements outside .constant.ts", severity="error")
   },
   JsExpressionStatement() as $s where {
     not $s <: within JsFunctionBody() ,
     not $s <: `import.meta.main && $call;`,
     not $s <: within `if (import.meta.main) { $body }` ,
-    register_diagnostic(span=$s, message="no top-level side-effecting expressions (except an `import.meta.main && call()` entrypoint guard)", severity="warn")
+    register_diagnostic(span=$s, message="no top-level side-effecting expressions (except an `import.meta.main && call()` entrypoint guard)", severity="error")
   },
   JsIfStatement() as $s where {
     not $s <: within JsFunctionBody() ,
     not $s <: `if (import.meta.main) { $body }`,
-    register_diagnostic(span=$s, message="no top-level if-statements (except an `if (import.meta.main) { ... }` entrypoint guard)", severity="warn")
+    register_diagnostic(span=$s, message="no top-level if-statements (except an `if (import.meta.main) { ... }` entrypoint guard)", severity="error")
   }
 }

@@ -7,20 +7,20 @@ or {
       $c <: JsFunctionDeclaration(),
       $c <: JsClassDeclaration()
     },
-    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="warn")
+    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="error")
   },
   JsVariableStatement() as $s where {
-    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="warn")
+    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="error")
   },
   JsFunctionDeclaration() as $s where {
     not $s <: within JsExport() ,
-    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="warn")
+    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="error")
   },
   JsClassDeclaration() as $s where {
     not $s <: within JsExport() ,
-    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="warn")
+    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="error")
   },
   JsExpressionStatement() as $s where {
-    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="warn")
+    register_diagnostic(span=$s, message=".type.ts files may only contain type/interface declarations and imports", severity="error")
   }
 }
