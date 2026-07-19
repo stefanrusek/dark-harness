@@ -213,3 +213,31 @@ export function sliceCodePoints(text: string, count: number, fromEnd: boolean): 
 export function codePointLength(text: string): number {
   return codePoints(text).length;
 }
+
+/** Strip codepoints this module treats as zero display width (combining marks, zero-width
+ * joiners/spaces, variation selectors, BOM) before text is handed to Ink for rendering
+ * (DH-0214). Ink's own internal grid-placement layer (`Output.get()` in
+ * `node_modules/ink/build/output.js`) tokenizes text via `@alcalzone/ansi-tokenize`, which —
+ * unlike this module's `charWidth` — gives every codepoint, including combining marks, its own
+ * one-column grid cell. That one-column-per-mark placement silently drifts every subsequent
+ * character in the row one column to the right per zero-width codepoint, and once the drift
+ * pushes trailing characters past the row's declared width they're dropped from the frame
+ * entirely (confirmed via `@alcalzone/ansi-tokenize`'s `tokenize`/`styledCharsFromTokens`
+ * directly: a string like "café" + a trailing U+0301 combining acute accent — two accents
+ * effectively stacked on the same "e" — tokenizes into one entry *per codepoint*, not one per
+ * visual grapheme). Ink is a third-party dependency we can't patch, so rather than render a
+ * silently corrupted frame, the TUI strips what it can't place: codepoints this module already
+ * models as contributing 0 columns are exactly the ones Ink cannot place without drifting.
+ * Deliberately blunt (matches this file's "not a full grapheme segmenter" scope, see the file
+ * header) — a double-accented character loses its second accent rather than corrupting
+ * everything after it. TUI-only: the shared `src/markdown/` module (also used by the Web
+ * client, which renders through the browser's own text shaping and has no such bug) must not
+ * gain this dependency — this stays local to `src/tui/`. */
+export function stripInkUnsafeCombining(text: string): string {
+  let out = "";
+  for (const cp of codePoints(text)) {
+    if (charWidth(cp) === 0) continue;
+    out += cp;
+  }
+  return out;
+}

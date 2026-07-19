@@ -80,7 +80,6 @@ source: tracking/
 | [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | bug | stefan |
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | feature | stefan |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | bug | stefan |
-| [DH-0214](../DH-0214-tui-precomposed-accented-char-extra-combining-mark-drops-the-next-rendered-character.md) | TUI: precomposed accented char + extra combining mark drops the next rendered character | bug | stefan |
 
 ### implementing
 
@@ -116,6 +115,7 @@ source: tracking/
 | [DH-0217](../DH-0217-spile-ops-new-ticket-py-counter-is-unsafe-for-concurrent-isolated-worktrees-id-collisions.md) | spile-ops new_ticket.py counter is unsafe for concurrent isolated worktrees — ID collisions | done |
 | [DH-0216](../DH-0216-refactoring-round-post-p0-fixes-and-workflow-self-awareness-feature-sweep.md) | Refactoring round: post-P0-fixes and Workflow/self-awareness feature sweep | done |
 | [DH-0215](../DH-0215-teach-agents-their-own-sessionid-agentid-log-path-jsonl-log-structure-in-the-system-prompt.md) | Teach agents their own sessionId/agentId/log path + JSONL log structure in the system prompt | done |
+| [DH-0214](../DH-0214-tui-precomposed-accented-char-extra-combining-mark-drops-the-next-rendered-character.md) | TUI: precomposed accented char + extra combining mark drops the next rendered character | done |
 | [DH-0212](../DH-0212-dh-0060-tui-spike-suite-regressed-from-16-0-to-9-7-pass-fail-needs-real-triage-before-treating-as-regressions.md) | DH-0060 TUI spike suite regressed from 16/0 to 9/7 pass/fail -- needs real triage before treating as regressions | done |
 | [DH-0211](../DH-0211-both-uis-pressing-escape-should-stop-the-currently-running-agent.md) | Both UIs: pressing Escape should stop the currently running agent | done |
 | [DH-0210](../DH-0210-import-resume-chain-toolresult-tooluse-block-count-mismatch-crashes-the-provider-request.md) | --import + resume chain: toolResult/toolUse block count mismatch crashes the provider request | done |
@@ -126,4 +126,3 @@ source: tracking/
 | [DH-0194](../DH-0194-agent-should-know-when-running-non-interactively-job-and-adjust-behavior-accordingly.md) | Agent should know when running non-interactively (--job) and adjust behavior accordingly | done |
 | [DH-0191](../DH-0191-consolidate-hand-rolled-status-color-sgr-tables-onto-design-tokens-ts-and-extract-a-shared-sgr-primitive.md) | Consolidate hand-rolled status-color/SGR tables onto design-tokens.ts and extract a shared SGR primitive | done |
 | [DH-0190](../DH-0190-refactoring-round-post-dh-0170-chain-sweep-focus-on-cli-ts-decomposition.md) | Refactoring round: post-DH-0170-chain sweep, focus on cli.ts decomposition | done |
-| [DH-0189](../DH-0189-import-import-cli-flag-mode-composition-model-selection-core.md) | import: --import CLI flag, mode composition, model selection (Core) | done |

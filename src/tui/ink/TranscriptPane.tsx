@@ -16,7 +16,7 @@ import { parseMarkdown, sanitizeText } from "../../markdown/index.ts";
 import { renderMarkdownRows } from "../markdown-ansi.ts";
 import { atBottom, scrollBy, toBottom, visibleSlice } from "../scroll-viewport.ts";
 import type { Turn } from "../types.type.ts";
-import { wrapText } from "../width.ts";
+import { stripInkUnsafeCombining, wrapText } from "../width.ts";
 import type { ScrollBus } from "./scroll-bus.ts";
 
 const RESET = "\x1b[0m";
@@ -37,14 +37,18 @@ export function renderTranscript(transcript: Turn[], cols: number): string[] {
   const innerCols = Math.max(1, cols - TRANSCRIPT_GUTTER_COLS);
   transcript.forEach((turn, index) => {
     if (index > 0) lines.push("");
+    // DH-0214: strip codepoints Ink's own grid-placement layer can't place without drifting
+    // (see stripInkUnsafeCombining's doc comment) before any wrap/markdown pipeline sees the
+    // text — every branch below eventually hands its output to Ink's <Text>.
+    const text = stripInkUnsafeCombining(turn.text);
     if (turn.role === "user") {
-      const rows = wrapText(sanitizeText(turn.text), innerCols);
+      const rows = wrapText(sanitizeText(text), innerCols);
       rows.forEach((row, i) => {
         const gutter = i === 0 ? `${USER_ROLE_SGR}>${RESET} ` : TRANSCRIPT_CONT_GUTTER;
         lines.push(`${gutter}${row}`);
       });
     } else if (turn.role === "tool") {
-      const rows = wrapText(sanitizeText(turn.text), innerCols);
+      const rows = wrapText(sanitizeText(text), innerCols);
       if (turn.terminalStatus) {
         const token = STATUS_TOKENS[turn.terminalStatus];
         rows.forEach((row, i) => {
@@ -60,7 +64,7 @@ export function renderTranscript(transcript: Turn[], cols: number): string[] {
         lines.push(`${DIM}${marker}${row}${RESET}${suffix}`);
       });
     } else {
-      const rows = renderMarkdownRows(parseMarkdown(turn.text), innerCols);
+      const rows = renderMarkdownRows(parseMarkdown(text), innerCols);
       rows.forEach((row, i) => {
         const gutter = i === 0 ? `${AGENT_ROLE_SGR}●${RESET} ` : TRANSCRIPT_CONT_GUTTER;
         lines.push(`${gutter}${row}`);
