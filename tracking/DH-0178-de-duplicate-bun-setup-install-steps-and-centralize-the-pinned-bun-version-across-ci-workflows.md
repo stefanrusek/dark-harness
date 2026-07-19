@@ -72,3 +72,17 @@ for exactly that reason — the coordinator should merge this commit onto the sh
 let a real `gate`/`release` workflow run execute against it, confirm green, and only then
 close DH-0178.
 
+**Coordinator follow-up (2026-07-19):** merged onto the shared branch (commit `84769b6`,
+also bumped the composite action's stale `bun-version` default 1.3.11 → 1.3.14 to match
+current `bun.lock`/gate.yml). Real CI run 29670595923 failed immediately: `##[error]Can't
+find 'action.yml' ... under .github/actions/setup-bun-and-install. Did you forget to run
+actions/checkout before running your local action?` — a genuine bug in the original design,
+not a staleness artifact. A local composite action (`uses: ./...`) can only be resolved once
+the repo is already checked out on the runner; bundling `actions/checkout` *inside* the
+composite action doesn't work because the runner can't find the action's own definition
+before checkout happens. Fixed: moved `Checkout` back to an explicit step immediately before
+each `Setup Bun and install dependencies` call (all three call sites), and narrowed the
+composite action itself to only `oven-sh/setup-bun` + `bun install` (dropped its
+`fetch-depth`/`fetch-tags` inputs along with the checkout step). Re-verifying in a fresh CI
+run before closing.
+

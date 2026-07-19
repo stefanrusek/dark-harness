@@ -45,10 +45,11 @@ jobs:
     name: typecheck / lint / coverage / e2e
     runs-on: ubuntu-latest
     steps:
-      # DH-0178: centralized checkout+setup-bun+install triplet (and the pinned
-      # bun-version) into a composite action, see
-      # .github/actions/setup-bun-and-install/action.yml for the rationale and
-      # the single source of truth for the version pin.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # DH-0178: centralizes Bun setup + install (not checkout -- see the action's
+      # own doc comment for why checkout has to stay a separate step here).
       - name: Setup Bun and install dependencies
         uses: ./.github/actions/setup-bun-and-install
 

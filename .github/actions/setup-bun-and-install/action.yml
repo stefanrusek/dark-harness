@@ -1,10 +1,18 @@
 name: Setup Bun and install dependencies
 description: >-
-  Checkout + oven-sh/setup-bun + `bun install --frozen-lockfile`, the triplet
-  every workflow job needs before it can run anything else. Centralizes the
-  pinned bun-version (DH-0178) so it's declared in exactly one place instead
-  of being hand-copied (and hand-kept-in-sync with bun.lock) across gate.yml
-  and release.yml.
+  `oven-sh/setup-bun` + `bun install --frozen-lockfile`, the pair every
+  workflow job needs before it can run anything else. Centralizes the pinned
+  bun-version (DH-0178) so it's declared in exactly one place instead of
+  being hand-copied (and hand-kept-in-sync with bun.lock) across gate.yml and
+  release.yml.
+  Does NOT check out the repo — a local composite action (`uses: ./...`)
+  can only be resolved by the runner once the repo it lives in is already on
+  disk, so `actions/checkout` must remain its own explicit step in the
+  calling job, before this action is invoked. (Confirmed the hard way: a
+  first version of this action bundled its own checkout step and every real
+  job failed at "Can't find 'action.yml' ... under
+  .github/actions/setup-bun-and-install" — the runner can't discover the
+  action's own definition without a checkout having already happened.)
 
 inputs:
   bun-version:
@@ -15,24 +23,10 @@ inputs:
       workflow behavior stays reproducible.
     required: false
     default: "1.3.14"
-  fetch-depth:
-    description: Passed through to actions/checkout's fetch-depth.
-    required: false
-    default: "1"
-  fetch-tags:
-    description: Passed through to actions/checkout's fetch-tags.
-    required: false
-    default: "false"
 
 runs:
   using: composite
   steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: ${{ inputs.fetch-depth }}
-        fetch-tags: ${{ inputs.fetch-tags }}
-
     - name: Set up Bun
       uses: oven-sh/setup-bun@v2
       with:

@@ -53,8 +53,11 @@ jobs:
           - target: bun-windows-x64
             artifact: dh-windows-x64.exe
     steps:
-      # DH-0178: centralized checkout+setup-bun+install triplet, see
-      # .github/actions/setup-bun-and-install/action.yml.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # DH-0178: centralizes Bun setup + install (not checkout -- see the action's
+      # own doc comment for why checkout has to stay a separate step here).
       - name: Setup Bun and install dependencies
         uses: ./.github/actions/setup-bun-and-install
 
@@ -283,8 +286,11 @@ jobs:
     # is source-controlled, same convention the single-package flow already used — bump it
     # in a commit before tagging, this job just publishes whatever's checked in at the tag.
     steps:
-      # DH-0178: centralized checkout+setup-bun+install triplet, see
-      # .github/actions/setup-bun-and-install/action.yml.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # DH-0178: centralizes Bun setup + install (not checkout -- see the action's
+      # own doc comment for why checkout has to stay a separate step here).
       - name: Setup Bun and install dependencies
         uses: ./.github/actions/setup-bun-and-install
 
