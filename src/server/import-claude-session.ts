@@ -17,7 +17,7 @@
 // already-resolved dh model alias.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { BuildInfo, LogEvent, LogHeader, SessionClientKind } from "../contracts/index.ts";
 import { SessionLogger } from "./logger.ts";
@@ -60,12 +60,12 @@ export interface ImportClaudeSessionResult {
   logsRoot: string;
 }
 
-const UNSTAMPED_BUILD: BuildInfo = {
+const UNSTAMPED_BUILD: BuildInfo = Object.freeze({
   version: "import",
   gitSha: null,
   dirty: false,
   releaseTag: null,
-};
+});
 
 /** Claude Code line shapes are read as loosely-typed records — this module deliberately does
  * not import/depend on any Claude Code type definitions (none exist in this repo; the source
@@ -145,16 +145,18 @@ function summarizeSystemLine(line: CcLine): string {
 
 /** Lossy-content dispositions (DH-0187 Decision 4) that are pure drops — no dh event is ever
  * emitted for these, and they carry no information import needs to consume. */
-const DROPPED_LINE_TYPES = new Set([
-  "file-history-snapshot",
-  "file-history-delta",
-  "mode",
-  "permission-mode",
-  "last-prompt",
-  "bridge-session",
-  "pr-link",
-  "queue-operation",
-]);
+const DROPPED_LINE_TYPES = Object.freeze(
+  new Set([
+    "file-history-snapshot",
+    "file-history-delta",
+    "mode",
+    "permission-mode",
+    "last-prompt",
+    "bridge-session",
+    "pr-link",
+    "queue-operation",
+  ]),
+);
 
 /** Result of translating one Claude Code agent transcript (root or sub-agent) into dh
  * `LogEvent`s, plus the bits the tree-builder / provenance-writer need afterward. */
