@@ -1,6 +1,6 @@
 ---
 spile: ticket
-id: DH-0213
+id: DH-0214
 type: bug
 status: ready
 owner: stefan
@@ -15,7 +15,7 @@ implementation:
   - repo: dark-harness
 ---
 
-# DH-0213: TUI: precomposed accented char + extra combining mark drops the next rendered character
+# DH-0214: TUI: precomposed accented char + extra combining mark drops the next rendered character
 
 ## Summary
 

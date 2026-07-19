@@ -77,7 +77,7 @@ extra instrumentation to see the actual byte sequence / timing. Verdicts:
   correctly every time — selection followed, root scrolled out of view exactly as DH-0027
   specifies. Fixed: match `.includes("> ")` instead of `.startsWith("> ")`.
 - **#14 (DH-0025 wide-character wrap/pad)** — genuine product bug, isolated and split off
-  as **DH-0213** (TUI domain, ready). Not a stale-spike issue: a string containing a
+  as **DH-0214** (TUI domain, ready). Not a stale-spike issue: a string containing a
   precomposed accented character immediately followed by an extra Unicode combining mark
   (`café` + U+0301, rendering as `café́`, two accents stacked on one `e`) reliably causes
   the TUI to drop the very next character after that cluster — confirmed via minimal
@@ -113,7 +113,7 @@ extra instrumentation to see the actual byte sequence / timing. Verdicts:
 **Final DH-0060 orchestrator result: 19 items, 18 PASS(-equivalent) / 1 hard FAIL** (up
 from the prior 16/0 baseline in raw pass count, though the comparison is apples-to-oranges
 since this run also includes the 2 Mode B heuristic-driven scenarios the earlier 16/0
-figure may not have covered the same way). The 1 remaining FAIL is DH-0213 (real bug, not
+figure may not have covered the same way). The 1 remaining FAIL is DH-0214 (real bug, not
 this ticket's fault to fix). Re-ran `bun e2e/spikes/tui/run-all.ts` twice more after the
 fixes landed to confirm stability — same 18/1 result both times, no flakiness introduced.
 
@@ -123,5 +123,5 @@ Files touched (all `e2e/spikes/tui/`, no product `src/` code changed):
 `test:coverage`/`e2e` (the standard gated suites, separate from these DH-0060 spikes)
 untouched by this change and not re-run since no product code changed.
 
-Follow-up ticket: **DH-0213** — TUI: precomposed accented char + extra combining mark
+Follow-up ticket: **DH-0214** — TUI: precomposed accented char + extra combining mark
 drops the next rendered character (status: ready, owner: TUI domain / Mary).
