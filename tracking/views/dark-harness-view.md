@@ -64,13 +64,11 @@ source: tracking/
 | [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
 | [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
-| [DH-0170](../DH-0170-tui-and-web-reimplement-the-same-contract-derived-client-core-sse-transport-event-reducer-connectionstatus-slash-command-parser-twice.md) | TUI and Web reimplement the same contract-derived client core (SSE transport, event reducer, ConnectionStatus, slash-command parser) twice | bug | stefan |
 | [DH-0171](../DH-0171-consolidate-duplicated-provider-adapter-helpers-mapstopreason-cache-marker-walk-error-classify-skeleton-and-fix-bedrock-as-unknown-casts.md) | Consolidate duplicated provider-adapter helpers (mapStopReason, cache-marker walk, error-classify skeleton) and fix bedrock as-unknown casts | bug | stefan |
 | [DH-0172](../DH-0172-introduce-a-shared-tool-input-validation-helper-driven-by-inputschema-remove-per-tool-typeof-boilerplate.md) | Introduce a shared tool-input validation helper driven by inputSchema; remove per-tool typeof boilerplate | bug | stefan |
 | [DH-0173](../DH-0173-split-the-agentruntime-god-class-into-collaborators-and-break-up-spawnagent-runroot.md) | Split the AgentRuntime God class into collaborators and break up spawnAgent/runRoot | bug | stefan |
 | [DH-0174](../DH-0174-split-cli-ts-2041-lines-into-focused-modules-and-extract-a-shared-ansi-color-primitive.md) | Split cli.ts (2041 lines) into focused modules and extract a shared ANSI/color primitive | bug | stefan |
 | [DH-0177](../DH-0177-e2e-test-support-cleanup-consolidate-mock-provider-scaffolding-and-resolve-the-spikes-tree-s-status-and-gate-dependency.md) | e2e test-support cleanup: consolidate mock-provider scaffolding and resolve the spikes/ tree's status and gate dependency | bug | stefan |
-| [DH-0178](../DH-0178-de-duplicate-bun-setup-install-steps-and-centralize-the-pinned-bun-version-across-ci-workflows.md) | De-duplicate Bun setup/install steps and centralize the pinned bun-version across CI workflows | bug | stefan |
 | [DH-0179](../DH-0179-revisit-web-static-server-dual-typecheck-split-to-remove-the-loopback-self-proxy-and-any-casts.md) | Revisit web static-server dual-typecheck split to remove the loopback self-proxy and any-casts | bug | stefan |
 | [DH-0180](../DH-0180-relocate-fakeagentloop-out-of-the-production-server-entrypoint-into-test-only-scope.md) | Relocate FakeAgentLoop out of the production server entrypoint into test-only scope | bug | stefan |
 | [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | bug | stefan |
@@ -100,6 +98,7 @@ source: tracking/
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
 | [DH-0139](../DH-0139-dh-web-is-unusable-remotely-out-of-the-box-dh-0128-auto-points-the-client-at-the-lan-ip-but-the-server-rejects-that-same-ip-by-default-421.md) | dh --web is unusable remotely out of the box: DH-0128 auto-points the client at the LAN IP, but the server rejects that same IP by default (421) | bug | stefan |
 | [DH-0149](../DH-0149-replace-shared-process-bun-test-with-per-file-process-isolation-orchestrator-standard-lcov-merge.md) | Replace shared-process bun test with per-file process isolation orchestrator + standard lcov merge | bug | stefan |
+| [DH-0178](../DH-0178-de-duplicate-bun-setup-install-steps-and-centralize-the-pinned-bun-version-across-ci-workflows.md) | De-duplicate Bun setup/install steps and centralize the pinned bun-version across CI workflows | bug | stefan |
 
 ### verifying
 
@@ -124,6 +123,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0170](../DH-0170-tui-and-web-reimplement-the-same-contract-derived-client-core-sse-transport-event-reducer-connectionstatus-slash-command-parser-twice.md) | TUI and Web reimplement the same contract-derived client core (SSE transport, event reducer, ConnectionStatus, slash-command parser) twice | superseded |
 | [DH-0169](../DH-0169-refactoring-round-first-ever-full-history-sweep.md) | Refactoring round: first-ever full-history sweep | done |
 | [DH-0167](../DH-0167-web-printed-url-hardcodes-localhost-ignoring-security-hostname.md) | --web printed URL hardcodes localhost, ignoring security.hostname | done |
 | [DH-0165](../DH-0165-e2e-web-browser-chromium-fails-in-real-ci-headless-chromium-can-t-connect-to-d-bus-dom-assertions-never-satisfied.md) | E2E (web/browser — Chromium) fails in real CI: headless Chromium can't connect to D-Bus, DOM assertions never satisfied | done |
@@ -138,4 +138,3 @@ source: tracking/
 | [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | done |
 | [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | done |
 | [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | done |
-| [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | done |
