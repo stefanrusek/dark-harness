@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0170
 type: bug
-status: draft
+status: closed
 owner: stefan
-resolution:
+resolution: superseded
 blocked_by: []
 created: 2026-07-18
 relations:
@@ -67,4 +67,79 @@ umbrella finding: it should be decomposed (transport / reducer / slash-parser ar
 independently actionable) by the coordinator with architect input, not implemented as one
 lump. Do NOT let an implementer collapse the deliberate validation-strictness divergence
 in item 1 without deciding which behavior is correct.
+
+---
+
+## Architect decomposition (Fable, 2026-07-18)
+
+Confirmed all four duplications against the live code. Decomposition decision below.
+
+### Key architectural finding: nothing goes into `src/contracts/`
+
+The ticket flags `src/contracts/` as the "natural home." It is **not** — per CLAUDE.md §3,
+contracts holds *wire truth* (types serialized on the SSE/POST/log wire), **not logic**, and
+nothing here is on the wire:
+
+- **`ConnectionStatus`** is the client's local connection-lifecycle state. It is never
+  serialized in any SSE event or POST command — it's computed client-side from the transport's
+  reconnect loop. Shared *client vocabulary*, not wire truth.
+- **The slash-command grammar** is pure client input parsing. The *resulting* command is a
+  wire command (already in `contracts/commands.type.ts`), but the parsing/grammar is not.
+- **The `Turn` type** is a client display model, never serialized.
+- The **event vocabulary itself already lives in contracts** (`ServerSentEvent`,
+  `events.type.ts`) and both reducers already import it — that part is not duplicated.
+
+So the correct home for the shared *implementation* is a **new shared client-implementation
+directory, `src/client-core/`** — a sibling to `src/contracts/` but for logic, not schema.
+This is the architect-approved ownership decision (CLAUDE.md §6 items 2 & 3). **No contracts
+change is actually required**, which also means no §6-item-2 wire review is triggered.
+`src/client-core/` is owned by **Core (Grace)** as the neutral integrating domain (it already
+owns cross-cutting non-UI glue); both TUI and Web import from it. DH-0183's scope includes
+adding the `src/client-core/` row to the CLAUDE.md §3 ownership map (pre-approved here).
+
+### Item-by-item disposition
+
+1. **SSE transport (parser + backoff + reconnect)** — genuine shared logic, zero UI coupling
+   (both clients use `fetch()`, not `EventSource`). **Extract to `src/client-core/`.**
+   → **DH-0184** (build the shared module) + **DH-0185** (TUI swap) + **DH-0186** (Web swap).
+   **Validation-strictness divergence resolved:** the permissive shape-check (Web's) is
+   canonical; the TUI's strict `KNOWN_TYPES` allowlist is a **confirmed latent bug** — it
+   omits `model_switched`, `resync`, and `agent_thinking` (all present in the contracts
+   `ServerSentEvent` union and all handled by the TUI reducer), so those events are silently
+   dropped at the parser today. Unknown/future types are the reducer's exhaustiveness-default
+   to tolerate, not the parser's to filter.
+2. **SSE-event reducer + `Turn` type** — **does NOT decompose / deliberately left duplicated.**
+   Despite sharing the event vocabulary, the two reducers have genuinely diverged in ways that
+   make a single shared reducer a large, risky rewrite forcing one architecture onto both:
+   - **Different merge semantics:** TUI merges streamed chunks purely on trailing-turn role;
+     Web tracks an explicit `turnOpen` flag cleared when status leaves `running` (the DH-0066
+     "two turns concatenate into one bubble" fix). Not interchangeable.
+   - **Different `Turn` shapes:** Web has a `timestamp` field and a distinct `"system"` role;
+     TUI has neither (uses `"tool"` for `/help`).
+   - **Different architecture:** TUI's `state.ts` is a full Elm-style `(state, action) ->
+     {state, effects}` reducer also owning keys, views (picker/tree), size, ownsServer/Ctrl+C
+     shutdown. Web's `state.ts` is a bag of pure helper functions driven imperatively by
+     `app.ts`, with React owning views and no effect channel.
+     Unifying these would subordinate both clients' UX models to one shared shape for little
+     gain. The shared *vocabulary* they consume is already centralized (contracts). **Record
+     as intentional; do not merge.**
+3. **Slash-command parser** — byte-identical, zero coupling. **Consolidate into
+   `src/client-core/`.** → **DH-0183.**
+4. **`ConnectionStatus` union** — shared client vocabulary, declared twice. **Consolidate into
+   `src/client-core/`.** → **DH-0183** (bundled with the slash parser as the low-risk
+   foundation).
+
+### Sub-tickets (independently pickup-able)
+
+- **DH-0183** — establish `src/client-core/`; move slash-parser + `ConnectionStatus`; update
+  CLAUDE.md §3. Low-risk foundation.
+- **DH-0184** — build the shared SSE transport in `src/client-core/` (validation decision
+  baked in). Depends on DH-0183.
+- **DH-0185** — TUI (Mary) migrates onto the shared transport. Depends on DH-0184.
+- **DH-0186** — Web (Susan) migrates onto the shared transport. Depends on DH-0184.
+
+DH-0185 and DH-0186 are independent of each other — Mary and Susan can pick them up in
+parallel once DH-0184 lands. Item 2 (reducer/`Turn`) yields no ticket by design.
+
+DH-0170 closes as **superseded** by this decomposition.
 
