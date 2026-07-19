@@ -189,7 +189,7 @@ function interactiveOverrides(io: CliIo): Partial<CliDeps> {
     loadConfig: async () => TEST_CONFIG,
     createAgentLoop: () => fakeAgentLoop(),
     createServer: () => fakeServer(),
-    startTui: async () => {},
+    startTui: async () => ({}),
     serveWebUi: () => fakeWebUi(),
     io,
     installSignalHandlers: fakeInstallSignalHandlers(),
@@ -672,11 +672,14 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       startTui: async (baseUrl) => {
         calls.push("startTui");
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
     expect(calls).toEqual(["createServer", "start", "startTui", "stop"]);
-    expect(receivedBaseUrl).toBe("http://localhost:55123");
+    // DH-0166: local TUI-only mode dials the same loopback address it binds — derived from
+    // one shared constant, not an independently-hardcoded `localhost`.
+    expect(receivedBaseUrl).toBe("http://127.0.0.1:55123");
   });
 
   test("--web starts local web mode: server + web UI on ephemeral ports, prints the URL, never calls startTui", async () => {
@@ -693,6 +696,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
       startTui: async () => {
         startTuiCalled = true;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
@@ -713,6 +717,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
       startTui: async () => {
         startTuiCalled = true;
+        return {};
       },
       serveWebUi: () => {
         serveWebUiCalled = true;
@@ -834,6 +839,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
       startTui: async (baseUrl) => {
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
@@ -865,6 +871,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       ...interactiveOverrides(io),
       startTui: async (baseUrl) => {
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
@@ -895,6 +902,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       }),
       startTui: async (baseUrl) => {
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(receivedBaseUrl).toBe(`https://example.com:${DEFAULT_PORT}`);
@@ -924,7 +932,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(sawTokenKey).toBe(false);
   });
 
-  test("config.security is passed through to createServer when set, omitted when unset", async () => {
+  test("config.security is passed through to createServer; DH-0166: local TUI-only mode forces loopback", async () => {
     const io = fakeIo();
     let receivedSecurity: unknown = "unset-sentinel";
     await main([], {
@@ -935,10 +943,64 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
         return fakeServer();
       },
     });
-    expect(receivedSecurity).toEqual({ token: "shh" });
+    // DH-0166: token passes through untouched, but plain `dh` (local TUI-only) always pins
+    // the bind interface to loopback — even with no `security.hostname` configured, since
+    // Bun's default would otherwise be every interface.
+    expect(receivedSecurity).toEqual({ token: "shh", hostname: "127.0.0.1" });
 
-    let sawSecurityKey = true;
+    // DH-0166: a configured `security.hostname` (remote reachability for --server/--web) is
+    // overridden — not honored — on the local TUI-only path; this is the exact misbind that
+    // made plain `dh` hang in an infinite reconnect loop.
     await main([], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "192.168.1.50" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "127.0.0.1" });
+
+    // DH-0166: with no security config at all, local TUI-only mode still forces loopback.
+    await main([], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "127.0.0.1" });
+  });
+
+  test("DH-0166: --server and local --web keep honoring security.hostname on createServer (no loopback forcing)", async () => {
+    const io = fakeIo();
+    let receivedSecurity: unknown = "unset-sentinel";
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "192.168.1.50" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "192.168.1.50" });
+
+    // Local --web: the browser dials the DhServer directly (src/web/server.ts resolveConfig),
+    // so remote reachability there is the operator's actual intent — hostname passes through.
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "192.168.1.50" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "192.168.1.50" });
+
+    // --server with no security config: unchanged pre-DH-0166 behavior — no security key
+    // forwarded at all (Bun's own default bind).
+    let sawSecurityKey = true;
+    await main(["--server"], {
       ...interactiveOverrides(io),
       createServer: (options) => {
         sawSecurityKey = "security" in options;
@@ -946,6 +1008,30 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(sawSecurityKey).toBe(false);
+  });
+
+  test("DH-0166: a TUI fatalError (SSE transport gave up) exits HarnessError with the message on stderr — local and --connect", async () => {
+    const io = fakeIo();
+    const localCode = await main([], {
+      ...interactiveOverrides(io),
+      startTui: async () => ({
+        fatalError: "could not connect to http://127.0.0.1:1 after 10 attempts",
+      }),
+    });
+    expect(localCode).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines.join("\n")).toContain(
+      "dh: error: could not connect to http://127.0.0.1:1 after 10 attempts",
+    );
+
+    const io2 = fakeIo();
+    const connectCode = await main(["--connect", "example.com"], {
+      ...interactiveOverrides(io2),
+      startTui: async () => ({ fatalError: "could not connect to http://example.com:4000" }),
+    });
+    expect(connectCode).toBe(ExitCode.HarnessError);
+    expect(io2.stderrLines.join("\n")).toContain(
+      "dh: error: could not connect to http://example.com:4000",
+    );
   });
 
   test("DH-0022: security.hostname is passed through to serveWebUi (local --web) when set, omitted when unset", async () => {
@@ -2410,7 +2496,7 @@ describe("main — real filesystem-backed default deps", () => {
     const io = fakeIo();
     const code = await main([], {
       loadConfig: async () => TEST_CONFIG,
-      startTui: async () => {},
+      startTui: async () => ({}),
       io,
       installSignalHandlers: fakeInstallSignalHandlers(),
     });

@@ -73,7 +73,6 @@ source: tracking/
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
-| [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need | bug | stefan |
 | [DH-0192](../DH-0192-logo-redesign-current-mark-is-too-literal-and-reads-unintentionally-suggestive.md) | Brand mark — standardize the diamond on ink (not amber), and redraw the ASCII banner to the bracket lockup | bug | stefan |
 | [DH-0193](../DH-0193-wordmark-needs-more-padding-wherever-it-s-plugged-in-next-to-the-logo.md) | Wordmark needs more padding wherever it's plugged in next to the logo | bug | stefan |
 | [DH-0195](../DH-0195-readme-stale-missing-web-port-host-import-model-and-slash-command-autocomplete.md) | README stale: missing --web-port, --host, --import/--model, and slash-command autocomplete | bug | stefan |

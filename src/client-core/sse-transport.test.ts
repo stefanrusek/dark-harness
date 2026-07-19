@@ -498,4 +498,102 @@ describe("runSseTransport", () => {
 
     expect(reconnectedCalls).toBe(2);
   });
+
+  // DH-0166: bounded retries — the opt-in cap on consecutive failed attempts that keeps a
+  // non-transient failure from spinning `reconnecting…` forever.
+  test("DH-0166: gives up after maxConsecutiveFailures consecutive failed attempts, calling onGiveUp with the last error then reporting disconnected", async () => {
+    const statuses: ConnectionStatus[] = [];
+    let attempts = 0;
+    let giveUpError: unknown;
+
+    const fetchImpl = asFetch(async () => {
+      attempts += 1;
+      return new Response(null, { status: 503 });
+    });
+
+    await runSseTransport({
+      url: "http://x/events",
+      fetchImpl,
+      onEvent: () => {},
+      onConnectionChange: (status) => statuses.push(status),
+      onGiveUp: (err) => {
+        giveUpError = err;
+      },
+      maxConsecutiveFailures: 3,
+      delayImpl: noDelay,
+    });
+
+    expect(attempts).toBe(3);
+    expect(giveUpError).toBeInstanceOf(Error);
+    expect((giveUpError as Error).message).toContain("HTTP 503");
+    // The final status is `disconnected` (the transport stopped trying), never a stale
+    // trailing `reconnecting` — the give-up attempt itself doesn't add one. Each pre-attempt
+    // status is `connecting` (no event frame was ever received, so there's nothing to
+    // "re"-connect to yet — see the lastEventId check in runSseTransport).
+    expect(statuses).toEqual([
+      "connecting",
+      "reconnecting",
+      "connecting",
+      "reconnecting",
+      "connecting",
+      "disconnected",
+    ]);
+  });
+
+  test("DH-0166: a successful open resets the failure streak — the cap only counts consecutive failures", async () => {
+    const controller = new AbortController();
+    let call = 0;
+    let gaveUp = false;
+
+    const fetchImpl = asFetch(async () => {
+      call += 1;
+      // One failure, then a clean open+close resets the streak, then two more failures —
+      // never two-in-a-row until calls 3 and 4, which hit the cap of 2.
+      if (call === 1) return new Response(null, { status: 500 });
+      if (call === 2) return streamResponse([]);
+      return new Response(null, { status: 500 });
+    });
+
+    await runSseTransport({
+      url: "http://x/events",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      onGiveUp: () => {
+        gaveUp = true;
+      },
+      maxConsecutiveFailures: 2,
+      delayImpl: noDelay,
+    });
+
+    expect(gaveUp).toBe(true);
+    // 1 failure + 1 success (reset) + 2 consecutive failures = 4 total attempts.
+    expect(call).toBe(4);
+  });
+
+  test("DH-0166: without maxConsecutiveFailures the transport never gives up on its own (pre-existing behavior)", async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    let gaveUp = false;
+
+    const fetchImpl = asFetch(async () => {
+      attempts += 1;
+      if (attempts === 20) controller.abort();
+      return new Response(null, { status: 500 });
+    });
+
+    await runSseTransport({
+      url: "http://x/events",
+      fetchImpl,
+      signal: controller.signal,
+      onEvent: () => {},
+      onGiveUp: () => {
+        gaveUp = true;
+      },
+      delayImpl: noDelay,
+    });
+
+    expect(attempts).toBe(20);
+    expect(gaveUp).toBe(false);
+  });
 });

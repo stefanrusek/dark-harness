@@ -27,6 +27,13 @@ import type { CliDeps, CliIo, WebUiHandleLike } from "./deps.ts";
 import { fail } from "./deps.ts";
 import { cliBold, cliCautionGlyph, cliSuccessGlyph } from "./styling.ts";
 
+/** DH-0166: the single source of truth for local/TUI-only mode's bind address AND the TUI's
+ * own client target — one constant so the bound interface and the dialed address cannot
+ * drift apart (the original bug: server bound `security.hostname`'s interface, TUI dialed a
+ * hardcoded `localhost`). Local mode always binds — and dials — loopback; see the
+ * `localTuiOnly` block in `runInteractiveMode`. */
+export const LOCAL_LOOPBACK_HOST = "127.0.0.1";
+
 /**
  * DH-0038: the synthetic wake-up message a `--resume`d root agent's conversation gets
  * appended (D3) when no `--instructions` file supplies one instead. States plainly what
@@ -221,7 +228,11 @@ export async function runInteractiveMode(
         );
         return ExitCode.Success;
       }
-      await deps.startTui(targetBaseUrl, config.security?.token);
+      const connectResult = await deps.startTui(targetBaseUrl, config.security?.token);
+      if (connectResult.fatalError !== undefined) {
+        io.stderr(`dh: error: ${connectResult.fatalError}`);
+        return ExitCode.HarnessError;
+      }
       return ExitCode.Success;
     }
 
@@ -259,12 +270,26 @@ export async function runInteractiveMode(
     // DH-0067: operators repeatedly ask "is my TUI even connected?" with nothing on either
     // side to confirm — a dim one-liner per SSE connect/disconnect. `--quiet` suppresses it
     // along with the agent activity feed below (the startup block itself always prints).
+    // DH-0166: local/TUI-only mode's server exists solely so this same process's own TUI has
+    // something to talk to — it has no legitimate remote-reachability use case, so it binds
+    // loopback unconditionally, ignoring `security.hostname` (whose entire purpose is remote
+    // reachability for `--server`/`--web`, DH-0022/DH-0182). Before this, forwarding
+    // `config.security` unmodified meant a configured `hostname` bound *only* that interface
+    // while the TUI dialed loopback — plain `dh` hung in an infinite reconnect loop — and an
+    // *unset* hostname bound every interface (Bun's default), an unnecessary exposure for a
+    // same-process IPC channel. `--web` local mode keeps honoring `hostname`: its browser
+    // dials the DhServer directly (src/web/server.ts's `resolveConfig`), so remote
+    // reachability there is the operator's actual intent.
+    const localTuiOnly = mode.kind === "local" && !mode.web;
+    const serverSecurity = localTuiOnly
+      ? { ...config.security, hostname: LOCAL_LOOPBACK_HOST }
+      : config.security;
     const server = deps.createServer({
       agentLoop,
       sessionId,
       logDir,
       port: mode.kind === "server" ? mode.port : 0,
-      ...(config.security ? { security: config.security } : {}),
+      ...(serverSecurity ? { security: serverSecurity } : {}),
       ...(quiet
         ? {}
         : {
@@ -375,7 +400,14 @@ export async function runInteractiveMode(
       return ExitCode.Success;
     }
 
-    const baseUrl = `http://localhost:${boundPort}`;
+    // DH-0166: in TUI-only mode the client address is derived from the same bind decision as
+    // the server (`LOCAL_LOOPBACK_HOST` above), not an independently-hardcoded literal — the
+    // two can no longer drift apart the way `hostname`-bound-server vs `localhost`-dialing-TUI
+    // did. The `--web` path keeps `localhost`: `resolveConfig` (src/web/server.ts) rewrites a
+    // loopback target host to whatever Host the browser actually used.
+    const baseUrl = localTuiOnly
+      ? `http://${LOCAL_LOOPBACK_HOST}:${boundPort}`
+      : `http://localhost:${boundPort}`;
     if (mode.web) {
       webHandle = deps.serveWebUi({
         port: webPort,
@@ -394,7 +426,7 @@ export async function runInteractiveMode(
       return ExitCode.Success;
     }
 
-    await deps.startTui(baseUrl, config.security?.token, { ownsServer: true });
+    const tuiResult = await deps.startTui(baseUrl, config.security?.token, { ownsServer: true });
     // DH-0059 backstop: guarantees no orphaned root agent regardless of *how* the TUI
     // resolved — a graceful Ctrl+C shutdown already stopped it (this is then a no-op re-abort
     // of an already-idempotent stopRoot()), but a force quit, the TUI's own fallback timer, or
@@ -406,6 +438,13 @@ export async function runInteractiveMode(
     }
     uninstallSignals();
     server.stop();
+    // DH-0166: the TUI tearing itself down because it could never (re)connect is a harness
+    // fault, not a clean quit — print the actionable error the TUI built and exit per the
+    // ADR 0005 contract.
+    if (tuiResult.fatalError !== undefined) {
+      io.stderr(`dh: error: ${tuiResult.fatalError}`);
+      return ExitCode.HarnessError;
+    }
     return ExitCode.Success;
   } catch (err) {
     return fail(io, `failed to start ${mode.kind} mode: ${(err as Error).message}`);

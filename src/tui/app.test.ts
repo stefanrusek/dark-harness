@@ -931,4 +931,47 @@ describe("startTui: DH-0093 slash-command wiring", () => {
     stdin.type("\x03");
     await done;
   });
+
+  test("DH-0166: resolves with a fatalError and exits the alt screen once the SSE transport gives up", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    // Command traffic works normally; only the SSE endpoint hard-fails — the shape of a
+    // server the TUI can never establish an event stream against.
+    const innerFetch = server.fetchImpl;
+    const failingSse = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith(EVENTS_PATH)) return new Response(null, { status: 503 });
+      return (innerFetch as unknown as (u: typeof url, i?: RequestInit) => Promise<Response>)(
+        url,
+        init,
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: failingSse },
+      // Cap of 1: the very first failed attempt gives up immediately — no real jittered
+      // backoff waits in the test. The cap/streak arithmetic itself is covered by
+      // sse-transport.test.ts.
+      maxSseFailures: 1,
+    });
+
+    expect(result.fatalError).toContain("could not connect to http://x after 1 attempts");
+    expect(result.fatalError).toContain("HTTP 503");
+    // The TUI tore itself down (left the alt screen) rather than spinning on reconnecting…
+    expect(stdout.allWrites()).toContain(ALT_SCREEN_EXIT);
+  });
+
+  test("DH-0166: a normal operator quit resolves with no fatalError", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+    stdin.type("\x03");
+    const result = await done;
+    expect(result.fatalError).toBeUndefined();
+  });
 });

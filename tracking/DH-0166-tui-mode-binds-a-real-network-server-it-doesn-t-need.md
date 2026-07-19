@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0166
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-18
 relations:
@@ -123,3 +123,69 @@ Reproduced by the coordinator (2026-07-19) against the repo's own local `dh.json
 `security.hostname` pinned to a stale LAN IP from earlier cross-machine web-UI testing) —
 immediate local workaround applied (nulled the field in the untracked, gitignored local
 `dh.json`) to unblock testing, but that's a workaround, not a fix; the underlying bug stands.
+
+**2026-07-19 — closed, extracted from stale branch.** A prior implementation of this fix had
+landed on `origin/dh-0166-rederive`, but that branch went stale (forked from a point before
+DH-0213/DH-0215/DH-0216/DH-0217 landed on `claude/coordinator-onboarding-kab9ls`) and its
+completion notification never reached the coordinator. Rather than merge it wholesale (which
+would have deleted several already-merged tracking files and clobbered DH-0217's already-
+verified `spile-ops` guard fix), the real DH-0166 product-code diff was hand-extracted and
+reapplied cleanly on top of current HEAD:
+
+- `src/cli/run.ts`: new `LOCAL_LOOPBACK_HOST = "127.0.0.1"` constant; local/TUI-only mode
+  (`mode.kind === "local" && !mode.web`) now forces `security.hostname` to loopback when
+  building `serverSecurity` passed to `deps.createServer`, and derives the TUI's `baseUrl`
+  from that same `localTuiOnly` decision instead of an independently hardcoded `localhost`
+  literal. `--server`, local `--web`, and `--connect` are unaffected — `security.hostname`
+  still passes through untouched for all of them. A `startTui` result carrying `fatalError`
+  now causes `runInteractiveMode` (both the local and `--connect` call sites) to print the
+  error and return `ExitCode.HarnessError`.
+- `src/cli/deps.ts`: `CliDeps.startTui`'s return type changed from `Promise<void>` to
+  `Promise<{ fatalError?: string }>`.
+- `src/client-core/sse-transport.ts`: `runSseTransport` gained opt-in
+  `maxConsecutiveFailures`/`onGiveUp` options — once a caller-supplied cap of *consecutive*
+  failed attempts is hit (a single successful open resets the streak), the loop reports
+  `disconnected` and calls `onGiveUp(lastError)` instead of retrying forever. Omitting the
+  option preserves the pre-existing unbounded-retry behavior (used by the Web client).
+- `src/tui/app.ts`: `startTui` now returns `Promise<StartTuiResult>` (`{ fatalError?: string }`,
+  re-exported from `src/tui/index.ts`); wires `maxConsecutiveFailures: SSE_MAX_CONSECUTIVE_FAILURES`
+  (10, overridable via the test-only `opts.maxSseFailures`) and an `onGiveUp` handler that
+  builds a "could not connect to `<baseUrl>` after N attempts (`<detail>`)..." message, stores
+  it, and tears the TUI down via the existing `finish()` path.
+- Test coverage added/updated: `src/client-core/sse-transport.test.ts` (3 new cases — gives up
+  at the cap, a success resets the streak, no cap means never give up),
+  `src/tui/app.test.ts` (2 new cases — fatalError result + alt-screen exit on give-up, normal
+  quit still resolves with no fatalError), `src/cli.test.ts` (loopback-forcing on the local
+  path with/without a configured `hostname`, `--server`/local `--web` still honoring
+  `hostname` unchanged, and a new case asserting `HarnessError` + the stderr message on a TUI
+  `fatalError` for both local and `--connect`).
+
+**Deliberately discarded from the stale branch** (not part of this fix, and reapplying them
+would have either regressed or duplicated already-landed work):
+- `src/agent/runtime.ts` and `src/prompt/system-prompt.ts` changes reverting the DH-0215
+  self-awareness feature (`renderSelfInfoSection`'s session/agent-id/log-path section) — that
+  branch was forked before DH-0215 landed on current HEAD; keeping DH-0215's code intact was
+  the correct call, not a merge of this branch's stale diff against it.
+- `.claude/skills/spile-ops/scripts/new_ticket.py`/`common.py` and `PLAYBOOK.md` changes —
+  DH-0217 already landed a proper, tested `die_if_linked_worktree()` guard for the exact same
+  file/problem on current HEAD; the stale branch's version was not reapplied.
+- Any `tracking/DH-02XX-*.md` files the stale branch's diff would have deleted (DH-0213,
+  DH-0215, DH-0216, DH-0217, DH-0218) — untouched, since those are real work merged after the
+  branch forked.
+- `e2e/spikes/tui/*` and `REPORT.md` changes visible in the branch's full diff were reviewed
+  and judged unrelated leftover DH-0212 TUI-spike context rather than part of the DH-0166 fix
+  itself — not reapplied.
+
+**Live-repro verification (2026-07-19):** built the real binary
+(`bun scripts/build.ts --outfile <scratch>/dh`), wrote a scratch `dh.json` with
+`security.hostname` set to a real LAN interface IP (`192.168.1.238`, confirmed via `ifconfig`),
+ran plain `dh` against it. Confirmed via the TUI's own status line that it reached `live`
+(previously this exact config hung forever in `connecting…`/`reconnecting…`), and confirmed
+via `lsof -iTCP -sTCP:LISTEN -P -n -p <pid>` that the process was listening on
+`127.0.0.1:<port>` only — no socket bound to the configured LAN IP or any wildcard interface.
+
+**Gates (2026-07-19):** `bun run typecheck`, `bun run lint`, and `bun run test:coverage`
+(100.00% lines, 137/137 test files) all green. `bun run e2e` has one pre-existing flake
+(`e2e/web.test.ts`'s "status colors, live output, token/cost display, and log download" case)
+that reproduces identically on unmodified HEAD (confirmed via `git stash`) and passes in
+isolation — unrelated to this fix, not a regression it introduced.

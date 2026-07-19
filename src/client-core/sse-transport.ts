@@ -43,6 +43,17 @@ export interface SseTransportOptions {
    * since the server-side event buffer may not have retained everything that happened while
    * disconnected. */
   onReconnected?: () => void;
+  /** DH-0166: upper bound on *consecutive* failed connection attempts before the transport
+   * gives up: once this many attempts in a row have failed without a single successful open
+   * in between, the loop stops retrying, reports `disconnected`, and calls `onGiveUp`. Any
+   * successful open resets the streak. Omitted (the default, and the Web client's behavior)
+   * means retry forever — the pre-DH-0166 behavior. */
+  maxConsecutiveFailures?: number;
+  /** DH-0166: the transport stopped retrying because `maxConsecutiveFailures` consecutive
+   * attempts failed. Called at most once, with the last attempt's error, right before the
+   * final `disconnected` status. Callers use this to surface a clear, terminal error instead
+   * of letting a status display spin on `reconnecting` forever. */
+  onGiveUp?: (lastError: unknown) => void;
   reconnectDelayMs?: number;
   maxReconnectDelayMs?: number;
   delayImpl?: (ms: number) => Promise<void>;
@@ -94,11 +105,20 @@ export async function runSseTransport(options: SseTransportOptions): Promise<voi
       // immediately retries below just like after a failed attempt, so it's reported the
       // same way: `reconnecting`.
       options.onConnectionChange?.("reconnecting");
-    } catch {
+    } catch (err) {
       if (options.signal?.aborted) break;
-      // A failed attempt always leads to another retry (this transport never gives up on its
-      // own) — that's exactly what the shared `reconnecting` state means, not a fatal
-      // `error`.
+      // DH-0166: bounded-retry callers (the TUI talking to its own same-process server) stop
+      // here once the streak hits the cap — an unbounded `reconnecting` spinner against a
+      // non-transient failure is exactly the opaque failure mode that ticket escalated on.
+      if (
+        options.maxConsecutiveFailures !== undefined &&
+        consecutiveFailures + 1 >= options.maxConsecutiveFailures
+      ) {
+        options.onGiveUp?.(err);
+        break;
+      }
+      // A failed attempt otherwise always leads to another retry — that's exactly what the
+      // shared `reconnecting` state means, not a fatal `error`.
       options.onConnectionChange?.("reconnecting");
       // Compute the wait using the failure streak *before* this one counts, so the very
       // first retry is jittered around the plain `base` delay rather than already doubled —
@@ -119,9 +139,9 @@ export async function runSseTransport(options: SseTransportOptions): Promise<voi
       computeBackoffDelayMs(consecutiveFailures, reconnectDelayMs, maxReconnectDelayMs, random),
     );
   }
-  // The loop only exits via `signal.aborted` — the one genuine "given up" case. Report it
-  // here too so a header/status display doesn't freeze on a stale `reconnecting`/`live` label
-  // when the operator (or the owning client) deliberately tears the connection down.
+  // The loop exits via `signal.aborted` (deliberate teardown) or the DH-0166 give-up branch
+  // above — both are genuine "stopped trying" cases. Report `disconnected` here so a header/
+  // status display doesn't freeze on a stale `reconnecting`/`live` label either way.
   options.onConnectionChange?.("disconnected");
 }
 

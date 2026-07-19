@@ -98,6 +98,23 @@ const FRAME_INTERVAL_MS = 33;
  * progress). A second Ctrl+C forces the same outcome sooner; this is only the backstop. */
 export const SHUTDOWN_FALLBACK_MS = 5000;
 
+/** DH-0166: how many consecutive failed SSE connection attempts the TUI tolerates before
+ * giving up and exiting with a fatal error instead of spinning on `reconnecting…` forever.
+ * The TUI's server is either this same process (local mode) or an operator-named `--connect`
+ * target — in both cases a failure that survives this many jittered-backoff attempts is
+ * non-transient, and an endless spinner with a one-line status is exactly the opaque failure
+ * mode DH-0166 escalated on. The Web client keeps its unbounded retry (a browser tab can
+ * legitimately outlive a long server restart). */
+export const SSE_MAX_CONSECUTIVE_FAILURES = 10;
+
+/** DH-0166: what `startTui` resolves with. `fatalError` is set when the TUI tore itself down
+ * because its SSE transport gave up (see `SSE_MAX_CONSECUTIVE_FAILURES`) — the caller
+ * (Core's run.ts) is responsible for printing it and exiting non-zero. Absent on a normal
+ * operator quit. */
+export interface StartTuiResult {
+  fatalError?: string;
+}
+
 export interface StartTuiOptions {
   /** DH-0059: true when this process also constructed the `DhServer` this TUI talks to
    * (local mode) — passed by `src/cli.ts`, which is the only place that knows. Defaults to
@@ -106,11 +123,17 @@ export interface StartTuiOptions {
   /** Lets tests inject fake stdin/stdout/fetch; production callers (Core's `src/cli.ts`)
    * can omit it to use the real terminal and network. */
   io?: Partial<TuiIO>;
+  /** DH-0166: override for `SSE_MAX_CONSECUTIVE_FAILURES` — test-only knob (a real give-up
+   * at the production cap sits behind minutes of jittered backoff). Production callers omit
+   * it. */
+  maxSseFailures?: number;
 }
 
 /**
  * Start the console TUI against the server at `baseUrl`. Resolves once the user quits
- * (Ctrl+C).
+ * (Ctrl+C), or — DH-0166 — once the SSE transport gives up after
+ * `SSE_MAX_CONSECUTIVE_FAILURES` consecutive failed attempts, in which case the result's
+ * `fatalError` carries the message the caller should surface (and exit non-zero on).
  *
  * `token`, when the target server has `security.token` configured (ADR 0004), is sent as a
  * real `Authorization: Bearer <token>` header on every HTTP/SSE request the client makes —
@@ -122,7 +145,7 @@ export async function startTui(
   baseUrl: string,
   token?: string,
   opts: StartTuiOptions = {},
-): Promise<void> {
+): Promise<StartTuiResult> {
   // DH-0164: the real fix for Ink's CI-suppressed-rendering bug (`is-in-ci`, same mechanism
   // as DH-0146) lives in `src/cli.ts`'s very first import
   // (`./tui/ink/clear-ci-env-for-interactive-render.ts`), not here — `mountInk`/`ink` are
@@ -161,8 +184,12 @@ export async function startTui(
   // tree calls Ink's `useInput`/`usePaste`, so mounting does not touch stdin raw-mode — that
   // stays owned by this file's own `stdin.on("data", ...)` wiring below, unchanged.
 
-  return new Promise<void>((resolve) => {
+  return new Promise<StartTuiResult>((resolve) => {
     const abortController = new AbortController();
+
+    // DH-0166: set by the SSE transport's `onGiveUp` right before it forces a `finish()` —
+    // read once, in `finish()`, to build the result the promise resolves with.
+    let fatalError: string | undefined;
 
     // Mounted just below, right after the alt-screen/cursor/bracketed-paste escape sequences
     // are written — so that write is always the first thing on the wire, matching this
@@ -224,7 +251,7 @@ export async function startTui(
       finished = true;
       if (shutdownFallbackTimer !== undefined) clearTimeout(shutdownFallbackTimer);
       cleanup();
-      resolve();
+      resolve(fatalError !== undefined ? { fatalError } : {});
     }
 
     function dispatch(action: Action): void {
@@ -351,6 +378,18 @@ export async function startTui(
       onEvent: (event) => dispatch({ type: "sse_event", event }),
       onConnectionChange: (status) => dispatch({ type: "connection", status }),
       onReconnected: () => dispatch({ type: "reconnected" }),
+      // DH-0166: bounded retries — after this many consecutive failures the failure is
+      // non-transient; tear the TUI down and let the caller print a real error (the FR's
+      // "clear, actionable error, not an endless reconnecting… spinner").
+      maxConsecutiveFailures: opts.maxSseFailures ?? SSE_MAX_CONSECUTIVE_FAILURES,
+      onGiveUp: (err) => {
+        const detail = err instanceof Error ? err.message : String(err);
+        const attempts = opts.maxSseFailures ?? SSE_MAX_CONSECUTIVE_FAILURES;
+        fatalError =
+          `could not connect to ${baseUrl} after ${attempts} attempts ` +
+          `(${detail}). Check that the server is running and reachable at that address.`;
+        finish();
+      },
     });
 
     // Fire request_agent_tree on startup (not just on left-arrow) so rootAgentId gets

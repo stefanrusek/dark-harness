@@ -125,7 +125,14 @@ export interface CliDeps {
    * `DhServer` it's talking to (local mode) — only this module knows, since it's the one
    * that did or didn't build one. Local mode passes `{ ownsServer: true }`; `--connect`
    * mode passes nothing, defaulting to `false` (unchanged detach-only behavior). */
-  startTui: (baseUrl: string, token?: string, opts?: { ownsServer?: boolean }) => Promise<void>;
+  /** DH-0166: resolves with `{ fatalError }` when the TUI tore itself down because its SSE
+   * transport gave up (bounded retries) — run.ts prints it and exits `HarnessError`. An
+   * empty result is a normal operator quit. */
+  startTui: (
+    baseUrl: string,
+    token?: string,
+    opts?: { ownsServer?: boolean },
+  ) => Promise<{ fatalError?: string }>;
   serveWebUi: (options: {
     port: number;
     targetBaseUrl: string;
