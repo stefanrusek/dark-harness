@@ -266,12 +266,14 @@ describe("Transcript", () => {
   // pure scroll-driven move away from the bottom left the button stuck hidden.
   test("DH-0200: scrolling away from the bottom with no new content reveals jump-to-latest", () => {
     const agent = agentWithOutput() as AgentNode;
-    const { container } = render(<Transcript
+    const { container } = render(
+      <Transcript
         agent={agent}
         sessionEnded={false}
         exitCode={null}
         onCancelQueuedMessage={() => {}}
-      />);
+      />,
+    );
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
 
