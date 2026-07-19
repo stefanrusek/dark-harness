@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ColorLevel } from "../design-tokens.ts";
+import { type ColorLevel, fgCode, nearestAnsi256 } from "../design-tokens.ts";
 import {
   type HeaderStatusFacts,
   renderHeaderA2,
@@ -90,7 +90,7 @@ describe("renderHeaderA2", () => {
   for (const level of LEVELS) {
     test(`${level}: full-size renders the gradient wordmark + tree (with web ui/logs)`, () => {
       const lines = renderHeaderA2(FACTS_NO_TOKEN, level, BIG_TERM);
-      expect(lines.length).toBeGreaterThan (5);
+      expect(lines.length).toBeGreaterThan(5);
       const joined = lines.join("\n");
       if (level === "none") {
         expect(joined).toContain("DARK HARNESS");
@@ -119,6 +119,41 @@ describe("renderHeaderA2", () => {
   test("no-columns/no-rows small terminal also falls back", () => {
     const lines = renderHeaderA2(FACTS_NO_TOKEN, "truecolor", { columns: 0, rows: 0 });
     expect(lines[0]).toBe("DARK HARNESS");
+  });
+});
+
+// DH-0225: the healthy startup-header dot must paint with STATUS_TOKENS.done.webHex
+// (#35c469) — the same canonical ok/live green the TUI agent tree and Web sidebar use for
+// their status dots — not BRAND.harnessGreen (#9ECE6A), so "ok/live/green" is one color
+// across every surface.
+describe("healthDot color (DH-0225)", () => {
+  // The health dot lives on the status-tree line starting with "dh <version>" — isolate it
+  // so this doesn't false-positive/negative against the wordmark gradient lines above it,
+  // which legitimately span the harnessGreen->signalCyan range (including harnessGreen's own
+  // code) for unrelated, in-scope reasons (see ticket's Rationale).
+  function healthDotLine(level: ColorLevel): string {
+    const lines = renderHeaderA2(FACTS_NO_TOKEN, level, BIG_TERM);
+    const line = lines.find((l) => l.includes("dh 0.1.0"));
+    if (!line) throw new Error("status-tree line not found");
+    return line;
+  }
+
+  test("truecolor: healthy dot uses #35c469's SGR sequence, not #9ECE6A's", () => {
+    const line = healthDotLine("truecolor");
+    expect(line).toContain(fgCode("#35c469", "truecolor"));
+    expect(line).not.toContain(fgCode("#9ECE6A", "truecolor"));
+  });
+
+  test("ansi256: healthy dot uses #35c469's nearest ansi256 index, not #9ECE6A's", () => {
+    const line = healthDotLine("ansi256");
+    const doneCode = fgCode("#35c469", "ansi256");
+    const harnessGreenCode = fgCode("#9ECE6A", "ansi256");
+    expect(line).toContain(doneCode);
+    // Only assert non-overlap when the two hexes actually downsample to different indices —
+    // guards against a false negative if a future palette tweak coincidentally collides them.
+    if (nearestAnsi256("#35c469") !== nearestAnsi256("#9ECE6A")) {
+      expect(line).not.toContain(harnessGreenCode);
+    }
   });
 });
 
