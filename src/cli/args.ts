@@ -67,6 +67,11 @@ export interface CliOptions {
    * `dh.json`'s `options.defaultModel`. A usage error (`--model requires --import`) outside
    * an `--import` invocation — it has no meaning anywhere else. */
   model: string | null;
+  /** DH-0220: forces the plain-text startup-header fallback (no color, no box-drawing/
+   * gradient art) regardless of TTY/size — same effect as `NO_COLOR` being set, expressed as
+   * a flag for scripts/CI that can't easily set env vars. See `detectColorLevel`
+   * (src/cli/color-context.ts) and the header renderers (src/cli/header.ts). */
+  plain: boolean;
 }
 
 const FLAGS_WITH_VALUES = Object.freeze(
@@ -127,6 +132,7 @@ export function parseArgs(argv: string[]): CliOptions {
     host: null,
     importPath: null,
     model: null,
+    plain: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -161,6 +167,10 @@ export function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--dry-run") {
       options.dryRun = true;
+      continue;
+    }
+    if (arg === "--plain") {
+      options.plain = true;
       continue;
     }
     if (arg !== undefined && FLAGS_WITH_VALUES.has(arg)) {

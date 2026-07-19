@@ -21,10 +21,13 @@ import { pruneLogDirectories } from "../server/index.ts";
 // DH-0101: reuse Web's short-id formatter for the transcript renderer rather than forking the
 // logic — same reasoning as ActivityFeed's own import of it (activity-feed.ts).
 import { shortAgentId } from "../web/client/format.ts";
-import { ActivityFeed, buildStartupPostureNote, printAppHeader } from "./activity-feed.ts";
+import { ActivityFeed, buildStartupPostureNote } from "./activity-feed.ts";
 import type { CliOptions, RunMode } from "./args.ts";
+import { detectColorLevel } from "./color-context.ts";
 import type { CliDeps, CliIo, WebUiHandleLike } from "./deps.ts";
 import { fail } from "./deps.ts";
+import type { HeaderStatusFacts } from "./header.ts";
+import { renderHeaderA2, renderHeaderB, styleDhPrefix } from "./header.ts";
 import { cliBold, cliCautionGlyph, cliSuccessGlyph } from "./styling.ts";
 
 /** DH-0166: the single source of truth for local/TUI-only mode's bind address AND the TUI's
@@ -184,6 +187,9 @@ export async function runInteractiveMode(
   // DH-0168: resolved (flag-overrides-config) pinned web-UI port; `0` (the default) preserves
   // today's random-ephemeral-port behavior unchanged.
   webPort = 0,
+  // DH-0220: `--plain` — forces the plain-text startup-header fallback, same effect as
+  // NO_COLOR, threaded into `detectColorLevel` below alongside the real TTY/env values.
+  plain = false,
   /** DH-0148: `--instructions` (no `--job`) — the instructions file's content, sent as the
    * session's first message once the root agent connects, indistinguishable from a normally-
    * typed message (no special badge/label/rendering). When `resumeResult` is also set, this
@@ -194,12 +200,16 @@ export async function runInteractiveMode(
   autoSendMessage?: string,
 ): Promise<ExitCodeType> {
   const { io } = deps;
-  // DH-0122: the app header prints once per invocation, before anything else — including
-  // before the TUI takes the alt-screen — so it's visible in scrollback on every run mode,
-  // not just the console-only ones (--server, --web, --connect). Ink's own `<Header>` (see
-  // src/tui/ink/Header.tsx) additionally keeps a compact form of the same content live
-  // inside the full-screen TUI view itself.
-  printAppHeader(config, configPath, io);
+  // DH-0220: startup header redesign — replaces the old flat figlet-banner + status-line
+  // block this function used to print via `printAppHeader` (activity-feed.ts; still used
+  // by `dh doctor`/`--check`, out of this ticket's scope) with two mode-selected headers
+  // (Header A2: interactive TTY/in-app chat window; Header B: web-serve or `--server`
+  // "headless" mode).
+  // `level` is resolved once, here, from the real TTY/env/`--plain` inputs and threaded into
+  // every renderer and into `styleDhPrefix` for the "extend Header B's styling to subsequent
+  // `dh:` log lines" owner decision (DH-0220 Summary #3) — see src/cli/header.ts.
+  const level = detectColorLevel({ isTTY: process.stdout.isTTY === true, env: process.env, plain });
+  const configLine = `${configPath} — ${config.models.length} model${config.models.length === 1 ? "" : "s"}`;
   const headerInfo = buildHeaderInfo(config, configPath, BUILD_INFO);
   try {
     if (mode.kind === "connect") {
@@ -219,15 +229,38 @@ export async function runInteractiveMode(
           ...(config.security?.token ? { token: config.security.token } : {}),
           ...(config.security?.hostname ? { hostname: config.security.hostname } : {}),
         });
+        const facts: HeaderStatusFacts = {
+          version: BUILD_INFO.version,
+          gitSha: BUILD_INFO.gitSha,
+          configLine,
+          bindHost: `${host}:${mode.port}`,
+          hasToken: Boolean(config.security?.token),
+          webUiUrl: handle.url,
+        };
+        for (const line of renderHeaderB(facts, level).slice(0, -1)) io.stdout(line);
         // DH-0101: glyph wraps around the grepped "web UI ready at <url>" substring, never
         // rewrites it — the color/glyph sit before "web" and the reset lands before the URL
         // so `\S+` captures in e2e regexes (web.test.ts, connect-web.test.ts, spikes) stay
-        // exactly the plain URL, no embedded ANSI.
+        // exactly the plain URL, no embedded ANSI. DH-0220: the "dh: " prefix itself now
+        // restyles to match Header B (owner decision #3) — text is byte-identical, only the
+        // surrounding color changes.
         io.stdout(
-          `dh: ${cliSuccessGlyph(process.stdout.isTTY === true)}web UI ready at ${handle.url} (connected to ${targetBaseUrl}).`,
+          `${styleDhPrefix(level)}${cliSuccessGlyph(process.stdout.isTTY === true)}web UI ready at ${handle.url} (connected to ${targetBaseUrl}).`,
         );
         return ExitCode.Success;
       }
+      const a2Facts: HeaderStatusFacts = {
+        version: BUILD_INFO.version,
+        gitSha: BUILD_INFO.gitSha,
+        configLine,
+        bindHost: `${host}:${mode.port}`,
+        hasToken: Boolean(config.security?.token),
+      };
+      const term = { columns: process.stdout.columns ?? 0, rows: process.stdout.rows ?? 0 };
+      // `--connect` without `--web` is always the interactive TUI/chat-window path — Header
+      // A2 unconditionally (`chooseHeaderMode` exists for the multi-branch local/server case
+      // below, where the choice actually varies).
+      for (const line of renderHeaderA2(a2Facts, level, term)) io.stdout(line);
       const connectResult = await deps.startTui(targetBaseUrl, config.security?.token);
       if (connectResult.fatalError !== undefined) {
         io.stderr(`dh: error: ${connectResult.fatalError}`);
@@ -293,8 +326,10 @@ export async function runInteractiveMode(
       ...(quiet
         ? {}
         : {
-            onClientConnect: (addr: string) => io.stdout(`dh: client connected from ${addr}`),
-            onClientDisconnect: (addr: string) => io.stdout(`dh: client disconnected from ${addr}`),
+            onClientConnect: (addr: string) =>
+              io.stdout(`${styleDhPrefix(level)}client connected from ${addr}`),
+            onClientDisconnect: (addr: string) =>
+              io.stdout(`${styleDhPrefix(level)}client disconnected from ${addr}`),
           }),
     });
     const boundPort = server.start();
@@ -310,7 +345,7 @@ export async function runInteractiveMode(
       const feedTty = process.stdout.isTTY === true;
       agentLoop.onEvent((event) => {
         const line = feed.onEvent(event, feedTty);
-        if (line !== undefined) io.stdout(`dh: ${line}`);
+        if (line !== undefined) io.stdout(`${styleDhPrefix(level)}${line}`);
       });
     }
 
@@ -348,7 +383,7 @@ export async function runInteractiveMode(
       // clean SIGTERM/SIGINT shutdown is an ordinary lifecycle event, not a fault; printing
       // it via stdout (rather than inventing an ANSI-styling layer just to force a neutral
       // color on stderr) keeps it looking like what it is.
-      io.stdout(`dh: received ${signal}; shutting down session ${sessionId}...`);
+      io.stdout(`${styleDhPrefix(level)}received ${signal}; shutting down session ${sessionId}...`);
       try {
         agentLoop.stopAgent(ROOT_AGENT_ID);
       } catch {
@@ -374,29 +409,37 @@ export async function runInteractiveMode(
 
     if (mode.kind === "server") {
       const panelTty = process.stdout.isTTY === true;
-      // DH-0067/DH-0101: this exact line — including the "listening on port" substring — is
-      // grepped by e2e's `waitForStdout` helpers (dh-process.ts and multiple spike scripts);
-      // it stays byte-stable. The DH-0101 styling only wraps around it (a colored headline
-      // glyph before "headless", nothing between/inside the grepped words), never rewrites
-      // it — verified against every e2e grep site before landing this (search performed:
-      // `grep -rn "listening on port" e2e/`).
-      io.stdout(
-        `dh: ${cliSuccessGlyph(panelTty)}headless server listening on port ${boundPort} (session ${sessionId}).`,
-      );
-      // DH-0067: `DhServer` only passes a `hostname` to `Bun.serve()` when the opt-in
-      // `security.hostname` config field (DH-0022) is set — unset (the common case) is
-      // still every interface, not just loopback — worth spelling out explicitly since
-      // that's exactly the fact the posture note below depends on.
       const boundHost = config.security?.hostname ?? "0.0.0.0";
+      // DH-0220: Header B (the framed instrument panel) prints first, established as the
+      // "headless mode" identity moment; the pre-existing byte-stable status lines below
+      // (grepped by e2e's `waitForStdout` helpers, dh-process.ts and multiple spike scripts)
+      // still follow it unchanged — only their "dh: " prefix now restyles via
+      // `styleDhPrefix` (owner decision #3), never the grepped substrings themselves
+      // ("listening on port ...", "bound to ...", "connect with: dh --connect ...").
+      const bFacts: HeaderStatusFacts = {
+        version: BUILD_INFO.version,
+        gitSha: BUILD_INFO.gitSha,
+        configLine,
+        bindHost: `${boundHost}:${boundPort}`,
+        hasToken: Boolean(config.security?.token),
+        logDir,
+      };
+      for (const line of renderHeaderB(bFacts, level).slice(0, -1)) io.stdout(line);
       io.stdout(
-        `dh: ${cliBold(formatVersionString(BUILD_INFO), panelTty)} — bound to ${boundHost}:${boundPort} — logs: ${logDir}`,
+        `${styleDhPrefix(level)}${cliSuccessGlyph(panelTty)}headless server listening on port ${boundPort} (session ${sessionId}).`,
       );
-      io.stdout(`dh: connect with: dh --connect <host> --port ${boundPort}`);
+      io.stdout(
+        `${styleDhPrefix(level)}${cliBold(formatVersionString(BUILD_INFO), panelTty)} — bound to ${boundHost}:${boundPort} — logs: ${logDir}`,
+      );
+      io.stdout(`${styleDhPrefix(level)}connect with: dh --connect <host> --port ${boundPort}`);
       const posture = buildStartupPostureNote(config.security);
       // DH-0101: caution-marked (⚠, yellow/dim) rather than just another sentence in the
       // stack, per style-guide §5's "startup blocks read as a panel" convention — the glyph
       // is prepended after the existing "dh: " prefix, the note's own text is untouched.
-      if (posture) io.stdout(`dh: ${cliCautionGlyph(panelTty)}${posture.replace(/^dh: /, "")}`);
+      if (posture)
+        io.stdout(
+          `${styleDhPrefix(level)}${cliCautionGlyph(panelTty)}${posture.replace(/^dh: /, "")}`,
+        );
       return ExitCode.Success;
     }
 
@@ -416,15 +459,39 @@ export async function runInteractiveMode(
         ...(config.security?.token ? { token: config.security.token } : {}),
         ...(config.security?.hostname ? { hostname: config.security.hostname } : {}),
       });
+      const bFacts: HeaderStatusFacts = {
+        version: BUILD_INFO.version,
+        gitSha: BUILD_INFO.gitSha,
+        configLine,
+        bindHost: config.security?.hostname ?? "all interfaces",
+        hasToken: Boolean(config.security?.token),
+        webUiUrl: webHandle.url,
+        logDir,
+      };
+      for (const line of renderHeaderB(bFacts, level).slice(0, -1)) io.stdout(line);
       // DH-0067/DH-0101: this exact "web UI ready at <url>." line is grepped by e2e
       // (web.test.ts, connect-web.test.ts, several spikes) — stays byte-stable; styling only
       // wraps the "dh: " prefix, never the substring itself.
       io.stdout(
-        `dh: ${cliSuccessGlyph(process.stdout.isTTY === true)}web UI ready at ${webHandle.url}.`,
+        `${styleDhPrefix(level)}${cliSuccessGlyph(process.stdout.isTTY === true)}web UI ready at ${webHandle.url}.`,
       );
-      io.stdout(`dh: logs: ${logDir}`);
+      io.stdout(`${styleDhPrefix(level)}logs: ${logDir}`);
       return ExitCode.Success;
     }
+
+    // DH-0220: this is the interactive local TUI's own startup moment — Header A2 (the full
+    // wordmark + status tree), printed before Ink takes the alt-screen (same "visible in
+    // scrollback" rationale the old `printAppHeader` comment documented).
+    const a2Facts: HeaderStatusFacts = {
+      version: BUILD_INFO.version,
+      gitSha: BUILD_INFO.gitSha,
+      configLine,
+      bindHost: baseUrl,
+      hasToken: Boolean(config.security?.token),
+      logDir,
+    };
+    const term = { columns: process.stdout.columns ?? 0, rows: process.stdout.rows ?? 0 };
+    for (const line of renderHeaderA2(a2Facts, level, term)) io.stdout(line);
 
     const tuiResult = await deps.startTui(baseUrl, config.security?.token, { ownsServer: true });
     // DH-0059 backstop: guarantees no orphaned root agent regardless of *how* the TUI

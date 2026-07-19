@@ -291,6 +291,7 @@ export async function main(
       resumeResult,
       options.quiet,
       resolvedWebPort,
+      options.plain,
     );
   }
 
@@ -339,6 +340,7 @@ export async function main(
       resumeResult,
       options.quiet,
       resolvedWebPort,
+      options.plain,
       instructionText,
     );
   }

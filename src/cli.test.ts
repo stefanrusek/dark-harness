@@ -31,7 +31,9 @@ import type {
   ProviderConfig,
   ServerSentEvent,
 } from "./contracts/index.ts";
+import { detectColorLevel } from "./cli/color-context.ts";
 import { ExitCode } from "./contracts/index.ts";
+import { BRAND, paint } from "./design-tokens.ts";
 import { buildHeaderInfo, formatHeaderLines, formatVersionString } from "./header-info.ts";
 import { buildDefaultSystemPrompt, REQUIRED_CONTRACT } from "./prompt/system-prompt.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
@@ -219,6 +221,7 @@ describe("parseArgs", () => {
       host: null,
       importPath: null,
       model: null,
+      plain: false,
     });
   });
 
@@ -247,6 +250,7 @@ describe("parseArgs", () => {
       "--resume",
       "abc123",
       "--quiet",
+      "--plain",
     ]);
     expect(options).toEqual({
       web: true,
@@ -267,6 +271,7 @@ describe("parseArgs", () => {
       host: "127.0.0.1",
       importPath: null,
       model: null,
+      plain: true,
     });
   });
 
@@ -860,7 +865,10 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(receivedTargetBaseUrl).toBe("http://example.com:9000");
-    const readyLine = io.stdoutLines.find((l) => l.includes("http://localhost:60002"));
+    // DH-0220: Header B's own "web ui" row also contains the bare URL — search specifically
+    // for the "ready at ... (connected to ...)" transition line, not just any line mentioning
+    // the URL.
+    const readyLine = io.stdoutLines.find((l) => l.includes("connected to"));
     expect(readyLine).toContain("http://localhost:60002");
     expect(readyLine).toContain("http://example.com:9000");
   });
@@ -4157,13 +4165,17 @@ describe("main — --server startup block (DH-0067)", () => {
       ...interactiveOverrides(io),
     });
     expect(code).toBe(ExitCode.Success);
-    const h = expectedHeaderLines(TEST_CONFIG).length;
-    expect(io.stdoutLines[h]).toMatch(/^dh: headless server listening on port \d+/);
-    expect(io.stdoutLines[h + 1]).toMatch(
+    // DH-0220: the startup header (Header B, an instrument panel) now prints ahead of these
+    // byte-stable lines, at a length that varies with config-status content — so these
+    // assertions search by content rather than a fixed index derived from the old
+    // printAppHeader block.
+    const i = io.stdoutLines.findIndex((l) => /^dh: headless server listening on port \d+/.test(l));
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(io.stdoutLines[i + 1]).toMatch(
       /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 0\.0\.0\.0:\d+ — logs: .*\.dh-logs/,
     );
-    expect(io.stdoutLines[h + 2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
-    expect(io.stdoutLines[h + 3]).toBe(
+    expect(io.stdoutLines[i + 2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
+    expect(io.stdoutLines[i + 3]).toBe(
       "dh: plaintext HTTP, no auth — see README security posture.",
     );
   });
@@ -4176,10 +4188,11 @@ describe("main — --server startup block (DH-0067)", () => {
       loadConfig: async () => hostConfig,
     });
     expect(code).toBe(ExitCode.Success);
-    const h = expectedHeaderLines(hostConfig).length;
-    expect(io.stdoutLines[h + 1]).toMatch(
-      /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 127\.0\.0\.1:\d+ — logs: .*\.dh-logs/,
-    );
+    expect(
+      io.stdoutLines.some((l) =>
+        /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 127\.0\.0\.1:\d+ — logs: .*\.dh-logs/.test(l),
+      ),
+    ).toBe(true);
   });
 
   test("a configured bearer token suppresses the posture note", async () => {
@@ -4198,9 +4211,9 @@ describe("main — --server startup block (DH-0067)", () => {
       ...interactiveOverrides(io),
     });
     expect(code).toBe(ExitCode.Success);
-    const h = expectedHeaderLines(TEST_CONFIG).length;
-    expect(io.stdoutLines[h]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
-    expect(io.stdoutLines[h + 1]).toMatch(/^dh: logs: .*\.dh-logs/);
+    const i = io.stdoutLines.findIndex((l) => /^dh: web UI ready at http:\/\/localhost:\d+\.$/.test(l));
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(io.stdoutLines[i + 1]).toMatch(/^dh: logs: .*\.dh-logs/);
   });
 
   // DH-0101: on a TTY, styling wraps around the two e2e-grepped substrings without breaking
@@ -4222,20 +4235,28 @@ describe("main — --server startup block (DH-0067)", () => {
       }
     });
 
+    // DH-0220: on a TTY, `dh: ` itself now also carries color (styleDhPrefix — the "extend
+    // Header B's ✓ ready styling to subsequent dh: log lines" owner decision), on top of the
+    // pre-existing DH-0101 glyph styling — so these assertions match on the harnessGreen-
+    // painted "dh:" prefix rather than a bare literal "dh: ", while still proving the grepped
+    // substrings themselves (e2e's actual concern) survive byte-stable. The exact color depth
+    // (truecolor vs ansi256) depends on this test process's own COLORTERM env, same as
+    // production's `detectColorLevel` — computed the same way here rather than hardcoded, so
+    // this doesn't hard-couple to one CI environment's COLORTERM setting.
+    const DH_PREFIX = `${paint(BRAND.harnessGreen, "dh:", detectColorLevel({ isTTY: true, env: process.env, plain: false }))} `;
+
     test("--server: headless line keeps its exact substring; version bolded; posture caution-marked", async () => {
       const io = fakeIo();
       const code = await main(["--server"], {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
-      expect(io.stdoutLines[h]).toContain("headless server listening on port");
-      expect(io.stdoutLines[h]).toStartWith(
-        "dh: \x1b[32m✓\x1b[0m headless server listening on port ",
-      );
-      expect(io.stdoutLines[h + 1]).toStartWith("dh: \x1b[1mdh ");
-      expect(io.stdoutLines[h + 1]).toContain("\x1b[0m — bound to");
-      expect(io.stdoutLines[h + 3]).toStartWith("dh: \x1b[33m⚠\x1b[0m plaintext HTTP, no auth");
+      const i = io.stdoutLines.findIndex((l) => l.includes("headless server listening on port"));
+      expect(i).toBeGreaterThanOrEqual(0);
+      expect(io.stdoutLines[i]).toStartWith(`${DH_PREFIX}\x1b[32m✓\x1b[0m headless server listening on port `);
+      expect(io.stdoutLines[i + 1]).toStartWith(`${DH_PREFIX}\x1b[1mdh `);
+      expect(io.stdoutLines[i + 1]).toContain("\x1b[0m — bound to");
+      expect(io.stdoutLines[i + 3]).toStartWith(`${DH_PREFIX}\x1b[33m⚠\x1b[0m plaintext HTTP, no auth`);
     });
 
     test("--web: 'web UI ready at <url>' substring survives styling intact, URL uncolored", async () => {
@@ -4244,9 +4265,8 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
-      const line = io.stdoutLines[h] ?? "";
-      expect(line).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
+      const line = io.stdoutLines.find((l) => l.includes("web UI ready at")) ?? "";
+      expect(line).toStartWith(`${DH_PREFIX}\x1b[32m✓\x1b[0m web UI ready at `);
       expect(line).toEndWith(".");
       // Everything between "ready at " and the trailing "." is the captured URL e2e's own
       // regex feeds straight into `fetch()` — it must be free of embedded ANSI.
@@ -4261,9 +4281,9 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
-      expect(io.stdoutLines[h]).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
-      expect(io.stdoutLines[h]).toContain(" (connected to ");
+      const line = io.stdoutLines.find((l) => l.includes("web UI ready at")) ?? "";
+      expect(line).toStartWith(`${DH_PREFIX}\x1b[32m✓\x1b[0m web UI ready at `);
+      expect(line).toContain(" (connected to ");
     });
   });
 });

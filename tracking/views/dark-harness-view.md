@@ -40,6 +40,7 @@ source: tracking/
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | status: refining |
 | [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | status: refining |
 | [DH-0219](../DH-0219-new-dh-monogram-logo-uppercase-d-h-replaces-diamond-evolution-direction.md) | New DH monogram logo (uppercase D+H, replaces diamond-evolution direction) | status: verifying |
+| [DH-0220](../DH-0220-dual-mode-startup-header-redesign-a2-interactive-b-web-headless.md) | Dual-mode startup header redesign: A2 (interactive) + B (web/headless) | status: verifying |
 | [DH-0221](../DH-0221-truecolor-brand-palette-color-level-resolver-shared-color-infrastructure.md) | Truecolor brand palette + color-level resolver (shared color infrastructure) | status: verifying |
 
 ## Board
@@ -67,12 +68,6 @@ source: tracking/
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
 | [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | feature | stefan |
 
-### ready
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0220](../DH-0220-dual-mode-startup-header-redesign-a2-interactive-b-web-headless.md) | Dual-mode startup header redesign: A2 (interactive) + B (web/headless) | feature | stefan |
-
 ### implementing
 
 | ID | Title | Type | Owner |
@@ -99,6 +94,7 @@ source: tracking/
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | feature | stefan |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | bug | stefan |
 | [DH-0219](../DH-0219-new-dh-monogram-logo-uppercase-d-h-replaces-diamond-evolution-direction.md) | New DH monogram logo (uppercase D+H, replaces diamond-evolution direction) | feature | stefan |
+| [DH-0220](../DH-0220-dual-mode-startup-header-redesign-a2-interactive-b-web-headless.md) | Dual-mode startup header redesign: A2 (interactive) + B (web/headless) | feature | stefan |
 | [DH-0221](../DH-0221-truecolor-brand-palette-color-level-resolver-shared-color-infrastructure.md) | Truecolor brand palette + color-level resolver (shared color infrastructure) | feature | stefan |
 
 ## Recently Closed

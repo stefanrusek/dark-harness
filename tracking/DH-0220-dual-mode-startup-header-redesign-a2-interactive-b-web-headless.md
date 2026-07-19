@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0220
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -274,3 +274,103 @@ dh: ✓ web UI ready at http://192.168.1.238:64810.
 dh: logs: /Users/stefanrusek/Code/dark-harness/.dh-logs/ac817fd0-cc1c-4458-9a67-f98fdce38883
 dh: client connected from 192.168.1.238
 ```
+
+### 2026-07-19 — implementation (Core + Prompt, ad-hoc implementer)
+
+Built per the Functional Requirements, on top of DH-0221's landed `BRAND`/`paint`/`lerpHex`/
+`fgCode` (src/design-tokens.ts) and `detectColorLevel` (src/cli/color-context.ts):
+
+- `src/prompt/banner.constant.ts` (Prompt): added `HEADER_A2_WORDMARK` (the full 12-line
+  ANSI-Shadow "DARK"/"HARNESS" wordmark), `HEADER_A2_WORDMARK_PLAIN` (`"DARK HARNESS"`),
+  `HEADER_B_GLYPH`, `HEADER_B_TAGLINE`. Existing `DH_ASCII_LOGO`/`DH_ASCII_LOGO_COMPACT` left
+  untouched — still consumed by `dh doctor`/`--check` and the TUI empty-state screen (see
+  scope judgment call below).
+- `src/cli/header.ts` (new, Core): `chooseHeaderMode`, `shortGitSha` (7-char truncation),
+  `shortLogDir` (run-id-directory + 8-char/ellipsis truncation), `sizeGateOk` (A2's
+  80-col/30-row gate), `renderHeaderA2`, `renderHeaderB`, `styleDhPrefix`. Each renderer takes
+  a resolved `ColorLevel` and falls back to plain ASCII (`level === "none"`, or for A2 also
+  the size gate failing) per the ticket's single-predicate design. Unit tests in
+  `src/cli/header.test.ts` cover both headers at all three color levels, the size-gate
+  boundary, optional web-ui/logs facts, and `styleDhPrefix`'s none-vs-colored byte shape.
+- `src/cli/args.ts`: added `--plain` (new flag, `CliOptions.plain`), forcing the plain-text
+  fallback the same way `NO_COLOR` does, via `detectColorLevel`.
+- `src/cli/run.ts`: `runInteractiveMode` now resolves `ColorLevel` once via `detectColorLevel`
+  and renders Header A2 (local TUI, `--connect` without `--web`) or Header B (`--server`,
+  `--web`, `--connect --web`) instead of the old `printAppHeader` figlet block — replaced
+  entirely, not additive, per the ticket's Assumption. Every existing `dh: `-prefixed
+  `io.stdout` call in this file (client connect/disconnect, activity-feed lines, the
+  `--server`/`--web` byte-stable status lines, the SIGTERM/SIGINT shutdown line) now goes
+  through `styleDhPrefix(level)` instead of a literal `"dh: "` — the literal text is
+  unchanged (`styleDhPrefix("none")` returns exactly `"dh: "`), only the surrounding color
+  changes, per owner decision #3.
+- `src/prompt/system-prompt.ts`: extended the existing "## Output format" section with an
+  additive paragraph telling the model its Markdown renders in real color across TUI/Web
+  (shared brand palette on headings/emphasis/code), encouraging fuller Markdown use — the
+  pre-existing "never emit raw ANSI/VT escapes" guidance is untouched, unchanged wording.
+
+**Judgment calls (documented, not blocking):**
+1. **No `--headless` flag exists in this codebase** (`args.ts` has no such flag; `--server`
+   is the existing "headless server" mode per its own log line). Read the ticket's
+   `--headless`/web-serve wording as referring to `RunMode.kind === "server"` and `mode.web`
+   — `chooseHeaderMode({ isServer, isWeb })` implements exactly that pairing. Flagging in case
+   a real `--headless` flag was intended elsewhere and I'm missing context.
+2. **Scope limited to the CLI startup print path** (`runInteractiveMode` in `run.ts`) — did
+   NOT touch `src/header-info.ts`'s `HeaderInfo`/`formatHeaderLines`/`formatEmptyStateLines`
+   (still the old ASCII-block logo), nor `dh doctor`/`--check` (`src/cli/doctor.ts`'s
+   `printAppHeader` call), nor the TUI's in-Ink `<Header>`/RootView empty-state screen. These
+   are separate rendering surfaces/domains (TUI's `Header.tsx` is Mary's) that the ticket's
+   Functional Requirements don't explicitly call out beyond "in-app chat window" — read that
+   phrase as referring to the pre-alt-screen startup print (which the old code's own comment
+   already described as "visible in scrollback... before the TUI takes the alt-screen"), not
+   Ink's own live in-view header component, since redesigning that is a distinct TUI-domain
+   surface with its own tests/conventions and wasn't in the ticket's concrete mockups.
+3. **Header B's own "✓ ready — waiting for clients" transition line is dropped** at each real
+   call site in favor of keeping the pre-existing byte-stable "headless server listening on
+   port..." / "web UI ready at..." lines (both e2e-grepped) — `renderHeaderB(...).slice(0,
+   -1)` prints the frame only, then the existing grepped line follows, now with a
+   `styleDhPrefix`-colored `dh:`. This satisfies "extend B's styling to subsequent dh: lines"
+   without inventing a second, differently-worded "ready" line that would duplicate the
+   grepped one's meaning.
+4. **Box-frame right-edge alignment in Header B's colored (non-plain) variant is
+   approximate** — content lines are not padded to a fixed interior width before the closing
+   `│`, so the right border does not form a perfectly straight edge when facts vary in length
+   (visible in the manual PTY run below). Accepted as a cosmetic gap given the ticket's
+   explicit warning that terminal-art perfection is hard to verify and time-boxed — the frame
+   still reads correctly and all content is present/correctly colored.
+5. **`healthDot` is always green** — no startup health-check surface exists yet to ever fail
+   it red/orange, so `renderHeaderA2` hardcodes `healthy = true`. Left the parameter in the
+   function signature (unused branch) rather than deleting it, so a future health-check
+   ticket has an obvious hook.
+
+**Terminal-art verification (not just string-construction unit tests):** compiled the real
+binary (`bun build --compile --outfile dist/dh src/cli.ts`) and drove it under a real PTY via
+a small Python `pty.fork()` harness (100x40 window, `COLORTERM=truecolor`), confirming: (a)
+`--server` renders Header B's full truecolor frame correctly, followed by the byte-stable
+status lines with a green-painted `dh:` prefix; (b) the same `--server` run under a piped
+(non-TTY) stdout renders the plain-text fallback with zero ANSI bytes and byte-identical `dh:
+` prefixes; (c) plain `dh` (local TUI mode) renders the full Header A2 gradient wordmark +
+status tree before Ink takes the alt-screen. Output samples captured in this session's
+scratch, not checked in.
+
+**e2e `dh: ` prefix audit:** `grep -rn '`dh: \|"dh: ' e2e` (and variants) found no e2e test
+asserting the literal `dh: ` prefix text directly — existing e2e assertions grep for the
+*content after* the prefix ("web UI ready at", "listening on port", "headless server", etc.),
+which stayed byte-identical since only the prefix's color changed. No e2e test edits were
+needed for the prefix restyling itself. `bun run e2e` reproduces one pre-existing failure
+(`e2e/web.test.ts`'s "status colors, live output, token/cost display, and log download") both
+with and without this ticket's changes (verified via `git stash`) — unrelated to this ticket.
+
+**Test/gate updates:** `src/cli.test.ts` — added `plain: false`/`plain: true` to the two
+`parseArgs` fixture expectations, and rewrote 7 tests in the `--server startup block
+(DH-0067)` describe block that computed a fixed line-index off the old `printAppHeader`
+output (`expectedHeaderLines(...).length`) — since Header B's own length now varies with
+config content, these search `io.stdoutLines` by content (`findIndex`/`find`) instead of a
+precomputed offset, and the TTY-styling assertions build their expected `dh:`-prefix color
+dynamically via `paint(BRAND.harnessGreen, "dh:", detectColorLevel(...))` rather than a
+hardcoded ansi256 escape, so they don't hard-couple to one CI environment's `COLORTERM`.
+
+**Gates:** `bun run typecheck` clean. `bun run lint` clean (`biome check .`, after fixing an
+import-order/module-scope-const nit `header.ts` first raised). `bun run test:coverage`:
+140/140 test files passed, 100.0% line coverage (14760/14760) on the full suite including the
+new `src/cli/header.ts`/`header.test.ts`. `bun run e2e`: 39/40 passed, the one failure
+pre-existing (see above).

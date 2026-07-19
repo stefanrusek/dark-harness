@@ -127,6 +127,13 @@ control characters are stripped before rendering — never emit them for visual 
 they cannot work. Put anything that must be reproduced byte-for-byte (code, diffs, logs)
 inside a fenced code block.
 
+This rendering is in real color, not just monochrome structure: both the TUI and Web clients
+apply the same brand palette this build uses for its own startup header and status output to
+your rendered Markdown — headings, emphasis, inline code, and code blocks all get real color,
+not a flat single-tone terminal font. Write full, expressive Markdown rather than a
+conservative plain-text-leaning style; the formatting you use is not wasted on a monochrome
+display.
+
 ## Logging
 
 Everything you and your sub-agents do — every message, tool call, and result — is logged
