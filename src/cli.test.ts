@@ -1464,62 +1464,68 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
   // AgentRuntime first — it launches the interactive session immediately and auto-sends the
   // instructions file's content as the session's first message once the root agent connects,
   // via the exact same sendMessage() lazy-start path a real operator's first message takes.
-  test("without --job, --instructions launches interactive mode immediately and auto-sends the " +
-    "instructions file's content as the first message (no separate standalone run)", async () => {
-    const io = fakeIo();
-    let receivedFirstMessage: string | undefined;
-    let createRuntimeCalled = false;
-    const code = await main(["--instructions", "plan.md"], {
-      ...interactiveOverrides(io),
-      readInstructions: async () => "do the thing",
-      createRuntime: () => {
-        createRuntimeCalled = true;
-        return {
-          runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
-          stopRoot: () => {},
-        };
-      },
-      createAgentLoop: () =>
-        fakeAgentLoop({
-          sendMessage: (agentId, message) => {
-            if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
-          },
-        }),
-    });
-    expect(code).toBe(ExitCode.Success);
-    expect(io.exitCodes).toEqual([]);
-    // No standalone headless run happens at all for this flag combination anymore.
-    expect(createRuntimeCalled).toBe(false);
-    expect(receivedFirstMessage).toBe("do the thing");
-    expect(io.stdoutLines.some((l) => l.includes("starting a new interactive session"))).toBe(
-      false,
-    );
-  });
+  test(
+    "without --job, --instructions launches interactive mode immediately and auto-sends the " +
+      "instructions file's content as the first message (no separate standalone run)",
+    async () => {
+      const io = fakeIo();
+      let receivedFirstMessage: string | undefined;
+      let createRuntimeCalled = false;
+      const code = await main(["--instructions", "plan.md"], {
+        ...interactiveOverrides(io),
+        readInstructions: async () => "do the thing",
+        createRuntime: () => {
+          createRuntimeCalled = true;
+          return {
+            runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
+            stopRoot: () => {},
+          };
+        },
+        createAgentLoop: () =>
+          fakeAgentLoop({
+            sendMessage: (agentId, message) => {
+              if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+            },
+          }),
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.exitCodes).toEqual([]);
+      // No standalone headless run happens at all for this flag combination anymore.
+      expect(createRuntimeCalled).toBe(false);
+      expect(receivedFirstMessage).toBe("do the thing");
+      expect(io.stdoutLines.some((l) => l.includes("starting a new interactive session"))).toBe(
+        false,
+      );
+    },
+  );
 
-  test("without --job, --instructions combined with --resume auto-sends the resume notice " +
-    "plus the instructions content as one first message", async () => {
-    const io = fakeIo();
-    let receivedFirstMessage: string | undefined;
-    const code = await main(["--instructions", "plan.md", "--resume", "s1"], {
-      ...interactiveOverrides(io),
-      readInstructions: async () => "keep going",
-      loadResumeSession: () => ({
-        messages: [],
-        model: "sonnet",
-        resumedFromSessionId: "s1",
-        lostAgents: [],
-      }),
-      createAgentLoop: () =>
-        fakeAgentLoop({
-          sendMessage: (agentId, message) => {
-            if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
-          },
+  test(
+    "without --job, --instructions combined with --resume auto-sends the resume notice " +
+      "plus the instructions content as one first message",
+    async () => {
+      const io = fakeIo();
+      let receivedFirstMessage: string | undefined;
+      const code = await main(["--instructions", "plan.md", "--resume", "s1"], {
+        ...interactiveOverrides(io),
+        readInstructions: async () => "keep going",
+        loadResumeSession: () => ({
+          messages: [],
+          model: "sonnet",
+          resumedFromSessionId: "s1",
+          lostAgents: [],
         }),
-    });
-    expect(code).toBe(ExitCode.Success);
-    expect(receivedFirstMessage).toContain('resumed after a restart from session "s1"');
-    expect(receivedFirstMessage).toContain("keep going");
-  });
+        createAgentLoop: () =>
+          fakeAgentLoop({
+            sendMessage: (agentId, message) => {
+              if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+            },
+          }),
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(receivedFirstMessage).toContain('resumed after a restart from session "s1"');
+      expect(receivedFirstMessage).toContain("keep going");
+    },
+  );
 
   // DH-0148: --instructions without --job combined with --web is allowed, not rejected — same
   // auto-send behavior as the local TUI case, just launched via the web client instead.
