@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0192
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: superseded
 blocked_by: []
 created: 2026-07-19
 relations:
@@ -256,3 +256,9 @@ supersedes all of it: silhouette stays plain (owner rejected Concept 1), and the
 is ink/foreground, not amber (the blinder reading needs a dark mark). The glyph-tier/SVG-tier
 observation remains true but is no longer load-bearing, since nothing is being carved into the
 silhouette.
+
+**Closed 2026-07-19 (superseded, round 3):** the diamond direction itself — evolved or plain —
+is abandoned entirely. A separate Fable design session produced a full handoff covering both
+the CLI startup headers and a completely different logo concept: a plain uppercase "D H"
+monogram (no diamond, no blinder reading at all). See **DH-0219** (logo) and **DH-0220** (CLI
+headers) for the final direction the owner actually shipped.

@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0193
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: superseded
 blocked_by: []
 created: 2026-07-19
 relations:
@@ -92,3 +92,7 @@ unaffected by the color change.
   to foreground/ink (matching the wordmark), which removes the Concept-1 "cup gives optical
   space" caveat (use the mid-range gap) and reinforces the one-unit lockup. No spacing values
   changed. Status refining → ready.
+- 2026-07-19 (closed, superseded): a separate Fable design session replaced the whole diamond
+  direction with a literal "D H" monogram (DH-0219) and a full CLI-header redesign (DH-0220),
+  which specify their own layout/spacing directly. This ticket's lockup/padding scope is
+  absorbed into those two rather than implemented standalone.

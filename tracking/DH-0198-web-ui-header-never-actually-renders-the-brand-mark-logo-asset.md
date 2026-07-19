@@ -2,14 +2,14 @@
 spile: ticket
 id: DH-0198
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: superseded
 blocked_by: []
 created: 2026-07-19
 relations:
-  depends_on: [DH-0192]
-  relates_to: [DH-0193]
+  depends_on: []
+  relates_to: [DH-0193, DH-0219]
   supersedes: []
 implementation:
   - repo: dark-harness
@@ -99,3 +99,10 @@ to the owner/Susan rather than decided here.
   is not "render logo.svg in the header." Left at `ready` (owner-owned); flagged the one genuine
   open decision (glyph vs inline SVG). All three of DH-0192/0193/0198 touch `.brand` and must be
   implemented as one coordinated Web pass.
+- 2026-07-19 (closed, superseded): the diamond-in-header premise is gone entirely — a separate
+  Fable session replaced the whole direction with a literal "D H" monogram logo (DH-0219) and a
+  new CLI-only header identity (DH-0220, which never touches the web app at all). DH-0219's own
+  Functional Requirements now explicitly cover "update every current consumer of the old asset:
+  web favicon, web header/masthead, README hero, social preview" — so this ticket's actual
+  concern (the real logo never renders in the web header) is absorbed into DH-0219 rather than
+  implemented standalone.
