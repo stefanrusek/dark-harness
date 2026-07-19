@@ -71,7 +71,6 @@ source: tracking/
 | [DH-0177](../DH-0177-e2e-test-support-cleanup-consolidate-mock-provider-scaffolding-and-resolve-the-spikes-tree-s-status-and-gate-dependency.md) | e2e test-support cleanup: consolidate mock-provider scaffolding and resolve the spikes/ tree's status and gate dependency | bug | stefan |
 | [DH-0179](../DH-0179-revisit-web-static-server-dual-typecheck-split-to-remove-the-loopback-self-proxy-and-any-casts.md) | Revisit web static-server dual-typecheck split to remove the loopback self-proxy and any-casts | bug | stefan |
 | [DH-0180](../DH-0180-relocate-fakeagentloop-out-of-the-production-server-entrypoint-into-test-only-scope.md) | Relocate FakeAgentLoop out of the production server entrypoint into test-only scope | bug | stefan |
-| [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | bug | stefan |
 
 ### refining
 
@@ -123,6 +122,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | done |
 | [DH-0170](../DH-0170-tui-and-web-reimplement-the-same-contract-derived-client-core-sse-transport-event-reducer-connectionstatus-slash-command-parser-twice.md) | TUI and Web reimplement the same contract-derived client core (SSE transport, event reducer, ConnectionStatus, slash-command parser) twice | superseded |
 | [DH-0169](../DH-0169-refactoring-round-first-ever-full-history-sweep.md) | Refactoring round: first-ever full-history sweep | done |
 | [DH-0167](../DH-0167-web-printed-url-hardcodes-localhost-ignoring-security-hostname.md) | --web printed URL hardcodes localhost, ignoring security.hostname | done |
@@ -137,4 +137,3 @@ source: tracking/
 | [DH-0157](../DH-0157-coding-standards-overhaul-wave-3-layer-2-file-migration-21-files.md) | Coding-standards overhaul Wave 3: layer-2 file migration (21 files) | done |
 | [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | done |
 | [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | done |
-| [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | done |
