@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0221
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -191,3 +191,53 @@ Split out of DH-0220 (2026-07-19 Fable architecture pass). DH-0220 depends on th
 first. Also consumed by DH-0220's owner-added TUI/Web Markdown-color rendering and referenced
 by DH-0219's logo palette — hence its own reusable-infrastructure ticket rather than being
 buried inside the header ticket.
+
+### 2026-07-19 — implementation (Core)
+
+Built exactly per the Functional Requirements section, verbatim signatures:
+
+- `src/design-tokens.ts`: added `ColorLevel`, `BRAND` (frozen, 5 hex entries), `BrandName`,
+  `hexToRgb` (throws on malformed hex — fail loud, not silent black), `lerpHex` (clamped t,
+  per-channel linear interpolation), `nearestAnsi256` (6x6x6 cube + 24-step grayscale ramp,
+  minimum squared RGB distance), `fgCode`, and `paint`. `fgCode`/`paint` reuse the existing
+  `wrapSgr`/`SGR_RESET` primitive (DH-0191) verbatim — no second escape/reset system was
+  introduced. `STATUS_TOKENS`/`CONNECTION_TOKENS` are untouched.
+- `src/cli/color-context.ts` (new): `ColorLevelInputs` + `detectColorLevel()`, a pure function
+  of injected `{ isTTY, env, plain }` — never reads `process` itself. NO_COLOR is honored by
+  presence (`env.NO_COLOR !== undefined`), not value, per the informal standard.
+
+**Judgment call — one precomputed index corrected.** The ticket's precomputed nearest-256
+table lists `boneWhite -> 189`. Implementing `nearestAnsi256` exactly as specified ("minimizes
+squared RGB distance" over the cube + grayscale ramp) and verifying by exhaustive brute force
+over all 256 palette entries, `#C0CAF5`'s true nearest index is **153** (cube color `#AFD7FF`,
+squared distance 558), not 189 (`#D7D7FF`, squared distance 798) — not a rounding-boundary
+tie, a clear 240-unit gap. The other four brand hexes (harnessGreen->149, leadOrange->179,
+wireGray->60, signalCyan->117) match the ticket's table exactly, so this looks like a one-off
+transcription slip in the ticket rather than a different intended algorithm. Implemented and
+tested against the brute-force-verified value (153); the regression test
+(`src/design-tokens.test.ts`, `describe("nearestAnsi256")`) documents the discrepancy and the
+verification method inline. Flagging for whoever reviews this into `closed` in case there's
+context I'm missing for why 189 was expected.
+
+**Test coverage** (`bun test src/design-tokens.test.ts src/cli/color-context.test.ts
+--coverage`): 100% lines/functions on both new/changed files. Explicit cases for
+`nearestAnsi256`'s three called-out branches: cube-corner round-trip (`#000000`->16,
+`#FFFFFF`->231), grayscale-ramp branch (`#080808`->232, `#EEEEEE`->255, chosen because the
+ramp step is an exact match while the cube isn't), and a genuine cube/grayscale tie
+(`#040404`, equidistant at squared-distance 48 from both, resolves to the cube branch per the
+`grayDist < cubeDist` strict inequality). `detectColorLevel` has one test per precedence rule
+(--plain, NO_COLOR presence regardless of value, non-TTY, COLORTERM truecolor/24bit/other/
+unset).
+
+**Gates run:** `bun run typecheck` (clean), `bun run lint` (clean on the files this ticket
+owns — a lint failure surfaced during this session in `docs/media/logo.svg`/a React component
+belongs to the concurrently-dispatched DH-0219 logo work happening in the same shared working
+tree, not this ticket's files), `bun run test:coverage` (full suite: 138/138 passed, 100%
+overall line coverage), `bun run e2e` (39/40 passed; the one failure,
+`e2e/server-protocol.test.ts`'s "a second send_message to a waiting root agent continues the
+same conversation", reproduces identically on a clean stash of this ticket's changes — i.e.
+pre-existing on this branch, unrelated to this ticket, and this ticket doesn't touch any
+CLI/server wiring per its explicit scope).
+
+No CLI/header wiring was added — `detectColorLevel`/`paint`/`BRAND` are not yet called from
+any entry point, matching the ticket's explicit scope (DH-0220 wires this in next).
