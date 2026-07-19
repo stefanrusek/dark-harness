@@ -178,6 +178,16 @@ Compact `dh` glyph and status in one frame; version in the frame's nameplate not
   the log-prefix restyling) and Prompt (banner/ASCII-art content, if that's where wordmark
   strings are authored per existing convention) — implementer/coordinator to slice cleanly per
   CLAUDE.md §3; flag if genuinely cross-cutting rather than guessing at an even split.
+- **Owner addition (2026-07-19): teach agents that their Markdown output renders with real
+  color, not just monochrome structure.** `src/prompt/system-prompt.ts`'s existing "Output
+  format" section (`renderSelfInfoSection`'s neighboring base-prompt text) already tells the
+  model that plain-text output is rendered as Markdown by every client — extend that note to
+  say the rendering is in **real color** (both TUI and Web clients apply the shared palette
+  this ticket establishes to headings/emphasis/code/etc., not just structural styling), so the
+  model can lean into full Markdown formatting confidently rather than writing conservatively
+  plain text. Keep the existing "never emit raw ANSI/VT escapes yourself, they're stripped"
+  guidance exactly as-is — this is additive context about what the *client* does with the
+  Markdown the model already writes, not a new capability the model gains.
 
 ## Assumptions
 
