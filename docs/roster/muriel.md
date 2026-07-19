@@ -163,3 +163,42 @@ Owner reviewed round 3's three concepts and corrected on two axes; I reconciled 
 **Status moves:** DH-0192 refining→**ready** (rescoped/retitled to color-standardization + ASCII-redraw; round-1 exploration preserved as superseded). DH-0193 refining→**ready** (dropped Concept-1 caveat; note ink mark reinforces one-unit lockup; spacing unchanged). DH-0198 stubs filled, left **ready** (owner-owned) — corrected its premise: header mark is the `◆` diamond in ink, NOT logo.svg; flagged glyph-vs-inline-SVG as the one open Web/Susan decision. All three touch `.brand` → must be one coordinated Web pass.
 
 **Nothing left at refining / no open question kicked back to owner** — the corrections were explicit enough to execute. Only non-gating flag: amber→accent demotion follows by implication from "black diamond"; noted in DH-0192 Risk so owner can bounce if they disagree.
+
+### 2026-07-19 — round 5: DH-0225, canonical ok/live green (BRAND vs STATUS_TOKENS fragmentation)
+
+Refactoring-round finding: DH-0221's new `BRAND` palette gave the CLI startup header's health
+`●` dot `BRAND.harnessGreen` (`#9ECE6A`) for "ok," while TUI/Web status dots use
+`STATUS_TOKENS`' green (`#35c469`) for the same glyph/semantic — three different greens for
+"ok/live" across surfaces. Not a request to merge `BRAND`/`STATUS_TOKENS` (design-tokens.ts
+documents that coexistence deliberately) — just which green wins for the shared status-dot
+vocabulary.
+
+**Decision:** canonical ok/live green is `STATUS_TOKENS.done.webHex` `#35c469`. Chose the
+older/more-established value (already load-bearing on TUI tree + Web sidebar) over the
+four-day-old brand green, minimizing churn: one-line fix in `src/cli/header.ts`'s
+`healthDot()` (swap `BRAND.harnessGreen` → `STATUS_TOKENS.done.webHex` for the `healthy`
+branch only; `leadOrange` unhealthy branch untouched). Did **not** touch
+`BRAND.harnessGreen` itself or `src/design-tokens.ts` — harnessGreen stays exactly as-is for
+its other header uses (wordmark gradient endpoints, `✓ ready` checkmark, `dh:` log prefix),
+which I judged decorative brand flourishes distinct from the shared `●` status-dot
+semantic, not instances of it. Checked `nearestAnsi256` — it's a pure runtime function, no
+precomputed/cached index table, so no ANSI-256 recalculation cascade from this change (just
+flagged that any *test* hardcoding the old healthy-dot ansi256 index needs updating to
+`#35c469`'s).
+
+Wrote the full before/after into DH-0225 (exact diff, import addition, FRs, User Stories,
+explicit test-update note) and updated `docs/design/style-guide.md` §3's `●` glyph row to
+state this as the durable convention (canonical hex + which BRAND uses are exempt and why).
+Transitioned DH-0225 draft → ready — no TODOs left for the implementer (Grace, owns
+`src/cli/`). Commits landed clean this round (no tracking-reverter collision hit).
+
+**Note:** other agents had concurrent uncommitted changes in the working tree (workflow
+tool, markdown, header-info, etc.) when I ran `git add`/`git status` — staged and committed
+*only* my two files (DH-0225 ticket + regenerated `tracking/views/dark-harness-view.md`)
+plus explicitly excluded a DH-0223 diff I didn't make (someone else's concurrent ticket
+edit). Worth remembering: `git add -A tracking/` is too broad when other agents are landing
+work in parallel — stage by exact filename.
+
+**Open threads for next round:** none from this ticket — implementation is Grace's per §3
+ownership; no further design follow-up expected unless a new status-dot surface introduces
+its own green later.
