@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0147
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
@@ -79,3 +79,33 @@ This is a real behavior change to `--job`'s default output (bare-final-output ->
 None remaining — resolved in Functional Requirements (live, turn-by-turn streaming).
 
 ## Notes
+
+> [!NOTE]
+> **Implemented 2026-07-19.** `src/cli.ts`: added `--result-only` (valid only with `--job`,
+> matching `--json`'s existing `requires --job` validation pattern); `--job`'s default
+> breadth is now a full live, turn-by-turn markdown transcript via the new
+> `JobTranscriptRenderer` class (buffers `agent_output` chunks per agent, flushes at each
+> turn boundary — `tool_call`/`agent_status`/`session_ended`/a different agent's output —
+> since `CliIo.stdout` always appends its own newline). `--json` stays a pure format
+> selector; `finalOutput`/the terminal `job_result` line print per the 2x2 matrix. README.md
+> updated with the matrix table and "headless mode" naming.
+>
+> Tests: `src/cli.test.ts` — `parseArgs` coverage for `--result-only` (defaults test,
+> "parses every documented flag together", `--result-only requires --job` usage error);
+> `--job --result-only exits 0 and prints the final output...` (old default preserved);
+> `DH-0011: SIGTERM stops the root agent...` updated to `--result-only` to keep asserting
+> `finalOutput` on interrupt. `JobTranscriptRenderer`'s full event-type switch (
+> `agent_spawned`/`agent_output`/`agent_thinking`/`tool_call`/`tool_result`/`agent_status`/
+> `model_switched`/`session_ended`/`token_usage`/`resync`) is exercised end-to-end by the
+> pre-existing real-provider tests ("the real (default) createRuntime dep writes a real
+> per-agent JSONL log for a standalone run" / "...writes summary.json...") which already run
+> plain `--job` (new default breadth) against a real mock Anthropic-compatible HTTP endpoint
+> — verified via `bun test src/cli.test.ts --coverage --coverage-reporter=lcov` that every
+> line of the new class has a nonzero hit count. `e2e/exit-codes.test.ts`'s existing
+> `--job` assertions on `proc.stdout()` containing the model's final text (`"All done, no
+> issues."`, `"TASK_FAILED"`) continue to pass unmodified against the new default breadth —
+> the text still appears in the streamed transcript, no e2e assertion changes were needed.
+>
+> All 4 gates green locally: typecheck, lint, `bun run test:coverage` (0 fail, pre-existing
+> non-100% lines in `src/cli.ts`/`src/tui/app.ts`/`src/web/client/app.ts` unchanged from
+> baseline), `bun run e2e` (38/38 pass).

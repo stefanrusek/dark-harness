@@ -93,9 +93,18 @@ export interface CliOptions {
   port: number | null;
   instructions: string | null;
   job: boolean;
-  /** DH-0050: `--job --json` — NDJSON progress stream on stdout, closed by a terminal
-   * `job_result` line (`JobResultLine`, src/contracts/outcome.ts). Invalid without --job. */
+  /** DH-0147: `--job` headless mode — no TUI/Web/server client attaches; the process exits
+   * once the root agent finishes (0 success, 1 self-reported failure, 2+ harness error). */
+  /** DH-0050/DH-0147: `--job --json` — pure format selector, orthogonal to breadth
+   * (`resultOnly`). Default breadth: NDJSON progress stream on stdout, closed by a terminal
+   * `job_result` line (`JobResultLine`, src/contracts/outcome.ts) — today's existing `--job
+   * --json` behavior, unchanged. `--result-only` breadth: a single `job_result` JSON object
+   * printed once at the end, no stream. Invalid without --job. */
   json: boolean;
+  /** DH-0147: `--job --result-only` — opts back into the pre-DH-0147 default: only
+   * `result.finalOutput` (or, combined with `--json`, a single `job_result` JSON object) is
+   * printed, once, at the end — no live transcript stream. Invalid without --job. */
+  resultOnly: boolean;
   config: string;
   env: string | null;
   /** DH-0035: `--check` (or the `dh doctor` subcommand, an alias set by main()) — runs one
@@ -301,13 +310,26 @@ const HELP_FLAG_ITEMS: readonly HelpItem[] = Object.freeze([
   },
   {
     name: "--job",
-    desc: "Exit when the root agent finishes: 0 success, 1 self-reported failure, 2+ harness error.",
+    desc:
+      "Headless mode: no TUI/Web session attaches; exit when the root agent finishes " +
+      "(0 success, 1 self-reported failure, 2+ harness error). By default, streams a full " +
+      "markdown-rendered transcript to stdout as the run progresses; see --result-only and " +
+      "--json.",
   },
   {
     name: "--json",
     desc:
-      "With --job: stream NDJSON progress events to stdout as the run happens, closed by a " +
-      "final job_result line. Requires --job.",
+      "With --job: a pure format selector, orthogonal to breadth. Default breadth: stream " +
+      "NDJSON progress events to stdout as the run happens, closed by a final job_result " +
+      "line. With --result-only: print a single job_result JSON object at the end. Requires " +
+      "--job.",
+  },
+  {
+    name: "--result-only",
+    desc:
+      "With --job: print only the final result at the end (today's markdown default streams " +
+      "the full transcript instead) — plain text, or a single JSON object with --json. " +
+      "Requires --job.",
   },
   { name: "--config <path>", desc: "Path to dh.json (default: ./dh.json)." },
   {
@@ -616,6 +638,88 @@ export class ActivityFeed {
   }
 }
 
+/**
+ * DH-0147: `--job`'s new default breadth — a full markdown-rendered transcript of the
+ * conversation (turns, tool calls, sub-agent activity), streamed to stdout live, turn-by-turn,
+ * as the run progresses (owner-resolved Open Question: live streaming, not end-of-run
+ * rendering — the whole point is watching a long unattended run in progress). Renders from the
+ * exact same `ServerSentEvent` stream `--json` already taps (DH-0147's own Assumption) — this
+ * is a new rendering of existing data, not new instrumentation.
+ *
+ * `agent_output` chunks arrive incrementally (per `AgentOutputEvent`'s own doc comment,
+ * clients must accumulate consecutive chunks into one logical turn) — this renderer buffers
+ * them per-agent and flushes as one markdown block at the next natural turn boundary (a
+ * `tool_call`, `agent_status` transition, `session_ended`, or a different agent producing
+ * output), rather than emitting a stdout line per raw chunk (which would fragment a single
+ * sentence across dozens of unreadable lines). `io.stdout` always appends its own line break
+ * (matches every other CliIo caller in this file), so "streamed live" here means "flushed at
+ * each turn boundary" rather than character-by-character — turn-by-turn, per the ticket.
+ */
+export class JobTranscriptRenderer {
+  private readonly buffers = new Map<string, string>();
+
+  constructor(private readonly io: CliIo) {}
+
+  private flush(agentId: string): void {
+    const text = this.buffers.get(agentId);
+    this.buffers.delete(agentId);
+    if (text !== undefined && text.trim().length > 0) {
+      this.io.stdout(text.replace(/\n+$/, ""));
+    }
+  }
+
+  private flushAll(): void {
+    for (const agentId of [...this.buffers.keys()]) this.flush(agentId);
+  }
+
+  onEvent(event: ServerSentEvent): void {
+    switch (event.type) {
+      case "agent_spawned": {
+        const id = shortAgentId(event.agentId);
+        const label = event.description ? `${id} (${event.description})` : id;
+        this.io.stdout(`\n### ${label} — model ${event.model}`);
+        return;
+      }
+      case "agent_output":
+        this.buffers.set(event.agentId, (this.buffers.get(event.agentId) ?? "") + event.chunk);
+        return;
+      case "agent_thinking":
+        // Extended-thinking content is never rendered to the transcript, same as every other
+        // client — see AgentThinkingEvent's own doc comment ("an unaware client degrades to
+        // invisible").
+        return;
+      case "tool_call":
+        this.flush(event.agentId);
+        this.io.stdout(`\n\`${event.toolName}\`: ${event.inputSummary}`);
+        return;
+      case "tool_result":
+        this.io.stdout(`  → ${event.isError ? "error" : "ok"} (${event.durationMs}ms)`);
+        return;
+      case "agent_status":
+        this.flush(event.agentId);
+        this.io.stdout(`\n_${shortAgentId(event.agentId)}: ${event.status}_`);
+        return;
+      case "model_switched":
+        this.io.stdout(
+          `\n_${shortAgentId(event.agentId)}: switched model ${event.from} → ${event.to}_`,
+        );
+        return;
+      case "session_ended":
+        this.flushAll();
+        this.io.stdout(`\n---\nSession ended (exit code ${event.exitCode})`);
+        return;
+      case "token_usage":
+      case "resync":
+        // token_usage is surfaced by ActivityFeed (--server mode) only, not the transcript;
+        // resync is an SSE-resume detail with nothing to render — no client of this standalone
+        // path ever resumes a stream mid-run.
+        return;
+      default:
+        return;
+    }
+  }
+}
+
 /** Parses argv (excluding the `bun`/script prefix — pass `process.argv.slice(2)`). Throws
  * CliUsageError on anything malformed; never exits or prints — that's main()'s job. */
 export function parseArgs(argv: string[]): CliOptions {
@@ -627,6 +731,7 @@ export function parseArgs(argv: string[]): CliOptions {
     instructions: null,
     job: false,
     json: false,
+    resultOnly: false,
     config: DEFAULT_CONFIG_PATH,
     env: null,
     check: false,
@@ -655,6 +760,10 @@ export function parseArgs(argv: string[]): CliOptions {
     }
     if (arg === "--json") {
       options.json = true;
+      continue;
+    }
+    if (arg === "--result-only") {
+      options.resultOnly = true;
       continue;
     }
     if (arg === "--quiet") {
@@ -701,6 +810,12 @@ export function parseArgs(argv: string[]): CliOptions {
   // error here, not a silent no-op, so an operator's misconfigured invocation fails loudly.
   if (options.json && !options.job) {
     throw new CliUsageError("--json requires --job");
+  }
+  // DH-0147: --result-only, like --json, is only meaningful alongside --job — it opts back
+  // into --job's pre-DH-0147 default breadth (final result only, not the new full-stream
+  // default); it has no meaning outside --job.
+  if (options.resultOnly && !options.job) {
+    throw new CliUsageError("--result-only requires --job");
   }
 
   // DH-0168: --web-port only means anything on a mode that actually starts the web UI's
@@ -1342,6 +1457,14 @@ async function runInteractiveMode(
   // DH-0168: resolved (flag-overrides-config) pinned web-UI port; `0` (the default) preserves
   // today's random-ephemeral-port behavior unchanged.
   webPort = 0,
+  /** DH-0148: `--instructions` (no `--job`) — the instructions file's content, sent as the
+   * session's first message once the root agent connects, indistinguishable from a normally-
+   * typed message (no special badge/label/rendering). When `resumeResult` is also set, this
+   * already has `buildResumeNotice(resumeResult)` prepended by the caller (matching the
+   * standalone `--job` path's own combined-text convention) — takes priority over sending the
+   * resume notice on its own. Undefined for every other call site (plain interactive start,
+   * or `--resume` with no `--instructions`). */
+  autoSendMessage?: string,
 ): Promise<ExitCodeType> {
   const { io } = deps;
   // DH-0122: the app header prints once per invocation, before anything else — including
@@ -1445,15 +1568,22 @@ async function runInteractiveMode(
       });
     }
 
-    // DH-0038: an interactive session doesn't wait for the operator's first message to start
-    // the root the way a fresh session does (no operator has attached yet when this runs) —
-    // a resumed root should pick up where it crashed off immediately, not sit idle in
-    // "waiting" for someone to notice and type something. Reuses the exact same lazy-start
-    // sendMessage() path a real operator's first message would take (AgentRuntimeLoopAdapter's
-    // doc comment) — from the loop's point of view this is indistinguishable from an operator
-    // kicking things off with the resume notice as their first message.
-    if (resumeResult) {
-      agentLoop.sendMessage(ROOT_AGENT_ID, buildResumeNotice(resumeResult));
+    // DH-0038/DH-0148: an interactive session doesn't wait for the operator's first message to
+    // start the root the way a fresh session does (no operator has attached yet when this
+    // runs) — a resumed root should pick up where it crashed off immediately, and a fresh
+    // `--instructions` (no `--job`) root should start on those instructions immediately, not
+    // sit idle in "waiting" for someone to notice and type something. Reuses the exact same
+    // lazy-start sendMessage() path a real operator's first message would take
+    // (AgentRuntimeLoopAdapter's doc comment) — from the loop's point of view this is
+    // indistinguishable from an operator kicking things off themselves, and (DH-0148) the
+    // rendered transcript is indistinguishable from a normally-typed message too, by design.
+    // `autoSendMessage` (DH-0148's instructions-derived first message) takes priority when
+    // both it and a bare `resumeResult` notice are candidates — see this function's own param
+    // doc comment for why the caller already folds the resume notice into it when both apply.
+    const firstMessage =
+      autoSendMessage ?? (resumeResult ? buildResumeNotice(resumeResult) : undefined);
+    if (firstMessage !== undefined) {
+      agentLoop.sendMessage(ROOT_AGENT_ID, firstMessage);
     }
 
     // DH-0011: this process owns real resources from here on (the DhServer's listening
@@ -2142,14 +2272,47 @@ export async function main(
     instructionText = `${buildResumeNotice(resumeResult)}\n\n${instructionText}`;
   }
 
-  // DH-0050 (`--job --json`): every ServerSentEvent the root runtime emits is written to
-  // stdout as one NDJSON line, as-is — no separate incremental schema, the existing
-  // versioned event union (src/contracts/events.type.ts) is reused verbatim. `undefined` in
-  // every other mode, so createRuntime()/createStandaloneRuntime() behave exactly as before
-  // this ticket (no `onEvent` at all) when `--json` wasn't given.
-  const onJsonEvent = options.json
-    ? (event: ServerSentEvent) => io.stdout(JSON.stringify(event))
-    : undefined;
+  // DH-0148: without --job, --instructions launches the interactive session (TUI or --web)
+  // immediately and auto-sends the instructions file's content (with any resume notice
+  // prepended, per the combined text built above) as the session's first message once the
+  // root agent connects — replacing the old behavior (an invisible headless run via a
+  // separate AgentRuntime, followed by a disconnected fresh interactive session). --job stays
+  // the fully headless/exit-on-completion path handled below, with its own output-mode flags
+  // (DH-0147) — unaffected by this branch.
+  if (!options.job) {
+    return runInteractiveMode(
+      mode,
+      config,
+      options.config,
+      systemPrompt,
+      deps,
+      resumeResult,
+      options.quiet,
+      resolvedWebPort,
+      instructionText,
+    );
+  }
+
+  // DH-0147: --job's output-mode matrix — breadth (full stream vs --result-only) x format
+  // (markdown vs --json), --json a pure format selector orthogonal to breadth.
+  //   - default breadth + markdown (new default): full conversation transcript, rendered as
+  //     markdown, streamed live turn-by-turn via JobTranscriptRenderer.
+  //   - default breadth + --json: full NDJSON event stream — today's existing `--job --json`
+  //     behavior, unchanged.
+  //   - --result-only + markdown: final result only, plain text — today's pre-DH-0147
+  //     default, now opt-in.
+  //   - --result-only + --json: final result only, as a single job_result JSON object.
+  const streamJson = options.json && !options.resultOnly;
+  const streamMarkdown = !options.json && !options.resultOnly;
+  let transcriptRenderer: JobTranscriptRenderer | undefined;
+  const onEvent: ((event: ServerSentEvent) => void) | undefined = streamJson
+    ? (event) => io.stdout(JSON.stringify(event))
+    : streamMarkdown
+      ? (event) => {
+          transcriptRenderer ??= new JobTranscriptRenderer(io);
+          transcriptRenderer.onEvent(event);
+        }
+      : undefined;
 
   const runtime = deps.createRuntime(
     config,
@@ -2162,7 +2325,7 @@ export async function main(
           model: resumeResult.model,
         }
       : undefined,
-    onJsonEvent,
+    onEvent,
   );
 
   // DH-0011: the standalone `--instructions`/`--job` path is exactly the unattended
@@ -2196,19 +2359,16 @@ export async function main(
   }
   uninstallSignals();
 
-  // DH-0050: in --json mode, human-readable finalOutput text never hits stdout on its own —
-  // the terminal job_result NDJSON line (below) is the one place it's carried, so a
-  // downstream parser reading stdout line-by-line as NDJSON never has to skip a stray
-  // non-JSON line mixed in. Judgment call: `JobResultLine.exitCode` is typed `0 | 1` per the
-  // architect design (mirroring the model self-report outcome, not the full harness-error
-  // exit-code space) — an operator-interrupted (SIGTERM/SIGINT) or crashed run has no
-  // self-report outcome to describe at all, so neither emits a job_result line; a downstream
-  // parser reading the NDJSON stream sees it end with no terminal line, same signal a piped
-  // process getting killed already gives any NDJSON consumer.
+  // DH-0147: `result.finalOutput`/the terminal `job_result` line are printed per the output-
+  // mode matrix above:
+  //   - --result-only (plain text): finalOutput printed once at the end — the old, pre-DH-0147
+  //     default behavior, preserved verbatim for this breadth.
+  //   - --result-only --json / default breadth --json: a `job_result` JSON object — either the
+  //     stream's terminal line (default breadth) or the only line printed (--result-only).
+  //   - default breadth, markdown format: finalOutput is never printed separately — it already
+  //     appeared as part of the live transcript stream above.
   // DH-0037 (`summary.json`): built unconditionally (not just under `--json`) so it can also
-  // back `summary.json`'s fields — the `--json`-gated NDJSON line and the on-disk summary
-  // file are two independent ways to read the exact same terminal facts about the run, not
-  // two different sources of truth for them.
+  // back `summary.json`'s fields.
   const buildJobResultLine = (): JobResultLine => ({
     version: 1,
     type: "job_result",
@@ -2220,53 +2380,21 @@ export async function main(
     finalOutput: result.finalOutput,
     ...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
   });
-  const emitJobResult = (line: JobResultLine) => {
-    if (!onJsonEvent) return;
-    io.stdout(JSON.stringify(line));
-  };
 
   if (interrupted) {
-    if (!options.json) io.stdout(result.finalOutput);
+    // Judgment call unchanged from pre-DH-0147: an operator-interrupted (SIGTERM/SIGINT) run
+    // has no self-report outcome to describe at all, so no job_result line is ever emitted on
+    // this path, in any format.
+    if (options.resultOnly && !options.json) io.stdout(result.finalOutput);
     await runtime.close?.()?.catch(() => {});
     io.exit(ExitCode.HarnessError);
     return ExitCode.HarnessError;
   }
 
-  if (!options.json) io.stdout(result.finalOutput);
+  if (options.resultOnly && !options.json) io.stdout(result.finalOutput);
   // DH-0002: best-effort — closes the shared McpManager (terminating stdio MCP child
-  // processes) now that this standalone run has finished; the `--job` branch below starts a
-  // brand-new AgentRuntime/session, so this one's MCP connections have no further use.
+  // processes) now that this run has finished.
   await runtime.close?.()?.catch(() => {});
-
-  if (!options.job) {
-    // Without --job the process stays alive after completion for inspection (HANDOFF.md
-    // §2) — now via the same real interactive surface the no-instructions path uses. Note
-    // this is a fresh AgentRuntime/session, not a continuation of the one that just ran the
-    // instruction (unifying those is out of scope this round — see the status log).
-    //
-    // DH-0038: this transition is otherwise invisible to the operator — the job's final
-    // output prints, then a silent, contextless session starts with no indication the
-    // conversation didn't just continue. Say so explicitly. Full crash-recovery/session-
-    // resume design is separately handled by the architect; out of scope here.
-    //
-    // DH-0067 fix: moved from io.stderr to io.stdout — this is a normal lifecycle
-    // transition, not an error, and used to render in the same alarming red as a real
-    // failure in a typical terminal/`docker logs` viewer (same reasoning as the SIGTERM
-    // notice above).
-    io.stdout(
-      "dh: job complete; starting a new interactive session (prior context is not preserved)",
-    );
-    return runInteractiveMode(
-      mode,
-      config,
-      options.config,
-      systemPrompt,
-      deps,
-      undefined,
-      options.quiet,
-      resolvedWebPort,
-    );
-  }
 
   const jobResultLine = buildJobResultLine();
   // DH-0037: `summary.json` — written into the finished session's own log directory,
@@ -2285,7 +2413,7 @@ export async function main(
       io.stderr(`dh: failed to write summary.json: ${(err as Error).message}`);
     }
   }
-  emitJobResult(jobResultLine);
+  if (options.json) io.stdout(JSON.stringify(jobResultLine));
   const code = result.success ? ExitCode.Success : ExitCode.TaskFailure;
   io.exit(code);
   return code;

@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0148
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
@@ -88,3 +88,36 @@ None remaining.
 > questions of, must not wait for input, etc.) and adjust its behavior accordingly. That's
 > a Prompt-domain change orthogonal to this ticket's interactive-auto-send scope — see
 > DH-0194.
+
+> [!NOTE]
+> **Implemented 2026-07-19.** `src/cli.ts`: `main()`'s `--instructions` (no `--job`) branch
+> now returns `runInteractiveMode(...)` directly, passing the (resume-notice-prefixed, when
+> applicable) instructions text as a new `autoSendMessage` parameter — the old standalone
+> `AgentRuntime.runRoot()` call, its "job complete; starting a new interactive session"
+> notice, and the fresh-disconnected-session fallthrough are removed entirely for this flag
+> combination (still present, unchanged, for `--job`). `runInteractiveMode` sends
+> `autoSendMessage ?? (resumeResult ? buildResumeNotice(resumeResult) : undefined)` via the
+> existing lazy-start `agentLoop.sendMessage(ROOT_AGENT_ID, ...)` path immediately after the
+> server/TUI/Web wiring starts — the exact same call a real operator's first typed message
+> takes, so the rendered transcript is indistinguishable from one, satisfying the owner's
+> "no special badge/label" decision without any TUI/Web rendering change needed. `--web`
+> works unmodified since mode composition was already flag-driven — no explicit "allow"
+> logic was needed.
+>
+> Tests (`src/cli.test.ts`, describe block "main — standalone --instructions path"):
+> "without --job, --instructions launches interactive mode immediately and auto-sends..."
+> (asserts `createRuntime` is never called and the auto-sent message equals the file
+> content, proving the old headless-then-fresh-session path is gone); "...combined with
+> --resume auto-sends the resume notice plus the instructions content as one first message"
+> (User Story 1, resume case); "...combined with --web is allowed and still auto-sends"
+> (User Story 1, `--web` case / the owner's "allowed, not rejected" decision). The
+> "indistinguishable from a normally-typed message" story (User Story 2) is proven by
+> construction — the auto-send goes through the identical `sendMessage(ROOT_AGENT_ID, ...)`
+> call a typed message uses, with no separate rendering path added anywhere in `src/tui/` or
+> `src/web/`. The `--job` no-effect story (User Story 3) is covered by the full pre-existing
+> `--job` test suite continuing to pass unmodified (this ticket's branch is only reached
+> when `!options.job`).
+>
+> All 4 gates green locally: typecheck, lint, `bun run test:coverage` (0 fail), `bun run
+> e2e` (38/38 pass, unmodified — no e2e test exercised the old headless-then-fresh-session
+> behavior this ticket removes).

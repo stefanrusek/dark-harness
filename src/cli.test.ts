@@ -207,6 +207,7 @@ describe("parseArgs", () => {
       instructions: null,
       job: false,
       json: false,
+      resultOnly: false,
       config: "dh.json",
       env: null,
       check: false,
@@ -225,6 +226,7 @@ describe("parseArgs", () => {
       "--web",
       "--server",
       "--job",
+      "--result-only",
       "--connect",
       "example.com",
       "--port",
@@ -253,6 +255,7 @@ describe("parseArgs", () => {
       instructions: "plan.md",
       job: true,
       json: false,
+      resultOnly: true,
       config: "custom.json",
       env: "secrets.env",
       check: true,
@@ -1263,7 +1266,10 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
 
   test("a root-agent crash returns HarnessError with a clear prefix", async () => {
     const io = fakeIo();
-    const code = await main(["--instructions", "plan.md"], {
+    // DH-0148: without --job, --instructions now launches the interactive session instead of
+    // running the standalone runtime directly — this test exercises the standalone
+    // runtime.runRoot() crash path, which only exists under --job now.
+    const code = await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
@@ -1302,7 +1308,9 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
   test("DH-0002: a crashed standalone run still closes the runtime's MCP manager", async () => {
     const io = fakeIo();
     let closeCalled = false;
-    await main(["--instructions", "plan.md"], {
+    // DH-0148: this test exercises the standalone (headless) runtime crash path, which only
+    // exists under --job now — see the identical note on "a root-agent crash..." above.
+    await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
@@ -1331,9 +1339,12 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(code).toBe(ExitCode.Success);
   });
 
-  test("--job exits 0 and prints the final output when the root agent succeeds", async () => {
+  // DH-0147: --job's new default breadth streams a live markdown transcript instead of
+  // printing bare finalOutput — --result-only opts back into the old default this test
+  // documents.
+  test("--job --result-only exits 0 and prints the final output when the root agent succeeds", async () => {
     const io = fakeIo();
-    const code = await main(["--instructions", "plan.md", "--job"], {
+    const code = await main(["--instructions", "plan.md", "--job", "--result-only"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
@@ -1449,26 +1460,84 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(jobResult.reportedBy).toBe("text-marker");
   });
 
-  test("without --job the process doesn't exit and falls through to a real (faked) interactive mode", async () => {
+  // DH-0148: without --job, --instructions no longer runs a separate, invisible headless
+  // AgentRuntime first — it launches the interactive session immediately and auto-sends the
+  // instructions file's content as the session's first message once the root agent connects,
+  // via the exact same sendMessage() lazy-start path a real operator's first message takes.
+  test("without --job, --instructions launches interactive mode immediately and auto-sends the " +
+    "instructions file's content as the first message (no separate standalone run)", async () => {
     const io = fakeIo();
+    let receivedFirstMessage: string | undefined;
+    let createRuntimeCalled = false;
     const code = await main(["--instructions", "plan.md"], {
       ...interactiveOverrides(io),
       readInstructions: async () => "do the thing",
-      createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
-        stopRoot: () => {},
-      }),
+      createRuntime: () => {
+        createRuntimeCalled = true;
+        return {
+          runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
+          stopRoot: () => {},
+        };
+      },
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          sendMessage: (agentId, message) => {
+            if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+          },
+        }),
     });
     expect(code).toBe(ExitCode.Success);
     expect(io.exitCodes).toEqual([]);
-    expect(io.stdoutLines[0]).toBe("yay");
-    // DH-0038: the operator gets an explicit message that this is a fresh session, not a
-    // continuation of the job that just ran.
-    expect(
-      io.stdoutLines.some((l) =>
-        l.includes("starting a new interactive session (prior context is not preserved)"),
-      ),
-    ).toBe(true);
+    // No standalone headless run happens at all for this flag combination anymore.
+    expect(createRuntimeCalled).toBe(false);
+    expect(receivedFirstMessage).toBe("do the thing");
+    expect(io.stdoutLines.some((l) => l.includes("starting a new interactive session"))).toBe(
+      false,
+    );
+  });
+
+  test("without --job, --instructions combined with --resume auto-sends the resume notice " +
+    "plus the instructions content as one first message", async () => {
+    const io = fakeIo();
+    let receivedFirstMessage: string | undefined;
+    const code = await main(["--instructions", "plan.md", "--resume", "s1"], {
+      ...interactiveOverrides(io),
+      readInstructions: async () => "keep going",
+      loadResumeSession: () => ({
+        messages: [],
+        model: "sonnet",
+        resumedFromSessionId: "s1",
+        lostAgents: [],
+      }),
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          sendMessage: (agentId, message) => {
+            if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+          },
+        }),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(receivedFirstMessage).toContain('resumed after a restart from session "s1"');
+    expect(receivedFirstMessage).toContain("keep going");
+  });
+
+  // DH-0148: --instructions without --job combined with --web is allowed, not rejected — same
+  // auto-send behavior as the local TUI case, just launched via the web client instead.
+  test("without --job, --instructions combined with --web is allowed and still auto-sends", async () => {
+    const io = fakeIo();
+    let receivedFirstMessage: string | undefined;
+    const code = await main(["--instructions", "plan.md", "--web"], {
+      ...interactiveOverrides(io),
+      readInstructions: async () => "do the thing",
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          sendMessage: (agentId, message) => {
+            if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+          },
+        }),
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(receivedFirstMessage).toBe("do the thing");
   });
 
   test("createRuntime is invoked with the loaded config and resolved system prompt", async () => {
@@ -1516,7 +1585,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     const io = fakeIo();
     let stopRootCalled = false;
     let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
-    const code = await main(["--instructions", "plan.md", "--job"], {
+    const code = await main(["--instructions", "plan.md", "--job", "--result-only"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       installSignalHandlers: (onSignal) => {
@@ -2195,7 +2264,7 @@ describe("main — real filesystem-backed default deps", () => {
     const io = fakeIo();
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "go");
-    const code = await main(["--instructions", instructionsPath], {
+    const code = await main(["--instructions", instructionsPath, "--job"], {
       loadConfig: async () => ({
         options: { defaultModel: "sonnet" },
         models: [{ name: "sonnet", provider: "unreachable", model: "sonnet-5" }],

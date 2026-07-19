@@ -148,9 +148,26 @@ current directory (see below). Point it at a task and let it run unattended:
 dh --instructions ./TASK.md --job
 ```
 
-`--job` makes the process exit when the root agent finishes: `0` on self-reported success,
-`1` on self-reported task failure, `2+` on a harness-level error (bad config, provider
-failure, crash) — safe to branch on from CI or a scheduler without parsing logs.
+`--job` is **headless mode**: no TUI/Web session ever attaches, and the process exits when the
+root agent finishes: `0` on self-reported success, `1` on self-reported task failure, `2+` on
+a harness-level error (bad config, provider failure, crash) — safe to branch on from CI or a
+scheduler without parsing logs.
+
+By default, `--job` streams a full markdown-rendered transcript of the run (turns, tool
+calls, sub-agent activity) to stdout live, turn-by-turn, as it happens — readable directly in
+a terminal, or piped to a file for later review. `--result-only` and `--json` narrow that
+down along two independent axes — breadth (the whole run vs. just the final result) and
+format (markdown vs. NDJSON) — see the table below.
+
+| | markdown (default format) | `--json` |
+| --- | --- | --- |
+| **default** (full stream) | Full transcript, live, turn-by-turn. | Full NDJSON event stream, closed by a terminal `job_result` line. |
+| **`--result-only`** | Just the final result, plain text. | Just the final result, as a single `job_result` JSON object. |
+
+Without `--job`, `--instructions <file>` launches the interactive session (TUI, or `--web`)
+immediately and auto-sends the instructions file's content as the first message once the root
+agent connects — you watch it run live in the same session, indistinguishable from having
+typed it yourself.
 
 ## Run modes
 
@@ -192,9 +209,10 @@ Flags:
 | `--quiet` | Suppress `--server`'s per-agent-lifecycle activity feed and SSE connect/disconnect lines. The one-time startup block still prints regardless. |
 | `--connect <host>` | Connect to a remote `dh --server` instead of starting a local one. |
 | `--port <n>` | Listen port for `--server`, or target port for `--connect`. Default `4000`. |
-| `--instructions <file>` | Path to an instructions file. The root agent starts on it immediately, autonomously. |
-| `--job` | Exit when the root agent finishes; see the exit-code table above. Without it, the process stays alive for inspection. |
-| `--json` | With `--job`: stream NDJSON progress events to stdout as the run happens, closed by a final `job_result` line. Requires `--job`. |
+| `--instructions <file>` | Path to an instructions file. Without `--job`, launches the interactive session immediately and auto-sends the file's content as the first message once the root agent connects. With `--job`, the root agent starts on it immediately, headlessly. |
+| `--job` | Headless mode: no TUI/Web session attaches; exit when the root agent finishes (see the exit-code table above). Defaults to a full, live, turn-by-turn markdown transcript on stdout — see `--result-only`/`--json` and the output-mode table above. |
+| `--json` | With `--job`: a pure format selector (markdown vs. JSON), orthogonal to breadth. Default breadth: stream NDJSON progress events to stdout as the run happens, closed by a final `job_result` line. With `--result-only`: print a single `job_result` JSON object at the end. Requires `--job`. |
+| `--result-only` | With `--job`: print only the final result at the end (plain text, or a single JSON object with `--json`) instead of the default full transcript stream. Requires `--job`. |
 | `--config <path>` | Path to `dh.json`. Default: `dh.json` in the working directory. |
 | `--env <file>` | Load a dotenv-style file into the environment before `dh.json` is loaded/interpolated (see below). |
 | `--check` | For each configured model, make one cheap no-op provider call and report pass/fail, then exit. Never enters the agent loop. Same as `dh doctor`. |
