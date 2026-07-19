@@ -14,8 +14,8 @@ import type {
   ServerSentEvent,
   SkillInfo,
 } from "../contracts/index.ts";
+import { FakeAgentLoop } from "./__fixtures__/fake-agent-loop.ts";
 import type { AgentLoopHandle } from "./agent-loop.type.ts";
-import { FakeAgentLoop } from "./fake-agent-loop.ts";
 
 // Statically confirm FakeAgentLoop really implements every member agent-loop.type.ts declares —
 // if the interface grows a member the fake doesn't provide, this line stops compiling.
