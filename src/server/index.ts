@@ -12,6 +12,12 @@ export { type CommandContext, type CommandResult, handleCommand } from "./comman
 export { EventBuffer } from "./event-buffer.ts";
 export { waitForExitCode } from "./exit.ts";
 export {
+  importClaudeSession,
+  type ImportClaudeSessionOptions,
+  type ImportClaudeSessionResult,
+  type ImportClaudeSessionSource,
+} from "./import-claude-session.ts";
+export {
   type AgentLogSummary,
   type AgentLogTreeNode,
   buildAgentLogTree,
