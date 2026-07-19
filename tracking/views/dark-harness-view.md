@@ -68,6 +68,13 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
 
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | feature | Iris |
+| [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | feature | Iris |
+
 ### implementing
 
 | ID | Title | Type | Owner |
