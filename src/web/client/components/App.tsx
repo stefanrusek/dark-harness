@@ -11,6 +11,7 @@ import { ConnectionPill } from "./ConnectionPill.tsx";
 import { ErrorBanner } from "./ErrorBanner.tsx";
 import { ErrorLogPanel } from "./ErrorLogPanel.tsx";
 import { GapBanner } from "./GapBanner.tsx";
+import { LogoMark } from "./LogoMark.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { SessionSummary } from "./SessionSummary.tsx";
 import { Sidebar } from "./Sidebar.tsx";
@@ -55,7 +56,10 @@ export function App({
         <AppHeader {...(headerInfo ? { headerInfo } : {})} />
       </div>
       <nav className="sidebar">
-        <div className="brand">Dark Harness</div>
+        <div className="brand">
+          <LogoMark className="brand-mark" />
+          Dark Harness
+        </div>
         <ConnectionPill status={state.connectionStatus} />
         <Sidebar state={state} onSelect={onSelectAgent} now={now} />
         <SessionSummary state={state} />

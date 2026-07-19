@@ -1,10 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="dh — Dark Harness">
-  <rect x="2" y="2" width="124" height="124" rx="20" fill="#0b0d12" stroke="#232833" stroke-width="2"/>
-  <!-- harness brackets clasping the wordmark -->
-  <path d="M30 34 L18 34 L18 94 L30 94" fill="none" stroke="#4f8cff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M98 34 L110 34 L110 94 L98 94" fill="none" stroke="#4f8cff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- wordmark -->
-  <text x="64" y="80" text-anchor="middle" font-family="'SF Mono','Menlo','Consolas',monospace" font-size="44" font-weight="700" fill="#e8eaee">dh</text>
-  <!-- agent node accent -->
-  <circle cx="64" cy="96" r="4" fill="#35c469"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="DH — Dark Harness">
+  <!-- DH-0219: literal uppercase "D H" monogram, replacing the DH-0121 brackets+dh+dot badge
+       and superseding the DH-0192/0193 "evolve the diamond" exploration entirely. Plain
+       conventional letterforms only — no ligature, no shared strokes between D and H, no
+       accessory marks — closing out the "unintentionally suggestive" finding by being
+       self-evidently literal instead of abstract. Transparent background is the canonical
+       export (owner decision, 2026-07-19); any badge/frame treatment is applied at the usage
+       site, not baked in here. Geometry is fixed per the ticket: D stem x=46, bowl
+       `M46 64 H82 A44 64 0 0 1 82 192 H46` (rx=44/ry=64 keeps D and H similar widths); H
+       stems x=146/x=210, crossbar y=128; the resulting 20px gap between the bowl's rightmost
+       point (x=126) and the H's left stem (x=146) is the "letter gap 20" from the ticket.
+       Stroke width (14, "14-gauge") is expressed as a CSS custom property so a consumer can
+       re-weight it per size context; verified legible as-is at a true 16x16 raster (see
+       DH-0219 ticket Notes for the render check). -->
+  <defs>
+    <!-- userSpaceOnUse + explicit coordinates spanning the whole mark, not the default
+         objectBoundingBox: a purely vertical stroke (the D's stem, both H stems) has a
+         zero-width geometric bounding box, which makes objectBoundingBox gradients degenerate
+         and silently fail to paint in Chromium/Safari (found while rendering the 16px proof
+         below — the stem and all of H were invisible until this was switched). -->
+    <linearGradient id="dhGradient" gradientUnits="userSpaceOnUse" x1="39" y1="57" x2="217" y2="199">
+      <stop offset="0%" stop-color="#9ECE6A"/>
+      <stop offset="100%" stop-color="#7DCFFF"/>
+    </linearGradient>
+    <style>
+      .dh-stroke {
+        fill: none;
+        stroke: url(#dhGradient);
+        stroke-width: var(--dh-logo-stroke-width, 14);
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+    </style>
+  </defs>
+  <!-- D: stem + elliptical bowl -->
+  <path class="dh-stroke" d="M46 64 L46 192"/>
+  <path class="dh-stroke" d="M46 64 H82 A44 64 0 0 1 82 192 H46"/>
+  <!-- H: two stems + crossbar -->
+  <path class="dh-stroke" d="M146 64 L146 192"/>
+  <path class="dh-stroke" d="M210 64 L210 192"/>
+  <path class="dh-stroke" d="M146 128 L210 128"/>
 </svg>

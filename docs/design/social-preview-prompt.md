@@ -31,12 +31,13 @@ marketing deck.
 Read these source files before generating anything — they're the actual visual language of
 the project, not a guess:
 
-1. **The diamond glyph `◆`** — the project's only current brand mark (see
-   `docs/design/style-guide.md` §0/§7 and `README.md`'s title, `# ◆ Dark Harness`). It's
-   borrowed from the web UI's own `.brand::before` CSS rule (`src/web/client/styles.css`).
-   Use it as the anchor mark — do not invent a new logo/symbol; this is the one identity
-   element that exists. Look up `.brand::before` in `src/web/client/styles.css` for its exact
-   current styling (weight, color, any glow/shadow) before rendering it larger.
+1. **The `docs/media/logo.svg` "D H" monogram** (DH-0219) — the project's current brand mark:
+   plain uppercase D and H, side by side, 14-gauge round-cap strokes, green (`#9ECE6A`) →
+   cyan (`#7DCFFF`) gradient, transparent background. It replaced the earlier `◆` diamond
+   glyph and the brackets+wordmark badge that preceded it — do not invent a new logo/symbol
+   or fall back to the diamond; this is the one identity element that exists. Use it as the
+   anchor mark, rendered large enough to read clearly at thumbnail scale (see the
+   16×16-legibility note in DH-0219 — if it holds up at 16px it will hold up here).
 2. **`docs/media/hero-web-dark.png`** (and `hero-web-light.png` for contrast) — the README's
    hero screenshot of the actual web UI: a real agent tree with running/waiting/done/failed
    status dots, a dark panel-on-dark-background layout, monospace transcript text. Use this
@@ -46,14 +47,16 @@ the project, not a guess:
    the screenshot:
    - Background: `#0b0d12` (near-black), panels `#12151c` / `#171b24`
    - Borders: `#232838` / `#2f3648`
-   - Accent (brand/amber): `#f5a524` — this is the one brand hue, use it for the diamond
-     and/or the wordmark, sparingly
+   - Logo gradient: harness green `#9ECE6A` → signal cyan `#7DCFFF` (the monogram's own
+     colors — don't recolor it)
+   - Accent (brand/amber): `#f5a524` — use for the wordmark and/or supporting motif,
+     sparingly
    - Status colors if you include any dots/nodes: running blue `#4f8cff`, done green
      `#35c469`, failed red `#f2545b`, stopped purple `#9a7bd1`, waiting amber `#f5a524`
    - Text: `#e7e9ee` primary, `#8b93a7` dim
 3. **The project name** — render "Dark Harness" as the primary wordmark text (full name, not
    just `dh`) so it's legible as a project name to someone who's never heard of it; `dh` can
-   appear as a secondary/smaller mark (e.g. near the diamond) since that's the actual binary
+   appear as a secondary/smaller mark (e.g. near the monogram) since that's the actual binary
    name, but shouldn't replace the full name as the headline text.
 4. **Optional supporting motif**: a faint suggestion of an agent tree / node graph (small
    dots connected by thin lines, using the status color palette above) in the background or
@@ -69,7 +72,7 @@ the project, not a guess:
 - Near-black background (`#0b0d12`) — do not use a light/white background; this is a dark
   brand, not a coincidence of the current README image, and a light background would clash
   with `hero-web-dark.png` right below it.
-- Diamond glyph + "Dark Harness" wordmark should be the dominant, immediately-legible
+- The "D H" monogram + "Dark Harness" wordmark should be the dominant, immediately-legible
   element, roughly centered or left-third-aligned (GitHub sometimes crops preview edges in
   some surfaces — keep the primary mark and text within the center ~85% of the frame, away
   from the outer edges).
@@ -88,8 +91,9 @@ feeding it the composition guidance above translated into a generation prompt. A
 starting generation prompt, adapt as needed for your tool's syntax:
 
 > A minimalist dark-themed software brand title card, 1280x640px. Near-black background
-> (#0b0d12). Center-left: a bold amber (#f5a524) diamond glyph (◆) next to the wordmark "Dark
-> Harness" in clean modern sans-serif, off-white (#e7e9ee) text. Subtle background texture:
+> (#0b0d12). Center-left: the "D H" monogram — plain uppercase D and H letterforms, round-cap
+> strokes, green-to-cyan gradient (#9ECE6A to #7DCFFF) — next to the wordmark "Dark Harness"
+> in clean modern sans-serif, off-white (#e7e9ee) text. Subtle background texture:
 > a faint constellation of small connected dots in blue (#4f8cff), green (#35c469), and
 > purple (#9a7bd1), suggesting a coordinated agent network, kept low-contrast and
 > non-distracting. No people, no robots, no stock photography, no gradients unrelated to

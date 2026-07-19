@@ -1,4 +1,8 @@
-# ◆ Dark Harness
+<p align="center">
+  <img src="docs/media/logo.svg" width="88" height="88" alt="Dark Harness logo: a green-to-cyan gradient uppercase D H monogram">
+</p>
+
+# Dark Harness
 
 [![CI](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/dark-harness)](https://www.npmjs.com/package/dark-harness)
@@ -413,8 +417,9 @@ should read both before their first change.
 
 ## Status / deferred this round
 
-- A full logo/wordmark design is still out of scope — the ◆ brand mark above (borrowed from
-  the web UI's own `.brand::before`) is the extent of the visual identity for now.
+- The logo (above, `docs/media/logo.svg`) is a literal uppercase "D H" monogram — DH-0219
+  replaced the earlier brackets+wordmark badge and the web UI's bare `◆` glyph with it; the
+  web sidebar header now renders the same mark (`LogoMark`, `src/web/client/components/`).
 - The repo has no GitHub social preview image set yet. A ready-to-follow generation prompt
   for one (dimensions, brand elements, and the mechanical steps to set it) lives at
   [docs/design/social-preview-prompt.md](docs/design/social-preview-prompt.md) for whichever

@@ -157,11 +157,18 @@ button {
   font-weight: 700;
   letter-spacing: 0.02em;
   font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.brand::before {
-  content: "◆ ";
-  color: var(--accent);
+/* DH-0219/DH-0198: the actual "D H" monogram (docs/media/logo.svg via <LogoMark>), replacing
+   the bare "◆ " ::before pseudo-element that stood in for the brand mark. Sized to stay
+   legible next to the 15px wordmark without dominating the sidebar header row. */
+.brand-mark {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .main-pane {

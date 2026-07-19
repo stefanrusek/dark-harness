@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0219
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -108,3 +108,63 @@ Supersedes DH-0192 (logo redesign exploration) and DH-0193 (wordmark padding) �
 as superseded by this ticket and DH-0220. The original "Blinker"/diamond-evolution concept
 from the first design session is abandoned entirely in favor of this literal-monogram
 direction from the owner's second, separate Fable session.
+
+### 2026-07-19 — implemented (Web domain)
+
+Built the DH monogram and swapped in every current consumer:
+
+- `docs/media/logo.svg` replaced with the "D H" monogram per the exact ticket geometry (D
+  stem x=46, bowl `M46 64 H82 A44 64 0 0 1 82 192 H46`; H stems x=146/x=210, crossbar y=128),
+  256x256 viewBox, 14-unit round-cap strokes, green (`#9ECE6A`) → cyan (`#7DCFFF`) gradient,
+  transparent background, no ligature/shared strokes/accessory marks.
+- **Bug found and fixed during the 16px verification pass**: the gradient originally used the
+  default `objectBoundingBox` units. A purely vertical stroke (the D's stem, both H stems) has
+  a zero-width *geometric* bounding box (stroke width isn't counted), which makes
+  `objectBoundingBox` gradients degenerate in Chromium — the stem and the entire H silently
+  failed to paint, leaving only the D's bowl visible. Fixed by switching to
+  `gradientUnits="userSpaceOnUse"` with explicit coordinates spanning the whole mark
+  (`x1=39 y1=57 x2=217 y2=199`). Confirmed both letterforms paint after the fix.
+- **16px legibility verification method**: rendered the SVG through a headless Chromium page
+  (Playwright, already a repo dependency) at a true 16x16 viewport/deviceScaleFactor=1, saved
+  the raw PNG, and read back the actual pixel alpha values (via Pillow) to confirm both the D
+  and H shapes are present as distinct glyphs, not just eyeballing an upscaled/anti-aliased
+  render. Result: both letterforms are clearly distinguishable at 16x16 (verified both via
+  raw alpha-channel dump and a nearest-neighbor-upscaled visual render for a sanity check).
+  This is what caught the gradient bug above — the bug was invisible at full size in a casual
+  look but total at 16px, confirming the ticket's risk note.
+- **Monochrome verification**: re-rendered with a flat black stroke in place of the gradient;
+  reads clearly as "DH" with no color dependency, satisfying the color-vision-difference user
+  story.
+- Web favicon (`src/web/client/index.html`): replaced the old `◆` diamond data-URI favicon
+  with an inlined data-URI of the new monogram (same geometry/gradient, minimally re-encoded
+  to keep the existing single-quote-attribute convention). Verified by rendering the decoded
+  data URI standalone.
+- Web header (`src/web/client/components/App.tsx` + new `LogoMark.tsx` +
+  `styles.css` `.brand`/`.brand-mark`): the sidebar `.brand` row now renders the actual SVG
+  mark (inlined as JSX, not fetched via `<img>`, to avoid adding new static-asset-serving
+  surface) instead of the bare `◆ ` `::before` pseudo-element. This is what closes out
+  DH-0198 (web header never rendered the real brand mark) — confirmed absorbed here per this
+  ticket's scope. New component has its own test (`LogoMark.test.tsx`) asserting the
+  rendered path geometry and `className` passthrough; 100% coverage maintained.
+- README hero: added `docs/media/logo.svg` as a centered image above the title (title text
+  itself de-diamonded from `# ◆ Dark Harness` to `# Dark Harness`); "Status / deferred this
+  round" section updated to describe the real mark instead of the retired `◆` glyph note.
+- `docs/design/social-preview-prompt.md` (the one other "social preview reference" consumer):
+  updated its brand-mark guidance from the `◆` diamond to the new monogram's geometry/colors,
+  including the example generation prompt text.
+- No CLI/TUI changes — confirmed no logo-rendering code exists there; the terminal identity
+  stays separate ASCII/ANSI art per DH-0220 (out of scope here).
+
+**Gate results:** `bun run typecheck` clean; `bun run lint` clean (one biome formatting
+auto-fix applied to the new `LogoMark.tsx`, then re-verified clean); `bun run test:coverage`
+139/139 suites passed, 100.00% line coverage (14563/14563); `bun run e2e` 40/40 tests passed
+across 12 files, no failures.
+
+Judgment calls: kept the palette hexes inline in `LogoMark.tsx`/the favicon data URI rather
+than importing from a shared tokens module — DH-0221 (parallel ticket) owns
+`src/design-tokens.ts`/color infrastructure and this ticket was explicitly scoped to avoid
+touching it; a follow-up can point this component at that module once DH-0221 lands, if the
+five hexes end up duplicated in more than these two spots. Did not add a badge/frame around
+the README hero image since the ticket only requires that framing not be baked into the SVG
+itself — the transparent mark alone reads fine at the size used; a future design pass can add
+one at the usage site without touching the canonical file.

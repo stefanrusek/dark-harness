@@ -4,12 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Dark Harness</title>
-    <!-- DH-0066: the ◆ brand mark (see .brand::before in styles.css) as an inlined SVG data
-         URI favicon — trivially inlinable, CSP-safe (no external request, DH-0023 posture),
-         and replaces the previously-blank `data:,` icon that left every tab anonymous. -->
+    <!-- DH-0066/DH-0219: the actual "D H" brand mark (docs/media/logo.svg geometry, kept in
+         sync manually) as an inlined SVG data URI favicon — trivially inlinable, CSP-safe (no
+         external request, DH-0023 posture). Originally a bare "◆" diamond glyph; replaced with
+         the real monogram per DH-0219. Transparent background, same green-to-cyan gradient as
+         the canonical file. -->
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 L30 16 L16 30 L2 16 Z' fill='%23f5a524'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='g' gradientUnits='userSpaceOnUse' x1='39' y1='57' x2='217' y2='199'%3E%3Cstop offset='0%25' stop-color='%239ECE6A'/%3E%3Cstop offset='100%25' stop-color='%237DCFFF'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg fill='none' stroke='url(%23g)' stroke-width='14' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M46 64 L46 192'/%3E%3Cpath d='M46 64 H82 A44 64 0 0 1 82 192 H46'/%3E%3Cpath d='M146 64 L146 192'/%3E%3Cpath d='M210 64 L210 192'/%3E%3Cpath d='M146 128 L210 128'/%3E%3C/g%3E%3C/svg%3E"
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
