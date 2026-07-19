@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0123
 type: bug
-status: implementing
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -45,3 +45,40 @@ Owner observation from live manual testing 2026-07-17: 'dh init output doesn't l
 ## Open Questions
 
 ## Notes
+
+### 2026-07-19 — implementation
+
+Wired the shared app header into `dh init`. Note: DH-0220 landed on this branch in the
+meantime and replaced the interactive-mode header path (`src/cli/run.ts` now uses
+`renderHeaderA2`/`renderHeaderB` from the new `src/cli/header.ts`) — but `dh doctor`'s own
+header call was untouched by that ticket and still goes through `printAppHeader`
+(`src/cli/activity-feed.ts`), which itself still calls the shared `buildHeaderInfo`/
+`formatHeaderLines` builders in `src/header-info.ts` (DH-0122). So the ticket's literal
+ask — wire `printAppHeader()` into `init` "the same way `runDoctor` already consumes it" —
+still applies verbatim; no need to reach for the new A2/B header modes (those are gated on
+`RunMode`/interactive-TTY composition that `init` doesn't participate in).
+
+Changes:
+- `src/cli/activity-feed.ts`: widened `printAppHeader`'s `config` param from `DhConfig` to
+  `DhConfig | null` — `header-info.ts`'s `buildHeaderInfo`/`buildConfigStatusSummary` already
+  anticipated this exact "future `dh init` degenerate case" (see that file's existing
+  comment), but the CLI-facing wrapper hadn't been widened to actually accept it yet.
+- `src/cli/init.ts`: calls `printAppHeader(null, targetPath, io)` right after flag parsing,
+  before the `fileExists`/overwrite-refusal check — same position `runDoctor` calls it in,
+  before doing any work. `null` config renders the same "config: not found (<path>)" status
+  line doctor shows for a genuinely missing file, which is accurate here (init hasn't written
+  anything yet at that point).
+- Audited the rest of `init`'s own output (the DH-0101 success-headline/dim-caveats/next-step
+  block) against `doctor`'s current conventions — found it already matches the same shape
+  (bold/glyph headline, dimmed detail lines, plain next-step line, same `dh: ` prefix
+  discipline) from an earlier round, so no further changes were needed there beyond the
+  header wiring itself.
+- Updated `src/cli.test.ts`'s `dh init` describe block for the new header lines leading the
+  output (both the non-TTY and TTY-styling assertions).
+
+Gates: `bun run typecheck`, `bun run test:coverage` (100%, 140/140), `bun run e2e` (40/40,
+one flaky failure on the first run — `web.test.ts`'s stream-reader race in
+`e2e/support/dh-process.ts`, unrelated to this change, passed clean on immediate retry) all
+green. `bun run lint` has one pre-existing, unrelated failure in `src/cli/header.test.ts`
+(a formatter-only nit, present on `main` before this change too — confirmed via `git
+stash`); left untouched as out of scope for this ticket.

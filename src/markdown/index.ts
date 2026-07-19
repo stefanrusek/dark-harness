@@ -13,10 +13,16 @@
 // therefore render as literal text — that's the "graceful degradation" functional
 // requirement, not a bug.
 //
-// Raw HTML is always literal text: there is no HTML AST node type at all. That absence is
+// Raw HTML is always literal text: there is no general HTML AST node type. That absence is
 // the core security property this ticket exists for — a `<script>` tag in model output can
 // never become markup in either client, because the AST has nothing that could render it as
-// one.
+// one. The sole exception, added by DH-0206/ADR 0009, is `coloredSpan` below — it is a
+// semantic color node, not an HTML node: it carries no tag name, no attribute string, and no
+// raw markup, only already-parsed children and a color that has passed a strict allowlist
+// (`validateColor`) before the node is ever constructed. Recognition of the one exact
+// `<span style="color: …">…</span>` surface syntax that produces it is fail-closed — any
+// other tag, any malformed span, or any span whose color fails validation stays literal text.
+// See docs/adr/0009-markdown-colored-span-subset.md for the full spec and rationale.
 
 export type InlineNode =
   | { kind: "text"; text: string }
@@ -24,7 +30,8 @@ export type InlineNode =
   | { kind: "emphasis"; children: InlineNode[] }
   | { kind: "strike"; children: InlineNode[] }
   | { kind: "code"; text: string }
-  | { kind: "link"; children: InlineNode[]; url: string; title?: string };
+  | { kind: "link"; children: InlineNode[]; url: string; title?: string }
+  | { kind: "coloredSpan"; children: InlineNode[]; color: string };
 
 export type TableAlign = "left" | "center" | "right" | null;
 
