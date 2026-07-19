@@ -99,3 +99,11 @@ per CLAUDE.md section 6 instead of ticketing normally.
   The `Refactoring-Round: DH-XXXX` trailer commit that closes the round is a
   separate, deliberate coordinator action taken *after* reviewing what Fable
   filed -- not something the round dispatch does automatically.
+- **Owner directive (2026-07-19): the coordinator closes the round on its own
+  once Fable's output is reviewed -- do not stop to ask the owner for
+  go-ahead first.** Read what Fable filed, sanity-check it (no duplicate/
+  overlapping tickets, findings look real), then commit the
+  `Refactoring-Round: DH-XXXX` trailer immediately. This is standing
+  authorization for this one specific action; it does not extend to
+  implementing the tickets a round files -- that still follows the normal
+  dispatch/merge process.
