@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { JsonSchema } from "./types.ts";
+import type { JsonSchema } from "./types.type.ts";
 import { validateInput } from "./validate-input.ts";
 
 describe("validateInput", () => {

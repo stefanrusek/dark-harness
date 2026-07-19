@@ -10,7 +10,7 @@
 // enum membership, semantic checks needing ctx, nested/complex shapes) stays as local
 // hand-written code in that tool's execute(), run *after* this helper's check.
 
-import type { JsonSchema, ToolResult } from "./types.ts";
+import type { JsonSchema, ToolResult } from "./types.type.ts";
 
 export type ValidationOutcome = { ok: true } | { ok: false; result: ToolResult };
 
