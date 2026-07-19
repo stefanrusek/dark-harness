@@ -80,3 +80,13 @@ in `server.test.ts` confirmed to fail identically on `main` before this change),
 (2 pre-existing failures in `web.test.ts`/`connect-web.test.ts` — a `"Waiting"` vs `"waiting"`
 casing mismatch — confirmed to fail identically on `main` before this change, unrelated to
 this ticket).
+
+**Discrepancy flagged (2026-07-19), needs a real browser check before closing:** a manual
+testing pass (`temp-manual-testing.md`) reported "Web is missing the app header — it should
+be visible but isn't." I spot-checked: `AppHeader` is genuinely mounted in
+`src/web/client/components/App.tsx` (not a stub, real wiring), and the compiled bundle serves
+fine (`curl` against a real `dh --web` instance returns HTTP 200 with a real chunk script). So
+this is not "never implemented" — but I can't rule out a runtime issue (e.g. `headerInfo`
+fetch failing silently, a CSS/layout bug hiding it) without an actual rendered-browser check,
+which I didn't have tooling for in this pass. Leaving at `verifying`; whoever does the visual
+review should specifically confirm the header renders, not just that the code path exists.
