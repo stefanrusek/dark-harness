@@ -8,6 +8,7 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { capOutput } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 function resolvePath(path: string, cwd: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);
@@ -38,10 +39,19 @@ export const globTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const pattern = input.pattern;
-    if (typeof pattern !== "string" || pattern.length === 0) {
-      return { output: "Glob tool error: 'pattern' must be a non-empty string.", isError: true };
-    }
+    // 'path' keeps its own local check — its "must be a string when provided." wording
+    // differs from the shared helper's "must be a string.", so only 'pattern' is scoped in.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: { pattern: globTool.inputSchema.properties.pattern },
+        required: ["pattern"],
+      },
+      "Glob",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const pattern = input.pattern as string;
     const path = input.path;
     if (path !== undefined && typeof path !== "string") {
       return { output: "Glob tool error: 'path' must be a string when provided.", isError: true };

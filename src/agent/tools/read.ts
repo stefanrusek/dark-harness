@@ -16,6 +16,7 @@ import { isAbsolute, resolve } from "node:path";
 import { getDocumentProxy } from "unpdf";
 import { recordRead } from "./read-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const DEFAULT_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
@@ -317,10 +318,24 @@ export const readTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const filePath = input.file_path;
-    if (typeof filePath !== "string" || filePath.length === 0) {
-      return { output: "Read tool error: 'file_path' must be a non-empty string.", isError: true };
-    }
+    // 'offset'/'limit' keep their own local checks — both add a positivity constraint beyond
+    // plain typeof ("must be a 1-based positive number." / "must be a positive number.") that
+    // the shared helper's generic "must be a number." wording doesn't match, so only
+    // 'file_path' and 'pages' are scoped into the shared validator.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: {
+          file_path: readTool.inputSchema.properties.file_path,
+          pages: readTool.inputSchema.properties.pages,
+        },
+        required: ["file_path"],
+      },
+      "Read",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const filePath = input.file_path as string;
 
     const offset = input.offset;
     if (offset !== undefined && (typeof offset !== "number" || offset < 1)) {
@@ -333,10 +348,7 @@ export const readTool: Tool = Object.freeze<Tool>({
     if (limit !== undefined && (typeof limit !== "number" || limit < 1)) {
       return { output: "Read tool error: 'limit' must be a positive number.", isError: true };
     }
-    const pages = input.pages;
-    if (pages !== undefined && typeof pages !== "string") {
-      return { output: "Read tool error: 'pages' must be a string.", isError: true };
-    }
+    const pages = input.pages as string | undefined;
 
     const absPath = resolvePath(filePath, ctx.cwd);
     const file = Bun.file(absPath);

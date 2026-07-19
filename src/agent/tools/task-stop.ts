@@ -2,6 +2,7 @@
 
 import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 export const taskStopTool: Tool = Object.freeze<Tool>({
   name: "TaskStop",
@@ -16,13 +17,9 @@ export const taskStopTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const taskId = input.task_id;
-    if (typeof taskId !== "string" || taskId.length === 0) {
-      return {
-        output: "TaskStop tool error: 'task_id' must be a non-empty string.",
-        isError: true,
-      };
-    }
+    const validation = validateInput(taskStopTool.inputSchema, "TaskStop", input);
+    if (!validation.ok) return validation.result;
+    const taskId = input.task_id as string;
 
     try {
       ctx.tasks.stop(taskId);

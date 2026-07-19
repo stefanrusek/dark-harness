@@ -21,6 +21,7 @@
 
 import { capOutputWithSavedFile } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -140,10 +141,22 @@ export const bashTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const command = input.command;
-    if (typeof command !== "string" || command.length === 0) {
-      return { output: "Bash tool error: 'command' must be a non-empty string.", isError: true };
-    }
+    // Scoped to 'command' only (not the whole inputSchema) — 'timeout'/'timeout_ms' keep
+    // their own resolveTimeout() logic (positivity + alias precedence beyond plain typeof),
+    // and 'run_in_background' has no error path at all (it just falls back to the ctx
+    // default), so running the shared validator over the full schema here would risk
+    // pre-empting that tool-specific logic with a generically-worded error instead.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: { command: bashTool.inputSchema.properties.command },
+        required: ["command"],
+      },
+      "Bash",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const command = input.command as string;
 
     let timeoutMs: number;
     try {

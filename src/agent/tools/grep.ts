@@ -15,6 +15,7 @@ import { stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { capOutput } from "./output-cap.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const MAX_FILE_BYTES = Object.freeze(5 * 1024 * 1024);
 const BINARY_SNIFF_BYTES = 8_000;
@@ -262,22 +263,30 @@ export const grepTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const pattern = input.pattern;
-    if (typeof pattern !== "string" || pattern.length === 0) {
-      return { output: "Grep tool error: 'pattern' must be a non-empty string.", isError: true };
-    }
-    const path = input.path;
-    if (path !== undefined && typeof path !== "string") {
-      return { output: "Grep tool error: 'path' must be a string when provided.", isError: true };
-    }
-    const globPattern = input.glob;
-    if (globPattern !== undefined && typeof globPattern !== "string") {
-      return { output: "Grep tool error: 'glob' must be a string when provided.", isError: true };
-    }
-    const fileType = input.type;
-    if (fileType !== undefined && typeof fileType !== "string") {
-      return { output: "Grep tool error: 'type' must be a string when provided.", isError: true };
-    }
+    // Scoped to the plain string fields only (not the whole inputSchema) — 'output_mode',
+    // '-A'/'-B'/'-C', 'multiline', and 'head_limit' below all carry validity constraints
+    // beyond plain typeof (enum membership, non-negativity, mutual dependence on
+    // output_mode), so they stay as local checks rather than going through the generic
+    // validator.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: {
+          pattern: grepTool.inputSchema.properties.pattern,
+          path: grepTool.inputSchema.properties.path,
+          glob: grepTool.inputSchema.properties.glob,
+          type: grepTool.inputSchema.properties.type,
+        },
+        required: ["pattern"],
+      },
+      "Grep",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const pattern = input.pattern as string;
+    const path = input.path as string | undefined;
+    const globPattern = input.glob as string | undefined;
+    const fileType = input.type as string | undefined;
     let typeExtensions: string[] | undefined;
     if (fileType !== undefined) {
       typeExtensions = TYPE_EXTENSIONS[fileType];

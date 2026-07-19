@@ -4,6 +4,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
@@ -24,14 +25,10 @@ export const writeTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const filePath = input.file_path;
-    const content = input.content;
-    if (typeof filePath !== "string" || filePath.length === 0) {
-      return { output: "Write tool error: 'file_path' must be a non-empty string.", isError: true };
-    }
-    if (typeof content !== "string") {
-      return { output: "Write tool error: 'content' must be a string.", isError: true };
-    }
+    const validation = validateInput(writeTool.inputSchema, "Write", input);
+    if (!validation.ok) return validation.result;
+    const filePath = input.file_path as string;
+    const content = input.content as string;
 
     const absPath = resolvePath(filePath, ctx.cwd);
 

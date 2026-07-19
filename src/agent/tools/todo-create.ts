@@ -4,6 +4,7 @@
 
 import { TodoCapExceededError, TodoNotFoundError } from "../todos.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 export const todoCreateTool: Tool = Object.freeze<Tool>({
   name: "TodoCreate",
@@ -39,37 +40,11 @@ export const todoCreateTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const subject = input.subject;
-    if (typeof subject !== "string" || subject.length === 0) {
-      return {
-        output: "TodoCreate tool error: 'subject' must be a non-empty string.",
-        isError: true,
-      };
-    }
+    const validation = validateInput(todoCreateTool.inputSchema, "TodoCreate", input);
+    if (!validation.ok) return validation.result;
 
-    let blockedBy: string[] | undefined;
-    if (input.blocked_by !== undefined) {
-      if (!Array.isArray(input.blocked_by) || input.blocked_by.some((v) => typeof v !== "string")) {
-        return {
-          output: "TodoCreate tool error: 'blocked_by' must be an array of strings.",
-          isError: true,
-        };
-      }
-      blockedBy = input.blocked_by as string[];
-    }
-
-    if (input.description !== undefined && typeof input.description !== "string") {
-      return {
-        output: "TodoCreate tool error: 'description' must be a string.",
-        isError: true,
-      };
-    }
-    if (input.active_form !== undefined && typeof input.active_form !== "string") {
-      return {
-        output: "TodoCreate tool error: 'active_form' must be a string.",
-        isError: true,
-      };
-    }
+    const subject = input.subject as string;
+    const blockedBy = input.blocked_by as string[] | undefined;
 
     try {
       const record = ctx.todos.create({

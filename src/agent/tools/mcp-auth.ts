@@ -10,6 +10,7 @@
 // failure. Full implementation (device/browser OAuth flow, token storage) is future work.
 
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 export const mcpAuthTool: Tool = Object.freeze<Tool>({
   name: "McpAuth",
@@ -25,10 +26,9 @@ export const mcpAuthTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, _ctx: ToolContext): Promise<ToolResult> {
-    const server = input.server;
-    if (typeof server !== "string" || server.length === 0) {
-      return { output: "McpAuth tool error: 'server' must be a non-empty string.", isError: true };
-    }
+    const validation = validateInput(mcpAuthTool.inputSchema, "McpAuth", input);
+    if (!validation.ok) return validation.result;
+    const server = input.server as string;
     return {
       output: `McpAuth is not implemented in this round. MCP server "${server}" cannot be authenticated; servers requiring OAuth are unsupported until an MCP client lands. See docs/handoffs/core.md status log.`,
       isError: true,

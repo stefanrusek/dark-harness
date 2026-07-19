@@ -3,6 +3,7 @@
 import type { TodoRecord } from "../todos.ts";
 import { TodoNotFoundError } from "../todos.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 function formatRecord(record: TodoRecord): string {
   const lines = [
@@ -32,13 +33,9 @@ export const todoGetTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const todoId = input.todo_id;
-    if (typeof todoId !== "string" || todoId.length === 0) {
-      return {
-        output: "TodoGet tool error: 'todo_id' must be a non-empty string.",
-        isError: true,
-      };
-    }
+    const validation = validateInput(todoGetTool.inputSchema, "TodoGet", input);
+    if (!validation.ok) return validation.result;
+    const todoId = input.todo_id as string;
 
     try {
       const record = ctx.todos.get(todoId);

@@ -20,6 +20,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import type { WebFetchConfig } from "../../contracts/index.ts";
 import { hostMatchesSuffix, isPrivateAddress } from "./net-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = Object.freeze(4 * 1024 * 1024);
@@ -168,14 +169,10 @@ export const webFetchTool: Tool = Object.freeze<Tool>({
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const url = input.url;
-    if (typeof url !== "string" || url.length === 0) {
-      return { output: "WebFetch tool error: 'url' must be a non-empty string.", isError: true };
-    }
-    const prompt = input.prompt;
-    if (prompt !== undefined && typeof prompt !== "string") {
-      return { output: "WebFetch tool error: 'prompt' must be a string.", isError: true };
-    }
+    const validation = validateInput(webFetchTool.inputSchema, "WebFetch", input);
+    if (!validation.ok) return validation.result;
+    const url = input.url as string;
+    const prompt = input.prompt as string | undefined;
 
     const fetchConfig: WebFetchConfig = ctx.config.web?.fetch ?? {};
     const timeoutMs = fetchConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS;

@@ -12,6 +12,7 @@
 import type { WebSearchConfig } from "../../contracts/index.ts";
 import { hostMatchesSuffix } from "./net-guard.ts";
 import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESULTS = 10;
@@ -115,26 +116,23 @@ export const webSearchTool: Tool = Object.freeze<Tool>({
         isError: true,
       };
     }
+    // 'query' keeps its own local check above (min-length, not plain typeof), so only the two
+    // array-of-strings fields are scoped into the shared validator.
+    const domainsValidation = validateInput(
+      {
+        type: "object",
+        properties: {
+          allowed_domains: webSearchTool.inputSchema.properties.allowed_domains,
+          blocked_domains: webSearchTool.inputSchema.properties.blocked_domains,
+        },
+        required: [],
+      },
+      "WebSearch",
+      input,
+    );
+    if (!domainsValidation.ok) return domainsValidation.result;
     const allowedDomains = input.allowed_domains;
-    if (
-      allowedDomains !== undefined &&
-      (!Array.isArray(allowedDomains) || allowedDomains.some((d) => typeof d !== "string"))
-    ) {
-      return {
-        output: "WebSearch tool error: 'allowed_domains' must be an array of strings.",
-        isError: true,
-      };
-    }
     const blockedDomains = input.blocked_domains;
-    if (
-      blockedDomains !== undefined &&
-      (!Array.isArray(blockedDomains) || blockedDomains.some((d) => typeof d !== "string"))
-    ) {
-      return {
-        output: "WebSearch tool error: 'blocked_domains' must be an array of strings.",
-        isError: true,
-      };
-    }
 
     const searchConfig = ctx.config.web?.search;
     if (!searchConfig) {
