@@ -1,5 +1,9 @@
-// Shared test scaffolding for tool unit tests. Kept branch-free so it doesn't dilute the
-// 100%-coverage gate: every call site exercises the same lines.
+// Shared test scaffolding for tool unit tests. `makeToolContext`'s `overrides` parameter
+// (with the `tasks ?? new TaskRegistry()` fallback below) is real, load-bearing behavior:
+// most call sites want a fresh, isolated `TaskRegistry` per test, but a test that needs to
+// share one `TaskRegistry` across two contexts (e.g. a parent and a resumed sub-agent) can
+// pass `tasks` explicitly — see the "overrides.tasks is used when provided" case in
+// test-helpers.test.ts.
 
 import type { DhConfig } from "../../contracts/index.ts";
 import { TaskRegistry } from "../tasks.ts";

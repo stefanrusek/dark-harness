@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { TaskRegistry } from "../tasks.ts";
 import { makeToolContext } from "./test-helpers.ts";
 
 describe("makeToolContext defaults", () => {
@@ -41,5 +42,18 @@ describe("makeToolContext defaults", () => {
     const ctx = makeToolContext({ cwd: "/tmp", agentId: "custom" });
     expect(ctx.cwd).toBe("/tmp");
     expect(ctx.agentId).toBe("custom");
+  });
+
+  test("overrides.tasks is used when provided, instead of a fresh TaskRegistry", () => {
+    const shared = new TaskRegistry();
+    shared.start({
+      kind: "bash",
+      parentAgentId: "agent-test-root",
+      id: "task-shared",
+      run: async () => {},
+    });
+    const ctx = makeToolContext({ tasks: shared });
+    expect(ctx.tasks).toBe(shared);
+    expect(ctx.tasks.list().map((t) => t.id)).toContain("task-shared");
   });
 });

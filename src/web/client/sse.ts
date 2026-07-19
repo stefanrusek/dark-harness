@@ -97,14 +97,15 @@ export function nextReconnectDelayMs(
  * it tolerates the stream being chunked at arbitrary byte boundaries.
  */
 export class SseStreamParser {
-  private buffer = "";
+  private buffer: string;
 
-  // Explicit (if empty) constructor: a class with only field initializers and no
-  // constructor of its own leaves Bun's coverage instrumentation treating the synthetic
-  // default constructor as never "hit," even though `new SseStreamParser()` runs on every
-  // (re)connect — a known instrumentation quirk (see docs/roster/radia.md), not a real gap.
-  // biome-ignore lint/complexity/noUselessConstructor: works around the coverage quirk above.
-  constructor() {}
+  constructor() {
+    // Real assignment (not a field initializer) so the constructor body itself executes and
+    // is counted as covered — a class with only field initializers and no constructor body
+    // left Bun's coverage instrumentation treating the synthetic default constructor as never
+    // "hit," even though `new SseStreamParser()` runs on every (re)connect.
+    this.buffer = "";
+  }
 
   push(chunk: string): SseRecord[] {
     // Normalize CRLF to LF up front so blank-line detection below (which only looks for

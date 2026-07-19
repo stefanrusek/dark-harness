@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0176
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-18
 relations:
@@ -95,4 +95,58 @@ Requirements. The escalation trigger was "could this weaken the locked gate?" �
 explicitly out of bounds. No architect re-escalation needed for the sanctioned work; re-escalate
 only if the synthetic-constructor fix turns out to require a generalizable coverage-exclusion
 mechanism (see Functional Requirements).
+
+### 2026-07-18 — Implementation complete
+
+**US1 (synthetic empty constructors) — done, no exclusion mechanism needed.** Both
+`constructor() {}` + `biome-ignore noUselessConstructor` workarounds are gone:
+- `src/web/client/sse.ts` (`SseStreamParser`): `private buffer = ""` field initializer moved
+  into a real constructor body (`this.buffer = ""`), field declared `private buffer: string`
+  (no initializer). The constructor body now genuinely executes, so Bun counts it as hit
+  without any exclusion.
+- `src/server/fake-agent-loop.ts` (`FakeAgentLoop`): same pattern — `private tree: AgentTreeNode[] = []`
+  field initializer moved into the constructor body (`this.tree = []`), field declared without
+  an initializer. Same effect, no exclusion needed. The escalation path in the Functional
+  Requirements (generalizable exclusion mechanism) was never triggered — the "genuinely
+  initializing field" shape worked for both occurrences.
+- Verified: `bun run test:coverage` shows both `src/web/client/sse.ts` and
+  `src/server/fake-agent-loop.ts` at 100.00%/100.00% (lines/functions) with the empty
+  constructors removed.
+
+**US2 (branch-free helper) — done.** `src/agent/tools/test-helpers.ts`'s header comment
+claimed the file was "kept branch-free"; that was already stale — `makeToolContext`'s
+`overrides.tasks ?? new TaskRegistry()` is a real conditional, but no test exercised the
+`overrides.tasks` (truthy) side before this change. Fixed:
+- Rewrote the header comment to state what the fallback is actually for (share one
+  `TaskRegistry` across two contexts) instead of the coverage-avoidance framing.
+- Added a new test, `test-helpers.test.ts`: "overrides.tasks is used when provided, instead
+  of a fresh TaskRegistry" — asserts `ctx.tasks` is the exact passed-in registry and that a
+  task started on it beforehand is visible through the context, which now genuinely exercises
+  both sides of the `??`.
+
+**US3 (oversized test files) — audited, no split, no line-hitting-only tests found.**
+Reviewed `src/agent/runtime.test.ts` (~2740 lines, 93 tests) and `src/agent/loop.test.ts`
+(~2171 lines, 66 tests) for tests that execute a line without asserting anything meaningful.
+Heuristic sweep (every `test(...)` block contains at least one `expect(...)`, and a spot check
+of every `toBe(true)`/`toBeTruthy()`-style assertion) turned up only genuine behavior
+assertions (result success, specific event/log-line presence, etc.) — no vacuous
+line-hitting-only tests. Per the ticket's own "size alone is not a defect" clause, neither
+file was split.
+
+**Guardrail confirmed held.** No change to `.github/workflows/gate.yml`, no coverage
+threshold change, no `istanbul-ignore`/lcov exclusion/instrumentation opt-out added anywhere.
+`bun run test:coverage`'s summed LH/LF ratio (the same formula `gate.yml` uses) is unchanged
+by this ticket's edits — the two new/moved lines in `sse.ts` and `fake-agent-loop.ts` are both
+hit, and the pre-existing gap this local sandbox run reports (~99.78%, from
+`src/tui/app.test.ts`'s four `test.skip(...)` cases tracked separately under DH-0146 as
+"flaky in real CI, root cause unconfirmed") is identical before and after this change —
+confirmed by diffing summed LH/LF across a `git stash`-baseline run vs. this branch's run.
+Full four-gate results (`typecheck`, `lint`, `test:coverage`, `e2e`) are in the implementer's
+report; `lint` fails in this sandbox on a pre-existing `biome.json` schema mismatch
+(`"include"` vs. `"includes"` in `src/web/client/components/**/*.tsx` override) unrelated to
+this ticket's diff, reproduced identically on a clean `git stash` of these changes.
+
+**Found but out of approved scope:** none. Both synthetic constructors were fixable with the
+"genuinely-initializing field" shape the Functional Requirements called for as the preferred
+option — no case required escalating to Fable for a generalizable exclusion mechanism.
 

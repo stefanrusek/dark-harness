@@ -19,7 +19,7 @@ import type {
 export class FakeAgentLoop implements AgentLoopHandle {
   private readonly eventListeners = new Set<AgentLoopEventListener>();
   private readonly logListeners = new Set<AgentLoopLogListener>();
-  private tree: AgentTreeNode[] = [];
+  private tree: AgentTreeNode[];
   readonly sentMessages: Array<{ agentId: string; message: string }> = [];
   readonly stoppedAgents: string[] = [];
   private models: ModelInfo[] = [];
@@ -27,11 +27,13 @@ export class FakeAgentLoop implements AgentLoopHandle {
   readonly switchedModels: Array<{ agentId: string; model: string }> = [];
   readonly invokedSkills: Array<{ agentId: string; skill: string; args: string | undefined }> = [];
 
-  // An explicit (even empty) constructor is required for Bun's coverage instrumentation to
-  // count the class's synthetic constructor slot as "hit" — see docs/handoffs/server.md
-  // status log for detail.
-  // biome-ignore lint/complexity/noUselessConstructor: see comment above
-  constructor() {}
+  constructor() {
+    // Real assignment (not a field initializer) so the constructor body itself executes and
+    // is counted as covered — a class with only field initializers and no constructor body
+    // left Bun's coverage instrumentation treating the synthetic default constructor as never
+    // "hit," even though `new FakeAgentLoop()` runs on every test.
+    this.tree = [];
+  }
 
   onEvent(listener: AgentLoopEventListener): () => void {
     this.eventListeners.add(listener);
