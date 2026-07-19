@@ -4,14 +4,23 @@
 
 # Dark Harness
 
+<p align="center"><em>Point <code>dh</code> at a repo and an instructions file, and it works the job unattended.</em></p>
+
 [![CI](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/dark-harness)](https://www.npmjs.com/package/dark-harness)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**Point `dh` at a repo and an instructions file, and it works the job unattended** — a
-single compiled binary running an LLM agent, sub-agents, a real tool set, skills, and MCP
-support, until the job is done or it self-reports why not. Watch it live in a console TUI
-or a web UI, or let it run headless as a dark factory.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-web-light.png">
+    <img src="docs/media/hero-web-dark.png" width="820" alt="Dark Harness web UI observing a multi-agent session: a 5-agent tree with running, waiting, done, and failed statuses, a rich-Markdown deploy report in the transcript, and real token/cost totals.">
+  </picture>
+</p>
+
+*A real session, captured through the actual web UI against a scripted mock provider — see
+[`e2e/spikes/web/hero-screenshot.ts`](e2e/spikes/web/hero-screenshot.ts) to reproduce it after
+any visual change.*
 
 No daemons to install, no runtime to configure — `dh` is one compiled binary that is the
 server, the console client, and the web client, composed by flags. Under the hood it's a
@@ -19,6 +28,10 @@ full harness: three provider integrations (Anthropic, AWS Bedrock, OpenAI-compat
 behind one interface, arbitrarily nested sub-agent orchestration, resumable JSONL-per-agent
 session logging, and an exit-code contract designed to be scripted against — not just a
 wrapper around a single API call.
+
+It's a single compiled binary running an LLM agent, sub-agents, a real tool set, skills, and
+MCP support, until the job is done or it self-reports why not. Watch it live in a console TUI
+or a web UI, or let it run headless as a dark factory.
 
 ### Why this exists, and what it's meant to demonstrate
 
@@ -45,18 +58,6 @@ sizing up how I work:
 - **Fixes driven by real incidents, not speculative hardening.** e.g. a flaky test's fixed
   sleep replaced with poll-until-stable after it was observed failing intermittently in real
   CI, not because a general "tests should be more robust" pass suggested it.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-web-light.png">
-    <img src="docs/media/hero-web-dark.png" width="820" alt="Dark Harness web UI observing a multi-agent session: a 5-agent tree with running, waiting, done, and failed statuses, a rich-Markdown deploy report in the transcript, and real token/cost totals.">
-  </picture>
-</p>
-
-*A real session, captured through the actual web UI against a scripted mock provider — see
-[`e2e/spikes/web/hero-screenshot.ts`](e2e/spikes/web/hero-screenshot.ts) to reproduce it after
-any visual change.*
 
 ## Security posture, up front
 

@@ -289,3 +289,42 @@ system-prompt.ts` 100%/100% lines+funcs; 215 pass, 2 pre-existing fail (both in 
 `AgentRuntimeLoopAdapter` streaming-adapter suite, caused by that same concurrent DH-0044
 change, unrelated to this ticket). Closed DH-0055 (`transition.py DH-0055 closed
 --resolution done`).
+
+### 2026-07-19 — DH-0227: README hero restructure (screenshot above the fold)
+
+Owner design feedback ahead of showing the project around: the product screenshot sat below
+a title, badges, two paragraphs, and a 25-line "Why this exists" essay — below the fold on
+every viewport. Muriel (design crew) specced the fix in `docs/design/style-guide.md` §8
+(new "README / repo-front conventions" section, added same pass): first-screenful order is
+mark → name → one-line tagline → badges → product shot, long-form rationale below. Pure
+reorder, no new content, per the ticket's explicit FR-5.
+
+Reordered `README.md`: logo → `# Dark Harness` → new one-line centered tagline (the first
+clause of the old multi-line bold hook, "Point `dh` at a repo and an instructions file, and
+it works the job unattended.") → badges → the existing hero `<picture>` block + caption
+(verbatim, srcset/alt/caption untouched). The "No daemons…" paragraph, the rest of the
+original hook sentence, and the "### Why this exists" essay now sit below the screenshot.
+
+**Judgment call:** the original hook was one sentence split by an em dash — extracting the
+first clause as the tagline (per FR-2's exact wording) left a dangling fragment for the
+remainder. Rejoined it below the fold as "It's a single compiled binary running an LLM
+agent…" — the only wording delta from the source text, and a minimal one needed to keep the
+demoted remainder grammatical after the split the ticket itself specified.
+
+Added a block-order regression test to `src/prompt/readme-config-sync.test.ts` (same file
+DH-0042 established as the README-drift-guard home): asserts the hero `<picture>` block's
+byte offset is less than both the `### Why this exists` heading's and the "No daemons to
+install" paragraph's offsets, so a future edit can't silently re-bury the screenshot. This
+is the durable convention now cited by `docs/design/style-guide.md` §8 for any future README
+edit.
+
+**Not mechanically tested (per the ticket's own acceptance-criteria note):** the "tagline
+fits in one line at GitHub's default column width" bullet is a visual property — flagged for
+the owner to eyeball on the rendered page, not something this test suite can check.
+
+Gates: `typecheck` clean; `test:coverage` 146/146 pass (100% on the two changed files);
+`e2e` 41/41 pass. `lint` has one pre-existing, unrelated failure in
+`docs/media/social-preview.render.ts` (DH-0228's file, not touched this round). Moved
+DH-0227 to `verifying` — implementation done, dated Notes entry added to the ticket; not
+mine to close since a Prompt/design ticket's close-out is the coordinator's call per
+CLAUDE.md §8.

@@ -44,6 +44,8 @@ source: tracking/
 | [DH-0221](../DH-0221-truecolor-brand-palette-color-level-resolver-shared-color-infrastructure.md) | Truecolor brand palette + color-level resolver (shared color infrastructure) | status: verifying |
 | [DH-0224](../DH-0224-brand-rebrand-only-reached-the-startup-header-doctor-init-tui-web-still-render-the-old-dh-ascii-logo-figlet.md) | Brand rebrand only reached the startup header; doctor/init/TUI/Web still render the old DH_ASCII_LOGO figlet | status: verifying |
 | [DH-0226](../DH-0226-workflow-tool-mvp-deterministic-sub-agent-orchestration-script-agent-parallel.md) | Workflow tool MVP: deterministic sub-agent orchestration script (agent() + parallel()) | status: verifying |
+| [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | status: verifying |
+| [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | status: verifying |
 
 ## Board
 
@@ -67,13 +69,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
-
-### ready
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | feature | Iris |
-| [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | feature | Iris |
 
 ### implementing
 
@@ -107,6 +102,8 @@ source: tracking/
 | [DH-0221](../DH-0221-truecolor-brand-palette-color-level-resolver-shared-color-infrastructure.md) | Truecolor brand palette + color-level resolver (shared color infrastructure) | feature | stefan |
 | [DH-0224](../DH-0224-brand-rebrand-only-reached-the-startup-header-doctor-init-tui-web-still-render-the-old-dh-ascii-logo-figlet.md) | Brand rebrand only reached the startup header; doctor/init/TUI/Web still render the old DH_ASCII_LOGO figlet | bug | stefan |
 | [DH-0226](../DH-0226-workflow-tool-mvp-deterministic-sub-agent-orchestration-script-agent-parallel.md) | Workflow tool MVP: deterministic sub-agent orchestration script (agent() + parallel()) | feature | stefan |
+| [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | feature | Iris |
+| [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | feature | Iris |
 
 ## Recently Closed
 

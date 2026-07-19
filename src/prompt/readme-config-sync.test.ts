@@ -53,3 +53,28 @@ describe("README config reference stays in sync with src/contracts/config.type.t
     }
   });
 });
+
+// DH-0227: the README hero (the product screenshot) was buried below a title, badges, and a
+// long "Why this exists" essay/prose — below the fold on every viewport. The fix was a
+// reorder: the hero <picture> block must sit above that long-form prose. This is a block-order
+// assertion (byte offsets), not a rendering test, so a future edit can't silently re-bury the
+// screenshot without failing here.
+describe("README hero screenshot stays above the fold (DH-0227)", () => {
+  const heroOffset = README_SOURCE.indexOf('srcset="docs/media/hero-web-dark.png"');
+  const whyThisExistsOffset = README_SOURCE.indexOf("### Why this exists");
+  const noDaemonsOffset = README_SOURCE.indexOf("No daemons to install");
+
+  test("hero <picture> block is present", () => {
+    expect(heroOffset).toBeGreaterThan(-1);
+  });
+
+  test("hero <picture> block appears before the 'Why this exists' section", () => {
+    expect(whyThisExistsOffset).toBeGreaterThan(-1);
+    expect(heroOffset).toBeLessThan(whyThisExistsOffset);
+  });
+
+  test("hero <picture> block appears before the 'No daemons to install' paragraph", () => {
+    expect(noDaemonsOffset).toBeGreaterThan(-1);
+    expect(heroOffset).toBeLessThan(noDaemonsOffset);
+  });
+});

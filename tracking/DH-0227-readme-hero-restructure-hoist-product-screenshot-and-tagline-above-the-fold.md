@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0227
 type: feature
-status: ready
+status: verifying
 owner: Iris
 resolution:
 blocked_by: []
@@ -168,3 +168,18 @@ readme-config-sync.test.ts` guarding README/config drift; extend that pattern:
 - Sibling ticket **DH-0228** produces the GitHub social-preview card (the *external* unfurl
   image); this ticket is the *on-page* hero. They share the "screenshot/mark reads in the
   first second" goal but are independent surfaces and independently landable.
+- **2026-07-19 — Iris, implementation:** Reordered `README.md` to logo → `# Dark Harness` →
+  one-line centered tagline ("Point `dh` at a repo and an instructions file, and it works the
+  job unattended.") → badges → hero `<picture>`/caption, with the "No daemons…" paragraph, the
+  rest of the original hook sentence, and the "### Why this exists" essay moved below the
+  screenshot (wording unchanged; the hook sentence was split at the tagline clause per FR-2
+  and rejoined with "It's a single compiled binary…" for grammatical continuity — the only
+  wording delta from the original). Added a block-order test to
+  `src/prompt/readme-config-sync.test.ts` asserting the hero `<picture>` byte offset is less
+  than both the `### Why this exists` heading and the "No daemons to install" paragraph
+  offsets — covers both structurally-checkable User Story bullets. Gates: `typecheck` clean;
+  `test:coverage` 146/146 pass (100% on changed files); `e2e` 41/41 pass. `lint` has one
+  pre-existing failure in `docs/media/social-preview.render.ts` (DH-0228's file, untouched
+  here) — not introduced by this change. The "tagline fits one line at GitHub column width"
+  bullet is a visual property, not mechanically testable, per the ticket's own
+  acceptance-criteria note — owner to eyeball on the rendered page. Moved to `verifying`.
