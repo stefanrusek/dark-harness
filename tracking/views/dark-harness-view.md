@@ -77,7 +77,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0187](../DH-0187-import-import-a-claude-code-session-directory-into-dh.md) | --import: import a Claude Code session directory into dh | feature | stefan |
-| [DH-0189](../DH-0189-import-import-cli-flag-mode-composition-model-selection-core.md) | import: --import CLI flag, mode composition, model selection (Core) | feature | stefan |
 
 ### implementing
 
@@ -110,6 +109,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0189](../DH-0189-import-import-cli-flag-mode-composition-model-selection-core.md) | import: --import CLI flag, mode composition, model selection (Core) | done |
 | [DH-0188](../DH-0188-import-claude-code-session-translation-jsonl-writer-server.md) | import: Claude Code session translation + JSONL writer (Server) | done |
 | [DH-0186](../DH-0186-migrate-the-web-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the Web SSE client onto the shared src/client-core/ transport | done |
 | [DH-0185](../DH-0185-migrate-the-tui-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the TUI SSE client onto the shared src/client-core/ transport | done |
@@ -124,4 +124,3 @@ source: tracking/
 | [DH-0176](../DH-0176-audit-coverage-gate-driven-test-patterns-branch-free-helpers-synthetic-empty-constructors-giant-test-files.md) | Audit coverage-gate-driven test patterns (branch-free helpers, synthetic empty constructors, giant test files) | done |
 | [DH-0173](../DH-0173-split-the-agentruntime-god-class-into-collaborators-and-break-up-spawnagent-runroot.md) | Split the AgentRuntime God class into collaborators and break up spawnAgent/runRoot | done |
 | [DH-0172](../DH-0172-introduce-a-shared-tool-input-validation-helper-driven-by-inputschema-remove-per-tool-typeof-boilerplate.md) | Introduce a shared tool-input validation helper driven by inputSchema; remove per-tool typeof boilerplate | done |
-| [DH-0171](../DH-0171-consolidate-duplicated-provider-adapter-helpers-mapstopreason-cache-marker-walk-error-classify-skeleton-and-fix-bedrock-as-unknown-casts.md) | Consolidate duplicated provider-adapter helpers (mapStopReason, cache-marker walk, error-classify skeleton) and fix bedrock as-unknown casts | done |

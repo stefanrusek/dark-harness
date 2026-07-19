@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readdirSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
@@ -20,6 +20,7 @@ import {
   parseArgs,
   parseEnvFile,
   renderHelpText,
+  resolveImportSource,
   SAMPLE_DH_JSON,
   type WebUiHandleLike,
 } from "./cli.ts";
@@ -214,6 +215,8 @@ describe("parseArgs", () => {
       quiet: false,
       webPort: null,
       host: null,
+      importPath: null,
+      model: null,
     });
   });
 
@@ -258,6 +261,8 @@ describe("parseArgs", () => {
       quiet: true,
       webPort: 8080,
       host: "127.0.0.1",
+      importPath: null,
+      model: null,
     });
   });
 
@@ -1679,6 +1684,284 @@ describe("main — --resume <sessionId> (DH-0038)", () => {
       }),
     });
     expect(code).toBe(ExitCode.Success);
+  });
+});
+
+describe("resolveImportSource (DH-0189)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "dh-import-src-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("throws when the path does not exist", () => {
+    expect(() => resolveImportSource(join(dir, "missing"))).toThrow(/not found/);
+  });
+
+  test("archive mode: manifest.json names the id, sidecar picked up when present", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: "sess-1" }));
+    await writeFile(join(dir, "sess-1.jsonl"), "{}\n");
+    await mkdir(join(dir, "sess-1"));
+    const source = resolveImportSource(dir);
+    expect(source.transcriptPath).toBe(join(dir, "sess-1.jsonl"));
+    expect(source.sidecarDir).toBe(join(dir, "sess-1"));
+  });
+
+  test("archive mode: manifest.json present but no sidecar directory", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: "sess-1" }));
+    await writeFile(join(dir, "sess-1.jsonl"), "{}\n");
+    const source = resolveImportSource(dir);
+    expect(source.transcriptPath).toBe(join(dir, "sess-1.jsonl"));
+    expect(source.sidecarDir).toBeUndefined();
+  });
+
+  test("archive mode: manifest.json with a non-string id is rejected", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: 42 }));
+    expect(() => resolveImportSource(dir)).toThrow(/no string "id" field/);
+  });
+
+  test("archive mode: unparseable manifest.json is rejected", async () => {
+    await writeFile(join(dir, "manifest.json"), "not json");
+    expect(() => resolveImportSource(dir)).toThrow(/could not parse/);
+  });
+
+  test("archive mode: manifest.json names an id whose transcript doesn't exist", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: "ghost" }));
+    expect(() => resolveImportSource(dir)).toThrow(/expected transcript not found/);
+  });
+
+  test("archive mode: no manifest.json, exactly one *.jsonl file is accepted", async () => {
+    await writeFile(join(dir, "sess-2.jsonl"), "{}\n");
+    const source = resolveImportSource(dir);
+    expect(source.transcriptPath).toBe(join(dir, "sess-2.jsonl"));
+    expect(source.sidecarDir).toBeUndefined();
+  });
+
+  test("archive mode: no manifest.json and no *.jsonl file is rejected", async () => {
+    expect(() => resolveImportSource(dir)).toThrow(/no manifest.json and no/);
+  });
+
+  test("archive mode: no manifest.json and multiple *.jsonl files is ambiguous and rejected", async () => {
+    await writeFile(join(dir, "a.jsonl"), "{}\n");
+    await writeFile(join(dir, "b.jsonl"), "{}\n");
+    expect(() => resolveImportSource(dir)).toThrow(/ambiguous/);
+  });
+
+  test("live mode: a lone .jsonl file, with sibling sidecar directory", async () => {
+    const filePath = join(dir, "live-sess.jsonl");
+    await writeFile(filePath, "{}\n");
+    await mkdir(join(dir, "live-sess"));
+    const source = resolveImportSource(filePath);
+    expect(source.transcriptPath).toBe(filePath);
+    expect(source.sidecarDir).toBe(join(dir, "live-sess"));
+  });
+
+  test("live mode: a lone .jsonl file, no sidecar directory", async () => {
+    const filePath = join(dir, "live-sess-2.jsonl");
+    await writeFile(filePath, "{}\n");
+    const source = resolveImportSource(filePath);
+    expect(source.transcriptPath).toBe(filePath);
+    expect(source.sidecarDir).toBeUndefined();
+  });
+
+  test("a bare project-slug directory (many sessions, no manifest) is rejected", async () => {
+    await writeFile(join(dir, "readme.txt"), "not a session");
+    expect(() => resolveImportSource(dir)).toThrow(/no manifest.json and no/);
+  });
+
+  test("a file that is neither a directory nor a .jsonl file is rejected", async () => {
+    const filePath = join(dir, "notes.txt");
+    await writeFile(filePath, "hello");
+    expect(() => resolveImportSource(filePath)).toThrow(/neither a directory nor/);
+  });
+});
+
+describe("parseArgs — --import/--model (DH-0189)", () => {
+  test("--model without --import is a usage error", () => {
+    expect(() => parseArgs(["--model", "sonnet"])).toThrow(/--model requires --import/);
+  });
+
+  test("--import combined with --resume is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--resume", "s1"])).toThrow(
+      /cannot be combined with --resume/,
+    );
+  });
+
+  test("--import combined with --check is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--check"])).toThrow(/not supported with --check/);
+  });
+
+  test("--import combined with --dry-run is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--dry-run"])).toThrow(
+      /not supported with --dry-run/,
+    );
+  });
+
+  test("--import combined with --connect is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--connect", "host1"])).toThrow(
+      /not supported with --connect/,
+    );
+  });
+
+  test("--import with --model parses cleanly", () => {
+    const options = parseArgs(["--import", "/tmp/session", "--model", "sonnet"]);
+    expect(options.importPath).toBe("/tmp/session");
+    expect(options.model).toBe("sonnet");
+  });
+});
+
+describe("main — --import <path> (DH-0189)", () => {
+  let dir: string;
+  let liveJsonlPath: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "dh-import-main-"));
+    liveJsonlPath = join(dir, "cc-session.jsonl");
+    await writeFile(liveJsonlPath, "{}\n");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("an unresolvable --model alias fails cleanly before any write", async () => {
+    const io = fakeIo();
+    let called = false;
+    const code = await main(["--import", liveJsonlPath, "--model", "ghost"], {
+      ...baseOverrides(io),
+      importClaudeSession: () => {
+        called = true;
+        return { sessionId: "new-session", logsRoot: "/tmp/.dh-logs" };
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain('model alias "ghost"');
+    expect(io.stderrLines[0]).toContain("sonnet"); // names the known models
+    expect(called).toBe(false);
+  });
+
+  test("omitting --model defaults to dh.json's options.defaultModel", async () => {
+    const io = fakeIo();
+    let receivedModel: string | undefined;
+    const code = await main(["--import", liveJsonlPath, "--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "keep going",
+      importClaudeSession: (_source, opts) => {
+        receivedModel = opts.model;
+        return { sessionId: "new-session", logsRoot: "/tmp/.dh-logs" };
+      },
+      loadResumeSession: () => ({
+        messages: [],
+        model: "sonnet",
+        resumedFromSessionId: "new-session",
+        lostAgents: [],
+      }),
+      createRuntime: () => ({
+        runRoot: async () => ({ success: true, finalOutput: "done", turns: 1 }),
+        stopRoot: () => {},
+      }),
+    });
+    expect(receivedModel).toBe("sonnet");
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  test("a resolveImportSource failure (bad path) is reported via the standard fail() path", async () => {
+    const io = fakeIo();
+    const code = await main(["--import", "/definitely/does/not/exist"], baseOverrides(io));
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("not found");
+  });
+
+  test("an importClaudeSession failure is reported via the standard fail() path", async () => {
+    const io = fakeIo();
+    const code = await main(["--import", liveJsonlPath], {
+      ...baseOverrides(io),
+      importClaudeSession: () => {
+        throw new Error("could not translate transcript");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("--import failed");
+    expect(io.stderrLines[0]).toContain("could not translate transcript");
+  });
+
+  test("success: the produced sessionId is handed to the existing --resume launch path", async () => {
+    const io = fakeIo();
+    let receivedSource: unknown;
+    let receivedResumeSessionId: string | undefined;
+    let receivedResume: unknown;
+    const code = await main(["--import", liveJsonlPath, "--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "keep going",
+      importClaudeSession: (source) => {
+        receivedSource = source;
+        return { sessionId: "imported-session", logsRoot: "/tmp/.dh-logs" };
+      },
+      loadResumeSession: (_logsRoot, sessionId) => {
+        receivedResumeSessionId = sessionId;
+        return {
+          messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+          model: "sonnet",
+          resumedFromSessionId: sessionId,
+          lostAgents: [],
+        };
+      },
+      createRuntime: (_config, _systemPrompt, _client, resume) => {
+        receivedResume = resume;
+        return {
+          runRoot: async () => ({ success: true, finalOutput: "done", turns: 1 }),
+          stopRoot: () => {},
+        };
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(receivedSource).toEqual({ transcriptPath: liveJsonlPath });
+    expect(receivedResumeSessionId).toBe("imported-session");
+    expect(receivedResume).toMatchObject({ fromSessionId: "imported-session", model: "sonnet" });
+  });
+
+  // DH-0189: exercises the REAL defaultDeps().importClaudeSession wiring (Server's actual
+  // DH-0188 translator), not a test fake — same "cover the real wiring, not just the seam"
+  // pattern the "dh logs" real-filesystem tests above already use for loadResumeSession.
+  // A live cwd (temp dir, restored after) stands in for `.dh-logs`'s usual "./" root.
+  test("real defaultDeps().importClaudeSession writes a resumable session (real end-to-end wiring)", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "dh-import-real-"));
+    const originalCwd = process.cwd();
+    process.chdir(cwd);
+    try {
+      const sourcePath = join(cwd, "cc-session.jsonl");
+      await writeFile(
+        sourcePath,
+        `${JSON.stringify({
+          parentUuid: null,
+          isSidechain: false,
+          type: "user",
+          timestamp: "2026-07-18T00:00:00.000Z",
+          message: { role: "user", content: "hello from claude code" },
+        })}\n`,
+      );
+      const io = fakeIo();
+      const code = await main(["--import", sourcePath, "--instructions", "plan.md", "--job"], {
+        io,
+        loadConfig: async () => TEST_CONFIG,
+        readInstructions: async () => "keep going",
+        installSignalHandlers: fakeInstallSignalHandlers(),
+        createRuntime: () => ({
+          runRoot: async () => ({ success: true, finalOutput: "done", turns: 1 }),
+          stopRoot: () => {},
+        }),
+      });
+      expect(code).toBe(ExitCode.Success);
+      const sessions = readdirSync(join(cwd, ".dh-logs"));
+      expect(sessions.length).toBe(1);
+    } finally {
+      process.chdir(originalCwd);
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });
 

@@ -15,7 +15,8 @@
 import "./tui/ink/clear-ci-env-for-interactive-render.ts";
 
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
 import { createProvider } from "./agent/providers/index.ts";
 import type { ModelProvider, ProviderToolDefinition } from "./agent/providers/types.ts";
@@ -55,6 +56,9 @@ import {
   type DhServerOptions,
   formatSessionList,
   formatSessionLogTree,
+  type ImportClaudeSessionResult,
+  type ImportClaudeSessionSource,
+  importClaudeSession,
   pruneLogDirectories,
   SessionLogger,
   type Unsubscribe,
@@ -116,6 +120,18 @@ export interface CliOptions {
   /** DH-0182: overrides `dh.json`'s `security.hostname` (DH-0022) for this invocation only.
    * `null` means unset — `security.hostname` (or its absence) behaves exactly as before. */
   host: string | null;
+  /** DH-0189: `--import <path>` — translates a real Claude Code session (a backup-archive
+   * directory or a live `<id>.jsonl` file, DH-0187 Decision 1) into a new resumable
+   * `.dh-logs/<sessionId>` directory, then hands that session id to the exact same
+   * `--resume` launch path used below (never a separate code path of its own). Null when not
+   * importing. */
+  importPath: string | null;
+  /** DH-0189: `--model <alias>` — companion flag to `--import` only, selecting the dh model
+   * alias the imported session resumes under (DH-0187 Decision 5). Must resolve against
+   * `dh.json`'s `models[]`, checked before any write. Null means unset: import falls back to
+   * `dh.json`'s `options.defaultModel`. A usage error (`--model requires --import`) outside
+   * an `--import` invocation — it has no meaning anywhere else. */
+  model: string | null;
 }
 
 const FLAGS_WITH_VALUES = Object.freeze(
@@ -128,6 +144,8 @@ const FLAGS_WITH_VALUES = Object.freeze(
     "--resume",
     "--web-port",
     "--host",
+    "--import",
+    "--model",
   ]),
 );
 
@@ -237,6 +255,12 @@ const HELP_USAGE_ITEMS: readonly HelpItem[] = Object.freeze([
     name: "dh logs",
     desc: 'List sessions under "./.dh-logs" (id, start time, agent count) — DH-0067.',
   },
+  {
+    name: "dh --import <path>",
+    desc:
+      'Import a real Claude Code session (backup-archive dir or a live ".jsonl" file) ' +
+      "into a new resumable dh session (DH-0187/DH-0189).",
+  },
 ]);
 
 const HELP_FLAG_ITEMS: readonly HelpItem[] = Object.freeze([
@@ -309,6 +333,21 @@ const HELP_FLAG_ITEMS: readonly HelpItem[] = Object.freeze([
     desc:
       'Reconstruct the root agent\'s conversation from a prior ".dh-logs/<sessionId>" ' +
       "directory and continue it as a new session (DH-0038). Not supported with --connect.",
+  },
+  {
+    name: "--import <path>",
+    desc:
+      'Import a Claude Code session — a directory with manifest.json/a lone ".jsonl", or a ' +
+      'live "<id>.jsonl" file — into a new resumable dh session, then continue it via the ' +
+      "same launch path as --resume (DH-0187/DH-0189). Not supported with --connect, " +
+      "--resume, --check, or --dry-run.",
+  },
+  {
+    name: "--model <alias>",
+    desc:
+      "With --import: the dh model alias the imported session resumes under (must resolve " +
+      "against dh.json). Defaults to dh.json's options.defaultModel when omitted. Requires " +
+      "--import.",
   },
   { name: "--help, -h", desc: "Show this help and exit." },
   { name: "--version", desc: "Show build identity (version, git sha, dirty flag) and exit." },
@@ -596,6 +635,8 @@ export function parseArgs(argv: string[]): CliOptions {
     quiet: false,
     webPort: null,
     host: null,
+    importPath: null,
+    model: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -640,6 +681,8 @@ export function parseArgs(argv: string[]): CliOptions {
       else if (arg === "--env") options.env = value;
       else if (arg === "--resume") options.resume = value;
       else if (arg === "--host") options.host = value;
+      else if (arg === "--import") options.importPath = value;
+      else if (arg === "--model") options.model = value;
       else if (arg === "--port" || arg === "--web-port") {
         const parsed = Number(value);
         if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -672,6 +715,36 @@ export function parseArgs(argv: string[]): CliOptions {
     }
   }
 
+  // DH-0189: --model is only meaningful as --import's companion flag (DH-0187 Decision 5) —
+  // same "requires" pattern as --json/--web-port above.
+  if (options.model !== null && options.importPath === null) {
+    throw new CliUsageError("--model requires --import");
+  }
+
+  // DH-0189: --import's own mutual-exclusion rules, checked here (pure, no filesystem/config
+  // needed) rather than deep in main() — --resume and --check/--dry-run are checked directly
+  // since parseArgs already knows about them; --connect reuses composeMode the same way
+  // --web-port's check above does. All three mirror --resume's own existing --connect
+  // rejection (logs/model resolution happen against *this* process's local filesystem/config,
+  // so there is nothing for a remote --connect target to do with an import).
+  if (options.importPath !== null) {
+    if (options.resume !== null) {
+      throw new CliUsageError("--import cannot be combined with --resume");
+    }
+    if (options.check) {
+      throw new CliUsageError("--import is not supported with --check");
+    }
+    if (options.dryRun) {
+      throw new CliUsageError("--import is not supported with --dry-run");
+    }
+    const mode = composeMode(options);
+    if (mode.kind === "connect") {
+      throw new CliUsageError(
+        "--import is not supported with --connect (the session is written to this process's local .dh-logs, not the remote server's).",
+      );
+    }
+  }
+
   return options;
 }
 
@@ -694,6 +767,81 @@ export function composeMode(options: CliOptions): RunMode {
     return { kind: "server", port: options.port ?? DEFAULT_PORT };
   }
   return { kind: "local", web: options.web };
+}
+
+/** DH-0189: `--import <path>`'s source-location detection (DH-0187 Decision 1) — the only
+ * path-kind sniffing the importer's own module (DH-0188, `src/server/import-claude-session
+ * .ts`) explicitly says is Core's job, not its own (it only ever receives already-resolved
+ * filesystem paths). Two accepted shapes, disambiguated purely by what `path` is on disk:
+ *
+ * - A **directory**: "archive mode". Preferred: a `manifest.json` naming the session's `id`
+ *   (the `session-backup` skill's own output shape), transcript at `<path>/<id>.jsonl`.
+ *   Fallback (no `manifest.json`): exactly one `*.jsonl` file directly inside `path`, whose
+ *   basename (minus `.jsonl`) is taken as `id`. Zero or multiple candidates is a clean error
+ *   — never a silent guess.
+ * - A **file ending `.jsonl`**: "live mode" (e.g.
+ *   `~/.claude/projects/<slug>/<id>.jsonl`). `id` is the file's own basename minus `.jsonl`.
+ *
+ * Either way, an optional sub-agent sidecar directory at the sibling `<id>/` path (relative
+ * to the archive dir, or the live file's own directory) is picked up if present. A bare live
+ * project-slug directory (many sessions, ambiguous) is deliberately rejected — Decision 1's
+ * explicit "name the specific .jsonl" call — which falls out naturally here since such a
+ * directory has neither a `manifest.json` nor exactly one `*.jsonl` at its top level. */
+export function resolveImportSource(path: string): ImportClaudeSessionSource {
+  if (!existsSync(path)) {
+    throw new ConfigError(`--import path not found: ${path}`);
+  }
+  const stat = statSync(path);
+  if (stat.isDirectory()) {
+    const manifestPath = join(path, "manifest.json");
+    let id: string;
+    if (existsSync(manifestPath)) {
+      let manifest: unknown;
+      try {
+        manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      } catch (err) {
+        throw new ConfigError(
+          `--import: could not parse "${manifestPath}": ${(err as Error).message}`,
+        );
+      }
+      const manifestId = (manifest as { id?: unknown } | null)?.id;
+      if (typeof manifestId !== "string" || manifestId === "") {
+        throw new ConfigError(`--import: "${manifestPath}" has no string "id" field`);
+      }
+      id = manifestId;
+    } else {
+      const jsonlFiles = readdirSync(path).filter((name) => name.endsWith(".jsonl"));
+      if (jsonlFiles.length === 0) {
+        throw new ConfigError(
+          `--import: "${path}" has no manifest.json and no "*.jsonl" transcript file`,
+        );
+      }
+      if (jsonlFiles.length > 1) {
+        throw new ConfigError(
+          `--import: "${path}" has no manifest.json and multiple "*.jsonl" files (` +
+            `${jsonlFiles.join(", ")}) — ambiguous which one to import; either add a ` +
+            "manifest.json or point --import directly at the one .jsonl file",
+        );
+      }
+      id = basename(jsonlFiles[0] as string, ".jsonl");
+    }
+    const transcriptPath = join(path, `${id}.jsonl`);
+    if (!existsSync(transcriptPath)) {
+      throw new ConfigError(`--import: expected transcript not found: ${transcriptPath}`);
+    }
+    const sidecarDir = join(path, id);
+    return existsSync(sidecarDir) ? { transcriptPath, sidecarDir } : { transcriptPath };
+  }
+  if (!path.endsWith(".jsonl")) {
+    throw new ConfigError(
+      `--import path "${path}" is neither a directory nor a ".jsonl" file. A bare live ` +
+        'Claude Code project-slug directory (e.g. "~/.claude/projects/<slug>/") is not ' +
+        "accepted — it can hold many sessions; name the specific .jsonl file instead.",
+    );
+  }
+  const id = basename(path, ".jsonl");
+  const sidecarDir = join(dirname(path), id);
+  return existsSync(sidecarDir) ? { transcriptPath: path, sidecarDir } : { transcriptPath: path };
 }
 
 async function readInstructionsFile(path: string): Promise<string> {
@@ -945,6 +1093,15 @@ export interface CliDeps {
    * route it through the standard `fail()` path, never letting it crash the process.
    * Injectable so tests never touch the real filesystem. */
   loadResumeSession: (logsRoot: string, sessionId: string) => ResumeResult;
+  /** DH-0189: the Server (DH-0188) translator that turns a resolved Claude Code source (a
+   * root transcript + optional sidecar, already path-kind-detected by
+   * `resolveImportSource` below) into a new `.dh-logs/<sessionId>` directory. Injectable so
+   * tests never touch the real filesystem; the produced `sessionId` is fed straight into the
+   * existing `loadResumeSession` above — import never gets its own replay/launch logic. */
+  importClaudeSession: (
+    source: ImportClaudeSessionSource,
+    opts: { logsRoot: string; model: string },
+  ) => ImportClaudeSessionResult;
   /** Used only by the standalone `--instructions` path (see the module doc comment above
    * for why that path never goes through createAgentLoop/createServer). Exposes `stopRoot`
    * too (DH-0011) so this path's SIGTERM/SIGINT handler has something real to call.
@@ -1069,6 +1226,8 @@ function defaultDeps(): CliDeps {
     },
     createProvider,
     loadResumeSession,
+    importClaudeSession: (source, opts) =>
+      importClaudeSession(source, { ...opts, client: "none", build: BUILD_INFO }),
     // The standalone path's own runtime is always constructed with client: "none" directly
     // inside createStandaloneRuntime() (it's not one of the four interactive modes this
     // `client` param maps from), so the value passed here is intentionally unused.
@@ -1877,6 +2036,40 @@ export async function main(
   }
   if (options.dryRun) {
     return runDryRun(options, config, deps);
+  }
+
+  // DH-0189: `--import <path>` — DH-0187's governing insight is that import is a pure format
+  // translator that writes a valid `.dh-logs/<sessionId>` directory and then *becomes* a
+  // `--resume <sessionId>` invocation; it must not fork its own launch logic. parseArgs
+  // already rejected --import combined with --resume/--check/--dry-run/--connect, so by the
+  // time we get here, mutating `options.resume` below and falling through to the existing
+  // DH-0038 resume block is the entire integration — no separate path needed.
+  if (options.importPath !== null) {
+    // D5: an explicit --model must resolve against *this* config or import fails cleanly
+    // before writing anything; with no --model, fall back to dh.json's own defaultModel (the
+    // same model a fresh, non-imported session would use).
+    const modelAlias = options.model ?? config.options.defaultModel;
+    if (!config.models.some((m) => m.name === modelAlias)) {
+      return fail(
+        io,
+        `--import: model alias "${modelAlias}" does not match any configured model; known models: ${config.models.map((m) => m.name).join(", ")}`,
+      );
+    }
+    let source: ImportClaudeSessionSource;
+    try {
+      source = resolveImportSource(options.importPath);
+    } catch (err) {
+      return fail(io, (err as Error).message);
+    }
+    try {
+      const imported = deps.importClaudeSession(source, {
+        logsRoot: join(process.cwd(), ".dh-logs"),
+        model: modelAlias,
+      });
+      options.resume = imported.sessionId;
+    } catch (err) {
+      return fail(io, `--import failed: ${(err as Error).message}`);
+    }
   }
 
   // DH-0038: `--resume <sessionId>` — resolved once, up front, before branching into the
