@@ -570,6 +570,44 @@ describe("AppView commands", () => {
     ]);
   });
 
+  // DH-0207/DH-0208
+  test("cancel button on a queued turn sends a cancel_queued_message command for that entry", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+
+    const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
+    const form = h.root.querySelector("form") as HTMLFormElement;
+    textarea.value = "please hold";
+    h.dispatch(form, "submit", { cancelable: true });
+    await flush();
+
+    // Simulate the server reporting this send is sitting in the queue, not yet delivered —
+    // real production wiring for an agent that's mid-turn/asleep when the operator sends.
+    h.stream.push({
+      version: 1,
+      id: "e-queue-1",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "agent_queue",
+      agentId: "root-1",
+      queue: [{ id: "qm-1", message: "please hold", queuedAt: "2026-01-01T00:00:01Z" }],
+    });
+    await flush();
+
+    await flush();
+    const cancelBtn = h.root.querySelector(".turn-queued-cancel") as HTMLButtonElement | null;
+    expect(cancelBtn).not.toBeNull();
+    if (cancelBtn) h.dispatch(cancelBtn, "click");
+    await flush();
+
+    expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
+      { type: "list_skills" },
+      { type: "send_message", agentId: "root-1", message: "please hold" },
+      { type: "cancel_queued_message", agentId: "root-1", messageId: "qm-1" },
+    ]);
+  });
+
   test("a failed stop command shows the error banner too", async () => {
     const h = harness({
       commandResponse: () =>

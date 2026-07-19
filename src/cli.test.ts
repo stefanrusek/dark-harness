@@ -163,6 +163,7 @@ function fakeAgentLoop(
     onEvent: () => () => {},
     onLog: () => () => {},
     sendMessage: () => {},
+    cancelQueuedMessage: () => false,
     stopAgent: () => {},
     getAgentTree: () => [],
     listModels: () => [],
@@ -2706,6 +2707,25 @@ describe("AgentRuntimeLoopAdapter", () => {
       await expect(
         adapter.invokeSkill(ROOT_AGENT_ID, "no-such-skill", undefined),
       ).rejects.toThrow();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  // DH-0207/DH-0208
+  test("cancelQueuedMessage() delegates straight to the wrapped AgentRuntime", () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+        client: "tui",
+      });
+      // Root hasn't started yet — AgentRuntime.cancelQueuedMessage() reports "nothing to
+      // cancel" rather than throwing (see its own doc comment); this exercises the adapter's
+      // one-line delegation, not AgentRuntime's own root-vs-sub-agent split (already covered
+      // directly in runtime.test.ts).
+      expect(adapter.cancelQueuedMessage(ROOT_AGENT_ID, "not-a-real-id")).toBe(false);
     } finally {
       server.stop(true);
     }

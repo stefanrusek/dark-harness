@@ -7,6 +7,7 @@ import type {
   AgentStatus,
   AgentTreeNode,
   ModelInfo,
+  QueuedMessage,
   ServerSentEvent,
   SkillInfo,
 } from "../../contracts/index.ts";
@@ -52,6 +53,14 @@ export interface Turn {
    * its doc comment in src/contracts/events.type.ts), so duration + success/failure is the
    * full "result" a client can ever show. */
   durationMs?: number;
+  /** DH-0207: set (via `correlateQueuedMessages` below) once an `agent_queue` snapshot
+   * reveals this "user" turn's send is currently sitting in the agent's not-yet-delivered
+   * queue, rather than already injected into its conversation. Left set even after the entry
+   * is delivered/cancelled — whether the turn is *currently* queued is always re-derived by
+   * checking membership in `AgentNode.queuedMessages`, not by clearing this field, so a
+   * delivered turn silently reverts to looking like any other sent message with no extra
+   * bookkeeping. */
+  queuedMessageId?: string;
 }
 
 export interface AgentNode {
@@ -116,6 +125,10 @@ export interface AgentNode {
    * stalled."
    */
   statusSince: string;
+  /** DH-0207/DH-0208: the latest `agent_queue` SSE snapshot for this agent — entries not yet
+   * injected into its conversation. Empty (never `undefined`) until the first `agent_queue`
+   * event arrives, so callers never need an existence check before reading `.length`. */
+  queuedMessages: QueuedMessage[];
 }
 
 // DH-0105: canonical four-state connection vocabulary shared with the TUI
@@ -267,6 +280,7 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
     turnOpen: false,
     pendingToolCall: null,
     statusSince: timestamp,
+    queuedMessages: [],
   };
   state.agents.set(agentId, node);
   return node;
@@ -440,6 +454,35 @@ function handleToolResult(
 }
 
 /** Applies one SSE event to state, returning a new `WebState` (state is not mutated). */
+/** DH-0207: matches each not-yet-correlated entry in a fresh `agent_queue` snapshot to the
+ * "user" turn its local echo (`addUserTurn`, at send time) already created, so the render
+ * layer can tell "queued" turns apart from delivered ones (see `Turn.queuedMessageId`'s doc
+ * comment). The server never tells a client which turn produced which queue entry — this is
+ * inferred client-side by matching text, newest-unmatched-turn-first, which is safe because
+ * `AgentQueueEvent` only ever ADDS an id this client hasn't seen before once per real send
+ * (the server generates each id exactly once, at the moment `runAgentLoop`'s `pendingMessages`
+ * sink receives that send). Returns `transcript` unchanged (same reference) if nothing new
+ * needed correlating. */
+function correlateQueuedMessages(transcript: Turn[], queue: QueuedMessage[]): Turn[] {
+  const known = new Set(
+    transcript.map((turn) => turn.queuedMessageId).filter((id): id is string => id !== undefined),
+  );
+  let next = transcript;
+  for (const entry of queue) {
+    if (known.has(entry.id)) continue;
+    for (let i = next.length - 1; i >= 0; i--) {
+      const turn = next[i];
+      if (turn?.role !== "user" || turn.text !== entry.message || turn.queuedMessageId) {
+        continue;
+      }
+      next = [...next.slice(0, i), { ...turn, queuedMessageId: entry.id }, ...next.slice(i + 1)];
+      known.add(entry.id);
+      break;
+    }
+  }
+  return next;
+}
+
 export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
   const next: WebState = {
     ...state,
@@ -545,6 +588,17 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       next.agents.set(event.agentId, node);
       return next;
     }
+    // DH-0207/DH-0208: a full snapshot of `event.agentId`'s not-yet-delivered queue — see
+    // `AgentQueueEvent`'s own doc comment (src/contracts/events.type.ts). Correlates any
+    // newly-queued entry to the local-echo "user" turn it came from, then stores the raw
+    // snapshot so the render layer can check membership per turn.
+    case "agent_queue": {
+      const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
+      node.transcript = correlateQueuedMessages(node.transcript, event.queue);
+      node.queuedMessages = event.queue;
+      next.agents.set(event.agentId, node);
+      return next;
+    }
     default:
       // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added to
       // src/contracts/ without a case here (assertNever's parameter type is `never`, which
@@ -632,6 +686,7 @@ export function seedFromTree(
       turnOpen: false,
       pendingToolCall: null,
       statusSince: nowIso,
+      queuedMessages: [],
     });
   }
 

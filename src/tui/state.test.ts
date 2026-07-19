@@ -324,6 +324,26 @@ describe("reducer: sse_event agent_thinking (DH-0045 exhaustiveness case)", () =
   });
 });
 
+describe("reducer: sse_event agent_queue (DH-0207/DH-0208 exhaustiveness case)", () => {
+  test("is a no-op — the TUI has no queued-message display yet (Web-only this round)", () => {
+    let state = initialState(size());
+    ({ state } = reducer(state, { type: "sse_event", event: spawned({ agentId: "root" }) }));
+    const before = state;
+    ({ state } = reducer(state, {
+      type: "sse_event",
+      event: {
+        version: 1,
+        id: "e10",
+        timestamp: "2026-07-19T00:00:00.000Z",
+        type: "agent_queue",
+        agentId: "root",
+        queue: [{ id: "q1", message: "hold on", queuedAt: "2026-07-19T00:00:00.000Z" }],
+      },
+    }));
+    expect(state).toBe(before);
+  });
+});
+
 describe("reducer: sse_event tool_call / tool_result (DH-0089)", () => {
   test("tool_call appends a tool marker turn and records it pending; a successful tool_result leaves it unchanged", () => {
     let state = initialState(size());

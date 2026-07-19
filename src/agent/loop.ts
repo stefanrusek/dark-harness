@@ -54,6 +54,7 @@ import { BUILD_INFO } from "../config/build-info.ts";
 import {
   type LogLine,
   type OutcomeReportedBy,
+  type QueuedMessage,
   REPORT_OUTCOME_TOOL_NAME,
   type ReportedOutcome,
   type ServerSentEvent,
@@ -130,6 +131,19 @@ export interface AgentLoopParams {
   maxTurns?: number;
   /** Injected by the runtime so SendMessage can steer a running agent between turns. */
   registerSendMessage?: (fn: (message: string) => void) => void;
+  /** DH-0207/DH-0208: installs a sink the runtime can call to cancel one not-yet-delivered
+   * entry out of `pendingMessages` (identified by its `QueuedMessage.id`, see
+   * `onQueueChange`) before it's injected into this loop's next turn. Returns `true` if an
+   * entry with that id was found and removed, `false` otherwise (already delivered/drained,
+   * or never existed — the caller can't distinguish those two, same as `registerSendMessage`
+   * has no way to report "delivered" vs "queued" today). */
+  registerCancelQueuedMessage?: (fn: (messageId: string) => boolean) => void;
+  /** DH-0207/DH-0208: fires with a full snapshot of `pendingMessages` every time it changes
+   * (a message queued, cancelled, or the whole queue drained into the next turn) — the
+   * runtime uses this to emit the `agent_queue` SSE event. See that event's own doc comment
+   * (`src/contracts/events.type.ts`) for why a full snapshot rather than a delta, and for how
+   * this doubles as DH-0208's completion/EOF signal for scripted callers. */
+  onQueueChange?: (queue: QueuedMessage[]) => void;
   onEvent?: (event: ServerSentEvent) => void;
   onLogLine?: (line: LogLine) => void;
   /** Round 3 addition: cooperative cancellation, driven by TaskStop/stopAgent
@@ -512,7 +526,13 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
   } else {
     messages.push({ role: "user", content: [{ type: "text", text: params.instruction }] });
   }
-  const pendingMessages: string[] = [];
+  // DH-0207/DH-0208: entries, not bare strings, so a still-queued message can be individually
+  // addressed (cancel_queued_message) and reported to clients (agent_queue) before it's
+  // delivered — see registerCancelQueuedMessage/onQueueChange below.
+  const pendingMessages: QueuedMessage[] = [];
+  const emitQueueChange = (): void => {
+    params.onQueueChange?.(pendingMessages.map((entry) => ({ ...entry })));
+  };
   // Round 5: when the loop is paused in "waiting" (interactive mode only — see below), a
   // newly-arrived message wakes it up immediately instead of sitting unread until some other
   // trigger polls for it. `waitingResolve` is only ever non-null while the loop is actually
@@ -521,12 +541,24 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
   // behavior, unchanged.
   let waitingResolve: (() => void) | null = null;
   params.registerSendMessage?.((message: string) => {
-    pendingMessages.push(message);
+    pendingMessages.push({ id: randomUUID(), message, queuedAt: nowIso() });
+    emitQueueChange();
     if (waitingResolve) {
       const resolve = waitingResolve;
       waitingResolve = null;
       resolve();
     }
+  });
+  // DH-0207/DH-0208: lets the runtime pull one specific entry back out of the queue before
+  // it's delivered (the Web UI's per-message cancel/delete button). Deliberately does NOT
+  // wake `waitingResolve` — cancelling the only queued message shouldn't spuriously resume a
+  // waiting agent that has nothing left to process.
+  params.registerCancelQueuedMessage?.((messageId: string) => {
+    const index = pendingMessages.findIndex((entry) => entry.id === messageId);
+    if (index === -1) return false;
+    pendingMessages.splice(index, 1);
+    emitQueueChange();
+    return true;
   });
 
   // DH-0093: mutable binding a live model switch replaces — every provider.complete() call
@@ -688,7 +720,11 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       }));
 
     if (pendingMessages.length > 0) {
-      const injected = pendingMessages.splice(0, pendingMessages.length).join("\n");
+      const injected = pendingMessages
+        .splice(0, pendingMessages.length)
+        .map((entry) => entry.message)
+        .join("\n");
+      emitQueueChange();
       messages.push({ role: "user", content: [{ type: "text", text: injected }] });
       emitLog(params, {
         version: 1,

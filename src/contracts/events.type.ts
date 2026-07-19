@@ -152,6 +152,35 @@ export interface AgentThinkingEvent extends SseEventBase {
   redacted?: true;
 }
 
+/** DH-0140 Phase 2 / DH-0207 / DH-0208: one entry in an agent's not-yet-delivered
+ * (`pendingMessages`) queue — a message that arrived while the agent was mid-turn and is
+ * sitting in `src/agent/loop.ts`'s in-memory queue until the top of its next turn. */
+export interface QueuedMessage {
+  /** Server-generated (`randomUUID()`), stable for this entry's lifetime in the queue — used
+   * by `cancel_queued_message` to target exactly this entry. */
+  id: string;
+  message: string;
+  queuedAt: string;
+}
+
+/**
+ * DH-0207/DH-0208: a full snapshot (not a delta) of `agentId`'s currently-queued,
+ * not-yet-delivered messages — emitted whenever the queue changes (a message is queued,
+ * cancelled, or the whole queue drains into the agent's next turn). Full-snapshot (rather
+ * than incremental add/remove events) deliberately mirrors `agent_status`/`agent_spawned`'s
+ * own precedent elsewhere in this file: a client that misses one event and catches the next
+ * still ends up in a correct state, no reconciliation logic needed. Doubles as the
+ * completion/EOF signal DH-0208 asked for: a scripted/`--job`-driven caller that has finished
+ * sending messages can treat `queue: []` (nothing left in flight) together with a terminal
+ * `agent_status`/`session_ended` as "the run actually drained, safe to stop waiting" instead
+ * of guessing or polling forever.
+ */
+export interface AgentQueueEvent extends SseEventBase {
+  type: "agent_queue";
+  agentId: string;
+  queue: QueuedMessage[];
+}
+
 export type ServerSentEvent =
   | AgentOutputEvent
   | AgentStatusEvent
@@ -162,4 +191,5 @@ export type ServerSentEvent =
   | SessionEndedEvent
   | ResyncEvent
   | ModelSwitchedEvent
-  | AgentThinkingEvent;
+  | AgentThinkingEvent
+  | AgentQueueEvent;

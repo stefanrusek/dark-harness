@@ -169,7 +169,19 @@ function ToolCallGroup({ turns }: { turns: Turn[] }): ReactElement {
   );
 }
 
-function TurnRow({ turn }: { turn: Turn }): ReactElement {
+function TurnRow({
+  turn,
+  queuedIds,
+  onCancelQueuedMessage,
+}: {
+  turn: Turn;
+  /** DH-0207: ids currently present in the agent's `agent_queue` snapshot — a turn whose
+   * `queuedMessageId` is a member of this set hasn't been delivered into the agent's
+   * conversation yet. See `Turn.queuedMessageId`'s doc comment (state.ts) for why membership,
+   * not the field's mere presence, is what "currently queued" means. */
+  queuedIds: ReadonlySet<string>;
+  onCancelQueuedMessage: (messageId: string) => void;
+}): ReactElement {
   if (turn.role === "tool") {
     if (turn.terminalStatus) {
       const token = STATUS_TOKENS[turn.terminalStatus];
@@ -183,14 +195,33 @@ function TurnRow({ turn }: { turn: Turn }): ReactElement {
     }
     return <ToolCallRow turn={turn} />;
   }
+  // DH-0207: distinct visual state for a "user" turn still sitting in the not-yet-delivered
+  // queue — the "UX gaps" this ticket exists to close (no way to tell queued from sent, no
+  // way to cancel). Every other role/case is unaffected (queuedMessageId is only ever set on
+  // "user" turns — see correlateQueuedMessages in state.ts).
+  const queuedMessageId = turn.queuedMessageId;
+  const isQueued = queuedMessageId !== undefined && queuedIds.has(queuedMessageId);
   return (
-    <div className={`turn turn-${turn.role}`}>
-      <div className="turn-role">{turnRoleLabel(turn.role)}</div>
+    <div className={`turn turn-${turn.role}${isQueued ? " turn-queued" : ""}`}>
+      <div className="turn-role">
+        {turnRoleLabel(turn.role)}
+        {isQueued ? <span className="turn-queued-badge">queued</span> : null}
+      </div>
       {turn.role === "assistant" ? (
         <MarkdownContent text={turn.text} />
       ) : (
         <div className="turn-text">{turn.text}</div>
       )}
+      {isQueued && queuedMessageId !== undefined ? (
+        <button
+          type="button"
+          className="turn-queued-cancel"
+          aria-label="Cancel queued message"
+          onClick={() => onCancelQueuedMessage(queuedMessageId)}
+        >
+          Cancel
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -212,9 +243,15 @@ export interface TranscriptProps {
   agent: AgentNode | null;
   sessionEnded: boolean;
   exitCode: number | null;
+  onCancelQueuedMessage: (agentId: string, messageId: string) => void;
 }
 
-export function Transcript({ agent, sessionEnded, exitCode }: TranscriptProps): ReactElement {
+export function Transcript({
+  agent,
+  sessionEnded,
+  exitCode,
+  onCancelQueuedMessage,
+}: TranscriptProps): ReactElement {
   const transcript = agent?.transcript ?? [];
   const scrollRegionRef = useRef<HTMLDivElement | null>(null);
   const [jumpVisible, setJumpVisible] = useState(false);
@@ -273,13 +310,22 @@ export function Transcript({ agent, sessionEnded, exitCode }: TranscriptProps): 
   const showThinking = agent && agent.status === "running" && !agent.turnOpen;
   const lastTurn = transcript.at(-1);
   const thinking = showThinking && lastTurn?.role !== "assistant";
+  const queuedIds = new Set((agent?.queuedMessages ?? []).map((entry) => entry.id));
   // transcript is append-only (never reordered/spliced), so each item's `startIndex` (a
   // transcript index) is a stable identity — see `groupTranscript`/`RenderItem` above.
+  const cancelQueuedMessage = (messageId: string) => {
+    if (agent) onCancelQueuedMessage(agent.agentId, messageId);
+  };
   const turnRows = groupTranscript(transcript).map((item) =>
     item.kind === "group" ? (
       <ToolCallGroup key={item.startIndex} turns={item.turns} />
     ) : (
-      <TurnRow key={item.startIndex} turn={item.turn} />
+      <TurnRow
+        key={item.startIndex}
+        turn={item.turn}
+        queuedIds={queuedIds}
+        onCancelQueuedMessage={cancelQueuedMessage}
+      />
     ),
   );
 

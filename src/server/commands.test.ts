@@ -103,6 +103,52 @@ describe("handleCommand", () => {
     });
   });
 
+  describe("cancel_queued_message", () => {
+    test("dispatches to the agent loop and acks when it reports the entry was cancelled", async () => {
+      const result = await handleCommand(
+        { type: "cancel_queued_message", agentId: "child-1", messageId: "msg-1" },
+        ctx(),
+      );
+      expect(result).toEqual({ kind: "json", status: 200, body: { ok: true } });
+      expect(loop.cancelledMessages).toEqual([{ agentId: "child-1", messageId: "msg-1" }]);
+    });
+
+    test("404s when the agent loop reports nothing was cancelled (already delivered/unknown id)", async () => {
+      loop.cancelQueuedMessageResult = false;
+      const result = await handleCommand(
+        { type: "cancel_queued_message", agentId: "child-1", messageId: "msg-1" },
+        ctx(),
+      );
+      expect(result).toEqual({
+        kind: "json",
+        status: 404,
+        body: { ok: false, error: "no queued message with id: msg-1" },
+      });
+    });
+
+    test("errors for an unknown agentId without touching the loop", async () => {
+      const result = await handleCommand(
+        { type: "cancel_queued_message", agentId: "ghost", messageId: "msg-1" },
+        ctx(),
+      );
+      expect(result).toEqual({
+        kind: "json",
+        status: 404,
+        body: { ok: false, error: "unknown agentId: ghost" },
+      });
+      expect(loop.cancelledMessages).toEqual([]);
+    });
+
+    test("rejects a body missing agentId or messageId", async () => {
+      expect(
+        (await handleCommand({ type: "cancel_queued_message", agentId: "child-1" }, ctx())).status,
+      ).toBe(400);
+      expect(
+        (await handleCommand({ type: "cancel_queued_message", messageId: "msg-1" }, ctx())).status,
+      ).toBe(400);
+    });
+  });
+
   describe("stop_agent", () => {
     test("dispatches to the agent loop and acks for a known agent", async () => {
       const result = await handleCommand({ type: "stop_agent", agentId: "root" }, ctx());

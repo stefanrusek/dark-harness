@@ -30,6 +30,11 @@ export interface TaskRunHandle {
   signal: AbortSignal;
   /** Agent-kind tasks call this to make themselves reachable by SendMessage. */
   registerSendMessage(fn: (message: string) => void): void;
+  /** DH-0207/DH-0208: agent-kind tasks call this to make their not-yet-delivered message
+   * queue reachable by `TaskRegistry.cancelQueuedMessage()` — mirrors `registerSendMessage`
+   * above, one level down (cancelling an entry already sitting in the queue, rather than
+   * adding a new one). */
+  registerCancelQueuedMessage(fn: (messageId: string) => boolean): void;
 }
 
 export interface StartTaskParams {
@@ -75,6 +80,9 @@ interface InternalTask {
   error?: string;
   controller: AbortController;
   sendMessage?: (message: string) => void;
+  /** DH-0207/DH-0208: installed alongside `sendMessage` — see
+   * `TaskRunHandle.registerCancelQueuedMessage`'s doc comment. */
+  cancelQueuedMessage?: (messageId: string) => boolean;
   done: Promise<void>;
   background: boolean;
 }
@@ -190,6 +198,9 @@ export class TaskRegistry {
       signal: controller.signal,
       registerSendMessage: (fn: (message: string) => void) => {
         task.sendMessage = fn;
+      },
+      registerCancelQueuedMessage: (fn: (messageId: string) => boolean) => {
+        task.cancelQueuedMessage = fn;
       },
     };
 
@@ -319,6 +330,18 @@ export class TaskRegistry {
       );
     }
     task.sendMessage(message);
+  }
+
+  /** DH-0207/DH-0208: cancels one not-yet-delivered entry out of `id`'s pending-message queue
+   * (if any). Unlike `sendMessage()` above, a terminal or never-listening task isn't an
+   * error here — there's nothing queued for it either way, so this just reports "nothing was
+   * cancelled" (`false`) rather than throwing `TaskFinishedError`/an "unknown"-style error.
+   * Still throws `TaskNotFoundError` (via `require()`) for a genuinely unknown task id — that
+   * one IS a caller mistake, same as every other method here. */
+  cancelQueuedMessage(id: string, messageId: string): boolean {
+    const task = this.require(id);
+    if (!task.cancelQueuedMessage) return false;
+    return task.cancelQueuedMessage(messageId);
   }
 
   /** Round 13 (docs/handoffs/core.md): incremental read backing TaskOutput — returns only the

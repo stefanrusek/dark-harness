@@ -783,6 +783,47 @@ button {
   color: var(--text);
 }
 
+/* DH-0207: a "user" turn still sitting in the agent's not-yet-delivered queue — visually
+ * distinct (dashed border, muted fill, reduced opacity) from an already-sent/delivered turn,
+ * plus an inline "queued" badge and Cancel button. Once the entry is delivered (or
+ * cancelled), the turn silently reverts to ordinary `.turn-user` styling — see
+ * `Turn.queuedMessageId`'s doc comment in state.ts for why no extra state transition is
+ * needed here. */
+.turn-queued .turn-text {
+  background: var(--panel-raised);
+  border-style: dashed;
+  border-color: var(--text-faint);
+  opacity: 0.72;
+}
+
+.turn-queued-badge {
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--text-faint);
+  color: var(--panel);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.turn-queued-cancel {
+  align-self: flex-end;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.turn-queued-cancel:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
 /* DH-0093: local, never-sent `/help` entries — visually distinct from real conversation
  * turns (centered, dim, monospace) so an operator never mistakes canned help text for
  * something the agent actually said. */

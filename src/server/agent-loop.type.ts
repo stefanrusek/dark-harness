@@ -27,6 +27,10 @@ export interface AgentLoopHandle {
   onLog(listener: AgentLoopLogListener): Unsubscribe;
   /** Send a user message into a running agent's conversation (send_message command). */
   sendMessage(agentId: string, message: string): void;
+  /** DH-0207/DH-0208: cancels one not-yet-delivered entry out of `agentId`'s pending-message
+   * queue (cancel_queued_message command). Returns `true` if `messageId` was found and
+   * removed, `false` otherwise (already delivered/drained, or never existed). */
+  cancelQueuedMessage(agentId: string, messageId: string): boolean;
   /** Request a stop of the given agent (stop_agent command). */
   stopAgent(agentId: string): void;
   /** Current snapshot of the agent tree (request_agent_tree command). */

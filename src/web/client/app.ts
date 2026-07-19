@@ -12,6 +12,7 @@ import type { HeaderInfo } from "../../header-info.ts";
 import type { ServerTarget } from "../protocol.ts";
 import {
   CommandError,
+  cancelQueuedMessage,
   type FetchLike,
   invokeSkill,
   listModels,
@@ -466,6 +467,15 @@ export class AppView {
             stopAgent(this.deps.target, agentId, this.deps.fetchImpl, this.commandOptions()).catch(
               (err) => this.reportError(err),
             );
+          },
+          onCancelQueuedMessage: (agentId, messageId) => {
+            cancelQueuedMessage(
+              this.deps.target,
+              agentId,
+              messageId,
+              this.deps.fetchImpl,
+              this.commandOptions(),
+            ).catch((err) => this.reportError(err));
           },
           onSelectModel: (name) => this.selectModel(name),
           onCloseModelPicker: () => this.closeModelPicker(),

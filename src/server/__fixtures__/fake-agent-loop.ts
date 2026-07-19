@@ -22,6 +22,9 @@ export class FakeAgentLoop implements AgentLoopHandle {
   private tree: AgentTreeNode[];
   readonly sentMessages: Array<{ agentId: string; message: string }> = [];
   readonly stoppedAgents: string[] = [];
+  readonly cancelledMessages: Array<{ agentId: string; messageId: string }> = [];
+  /** Test setup: what cancelQueuedMessage() should return next (defaults to `true`). */
+  cancelQueuedMessageResult = true;
   private models: ModelInfo[] = [];
   private skills: SkillInfo[] = [];
   readonly switchedModels: Array<{ agentId: string; model: string }> = [];
@@ -51,6 +54,11 @@ export class FakeAgentLoop implements AgentLoopHandle {
 
   stopAgent(agentId: string): void {
     this.stoppedAgents.push(agentId);
+  }
+
+  cancelQueuedMessage(agentId: string, messageId: string): boolean {
+    this.cancelledMessages.push({ agentId, messageId });
+    return this.cancelQueuedMessageResult;
   }
 
   getAgentTree(): AgentTreeNode[] {

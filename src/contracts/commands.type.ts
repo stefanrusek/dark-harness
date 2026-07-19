@@ -9,6 +9,17 @@ export interface SendMessageCommand {
   message: string;
 }
 
+/** DH-0207/DH-0208: cancels one not-yet-delivered entry from `agentId`'s pending-message
+ * queue (see `AgentQueueEvent` in `events.type.ts`) before it's injected into the agent's
+ * next turn. A 404-shaped ack (`ok: false`) covers both "already delivered/drained" and
+ * "never existed" — the queue is a full in-memory snapshot with no history, so the server
+ * can't distinguish those two cases and doesn't try to. */
+export interface CancelQueuedMessageCommand {
+  type: "cancel_queued_message";
+  agentId: string;
+  messageId: string;
+}
+
 export interface RequestAgentTreeCommand {
   type: "request_agent_tree";
 }
@@ -71,6 +82,7 @@ export interface InvokeSkillCommand {
 
 export type ClientCommand =
   | SendMessageCommand
+  | CancelQueuedMessageCommand
   | RequestAgentTreeCommand
   | DownloadLogsCommand
   | StopAgentCommand

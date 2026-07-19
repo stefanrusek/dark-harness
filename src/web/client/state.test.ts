@@ -914,3 +914,82 @@ describe("DH-0093: slash-command state helpers", () => {
     expect(state.agents.get("mystery")?.model).toBe("sonnet");
   });
 });
+
+// DH-0207/DH-0208: agent_queue — a full snapshot of an agent's not-yet-delivered queue, used
+// by the Web UI's "queued" visual state + cancel button, and doubling as a completion/EOF
+// signal for scripted callers watching the SSE stream.
+describe("agent_queue (DH-0207/DH-0208)", () => {
+  function queueEvent(id: string, agentId: string, queue: { id: string; message: string }[]) {
+    return {
+      version: 1 as const,
+      id,
+      timestamp: "2026-01-01T00:00:02Z",
+      type: "agent_queue" as const,
+      agentId,
+      queue: queue.map((e) => ({ ...e, queuedAt: "2026-01-01T00:00:01Z" })),
+    };
+  }
+
+  test("stores the raw snapshot on AgentNode.queuedMessages", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "haiku"));
+    state = applyEvent(state, queueEvent("e1", "root-1", [{ id: "q1", message: "hold on" }]));
+    expect(state.agents.get("root-1")?.queuedMessages).toEqual([
+      { id: "q1", message: "hold on", queuedAt: "2026-01-01T00:00:01Z" },
+    ]);
+  });
+
+  test("correlates a new queue entry to the matching local-echo user turn, newest-unmatched first", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "haiku"));
+    state = addUserTurn(state, "root-1", "hold on", "2026-01-01T00:00:00Z");
+    state = applyEvent(state, queueEvent("e1", "root-1", [{ id: "q1", message: "hold on" }]));
+    const turn = state.agents.get("root-1")?.transcript.find((t) => t.role === "user");
+    expect(turn?.queuedMessageId).toBe("q1");
+  });
+
+  test("a turn's queuedMessageId sticks around after delivery/cancellation, but membership in the new (empty) snapshot goes away — this is how the render layer tells 'queued' from 'no longer queued' without a separate clear step", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "haiku"));
+    state = addUserTurn(state, "root-1", "hold on", "2026-01-01T00:00:00Z");
+    state = applyEvent(state, queueEvent("e1", "root-1", [{ id: "q1", message: "hold on" }]));
+    // Delivered (or cancelled) — the server's next snapshot no longer contains it.
+    state = applyEvent(state, queueEvent("e2", "root-1", []));
+    const turn = state.agents.get("root-1")?.transcript.find((t) => t.role === "user");
+    expect(turn?.queuedMessageId).toBe("q1");
+    expect(state.agents.get("root-1")?.queuedMessages).toEqual([]);
+  });
+
+  test("an entry with no matching local-echo turn (e.g. a scripted/--job caller with no client-side echo) is stored without correlating to anything, and doesn't throw", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "haiku"));
+    state = applyEvent(
+      state,
+      queueEvent("e1", "root-1", [{ id: "q1", message: "no echo for this" }]),
+    );
+    expect(state.agents.get("root-1")?.queuedMessages).toEqual([
+      { id: "q1", message: "no echo for this", queuedAt: "2026-01-01T00:00:01Z" },
+    ]);
+    expect(state.agents.get("root-1")?.transcript).toEqual([]);
+  });
+
+  test("a second agent_queue snapshot with the same already-correlated id is a no-op re-correlation (doesn't re-scan/rematch)", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "haiku"));
+    state = addUserTurn(state, "root-1", "hold on", "2026-01-01T00:00:00Z");
+    state = applyEvent(state, queueEvent("e1", "root-1", [{ id: "q1", message: "hold on" }]));
+    const before = state.agents.get("root-1")?.transcript;
+    state = applyEvent(state, queueEvent("e2", "root-1", [{ id: "q1", message: "hold on" }]));
+    expect(state.agents.get("root-1")?.transcript).toBe(before);
+  });
+
+  test("creates the agent node if the queue event arrives before agent_spawned", () => {
+    const state = applyEvent(
+      createInitialState(),
+      queueEvent("e1", "not-yet-spawned", [{ id: "q1", message: "hi" }]),
+    );
+    expect(state.agents.get("not-yet-spawned")?.queuedMessages).toEqual([
+      { id: "q1", message: "hi", queuedAt: "2026-01-01T00:00:01Z" },
+    ]);
+  });
+});

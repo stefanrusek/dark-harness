@@ -120,6 +120,14 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
     this.runtime.sendMessageToRoot(message);
   }
 
+  /** DH-0207/DH-0208: unlike `sendMessage()` above, the root agent has no special-case here —
+   * `AgentRuntime.cancelQueuedMessage()` already handles the root-vs-sub-agent split
+   * internally (see its own doc comment), and there's no "lazily start the root" branch to
+   * mirror since cancelling against a not-yet-started root is trivially "nothing to cancel". */
+  cancelQueuedMessage(agentId: string, messageId: string): boolean {
+    return this.runtime.cancelQueuedMessage(agentId, messageId);
+  }
+
   stopAgent(agentId: string): void {
     if (agentId === ROOT_AGENT_ID) {
       // Round 3 fix (docs/handoffs/core.md status log): this used to be a documented no-op

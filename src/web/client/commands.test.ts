@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { AgentTreeResponse, CommandAck } from "../../contracts/index.ts";
 import type { ServerTarget } from "../protocol.ts";
 import {
+  buildCancelQueuedMessageCommand,
   buildDownloadLogsCommand,
   buildInvokeSkillCommand,
   buildListModelsCommand,
@@ -11,6 +12,7 @@ import {
   buildStopAgentCommand,
   buildSwitchModelCommand,
   CommandError,
+  cancelQueuedMessage,
   invokeSkill,
   listModels,
   listSkills,
@@ -48,6 +50,15 @@ describe("command builders", () => {
 
   test("buildStopAgentCommand", () => {
     expect(buildStopAgentCommand("a1")).toEqual({ type: "stop_agent", agentId: "a1" });
+  });
+
+  // DH-0207/DH-0208
+  test("buildCancelQueuedMessageCommand", () => {
+    expect(buildCancelQueuedMessageCommand("a1", "msg-1")).toEqual({
+      type: "cancel_queued_message",
+      agentId: "a1",
+      messageId: "msg-1",
+    });
   });
 
   // DH-0093: slash-command backend builders.
@@ -217,6 +228,17 @@ describe("sendMessage / requestAgentTree / stopAgent", () => {
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       type: "stop_agent",
       agentId: "a1",
+    });
+  });
+
+  // DH-0207/DH-0208
+  test("cancelQueuedMessage posts a cancel_queued_message command", async () => {
+    const { fetch: fetchImpl, calls } = fakeFetch(200, { ok: true });
+    await cancelQueuedMessage(target, "a1", "msg-1", fetchImpl);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      type: "cancel_queued_message",
+      agentId: "a1",
+      messageId: "msg-1",
     });
   });
 });

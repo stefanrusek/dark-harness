@@ -32,7 +32,14 @@ function agentWithOutput() {
 
 describe("Transcript", () => {
   test("renders the empty state when there is no agent", () => {
-    const { container } = render(<Transcript agent={null} sessionEnded={false} exitCode={null} />);
+    const { container } = render(
+      <Transcript
+        agent={null}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
+    );
     expect(container.querySelector(".empty-state")?.textContent).toContain("Waiting for an agent");
   });
 
@@ -48,14 +55,24 @@ describe("Transcript", () => {
       model: "sonnet",
     });
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     expect(container.querySelector(".empty-state")?.textContent).toContain("sonnet");
   });
 
   test("renders assistant output as markdown-parsed turn text", () => {
     const { container } = render(
-      <Transcript agent={agentWithOutput()} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={agentWithOutput()}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const turn = container.querySelector(".turn-assistant");
     expect(turn?.textContent).toContain("hello world");
@@ -63,7 +80,12 @@ describe("Transcript", () => {
 
   test("shows the session-end echo once the session has ended", () => {
     const { container } = render(
-      <Transcript agent={agentWithOutput()} sessionEnded={true} exitCode={0} />,
+      <Transcript
+        agent={agentWithOutput()}
+        sessionEnded={true}
+        exitCode={0}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     expect(container.querySelector(".session-end-echo")?.textContent).toContain("Session ended");
   });
@@ -88,7 +110,12 @@ describe("Transcript", () => {
       status: "running",
     });
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     expect(container.querySelector(".turn-thinking")).not.toBeNull();
   });
@@ -122,7 +149,12 @@ describe("Transcript", () => {
   test("auto-scrolls to the new bottom when content grows while already near the bottom", () => {
     const agent = agentWithOutput() as AgentNode;
     const { container, rerender } = render(
-      <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={agent}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
     // User is scrolled to the bottom of the initial, shorter content.
@@ -139,7 +171,14 @@ describe("Transcript", () => {
         { role: "user", text: "more", timestamp: "2026-01-01T00:00:02Z" },
       ],
     };
-    rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
+    rerender(
+      <Transcript
+        agent={grown}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
+    );
 
     expect(scrollRegion.scrollTop).toBe(900);
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
@@ -148,7 +187,12 @@ describe("Transcript", () => {
   test("stays put and reveals the jump-to-latest button when content grows while scrolled away", () => {
     const agent = agentWithOutput() as AgentNode;
     const { container, rerender } = render(
-      <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={agent}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
     // User has scrolled up, away from the bottom of the initial content.
@@ -164,7 +208,14 @@ describe("Transcript", () => {
         { role: "user", text: "more", timestamp: "2026-01-01T00:00:02Z" },
       ],
     };
-    rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
+    rerender(
+      <Transcript
+        agent={grown}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
+    );
 
     expect(scrollRegion.scrollTop).toBe(0);
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
@@ -173,7 +224,12 @@ describe("Transcript", () => {
   test("clicking jump-to-latest scrolls back to the bottom and hides the button", () => {
     const agent = agentWithOutput() as AgentNode;
     const { container, rerender } = render(
-      <Transcript agent={agent} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={agent}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
     mutateScrollMetrics(scrollRegion, { scrollHeight: 500, clientHeight: 200, scrollTop: 0 });
@@ -187,7 +243,14 @@ describe("Transcript", () => {
         { role: "user", text: "more", timestamp: "2026-01-01T00:00:02Z" },
       ],
     };
-    rerender(<Transcript agent={grown} sessionEnded={false} exitCode={null} />);
+    rerender(
+      <Transcript
+        agent={grown}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
+    );
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
 
     const jumpButton = container.querySelector(".jump-to-latest") as HTMLElement;
@@ -203,7 +266,12 @@ describe("Transcript", () => {
   // pure scroll-driven move away from the bottom left the button stuck hidden.
   test("DH-0200: scrolling away from the bottom with no new content reveals jump-to-latest", () => {
     const agent = agentWithOutput() as AgentNode;
-    const { container } = render(<Transcript agent={agent} sessionEnded={false} exitCode={null} />);
+    const { container } = render(<Transcript
+        agent={agent}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />);
     const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
 
@@ -240,7 +308,12 @@ describe("Transcript", () => {
       inputSummary: "bun test",
     });
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const toolTurn = container.querySelector(".turn-tool");
     expect(toolTurn?.textContent).toContain("Bash: bun test");
@@ -279,7 +352,12 @@ describe("Transcript", () => {
       durationMs: 42,
     });
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     expect(container.querySelector(".tool-call-detail")).toBeNull();
     const row = container.querySelector(".turn-tool") as HTMLElement;
@@ -316,7 +394,12 @@ describe("Transcript", () => {
       inputSummary: "bun test",
     });
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const row = container.querySelector(".turn-tool") as HTMLElement;
     fireEvent.keyDown(row, { key: "Enter" });
@@ -363,7 +446,12 @@ describe("Transcript", () => {
       });
     }
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     // Collapsed by default: no individual tool rows visible, just the group summary.
     expect(container.querySelectorAll(".turn-tool").length).toBe(0);
@@ -409,7 +497,12 @@ describe("Transcript", () => {
       inputSummary: "bun test",
     });
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     expect(container.querySelector(".tool-group-toggle")).toBeNull();
     expect(container.querySelector(".turn-tool")).not.toBeNull();
@@ -460,7 +553,12 @@ describe("Transcript", () => {
       });
     }
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const toggles = container.querySelectorAll(".tool-group-toggle");
     expect(toggles.length).toBe(2);
@@ -487,7 +585,12 @@ describe("Transcript", () => {
       status: "failed",
     });
     const { container } = render(
-      <Transcript agent={selectedAgent(state)} sessionEnded={false} exitCode={null} />,
+      <Transcript
+        agent={selectedAgent(state)}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
     );
     const marker = container.querySelector(".turn-terminal-status");
     expect(marker).not.toBeNull();

@@ -431,6 +431,14 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
     // case exists to keep this switch's exhaustiveness check compiling until then.
     case "agent_thinking":
       return noEffects(state);
+    // DH-0207/DH-0208: `agent_queue` (a full not-yet-delivered-queue snapshot for one agent —
+    // see its doc comment in src/contracts/events.type.ts) has no TUI display yet; this ticket's
+    // scope is the Web UI (queued-state styling + cancel button) and the completion/EOF
+    // signal for scripted callers, neither of which needs a TUI-rendered queue view. No-op
+    // here for the same reason as agent_thinking above: keeps this switch's exhaustiveness
+    // check compiling without pretending the TUI does something with it yet.
+    case "agent_queue":
+      return noEffects(state);
   }
 }
 

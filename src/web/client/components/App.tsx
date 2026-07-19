@@ -26,6 +26,7 @@ export interface AppProps {
   onDownloadAgentLog: (agentId: string) => void;
   onDownloadSessionBundle: () => void;
   onStopAgent: (agentId: string) => void;
+  onCancelQueuedMessage: (agentId: string, messageId: string) => void;
   onSelectModel: (name: string) => void;
   onCloseModelPicker: () => void;
   onDismissGapBanner: () => void;
@@ -41,6 +42,7 @@ export function App({
   onDownloadAgentLog,
   onDownloadSessionBundle,
   onStopAgent,
+  onCancelQueuedMessage,
   onSelectModel,
   onCloseModelPicker,
   onDismissGapBanner,
@@ -68,7 +70,12 @@ export function App({
             now={now}
           />
         </div>
-        <Transcript agent={agent} sessionEnded={state.sessionEnded} exitCode={state.exitCode} />
+        <Transcript
+          agent={agent}
+          sessionEnded={state.sessionEnded}
+          exitCode={state.exitCode}
+          onCancelQueuedMessage={onCancelQueuedMessage}
+        />
         <div className="composer-region">
           <Composer state={state} onSend={onSendMessage} />
         </div>

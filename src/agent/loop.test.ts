@@ -479,6 +479,121 @@ describe("runAgentLoop", () => {
     );
     expect(hasInjected).toBe(true);
   });
+
+  // DH-0207/DH-0208: registerCancelQueuedMessage/onQueueChange — the mechanism behind the
+  // Web UI's per-message cancel button and the agent_queue completion/EOF signal. Mirrors
+  // the "SendMessage injection" test above's shape (tool_use turn then two end_turn turns,
+  // the send fired synchronously right after kicking off the loop) rather than interactive
+  // mode's wait/signal machinery, since these two behaviors don't depend on interactive mode.
+  test("onQueueChange reports the queue growing on send and emptying on drain", async () => {
+    let sendFn: ((message: string) => void) | undefined;
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo first", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const queueSnapshots: Array<Array<{ id: string; message: string }>> = [];
+    const { params } = baseParams({
+      provider,
+      registerSendMessage: (fn) => {
+        sendFn = fn;
+      },
+      onQueueChange: (queue) => {
+        queueSnapshots.push(queue.map((e) => ({ id: e.id, message: e.message })));
+      },
+    });
+    const resultPromise = runAgentLoop(params);
+    sendFn?.("queued message");
+    await resultPromise;
+    // First snapshot: one entry just queued. Last snapshot: drained back to empty at the top
+    // of the next turn.
+    expect(queueSnapshots[0]?.length).toBe(1);
+    expect(queueSnapshots[0]?.[0]?.message).toBe("queued message");
+    expect(queueSnapshots.at(-1)).toEqual([]);
+  });
+
+  test("registerCancelQueuedMessage removes a still-queued entry and reports it via onQueueChange, returning false for an unknown id", async () => {
+    let sendFn: ((message: string) => void) | undefined;
+    let cancelFn: ((messageId: string) => boolean) | undefined;
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo first", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const queueSnapshots: Array<Array<{ id: string; message: string }>> = [];
+    const { params } = baseParams({
+      provider,
+      registerSendMessage: (fn) => {
+        sendFn = fn;
+      },
+      registerCancelQueuedMessage: (fn) => {
+        cancelFn = fn;
+      },
+      onQueueChange: (queue) => {
+        queueSnapshots.push(queue.map((e) => ({ id: e.id, message: e.message })));
+      },
+    });
+    const resultPromise = runAgentLoop(params);
+    sendFn?.("cancel me");
+    const queuedId = queueSnapshots[0]?.[0]?.id;
+    expect(queuedId).toBeDefined();
+    // Unknown id: no-op, reports false, no further onQueueChange emission.
+    expect(cancelFn?.("unknown-id")).toBe(false);
+    const snapshotCountBeforeCancel = queueSnapshots.length;
+    const cancelResult = queuedId !== undefined ? cancelFn?.(queuedId) : undefined;
+    expect(cancelResult).toBe(true);
+    expect(queueSnapshots.length).toBe(snapshotCountBeforeCancel + 1);
+    expect(queueSnapshots.at(-1)).toEqual([]);
+    const result = await resultPromise;
+    // Nothing was ever injected — the cancelled message never reaches the conversation.
+    expect(result.success).toBe(true);
+    const anyCallMentionsCancelled = provider.calls.some((c) =>
+      c.messages.some((m) =>
+        m.content.some((b) => b.type === "text" && b.text.includes("cancel me")),
+      ),
+    );
+    expect(anyCallMentionsCancelled).toBe(false);
+  });
 });
 
 // DH-0093: model-switch mechanism — a pushed ModelBinding takes effect on the very next turn

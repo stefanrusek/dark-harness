@@ -21,6 +21,7 @@ describe("App", () => {
         onDownloadAgentLog={noop}
         onDownloadSessionBundle={noop}
         onStopAgent={noop}
+        onCancelQueuedMessage={noop}
         onSelectModel={noop}
         onCloseModelPicker={noop}
         onDismissGapBanner={noop}

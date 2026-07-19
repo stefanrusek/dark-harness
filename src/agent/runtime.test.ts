@@ -1222,6 +1222,49 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
     expect(() => runtime.sendMessageToRoot("hi")).toThrow(RootNotListeningError);
   });
 
+  // DH-0207/DH-0208: cancelQueuedMessage() root-vs-sub-agent split.
+  test("cancelQueuedMessage(ROOT_AGENT_ID, ...) returns false before the root has started (nothing queued, nothing to cancel)", () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    expect(runtime.cancelQueuedMessage(ROOT_AGENT_ID, "whatever")).toBe(false);
+  });
+
+  test("cancelQueuedMessage(ROOT_AGENT_ID, ...) removes a still-queued entry from a live root, returning false for an unknown id", async () => {
+    let queuedId: string | undefined;
+    const runtime = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      onEvent: (event) => {
+        if (event.type === "agent_queue" && event.agentId === ROOT_AGENT_ID) {
+          queuedId = event.queue[0]?.id;
+        }
+      },
+    });
+    const rootPromise = runtime.runRoot("please just answer");
+    // sendMessageToRoot's own sibling test above already establishes this synchronous-window
+    // ordering is safe (the sink is registered before the first `await` inside runAgentLoop).
+    runtime.sendMessageToRoot("cancel target");
+    expect(queuedId).toBeDefined();
+    expect(runtime.cancelQueuedMessage(ROOT_AGENT_ID, "not-a-real-id")).toBe(false);
+    expect(queuedId !== undefined && runtime.cancelQueuedMessage(ROOT_AGENT_ID, queuedId)).toBe(
+      true,
+    );
+    const result = await rootPromise;
+    expect(result.success).toBe(true);
+  });
+
+  test("cancelQueuedMessage against a non-root agentId delegates to TaskRegistry", async () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+    });
+    // registerCancelQueuedMessage is installed synchronously at the top of runAgentLoop,
+    // before its first await — safe to call immediately, mirroring sendMessage()'s own
+    // precedent (see the "SendMessage injection" test in loop.test.ts).
+    expect(runtime.cancelQueuedMessage(taskId, "not-a-real-id")).toBe(false);
+    await runtime.tasks.awaitDone(taskId);
+  });
+
   test("sendMessageToRoot delivers into the running root agent's next turn", async () => {
     // A dedicated local mock server (not the shared one above) so this test can capture and
     // assert on raw request bodies without disturbing the other tests' shared fixture.

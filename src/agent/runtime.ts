@@ -186,6 +186,10 @@ export class AgentRuntime {
   private rootModel: string | undefined;
   private rootStatus: AgentStatus = "waiting";
   private rootSendMessage: ((message: string) => void) | undefined;
+  /** DH-0207/DH-0208: mirrors `rootSendMessage` above, one level down — installed via
+   * `registerCancelQueuedMessage` on every `runRoot()` call so `cancelQueuedMessage()` can
+   * pull a specific not-yet-delivered entry back out of the root's currently-running loop. */
+  private rootCancelQueuedMessage: ((messageId: string) => boolean) | undefined;
   /** DH-0093: root-not-started-yet model switch — set by `switchModel()` when
    * `!this.rootStarted`, consulted by `runRoot()`'s own model-resolution precedence chain (an
    * explicit `runRoot(instruction, modelName)` argument still wins over this; this wins over
@@ -694,6 +698,17 @@ export class AgentRuntime {
         tools: this.toolMap,
         toolContext: this.buildToolContext(agentId),
         registerSendMessage: handle.registerSendMessage,
+        registerCancelQueuedMessage: handle.registerCancelQueuedMessage,
+        onQueueChange: (queue) => {
+          this.onEvent?.({
+            version: 1,
+            id: randomUUID(),
+            timestamp: new Date().toISOString(),
+            type: "agent_queue",
+            agentId,
+            queue,
+          });
+        },
         // Round 3 (docs/handoffs/core.md status log): this AbortSignal was already sitting
         // right here in scope — TaskRegistry.stop(id) calls this same task's
         // AbortController, which previously only reached the Bash tool's own
@@ -1015,10 +1030,25 @@ export class AgentRuntime {
       registerSendMessage: (fn) => {
         this.rootSendMessage = fn;
       },
+      // DH-0207/DH-0208: mirrors registerSendMessage above, one level down — lets
+      // cancelQueuedMessage() reach into the root's currently-running loop.
+      registerCancelQueuedMessage: (fn) => {
+        this.rootCancelQueuedMessage = fn;
+      },
       // DH-0093: mirrors registerSendMessage above — lets switchModel() push a new binding
       // into the root's currently-running loop once it's live.
       registerModelSwitch: (fn) => {
         this.rootModelSwitch = fn;
+      },
+      onQueueChange: (queue) => {
+        this.onEvent?.({
+          version: 1,
+          id: randomUUID(),
+          timestamp: new Date().toISOString(),
+          type: "agent_queue",
+          agentId: ROOT_AGENT_ID,
+          queue,
+        });
       },
       signal: rootController.signal,
       interactive: this.interactive,
@@ -1130,6 +1160,19 @@ export class AgentRuntime {
    * idempotent). */
   stopRoot(): void {
     this.rootController?.abort();
+  }
+
+  /** DH-0207/DH-0208: cancels one not-yet-delivered entry out of `agentId`'s pending-message
+   * queue (the `cancel_queued_message` command's handler). Mirrors `sendMessage()`'s root/
+   * sub-agent split above, but unlike `sendMessage()` there's no resume-a-finished-agent case
+   * to consider — a terminal or unstarted agent simply has nothing queued, so this returns
+   * `false` rather than throwing. Returns `true` only if `messageId` was actually found and
+   * removed. */
+  cancelQueuedMessage(agentId: string, messageId: string): boolean {
+    if (agentId === ROOT_AGENT_ID) {
+      return this.rootCancelQueuedMessage?.(messageId) ?? false;
+    }
+    return this.tasks.cancelQueuedMessage(agentId, messageId);
   }
 
   /** DH-0003: delivers a message into `agentId`'s conversation, resuming a finished sub-agent
