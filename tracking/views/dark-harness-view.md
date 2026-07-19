@@ -72,12 +72,6 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
 
-### ready
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0187](../DH-0187-import-import-a-claude-code-session-directory-into-dh.md) | --import: import a Claude Code session directory into dh | feature | stefan |
-
 ### implementing
 
 | ID | Title | Type | Owner |
@@ -111,6 +105,7 @@ source: tracking/
 | --- | --- | --- |
 | [DH-0189](../DH-0189-import-import-cli-flag-mode-composition-model-selection-core.md) | import: --import CLI flag, mode composition, model selection (Core) | done |
 | [DH-0188](../DH-0188-import-claude-code-session-translation-jsonl-writer-server.md) | import: Claude Code session translation + JSONL writer (Server) | done |
+| [DH-0187](../DH-0187-import-import-a-claude-code-session-directory-into-dh.md) | --import: import a Claude Code session directory into dh | done |
 | [DH-0186](../DH-0186-migrate-the-web-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the Web SSE client onto the shared src/client-core/ transport | done |
 | [DH-0185](../DH-0185-migrate-the-tui-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the TUI SSE client onto the shared src/client-core/ transport | done |
 | [DH-0184](../DH-0184-extract-the-shared-sse-transport-frame-parser-full-jitter-backoff-last-event-id-reconnect-payload-validation-into-src-client-core-resolving-the-validation-strictness-divergence.md) | Extract the shared SSE transport (frame parser + full-jitter backoff + Last-Event-ID reconnect + payload validation) into src/client-core/, resolving the validation-strictness divergence | done |
@@ -123,4 +118,3 @@ source: tracking/
 | [DH-0177](../DH-0177-e2e-test-support-cleanup-consolidate-mock-provider-scaffolding-and-resolve-the-spikes-tree-s-status-and-gate-dependency.md) | e2e test-support cleanup: consolidate mock-provider scaffolding and resolve the spikes/ tree's status and gate dependency | done |
 | [DH-0176](../DH-0176-audit-coverage-gate-driven-test-patterns-branch-free-helpers-synthetic-empty-constructors-giant-test-files.md) | Audit coverage-gate-driven test patterns (branch-free helpers, synthetic empty constructors, giant test files) | done |
 | [DH-0173](../DH-0173-split-the-agentruntime-god-class-into-collaborators-and-break-up-spawnagent-runroot.md) | Split the AgentRuntime God class into collaborators and break up spawnAgent/runRoot | done |
-| [DH-0172](../DH-0172-introduce-a-shared-tool-input-validation-helper-driven-by-inputschema-remove-per-tool-typeof-boilerplate.md) | Introduce a shared tool-input validation helper driven by inputSchema; remove per-tool typeof boilerplate | done |
