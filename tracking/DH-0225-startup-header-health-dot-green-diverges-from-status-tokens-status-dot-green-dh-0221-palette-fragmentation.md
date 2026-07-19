@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0225
 type: bug
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-19
 relations:
@@ -169,3 +169,22 @@ None — decision is final per this ticket; no TODOs left for the implementer.
 - 2026-07-19 (Muriel): Ticket specced end-to-end — design decision, exact hex/token change,
   confirmed no ANSI-256 cache-invalidation concern, style-guide.md §3 updated in the same
   pass. Moving draft -> ready.
+- 2026-07-19 (Grace, implementer): The exact `healthDot()` change (STATUS_TOKENS import +
+  swapping the healthy branch to `STATUS_TOKENS.done.webHex`) had already landed at HEAD as
+  part of a concurrent DH-0224 commit (`f6d23c3`) that touched the same lines while my staged
+  hunk was in the shared working-tree index — confirmed the diff matches this ticket's spec
+  exactly, no further source change needed. Added the test coverage the Functional
+  Requirements call for: `src/cli/header.test.ts`'s new `describe("healthDot color
+  (DH-0225)")` asserts the healthy dot's truecolor SGR sequence and ansi256 index resolve
+  from `#35c469`, not `#9ECE6A`, isolated to the status-tree line (not the whole rendered
+  header) so it doesn't false-positive against the wordmark gradient's legitimate
+  harnessGreen->signalCyan span. `healthy: false` (`BRAND.leadOrange`) untouched, confirmed
+  by reading the current source. Gates: typecheck has pre-existing unrelated failures from
+  other agents' concurrent in-flight work (`src/agent/mcp/*`, `src/agent/tools/*`,
+  `src/config/validate.ts`) — none touch `src/cli/header.ts`; `bun run lint` clean on
+  `header.ts`/`header.test.ts`; `bun test src/cli/header.test.ts` 28/28 pass,
+  `src/cli/header.ts` at 100% line/function coverage; full `bun test src --coverage` had one
+  unrelated pre-existing failure (`src/agent/tools/mcp-auth.test.ts`, another agent's WIP);
+  `bun run e2e` 41/41 pass. Commit `fdaa633`, pushed to
+  `claude/coordinator-onboarding-kab9ls`. Closing directly — trivial, fully verified, no
+  ambiguity left for a separate verifying pass.

@@ -72,7 +72,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
-| [DH-0225](../DH-0225-startup-header-health-dot-green-diverges-from-status-tokens-status-dot-green-dh-0221-palette-fragmentation.md) | Startup-header health dot green diverges from STATUS_TOKENS status-dot green (DH-0221 palette fragmentation) | bug | stefan |
 
 ### implementing
 
@@ -110,6 +109,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0225](../DH-0225-startup-header-health-dot-green-diverges-from-status-tokens-status-dot-green-dh-0221-palette-fragmentation.md) | Startup-header health dot green diverges from STATUS_TOKENS status-dot green (DH-0221 palette fragmentation) | done |
 | [DH-0223](../DH-0223-chooseheadermode-is-exported-and-unit-tested-but-never-called-at-runtime.md) | chooseHeaderMode is exported and unit-tested but never called at runtime | done |
 | [DH-0222](../DH-0222-refactoring-round-dh-0219-0220-0221-logo-header-color-wave-sweep.md) | Refactoring round: DH-0219/0220/0221 logo+header+color wave sweep | done |
 | [DH-0218](../DH-0218-renderselfinfosection-signature-accreted-into-positional-optional-trap-across-dh-0094-0194-0215.md) | renderSelfInfoSection signature accreted into positional-optional trap across DH-0094/0194/0215 | done |
@@ -124,4 +124,3 @@ source: tracking/
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | done |
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | done |
 | [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | done |
-| [DH-0204](../DH-0204-markdown-link-title-attribute-leaks-into-the-href.md) | Markdown: link title attribute leaks into the href | done |
