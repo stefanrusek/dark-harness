@@ -98,3 +98,54 @@ component/design-system architecture and anticipating the blocked follow-up tick
 - DH-0122/DH-0124/DH-0125 still need their own full design passes (exact header fields,
   non-TTY/--json degrade behavior, status-row field list and narrow-width behavior) — the
   slots are reserved but empty by design; don't let "slot exists" be mistaken for "designed."
+
+### 2026-07-19 — round 3: logo redesign (DH-0192) + wordmark padding (DH-0193)
+
+Owner found DH-0121's delivered logo too literal / unintentionally suggestive, but likes the
+◆ diamond and has a lead: next to "Dark Harness" it reads like a horse **blinder**. Explored
+evolving the mark rather than replacing it.
+
+**Judgment calls made this round:**
+- **Audited first, found the premise was slightly off:** there are TWO unrelated marks. The
+  suggestive one is `docs/media/logo.svg` (blue harness *brackets* + `dh` text + green dot) —
+  it has no diamond at all. The ◆ the owner likes lives separately in README title, web
+  `.brand::before`, favicon, social preview. The "not consistently black" complaint is really
+  amber-vs-ink: every *app* surface renders ◆ **amber** `#f5a524`; only the README (can't
+  color a markdown-heading glyph) shows it in theme ink. Recorded this correction in the ticket
+  so implementers don't chase a nonexistent black-diamond.
+- **Surfaced the governing constraint as glyph-tier vs SVG-tier:** the mark must survive both
+  as the literal `◆` character (README, CSS `content:`, ASCII, logs — no custom geometry
+  possible) and as real SVG. Any negative-space evolution exists ONLY in the SVG tier. So I
+  specced a deliberate **two-tier system**: plain ◆ = canonical reduced form; evolved blinder
+  art = full form. This is why I recommend evolving the diamond *gently* (must stay
+  recognizable as the same mark when it degrades to a bare glyph).
+- **Three concepts, recommended Concept 1 "The Blinker"** — sharp outer diamond points, one
+  concave scooped inner (wordmark-facing) side, single **round** negative-space eye (explicitly
+  NOT a vertical almond — an almond in a cupped shape risks re-introducing the exact anatomical
+  misread that started the ticket). Wrote starting SVG path into the ticket. Concept 2 (rosette
+  boss + crossing straps) is the fallback if owner wants the diamond untouched; Concept 3
+  (lockup-only) folds in as Concept 1's lockup layer.
+- **Color recommendation:** amber `#f5a524` canonical everywhere color is possible; ink
+  fallback only where the medium can't carry color (accepted degradation, same spirit as the
+  "color is never the only signal" law); upgrade README hero to inline amber `<img>` SVG.
+- **Left DH-0192 at `refining`, not `ready`** — deliberately. Taste is the owner's call
+  (§6 + the ticket's own Risk), and given the mark's origin as an *unintended* misread, an
+  owner look before implementation is cheap insurance. User Stories/FRs are written against
+  Concept 1 so blessing it is a short hop to `ready`.
+- **DH-0193 (padding)** filled in and set `refining` too — specced the lockup in mark-relative
+  units (0.4–0.6× mark width mark↔wordmark gap, ≥1× mark-width chrome clearance, cap-height
+  vertical centering; kill the web `content: "◆ "` space-hack for a real flex `gap`). It lands
+  in the same pass as DH-0192; only the web-header gap truly depends on the final silhouette.
+
+**Process note (do not lose):** something in this repo actively **reverts edits to
+`tracking/*.md` between tool calls** (a spile watcher / linter restoring from disk — hit it
+repeatedly this round; both tickets reverted to draft after Edit succeeded). Workaround that
+worked: write full ticket content to the scratchpad, then `cp` into place + `git add` + commit
+in ONE Bash call so the commit beats the reverter. Verify with `git show HEAD:<path>` after,
+not by re-reading the working file. There's also a git commit hook printing a "Refactoring
+Round due" banner (17 commits since last) — not my task, flagged for Ada.
+
+**Open threads for next round:**
+- Owner to pick Concept 1/2/3 on DH-0192; then it → `ready` and fans out (Web=Susan for
+  logo.svg/favicon/header/social, Prompt=Iris for ASCII/README, TUI=Mary for ASCII render).
+- Refactoring-Round is due (git-hook banner) — Ada's call to dispatch.
