@@ -8,6 +8,33 @@
 
 ## Memory
 
+### 2026-07-19 — DH-0228: GitHub social-preview card
+
+Built `docs/media/social-preview.svg` (1280×640, near-black `#0b0d12`), embedding the real
+`logo.svg` monogram path geometry + `dhGradient` (unrecolored) via
+`<g transform="translate(200,175) scale(0.78125)">`, the "Dark Harness" wordmark, the DH-0227
+tagline ("Unattended multi-agent harness in a single binary."), and a recessive agent-node
+motif in the corners — exactly per Muriel's coordinate-level spec, no design judgment calls
+left. Rasterized with headless Chromium via a new `docs/media/social-preview.render.ts`
+(reuses `e2e/support/chromium.ts`'s resolver, same pattern as `hero-web-dark.png`'s capture
+script) rather than a local SVG rasterizer, specifically to dodge font substitution — Chromium
+brings its own web-safe grotesque sans. Output confirmed exactly 1280×640 px, 35 KB.
+
+**Convention worth remembering:** static docs/media assets that need deterministic rendering
+(fonts, gradients) should render via headless Chromium + Playwright, not a local
+`resvg`/`rsvg-convert` binary whose font availability varies by machine — same lesson
+DH-0068's hero-screenshot capture already established, now applied to a second asset type
+(SVG-to-PNG, not live-app screenshot).
+
+**Test:** `src/prompt/social-preview.test.ts` — asserts PNG IHDR is 1280×640 and the SVG
+contains the logo's exact bowl path data, both gradient stops, the background fill, and the
+wordmark text. Full gates (typecheck/lint/test:coverage/e2e) all green. A concurrent session
+was landing DH-0227 (README hero reorder) at the same time touching `README.md` and
+`src/prompt/readme-config-sync.test.ts` — left those files' uncommitted state untouched and
+committed only DH-0228's own files, per CLAUDE.md's directory-ownership collision-avoidance
+guidance. Ticket moved to `verifying`; owner still needs to manually upload the PNG via
+GitHub Settings → General → Social preview (out of ticket scope, flagged in ticket Notes).
+
 ### 2026-07-15 — first round
 
 Built the built-in system prompt (`src/prompt/system-prompt.ts`), skill discovery
