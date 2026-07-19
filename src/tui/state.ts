@@ -2,6 +2,11 @@
 // here — side effects (HTTP commands, process exit) are described as data and executed by
 // app.ts. This is what makes the TUI's core logic fully unit-testable without a terminal.
 
+import {
+  autocompleteMatches,
+  buildCommandList,
+  type CommandEntry,
+} from "../client-core/command-list.ts";
 import { parseSlashCommand } from "../client-core/slash-command-parser.ts";
 import type { AgentStatus, ModelInfo, ServerSentEvent } from "../contracts/index.ts";
 import type { KeyEvent } from "./keys.ts";
@@ -97,7 +102,19 @@ export function initialState(
     shutdownRequested: false,
     rootActive: false,
     skills: null,
+    dropdownIndex: 0,
+    dropdownDismissed: false,
   };
+}
+
+/** DH-0142: the autocomplete dropdown's current contents, or `null` when it shouldn't
+ * render — either the input isn't an in-progress command (see `commandQueryFromInput`), the
+ * query matches nothing, or the operator dismissed it (Escape) for this input. Exported for
+ * `Composer.tsx` to render from directly, so the Ink component never re-derives the matching
+ * logic itself. */
+export function visibleAutocomplete(state: TuiState): CommandEntry[] | null {
+  if (state.dropdownDismissed) return null;
+  return autocompleteMatches(buildCommandList(state.skills ?? []), state.input);
 }
 
 /** Parse an SSE event's ISO `timestamp` into epoch ms, falling back to "now" if the string
@@ -509,6 +526,43 @@ function insertAt(input: string, cursor: number, text: string): { input: string;
 }
 
 function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
+  // DH-0142: the autocomplete dropdown intercepts navigation/selection/dismissal keys ahead
+  // of every other root-key handling below, whenever it's currently showing. Computed fresh
+  // from `state` (before this key is applied), matching what the operator actually sees on
+  // screen right now.
+  const dropdown = visibleAutocomplete(state);
+  if (dropdown && dropdown.length > 0) {
+    if (key.kind === "up" || key.kind === "down") {
+      const delta = key.kind === "up" ? -1 : 1;
+      const nextIndex = (state.dropdownIndex + delta + dropdown.length) % dropdown.length;
+      return noEffects({ ...state, dropdownIndex: nextIndex });
+    }
+    if (key.kind === "enter" || key.kind === "tab") {
+      const chosen = dropdown[Math.min(state.dropdownIndex, dropdown.length - 1)];
+      // `key.kind === "enter"` on an already-fully-typed command name (e.g. "/model") is the
+      // pre-existing DH-0093 "execute now" behavior, not a completion — the dropdown showing
+      // a single exact match is incidental, not something to intercept. `Tab` never executes
+      // a command (only Enter does, per DH-0093), so it always completes/selects instead.
+      const alreadyComplete =
+        key.kind === "enter" && chosen !== undefined && state.input === `/${chosen.name}`;
+      if (chosen && !alreadyComplete) {
+        // Trailing space: `commandQueryFromInput` treats any whitespace after the name as
+        // "args have started," so this naturally closes the dropdown on the next render
+        // without needing a separate dismissal flag here.
+        return noEffects({
+          ...state,
+          input: `/${chosen.name} `,
+          inputCursor: chosen.name.length + 2,
+          dropdownIndex: 0,
+          dropdownDismissed: false,
+        });
+      }
+    }
+    if (key.kind === "escape") {
+      return noEffects({ ...state, dropdownDismissed: true });
+    }
+  }
+
   // Left-arrow is only reserved for "open the agent tree" when the input box is empty —
   // otherwise it repositions the cursor within typed text like every other editor (DH-0026).
   if (key.kind === "left" && state.input === "") {
@@ -534,25 +588,43 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
   }
   if (key.kind === "char") {
     const { input, cursor } = insertAt(state.input, state.inputCursor, key.value);
-    return noEffects({ ...state, input, inputCursor: cursor });
+    return noEffects({
+      ...state,
+      input,
+      inputCursor: cursor,
+      dropdownIndex: 0,
+      dropdownDismissed: false,
+    });
   }
   if (key.kind === "paste") {
     // Literal insert, including any embedded newlines — never re-parsed as `enter`
     // keystrokes, which is exactly the fragmentation bug DH-0026 exists to fix.
     const { input, cursor } = insertAt(state.input, state.inputCursor, key.text);
-    return noEffects({ ...state, input, inputCursor: cursor });
+    return noEffects({
+      ...state,
+      input,
+      inputCursor: cursor,
+      dropdownIndex: 0,
+      dropdownDismissed: false,
+    });
   }
   if (key.kind === "backspace") {
     if (state.inputCursor === 0) return noEffects(state);
     const input =
       state.input.slice(0, state.inputCursor - 1) + state.input.slice(state.inputCursor);
-    return noEffects({ ...state, input, inputCursor: state.inputCursor - 1 });
+    return noEffects({
+      ...state,
+      input,
+      inputCursor: state.inputCursor - 1,
+      dropdownIndex: 0,
+      dropdownDismissed: false,
+    });
   }
   if (key.kind === "delete") {
     if (state.inputCursor >= state.input.length) return noEffects(state);
     const input =
       state.input.slice(0, state.inputCursor) + state.input.slice(state.inputCursor + 1);
-    return noEffects({ ...state, input });
+    return noEffects({ ...state, input, dropdownIndex: 0, dropdownDismissed: false });
   }
   if (key.kind === "enter") {
     if (state.input.trim() === "") return noEffects(state);

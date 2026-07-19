@@ -28,4 +28,35 @@ describe("Composer", () => {
     rerender(React.createElement(Composer, { state: afterTick }));
     expect(lastFrame()).toContain("still typing");
   });
+
+  // DH-0142: dropdown rendering.
+  test("shows the autocomplete dropdown while typing a slash command", () => {
+    const state = { ...rootState(), input: "/mo", inputCursor: 3 };
+    const { lastFrame } = render(React.createElement(Composer, { state }));
+    expect(lastFrame()).toContain("/model");
+    expect(lastFrame()).toContain("switch the active model");
+  });
+
+  test("highlights the entry at dropdownIndex", () => {
+    const state = { ...rootState(), input: "/", inputCursor: 1, dropdownIndex: 1 };
+    const { lastFrame } = render(React.createElement(Composer, { state }));
+    // ink-testing-library renders `inverse` text with ANSI codes we don't assert on
+    // directly; asserting the frame still contains every command name is a reasonable
+    // proxy that rendering didn't throw/skip entries when a non-zero index is highlighted.
+    expect(lastFrame()).toContain("/model");
+    expect(lastFrame()).toContain("/help");
+    expect(lastFrame()).toContain("/clear");
+  });
+
+  test("does not render a dropdown for plain chat text", () => {
+    const state = { ...rootState(), input: "hello", inputCursor: 5 };
+    const { lastFrame } = render(React.createElement(Composer, { state }));
+    expect(lastFrame()).not.toContain("switch the active model");
+  });
+
+  test("does not render a dropdown once dismissed", () => {
+    const state = { ...rootState(), input: "/mo", inputCursor: 3, dropdownDismissed: true };
+    const { lastFrame } = render(React.createElement(Composer, { state }));
+    expect(lastFrame()).not.toContain("switch the active model");
+  });
 });

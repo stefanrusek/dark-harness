@@ -118,6 +118,161 @@ describe("Composer", () => {
     expect((document.activeElement as unknown) === (textarea as unknown)).toBe(true);
   });
 
+  // DH-0143: autocomplete dropdown.
+  test("shows the dropdown while typing a slash command, filtered live", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/mo";
+    fireEvent.input(textarea);
+    const items = container.querySelectorAll(".composer-autocomplete li");
+    expect(items).toHaveLength(1);
+    expect(items[0]?.textContent).toContain("/model");
+    expect(items[0]?.textContent).toContain("switch the active model");
+  });
+
+  test("bare slash shows every built-in command", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/";
+    fireEvent.input(textarea);
+    expect(container.querySelectorAll(".composer-autocomplete li")).toHaveLength(3);
+  });
+
+  test("plain chat text never shows a dropdown", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "hello";
+    fireEvent.input(textarea);
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+  });
+
+  test("a query matching nothing renders no dropdown", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/zzz";
+    fireEvent.input(textarea);
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+  });
+
+  test("ArrowDown/ArrowUp move the highlighted entry", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/";
+    fireEvent.input(textarea);
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    let active = container.querySelector(".composer-autocomplete-active");
+    expect(active?.textContent).toContain("/help");
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    active = container.querySelector(".composer-autocomplete-active");
+    expect(active?.textContent).toContain("/model");
+  });
+
+  test("Enter selects the highlighted entry, inserts it, and does not submit a message", () => {
+    const sent: string[] = [];
+    const { container } = render(
+      <Composer state={stateWithRootAndChild()} onSend={(msg) => sent.push(msg)} />,
+    );
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/mo";
+    fireEvent.input(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea.value).toBe("/model ");
+    expect(sent).toEqual([]);
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+  });
+
+  test("Tab selects the highlighted entry same as Enter", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/cl";
+    fireEvent.input(textarea);
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    expect(textarea.value).toBe("/clear ");
+  });
+
+  test("clicking an entry selects it", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/";
+    fireEvent.input(textarea);
+    const helpItem = [...container.querySelectorAll(".composer-autocomplete li")].find((li) =>
+      li.textContent?.includes("/help"),
+    ) as HTMLLIElement;
+    fireEvent.mouseDown(helpItem);
+    expect(textarea.value).toBe("/help ");
+  });
+
+  test("Escape dismisses the dropdown without clearing the typed text", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/mo";
+    fireEvent.input(textarea);
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+    expect(textarea.value).toBe("/mo");
+  });
+
+  test("clicking outside the composer closes the dropdown", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/mo";
+    fireEvent.input(textarea);
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
+    fireEvent.mouseDown(document.body);
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+  });
+
+  test("a new keystroke after Escape re-opens the dropdown", () => {
+    const { container } = render(<Composer state={stateWithRootAndChild()} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/mo";
+    fireEvent.input(textarea);
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+    textarea.value = "/mod";
+    fireEvent.input(textarea);
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
+  });
+
+  test("merges cached skills into the dropdown alongside built-ins", () => {
+    const state = {
+      ...stateWithRootAndChild(),
+      skills: [{ name: "deploy", description: "deploy the app" }],
+    };
+    const { container } = render(<Composer state={state} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/dep";
+    fireEvent.input(textarea);
+    const items = container.querySelectorAll(".composer-autocomplete li");
+    expect(items).toHaveLength(1);
+    expect(items[0]?.textContent).toContain("/deploy");
+  });
+
+  test("Enter on an already-fully-typed command name submits rather than re-selecting", () => {
+    const sent: string[] = [];
+    const { container } = render(
+      <Composer state={stateWithRootAndChild()} onSend={(msg) => sent.push(msg)} />,
+    );
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "/model";
+    fireEvent.input(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(sent).toEqual(["/model"]);
+    expect(textarea.value).toBe("");
+  });
+
+  test("Enter still submits ordinary chat text when no dropdown is showing", () => {
+    const sent: string[] = [];
+    const { container } = render(
+      <Composer state={stateWithRootAndChild()} onSend={(msg) => sent.push(msg)} />,
+    );
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "hello there";
+    fireEvent.input(textarea);
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(sent).toEqual(["hello there"]);
+  });
+
   test("rebuilds the composer on an actual show/hide transition (root -> non-root -> root)", () => {
     const state = stateWithRootAndChild();
     const { container, rerender } = render(<Composer state={state} onSend={() => {}} />);

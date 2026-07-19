@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0142
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
@@ -72,3 +72,32 @@ matcher is small.
 ## Open Questions
 
 ## Notes
+
+### 2026-07-19 — implemented
+
+Shared matcher landed in `src/client-core/command-list.ts` (`CommandEntry`, `BUILTIN_COMMANDS`,
+`buildCommandList`, `filterCommands`, `commandQueryFromInput`, `autocompleteMatches`) — reused
+as-is by DH-0143 (Web) and merges in skills per DH-0144. Tests:
+`src/client-core/command-list.test.ts`.
+
+TUI wiring: `TuiState.dropdownIndex`/`dropdownDismissed` (`src/tui/types.type.ts`),
+`visibleAutocomplete` helper + reducer interception of Down/Up/Enter/Tab/Escape in
+`handleRootKey` (`src/tui/state.ts`), rendering in `src/tui/ink/Composer.tsx`. Selecting an
+entry inserts `/<name> ` (trailing space) so the dropdown closes itself via
+`commandQueryFromInput`'s "whitespace after the name" rule — no separate "just selected" flag
+needed. Enter on an *already*-fully-typed command name (e.g. `/model`) falls through to the
+pre-existing DH-0093 "execute now" behavior rather than being swallowed by the dropdown, since
+its single exact match is incidental, not a real completion — preserves all pre-existing
+`/model`, `/help`, `/clear`, `/<skill>` reducer tests unchanged.
+
+User Story tests: `src/tui/state.test.ts`'s `describe("DH-0142: slash-command autocomplete")`
+block (Down/Up cycling+wrap, Enter/Tab select+insert, selecting after navigating, Escape
+dismissal, no-match/dismissed closing, reset-on-keystroke) plus rendering assertions in
+`src/tui/ink/Composer.test.tsx`.
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100.00% lines) all green.
+`bun run e2e`: one pre-existing flake (`e2e/web.test.ts`/`e2e/connect-web.test.ts`, a
+process-spawn `stream.getReader()` race in `e2e/support/dh-process.ts`, unrelated to this
+change) reproduces identically on a clean, unmodified worktree at the same commit — not a
+regression from this work. `e2e/slash-commands.test.ts` and `e2e/tui.test.ts` (the tests that
+actually exercise the composer) pass reliably.

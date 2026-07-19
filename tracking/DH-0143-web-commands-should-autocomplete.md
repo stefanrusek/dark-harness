@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0143
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
@@ -72,3 +72,31 @@ DH-0142 if worked concurrently; the shared matcher itself is small.
 ## Open Questions
 
 ## Notes
+
+### 2026-07-19 — implemented
+
+Reuses DH-0142's shared matcher (`src/client-core/command-list.ts`) as-is — no Web-specific
+fork.
+
+Web wiring: `src/web/client/components/Composer.tsx` gained local `useState` for the
+textarea's current value (kept separate from the uncontrolled `value`/focus behavior that
+DH-0117's regression test protects — never wired to the textarea's `value` prop), the
+highlighted index, and a dismissed flag. Dropdown renders as a `<ul class="composer-
+autocomplete">` under the form; ArrowDown/ArrowUp/Enter/Tab/Escape are intercepted in
+`onKeyDown` ahead of the existing Enter-submits handling; a `mousedown` document listener
+(inside a `useEffect`, cleaned up on unmount/dropdown-close) closes it on click-outside, per
+this ticket's third User Story. Same "already-fully-typed command falls through to submit,
+not re-selection" guard as DH-0142's TUI fix, so pressing Enter on a complete `/model` still
+sends the message rather than being swallowed by the dropdown.
+
+User Story tests: `src/web/client/components/Composer.test.tsx` — dropdown-while-typing,
+bare-slash-shows-all, no-dropdown-for-chat-text, no-match-closes, Arrow nav, Enter/Tab
+select+insert (including the already-complete-submits case), mouse-click select,
+Escape-dismiss-keeps-text, click-outside-closes, re-open-after-Escape-on-new-keystroke,
+skills merged into the list (DH-0144 tie-in).
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100.00% lines) all green.
+`bun run e2e`: one pre-existing flake (`e2e/web.test.ts`/`e2e/connect-web.test.ts`'s
+`stream.getReader()` process-spawn race in `e2e/support/dh-process.ts`) reproduces
+identically on a clean, unmodified worktree — not a regression here. `e2e/web.test.ts` and
+`e2e/slash-commands.test.ts` pass reliably when run directly.

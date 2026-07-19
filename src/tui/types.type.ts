@@ -138,6 +138,16 @@ export interface TuiState {
    * `request_agent_tree`) so `/help` and `/<skillname>` resolve locally with no per-keystroke
    * round-trip. `null` until the first response arrives. */
   skills: SkillInfo[] | null;
+  /** DH-0142: index of the currently-highlighted entry in the slash-command autocomplete
+   * dropdown (only meaningful while the dropdown is showing — see `visibleAutocomplete` in
+   * state.ts). Reset to 0 whenever the input changes, so the highlight always starts on the
+   * top match for a fresh query. */
+  dropdownIndex: number;
+  /** DH-0142: true once the operator has explicitly dismissed the autocomplete dropdown for
+   * the current input (Escape) — the dropdown is derived from `input`/`skills` on every
+   * render, so this is the only piece of state needed to suppress it until the next
+   * input-changing keystroke resets it back to `false`. */
+  dropdownDismissed: boolean;
 }
 
 export type Action =

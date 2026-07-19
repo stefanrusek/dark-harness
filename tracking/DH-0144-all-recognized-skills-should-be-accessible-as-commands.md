@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0144
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
@@ -72,3 +72,29 @@ so the autocomplete dropdown (DH-0142/DH-0143) can show real skills, not just bu
 ## Open Questions
 
 ## Notes
+
+### 2026-07-19 — implemented (scope confirmed narrow, as the ticket's own status check said)
+
+Both **list** and **execute** were already fully wired before this round:
+`listSkills`/`invokeSkill` (`src/web/client/commands.ts`) are called once at TUI/Web startup
+(`src/tui/app.ts`'s `list_skills` effect at startup; `src/web/client/app.ts`'s `listSkills(...)`
+call) and cached (`TuiState.skills`, `WebState.skills`) — `/help` and `/<skillname>` already
+resolved against that cache. Nothing needed to change there.
+
+This ticket's only real remaining scope — "merge skill entries into the same command-list
+data structure DH-0142/DH-0143 establish" — is `buildCommandList` in
+`src/client-core/command-list.ts`: it takes the cached skill array and merges it with the
+three built-ins, built-in names shadowing same-named skills per DH-0093 design §4 (matching
+the existing `/help`/`/<name>` dispatch precedence). Both `src/tui/state.ts`'s
+`visibleAutocomplete` and `src/web/client/components/Composer.tsx` call `buildCommandList`
+directly from live session state (`state.skills`) — no separate skills-fetch path for
+autocomplete vs. execution.
+
+Tests: `src/client-core/command-list.test.ts` ("merges built-ins with a skill catalog",
+"built-in names shadow same-named skills"); `src/tui/ink/Composer.test.tsx` and
+`src/web/client/components/Composer.test.tsx` ("merges cached skills into the dropdown
+alongside built-ins" in the Web case) cover the UI-visible merge.
+
+Gates: `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100.00% lines) all green.
+`bun run e2e`: one pre-existing flake unrelated to this change (see DH-0142/DH-0143 notes —
+reproduces identically on a clean, unmodified worktree).

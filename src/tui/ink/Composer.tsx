@@ -4,6 +4,7 @@
 // on a tick naturally preserves in-progress typed text (the regression this ticket's first
 // User Story guards against, restated from DH-0133/DH-0135's Web equivalent).
 import { Box, Text } from "ink";
+import { visibleAutocomplete } from "../state.ts";
 import type { TuiState } from "../types.type.ts";
 import { CURSOR_MARKER } from "./tokens.ts";
 
@@ -19,6 +20,9 @@ export function Composer({ state }: ComposerProps) {
   // on this one-line display only — `state.input` itself keeps the real newline characters.
   const before = state.input.slice(0, state.inputCursor).replace(/\n/g, "⏎");
   const after = state.input.slice(state.inputCursor).replace(/\n/g, "⏎");
+  // DH-0142: dropdown contents derived straight from state — no local component state, so
+  // this stays a pure function of props like the rest of the composer.
+  const dropdown = visibleAutocomplete(state);
   return (
     <Box flexDirection="column">
       {/* height=1: Ink collapses an empty-string <Text> to zero height, and
@@ -29,6 +33,15 @@ export function Composer({ state }: ComposerProps) {
       <Box height={1}>
         <Text>{`> ${before}${CURSOR_MARKER}${after}`}</Text>
       </Box>
+      {dropdown && dropdown.length > 0 ? (
+        <Box flexDirection="column">
+          {dropdown.map((entry, index) => (
+            <Text key={entry.name} inverse={index === state.dropdownIndex}>
+              {`  /${entry.name} — ${entry.description}`}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
     </Box>
   );
 }

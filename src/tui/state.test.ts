@@ -10,7 +10,7 @@ import type {
   ToolCallEvent,
   ToolResultEvent,
 } from "../contracts/index.ts";
-import { initialState, MAX_OUTPUT_CHARS, reducer } from "./state.ts";
+import { initialState, MAX_OUTPUT_CHARS, reducer, visibleAutocomplete } from "./state.ts";
 import type { TuiState } from "./types.type.ts";
 
 function size() {
@@ -1462,5 +1462,112 @@ describe("reducer: slash commands (DH-0093)", () => {
     });
     expect(next.agents.get("sub-agent")?.model).toBe("sonnet");
     expect(next.statusMessage).toBe("unrelated");
+  });
+});
+
+describe("DH-0142: slash-command autocomplete", () => {
+  function typed(text: string): TuiState {
+    return { ...initialState(size()), input: text, inputCursor: text.length };
+  }
+
+  test("Down/Up cycles the highlighted index while the dropdown is showing", () => {
+    let state = typed("/");
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    expect(state.dropdownIndex).toBe(1);
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    expect(state.dropdownIndex).toBe(2);
+    ({ state } = reducer(state, { type: "key", key: { kind: "up" } }));
+    expect(state.dropdownIndex).toBe(1);
+  });
+
+  test("Down wraps from the last entry back to the first", () => {
+    let state = typed("/");
+    for (let i = 0; i < 3; i++) {
+      ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    }
+    // 3 built-ins, no skills cached -> wraps back to index 0 after 3 downs from 0.
+    expect(state.dropdownIndex).toBe(0);
+  });
+
+  test("Enter selects the highlighted entry, inserting the full name with a trailing space", () => {
+    const state = typed("/mo");
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.input).toBe("/model ");
+    expect(next.inputCursor).toBe("/model ".length);
+    // Selecting from the dropdown must never fall through to command dispatch/submission.
+    expect(effects).toEqual([]);
+  });
+
+  test("Tab selects the highlighted entry same as Enter", () => {
+    const state = typed("/cl");
+    const { state: next } = reducer(state, { type: "key", key: { kind: "tab" } });
+    expect(next.input).toBe("/clear ");
+  });
+
+  test("selecting after navigating Down picks the highlighted (not the first) entry", () => {
+    let state = typed("/");
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } })); // -> help
+    const { state: next } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(next.input).toBe("/help ");
+  });
+
+  test("after selection, the dropdown no longer shows (query has trailing whitespace)", () => {
+    const state = typed("/mo");
+    const { state: next } = reducer(state, { type: "key", key: { kind: "enter" } });
+    expect(visibleAutocomplete(next)).toBeNull();
+  });
+
+  test("Escape dismisses the dropdown without touching input or falling through to the default escape handling", () => {
+    const state = { ...typed("/mo"), statusMessage: "kept" };
+    const { state: next } = reducer(state, { type: "key", key: { kind: "escape" } });
+    expect(next.dropdownDismissed).toBe(true);
+    expect(next.input).toBe("/mo");
+    expect(next.statusMessage).toBe("kept");
+  });
+
+  test("typing a character that matches nothing closes the dropdown (no matches -> null)", () => {
+    const state = typed("/zz");
+    expect(visibleAutocomplete(state)).toBeNull();
+  });
+
+  test("a fresh keystroke resets dropdownDismissed back to false", () => {
+    let state = typed("/mo");
+    ({ state } = reducer(state, { type: "key", key: { kind: "escape" } }));
+    expect(state.dropdownDismissed).toBe(true);
+    ({ state } = reducer(state, { type: "key", key: { kind: "char", value: "d" } }));
+    expect(state.dropdownDismissed).toBe(false);
+    expect(state.input).toBe("/mod");
+  });
+
+  test("paste also resets dropdown navigation/dismissal state", () => {
+    let state = typed("/");
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    expect(state.dropdownIndex).toBe(1);
+    ({ state } = reducer(state, { type: "key", key: { kind: "paste", text: "mo" } }));
+    expect(state.dropdownIndex).toBe(0);
+    expect(state.dropdownDismissed).toBe(false);
+  });
+
+  test("backspace resets dropdown navigation state", () => {
+    let state = typed("/mo");
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    ({ state } = reducer(state, { type: "key", key: { kind: "backspace" } }));
+    expect(state.dropdownIndex).toBe(0);
+    expect(state.input).toBe("/m");
+  });
+
+  test("delete resets dropdown navigation state", () => {
+    let state = { ...typed("/mo"), inputCursor: 0 };
+    ({ state } = reducer(state, { type: "key", key: { kind: "down" } }));
+    ({ state } = reducer(state, { type: "key", key: { kind: "delete" } }));
+    expect(state.dropdownIndex).toBe(0);
+    expect(state.input).toBe("mo");
+  });
+
+  test("Up/Down/Enter/Tab/Escape fall through to normal handling when the dropdown isn't showing", () => {
+    const state = typed("hello");
+    const { state: afterEnter } = reducer(state, { type: "key", key: { kind: "escape" } });
+    expect(afterEnter.dropdownDismissed).toBe(false);
+    expect(afterEnter.statusMessage).toBeNull();
   });
 });
