@@ -1,30 +1,30 @@
-// SSE client speaking the wire format directly over `fetch()`, rather than the browser's
-// native `EventSource`.
+// SSE client: builds the Web-specific request (URL, bearer-token header) and adapts this
+// client's `SseHandlers`/`ConnectEventsOptions` API onto the shared client-core transport
+// (`runSseTransport`, `src/client-core/sse-transport.ts`) — DH-0186.
 //
-// Why not `EventSource`: ADR 0004's bearer-token auth requires an `Authorization: Bearer
-// <token>` header on every request, including the SSE stream — but the `EventSource` spec
-// gives it no way to set custom headers. The Server domain lead (Radia) flagged this as a
-// real interoperability gap rather than unilaterally adding a `?token=` query-string
-// fallback (query strings leak into proxy/access logs far more readily than headers, which
-// would be a security-posture change outside her call to make alone — see
-// docs/handoffs/server.md's status log). Of the options she raised, this module implements
-// the one that stays entirely inside Web's own ownership and touches no security posture:
-// read the SSE stream ourselves via `fetch()`, which — unlike `EventSource` — can set any
-// header we like. See docs/handoffs/web.md's status log for the fuller reconciliation note.
+// DH-0184 extracted the frame parser, permissive payload validator, full-jitter backoff, and
+// `Last-Event-ID` reconnect driver this module used to hand-roll into `src/client-core/`
+// (Web's own pre-DH-0184 validator was already the permissive shape-check the shared module
+// standardized on — see `src/client-core/sse-payload.ts`'s header comment — so this migration
+// is a straight wiring swap, no behavior change on that axis). This module now only:
 //
-// This module re-derives the small slice of `EventSource` behavior this app actually
-// depends on: SSE field parsing (`id:`/`data:`/comment lines, blank-line-terminated
-// records — matches `src/server/sse.ts`'s `formatSseEvent` wire format, plus tolerance for
-// the general spec shape so it isn't brittle to future server changes), automatic
-// reconnect with backoff, and `Last-Event-ID` resend on reconnect. The console TUI
-// (`src/tui/sse-parser.ts`, `src/tui/sse-client.ts`) solves the same problem the same way
-// for the same reason — independently arrived at, not shared code; see
-// docs/handoffs/web.md's status log for why extracting a shared parser was judged not
-// worth it this round.
+// - composes the SSE URL and `Authorization: Bearer <token>` header (ADR 0004 — `EventSource`
+//   can't set custom headers, which is why this speaks the wire format over `fetch()` rather
+//   than using it; see docs/handoffs/web.md's status log for the fuller reconciliation note),
+// - adapts this client's injectable `setTimeoutImpl`/`clearTimeoutImpl` timer deps (used
+//   elsewhere in `src/web/client/app.ts`, e.g. the liveness ticker) into the `delayImpl`
+//   shape `runSseTransport` expects, wired to abort immediately when `close()` is called, and
+// - maps `runSseTransport`'s `onConnectionChange`/`onEvent`/`onReconnected` callbacks onto
+//   this module's existing `SseHandlers` shape, unchanged from before the migration.
 
+import type { ConnectionStatus } from "../../client-core/connection-status.ts";
+import {
+  DEFAULT_MAX_RECONNECT_DELAY_MS,
+  DEFAULT_RECONNECT_DELAY_MS,
+} from "../../client-core/sse-backoff.ts";
+import { runSseTransport } from "../../client-core/sse-transport.ts";
 import type { ServerSentEvent } from "../../contracts/index.ts";
 import { type ServerTarget, sseUrl } from "../protocol.ts";
-import type { ConnectionStatus } from "./state.ts";
 
 export interface SseHandlers {
   onEvent(event: ServerSentEvent): void;
@@ -53,9 +53,8 @@ export interface SseConnection {
 export interface ConnectEventsOptions {
   fetchImpl?: SseFetch | undefined;
   /** Initial delay before the first retry after the stream drops or fails to open.
-   *  Subsequent attempts back off exponentially (see `nextReconnectDelayMs`), capped at
-   *  `maxReconnectDelayMs`, and reset back to this value once a connection succeeds.
-   *  Defaults to 1000ms. */
+   *  Subsequent attempts back off exponentially, capped at `maxReconnectDelayMs`, and reset
+   *  back to this value once a connection succeeds. Defaults to 1000ms. */
   reconnectDelayMs?: number | undefined;
   /** Cap on the backed-off delay, so a genuinely down server is retried on a bounded
    *  cadence instead of the wait growing forever. Defaults to 30000ms. */
@@ -66,98 +65,37 @@ export interface ConnectEventsOptions {
   randomImpl?: (() => number) | undefined;
 }
 
-export interface SseRecord {
-  id?: string | undefined;
-  data?: string | undefined;
-}
-
-const DEFAULT_RECONNECT_DELAY_MS = 1000;
-const DEFAULT_MAX_RECONNECT_DELAY_MS = 30_000;
-
-/**
- * Full-jitter exponential backoff (DH-0024): doubles the delay on each successive failed
- * attempt (attempt 0 = first retry), capped at `maxDelayMs`, then picks a random value in
- * `[0, cappedDelay]` rather than using the capped value outright — jitter keeps clients that
- * all dropped at the same moment (e.g. a server restart) from reconnecting in lockstep and
- * re-hammering it the instant it comes back.
- */
-export function nextReconnectDelayMs(
-  attempt: number,
-  baseDelayMs: number,
-  maxDelayMs: number,
-  randomFn: () => number = Math.random,
-): number {
-  const capped = Math.min(maxDelayMs, baseDelayMs * 2 ** attempt);
-  return Math.round(randomFn() * capped);
-}
-
-/**
- * Incrementally parses a decoded SSE text stream into `{ id, data }` records, split on the
- * blank-line record terminator. Buffers a trailing partial record across `push()` calls, so
- * it tolerates the stream being chunked at arbitrary byte boundaries.
- */
-export class SseStreamParser {
-  private buffer: string;
-
-  constructor() {
-    // Real assignment (not a field initializer) so the constructor body itself executes and
-    // is counted as covered — a class with only field initializers and no constructor body
-    // left Bun's coverage instrumentation treating the synthetic default constructor as never
-    // "hit," even though `new SseStreamParser()` runs on every (re)connect.
-    this.buffer = "";
-  }
-
-  push(chunk: string): SseRecord[] {
-    // Normalize CRLF to LF up front so blank-line detection below (which only looks for
-    // "\n\n") also matches a "\r\n\r\n" terminator — `formatSseEvent` only ever emits LF,
-    // but the SSE spec permits CRLF, so this keeps the parser correct against any spec-
-    // conforming producer, not just our own server.
-    this.buffer += chunk.replace(/\r\n/g, "\n");
-    const records: SseRecord[] = [];
-    let sep = this.buffer.indexOf("\n\n");
-    while (sep !== -1) {
-      records.push(parseBlock(this.buffer.slice(0, sep)));
-      this.buffer = this.buffer.slice(sep + 2);
-      sep = this.buffer.indexOf("\n\n");
-    }
-    return records;
-  }
-}
-
-function parseBlock(block: string): SseRecord {
-  let id: string | undefined;
-  const dataLines: string[] = [];
-  for (const line of block.split("\n")) {
-    // Comment lines (leading ':') are part of the SSE spec — the server sends a leading
-    // `: connected` keep-alive line (src/server/server.ts) purely to flush headers early.
-    if (line.startsWith(":")) continue;
-    if (line.startsWith("id:")) id = line.slice(3).trim();
-    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-    // Per SSE field-parsing rules, multiple `data:` lines in one record join with `\n` —
-    // never produced by `formatSseEvent` today (JSON-encoding a chunk can't contain a raw
-    // newline), but handling it costs little and keeps this parser forward-compatible.
-  }
-  return { id, data: dataLines.length > 0 ? dataLines.join("\n") : undefined };
-}
-
-export function parseEventPayload(raw: unknown): ServerSentEvent | null {
-  if (typeof raw !== "string") return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && typeof parsed.type === "string") {
-      return parsed as ServerSentEvent;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function requestHeaders(target: ServerTarget, lastEventId: string | null): HeadersInit {
+function authHeaders(target: ServerTarget): Record<string, string> {
   const headers: Record<string, string> = {};
   if (target.token) headers.Authorization = `Bearer ${target.token}`;
-  if (lastEventId) headers["Last-Event-ID"] = lastEventId;
   return headers;
+}
+
+/**
+ * Adapts this client's injectable `setTimeout`/`clearTimeout` pair into the `Promise`-based
+ * `delayImpl` shape `runSseTransport` expects, so existing tests (and `app.ts`'s own fake
+ * timers, used elsewhere for the liveness ticker) keep driving reconnect delays by invoking
+ * the captured timer callback directly rather than waiting in real time. Resolves early —
+ * clearing the pending timeout — if `signal` aborts first, so `close()` doesn't leave a
+ * dangling scheduled reconnect.
+ */
+function makeDelayImpl(
+  setTimeoutImpl: typeof setTimeout,
+  clearTimeoutImpl: typeof clearTimeout,
+  signal: AbortSignal,
+): (ms: number) => Promise<void> {
+  return (ms) =>
+    new Promise<void>((resolve) => {
+      const handle = setTimeoutImpl(() => resolve(), ms);
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeoutImpl(handle);
+          resolve();
+        },
+        { once: true },
+      );
+    });
 }
 
 /**
@@ -173,95 +111,44 @@ export function connectEvents(
   handlers: SseHandlers,
   options: ConnectEventsOptions = {},
 ): SseConnection {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const baseReconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
-  const maxReconnectDelayMs = options.maxReconnectDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY_MS;
-  const randomImpl = options.randomImpl ?? Math.random;
   const setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
   const clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
+  const controller = new AbortController();
 
-  let closed = false;
-  let lastEventId: string | null = null;
-  let abortController: AbortController | null = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Number of consecutive failed (re)connect attempts, driving the backoff delay. Reset to
-   *  0 once a connection opens successfully. */
-  let reconnectAttempt = 0;
-  /** Whether any connection has ever opened successfully — the first successful open is
-   *  the initial connect, not a reconnect, so it must not fire `onReconnected`. */
+  // DH-0186 preserves Web's original `onReconnected` semantics locally rather than passing
+  // `handlers.onReconnected` straight through to `runSseTransport`'s own `onReconnected`:
+  // the shared transport only fires its `onReconnected` after a *failed* connect attempt
+  // (an exception or non-OK response) — the behavior `src/tui/sse-client.ts` (pre-DH-0185)
+  // already had. Web's pre-migration behavior was broader: any successful connect after the
+  // first counted as a reconnect, including a *clean* stream end (e.g. the server cleanly
+  // closing the response on a restart) — exactly the DH-0024 "may have missed events" case
+  // the gap banner exists for, and one that never throws so the shared transport's stricter
+  // check would silently miss it for Web. Deriving it from the `live` transitions this
+  // module already sees keeps that broader guarantee without changing the shared module's
+  // (correct-for-TUI) default.
   let everConnected = false;
-
-  function scheduleReconnect(): void {
-    if (closed) return;
-    handlers.onStatusChange("reconnecting");
-    const delay = nextReconnectDelayMs(
-      reconnectAttempt,
-      baseReconnectDelayMs,
-      maxReconnectDelayMs,
-      randomImpl,
-    );
-    reconnectAttempt++;
-    reconnectTimer = setTimeoutImpl(() => {
-      void run();
-    }, delay);
-  }
-
-  async function run(): Promise<void> {
-    if (closed) return;
-    handlers.onStatusChange(lastEventId ? "reconnecting" : "connecting");
-    abortController = new AbortController();
-
-    let response: Response;
-    try {
-      response = await fetchImpl(sseUrl(target), {
-        headers: requestHeaders(target, lastEventId),
-        signal: abortController.signal,
-      });
-    } catch {
-      scheduleReconnect();
-      return;
-    }
-    if (closed) return;
-    if (!response.ok || !response.body) {
-      scheduleReconnect();
-      return;
-    }
-
-    const isReconnect = everConnected;
-    everConnected = true;
-    reconnectAttempt = 0;
-    handlers.onStatusChange("live");
-    if (isReconnect) handlers.onReconnected?.();
-    const parser = new SseStreamParser();
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        for (const record of parser.push(decoder.decode(value, { stream: true }))) {
-          if (record.id) lastEventId = record.id;
-          const event = parseEventPayload(record.data);
-          if (event) handlers.onEvent(event);
-        }
+  void runSseTransport({
+    url: sseUrl(target),
+    fetchImpl: options.fetchImpl ?? fetch,
+    headers: authHeaders(target),
+    onEvent: handlers.onEvent,
+    onConnectionChange: (status) => {
+      if (status === "live") {
+        if (everConnected) handlers.onReconnected?.();
+        everConnected = true;
       }
-    } catch {
-      // Fall through to reconnect below — a mid-stream read failure is treated the same as
-      // a clean end-of-stream: retry from the last seen event id.
-    }
-    if (closed) return;
-    scheduleReconnect();
-  }
-
-  void run();
+      handlers.onStatusChange(status);
+    },
+    reconnectDelayMs: options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS,
+    maxReconnectDelayMs: options.maxReconnectDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY_MS,
+    delayImpl: makeDelayImpl(setTimeoutImpl, clearTimeoutImpl, controller.signal),
+    randomImpl: options.randomImpl ?? Math.random,
+    signal: controller.signal,
+  });
 
   return {
     close(): void {
-      if (closed) return;
-      closed = true;
-      if (reconnectTimer !== undefined) clearTimeoutImpl(reconnectTimer);
-      abortController?.abort();
-      handlers.onStatusChange("disconnected");
+      controller.abort();
     },
   };
 }
