@@ -17,6 +17,16 @@ implementation:
 
 # DH-0168: --web hardcodes a random port instead of an operator-chosen one
 
+**Owner decision (2026-07-18, supersedes the "flag, not config" call below):** support
+**both** a `dh.json` field and a `--web-port` CLI flag, with the flag overriding config when
+both are set. The owner: "there are arguments both ways for host and port... the flag would
+override the config." The Fable analysis of *why pinning matters* (container mapping, reverse
+proxies, stable bookmarks) and the flag's shape/validation below still stand — the only change
+is that a `dh.json web.port` field is no longer deferred; it's in scope for this ticket,
+alongside the flag, with the flag winning when both are present. See companion ticket
+DH-0182 for the equivalent host-side change (add a `--host`/`--web-host` flag that overrides
+`security.hostname`, since DH-0022 currently only supports config).
+
 ## Summary
 
 Both web-serving call sites in `src/cli.ts`'s `runInteractiveMode` (`dh --web` local, and
@@ -104,18 +114,26 @@ These are real but not the *common* case, which is why the default stays random.
 - Add `--web-port <N>` to `FLAGS_WITH_VALUES` and the `--port`-style positive-integer parse
   (reuse the exact `Number.isInteger(parsed) && parsed > 0` validation and error shape) into a
   new `CliOptions.webPort?: number`.
-- Add `--web-port` to `HELP_FLAG_ITEMS` with a one-line description noting default = random and
-  that it requires `--web`.
+- Add a `dh.json` field for the same value (natural home: alongside `security.hostname` as
+  something like `security.webPort`, or a sibling `web.port` field — implementer's call,
+  consistent with wherever DH-0182's host-side field lands) and thread it through
+  `validateConfig`/`ConfigSchema` the same way `security.hostname` is validated today.
+- Precedence: `--web-port` (CLI flag) overrides the `dh.json` field when both are set; the
+  config field is used when the flag is absent; `0`/unset on both keeps today's random-port
+  behavior.
+- Add `--web-port` to `HELP_FLAG_ITEMS` with a one-line description noting default = random,
+  that it requires `--web`, and that it overrides the config field when both are set.
 - Validate in `parseArgs` (alongside the `--json requires --job` check): `webPort` set but the
   invocation is not a web mode ⇒ `CliUsageError`.
-- Thread the value to both `serveWebUi({ port: … })` call sites in `runInteractiveMode` (the
-  `mode.kind === "connect" && mode.web` branch and the `mode.web` local branch), using
-  `options.webPort ?? 0` so unset stays `0`. Carry it on `RunMode` (the `local` and `connect`
-  variants) or via the already-plumbed config/options — implementer's call, but both web
-  branches must honor it identically.
-- `security.hostname` (DH-0022) and `--web-port` are orthogonal and compose: hostname sets the
-  bind **address**, `--web-port` sets the bind **port**; both continue to be forwarded to
-  `serveWebUi` unchanged. No precedence logic needed.
+- Thread the resolved value (flag-overrides-config) to both `serveWebUi({ port: … })` call
+  sites in `runInteractiveMode` (the `mode.kind === "connect" && mode.web` branch and the
+  `mode.web` local branch). Carry it on `RunMode` (the `local` and `connect` variants) or via
+  the already-plumbed config/options — implementer's call, but both web branches must honor it
+  identically.
+- `security.hostname` (DH-0022) and the port setting are orthogonal and compose: hostname sets
+  the bind **address**, this setting sets the bind **port**; both continue to be forwarded to
+  `serveWebUi` unchanged. No precedence logic needed *between* host and port — only within each
+  axis (flag vs. its own config field).
 - Tests (CLAUDE.md §9 — each User Story bullet maps to a case): parse-level cases for accepted
   value, default-unset (`port: 0` preserved), requires-`--web` usage error, and invalid-value
   usage error; `runInteractiveMode`-level cases (mocked `serveWebUi`) asserting the pinned port
@@ -137,8 +155,9 @@ These are real but not the *common* case, which is why the default stays random.
 
 ## Open Questions
 
-- None blocking. Deferred (not in scope): a `dh.json` `web.port` field — revisit only on a
-  concrete ask that the port must travel with config rather than the command line.
+- Exact `dh.json` field name/location (`security.webPort` vs. a new `web.port` object) —
+  implementer's call, but should land consistently with wherever DH-0182 puts the host-side
+  config field.
 
 ## Notes
 

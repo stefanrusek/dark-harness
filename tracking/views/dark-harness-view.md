@@ -82,6 +82,7 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0168](../DH-0168-web-hardcodes-a-random-port-instead-of-an-operator-chosen-one.md) | --web hardcodes a random port instead of an operator-chosen one | feature | stefan |
+| [DH-0182](../DH-0182-add-a-cli-flag-to-override-security-hostname-overriding-config.md) | Add a CLI flag to override security.hostname, overriding config | feature | stefan |
 
 ### implementing
 
