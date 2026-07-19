@@ -95,6 +95,7 @@ function renderInlineNode(doc: Document, node: InlineNode, parent: Node): void {
       }
       const anchor = el(doc, "a");
       anchor.href = href;
+      if (node.title) anchor.title = node.title;
       anchor.rel = "noopener noreferrer";
       anchor.target = "_blank";
       renderInlineNodes(doc, node.children, anchor);

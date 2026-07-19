@@ -53,6 +53,7 @@ const UNDERLINE = "4";
 const STRIKE = "9";
 const CYAN = "36";
 const BLUE = "34";
+const DIM = "2";
 
 export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
   // --- Headings 1-6 -------------------------------------------------------------------
@@ -63,7 +64,8 @@ export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
       expect(rows).toHaveLength(1);
       const row = rows[0] as string;
       expect(stripAnsi(row)).toBe(`Heading ${level}`);
-      const codes = level === 1 ? [BOLD, UNDERLINE] : [BOLD, CYAN];
+      const codes =
+        level === 1 ? [BOLD, UNDERLINE] : level <= 3 ? [BOLD, CYAN] : [BOLD, CYAN, DIM];
       expect(row.startsWith(`\x1b[${codes.join(";")}m`)).toBe(true);
       expect(row.endsWith(RESET)).toBe(true);
     },
@@ -249,6 +251,20 @@ export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
     },
   },
   {
+    // DH-0204: a `"title"` after the URL is a tooltip, never part of the href.
+    name: "link with title",
+    markdown: '[link](https://x.example "a title")',
+    tui: (rows) => {
+      expect(rows).toEqual([`\x1b[${UNDERLINE};${BLUE}mlink\x1b[0m (https://x.example)\x1b[0m`]);
+    },
+    web: (root) => {
+      const anchor = root.querySelector("a");
+      expect(anchor?.textContent).toBe("link");
+      expect(anchor?.getAttribute("href")).toBe("https://x.example/");
+      expect(anchor?.getAttribute("title")).toBe("a title");
+    },
+  },
+  {
     name: "thematic break",
     markdown: "---",
     tui: (rows) => {
@@ -335,6 +351,19 @@ export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
       const anchor = root.querySelector("a");
       expect(anchor?.textContent).toBe("text");
       expect(anchor?.getAttribute("href")).toBe("https://x.example/");
+    },
+  },
+
+  // --- Backslash escapes (DH-0205) --------------------------------------------------------
+  {
+    name: "escaped asterisk stays literal, doesn't trigger emphasis",
+    markdown: "\\*not emphasis\\*",
+    tui: (rows) => {
+      expect(stripAnsi(rows.join("\n"))).toBe("*not emphasis*");
+    },
+    web: (root) => {
+      expect(root.querySelector("em")).toBeNull();
+      expect(root.textContent).toBe("*not emphasis*");
     },
   },
 

@@ -248,8 +248,19 @@ function renderBlock(block: BlockNode, cols: number): string[] {
       // styling to bold body text"). h1 keeps its existing bold+underline treatment; h2+ now
       // additionally carries cyan — already an allowlisted color (used for inline code) — so
       // any heading is visually distinguishable from bold prose at a glance.
-      const codes: readonly string[] =
-        block.level === 1 ? [SGR.bold, SGR.underline] : [SGR.bold, SGR.cyan];
+      //
+      // DH-0203: h3-h6 used to all share the exact same [SGR.bold, SGR.cyan] pair as h2,
+      // losing hierarchy for deeper heading levels. h3 keeps the plain bold+cyan look; h4-h6
+      // additionally dim to give the eye a decreasing-weight cue as level increases, without
+      // introducing new colors beyond the already-allowlisted set.
+      let codes: readonly string[];
+      if (block.level === 1) {
+        codes = [SGR.bold, SGR.underline];
+      } else if (block.level <= 3) {
+        codes = [SGR.bold, SGR.cyan];
+      } else {
+        codes = [SGR.bold, SGR.cyan, SGR.dim];
+      }
       return renderInlineBlock(block.children, codes, cols);
     }
     case "codeBlock": {

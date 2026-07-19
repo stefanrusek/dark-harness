@@ -24,7 +24,7 @@ export type InlineNode =
   | { kind: "emphasis"; children: InlineNode[] }
   | { kind: "strike"; children: InlineNode[] }
   | { kind: "code"; text: string }
-  | { kind: "link"; children: InlineNode[]; url: string };
+  | { kind: "link"; children: InlineNode[]; url: string; title?: string };
 
 export type TableAlign = "left" | "center" | "right" | null;
 
@@ -471,22 +471,37 @@ function findMatchingBracket(text: string, start: number): number {
 interface ParsedLink {
   label: string;
   url: string;
+  title?: string;
   end: number;
 }
 
-/** `text[at]` must be `"["`. Parses `[label](url)`, returning null if the syntax doesn't
- * fully resolve (falls back to literal text at the call site). */
+/** Matches an optional trailing `"title"`/`'title'` on a link destination (DH-0204):
+ * `url "title"` or `url 'title'`, the title in quotes separated from the URL by whitespace.
+ * Returns the URL and title split apart, or the whole trimmed string as the URL with no title
+ * when the trailing-quoted-string shape isn't present — so `(url)` and malformed/unquoted
+ * trailing text both fall back to treating the entire parenthesized content as the URL,
+ * matching CommonMark's link-title grammar rather than folding the title text into `href`. */
+function splitLinkDestination(raw: string): { url: string; title?: string } {
+  const trimmed = raw.trim();
+  const m = /^(\S+)\s+(?:"([^"]*)"|'([^']*)')\s*$/.exec(trimmed);
+  if (!m) return { url: trimmed };
+  const title = m[2] !== undefined ? m[2] : m[3];
+  return title === undefined ? { url: m[1] as string } : { url: m[1] as string, title };
+}
+
+/** `text[at]` must be `"["`. Parses `[label](url)` or `[label](url "title")`, returning null
+ * if the syntax doesn't fully resolve (falls back to literal text at the call site). */
 function parseLinkLike(text: string, at: number): ParsedLink | null {
   const closeBracket = findMatchingBracket(text, at);
   if (closeBracket === -1) return null;
   if (text[closeBracket + 1] !== "(") return null;
   const closeParen = text.indexOf(")", closeBracket + 2);
   if (closeParen === -1) return null;
-  return {
-    label: text.slice(at + 1, closeBracket),
-    url: text.slice(closeBracket + 2, closeParen).trim(),
-    end: closeParen + 1,
-  };
+  const { url, title } = splitLinkDestination(text.slice(closeBracket + 2, closeParen));
+  const label = text.slice(at + 1, closeBracket);
+  return title === undefined
+    ? { label, url, end: closeParen + 1 }
+    : { label, url, title, end: closeParen + 1 };
 }
 
 /** `text[at]` must be `"["`. Parses a reference-style link/image `[label][ref]` or the
@@ -516,6 +531,16 @@ function parseReferenceLink(
   return { label, url, end };
 }
 
+/** ASCII punctuation eligible for backslash-escaping (DH-0205), matching CommonMark's
+ * escapable-character set. */
+const ESCAPABLE_RE = /[!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~\\]/;
+
+/** Builds a `link` InlineNode, omitting `title` entirely (rather than setting it to
+ * `undefined`) when there is none — required under `exactOptionalPropertyTypes`. */
+function makeLinkNode(children: InlineNode[], url: string, title: string | undefined): InlineNode {
+  return title === undefined ? { kind: "link", children, url } : { kind: "link", children, url, title };
+}
+
 export function parseInline(
   text: string,
   refs: Readonly<Record<string, string>> = {},
@@ -533,12 +558,25 @@ export function parseInline(
   while (i < text.length) {
     const rest = text.slice(i);
 
+    // Backslash escapes (DH-0205): a backslash followed by ASCII punctuation renders the
+    // punctuation character literally, dropping the backslash, per standard Markdown escaping
+    // — otherwise `\*` etc. would either trigger emphasis parsing or render the literal
+    // two-character `\*` instead of an escaped `*`. A backslash not followed by punctuation
+    // (e.g. at end of string, or before a letter/digit) is left as a literal backslash.
+    if (text[i] === "\\" && ESCAPABLE_RE.test(text[i + 1] ?? "")) {
+      buf += text[i + 1];
+      i += 2;
+      continue;
+    }
+
     if (text[i] === "!" && text[i + 1] === "[") {
       const link = parseLinkLike(text, i + 1) ?? parseReferenceLink(text, i + 1, refs);
       if (link) {
         flush();
         // Images degrade to links: alt text becomes the visible link text (D1).
-        nodes.push({ kind: "link", children: [{ kind: "text", text: link.label }], url: link.url });
+        nodes.push(
+          makeLinkNode([{ kind: "text", text: link.label }], link.url, link.title),
+        );
         i = link.end;
         continue;
       }
@@ -548,7 +586,7 @@ export function parseInline(
       const link = parseLinkLike(text, i) ?? parseReferenceLink(text, i, refs);
       if (link) {
         flush();
-        nodes.push({ kind: "link", children: parseInline(link.label, refs), url: link.url });
+        nodes.push(makeLinkNode(parseInline(link.label, refs), link.url, link.title));
         i = link.end;
         continue;
       }

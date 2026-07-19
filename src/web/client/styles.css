@@ -594,11 +594,27 @@ button {
   font-size: 1.15em;
 }
 
-.turn-text h3,
-.turn-text h4,
-.turn-text h5,
-.turn-text h6 {
+.turn-text h3 {
+  font-size: 1.05em;
+}
+
+.turn-text h4 {
   font-size: 1em;
+}
+
+.turn-text h5 {
+  font-size: 0.925em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.turn-text h6 {
+  font-size: 0.85em;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .turn-text ul,

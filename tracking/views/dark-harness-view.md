@@ -38,6 +38,7 @@ source: tracking/
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | status: verifying |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: verifying |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | status: refining |
+| [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | status: refining |
 
 ## Board
 
@@ -57,7 +58,6 @@ source: tracking/
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0199](../DH-0199-web-consecutive-tool-calls-should-group-into-a-collapsible-expando.md) | Web: consecutive tool calls should group into a collapsible expando | feature | stefan |
 | [DH-0200](../DH-0200-web-jump-to-latest-button-disappears-after-mouse-wheel-scroll-doesn-t-reappear-consistently.md) | Web: 'Jump to Latest' button disappears after mouse-wheel scroll, doesn't reappear consistently | bug | stefan |
-| [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
 
 ### refining
@@ -65,6 +65,7 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
+| [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | feature | stefan |
 
 ### ready
 
@@ -75,9 +76,6 @@ source: tracking/
 | [DH-0198](../DH-0198-web-ui-header-never-actually-renders-the-brand-mark-logo-asset.md) | Web UI header never actually renders the brand mark/logo asset | bug | stefan |
 | [DH-0201](../DH-0201-web-switching-to-view-a-sub-agent-erases-the-pending-unsent-operator-message.md) | Web: switching to view a sub-agent erases the pending (unsent) operator message | bug | stefan |
 | [DH-0202](../DH-0202-web-model-name-shows-unknown-model-after-sse-reconnect.md) | Web: model name shows '(unknown model)' after SSE reconnect | bug | stefan |
-| [DH-0203](../DH-0203-markdown-h3-h6-headers-render-visually-identical-no-hierarchy.md) | Markdown: H3-H6 headers render visually identical, no hierarchy | bug | stefan |
-| [DH-0204](../DH-0204-markdown-link-title-attribute-leaks-into-the-href.md) | Markdown: link title attribute leaks into the href | bug | stefan |
-| [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | bug | stefan |
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | feature | stefan |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | bug | stefan |
 
@@ -120,9 +118,9 @@ source: tracking/
 | [DH-0211](../DH-0211-both-uis-pressing-escape-should-stop-the-currently-running-agent.md) | Both UIs: pressing Escape should stop the currently running agent | done |
 | [DH-0210](../DH-0210-import-resume-chain-toolresult-tooluse-block-count-mismatch-crashes-the-provider-request.md) | --import + resume chain: toolResult/toolUse block count mismatch crashes the provider request | done |
 | [DH-0209](../DH-0209-sub-agents-may-lack-access-to-reportoutcome-falling-back-to-task-failed-confusion.md) | Sub-agents may lack access to ReportOutcome, falling back to TASK_FAILED confusion | duplicate |
+| [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | done |
+| [DH-0204](../DH-0204-markdown-link-title-attribute-leaks-into-the-href.md) | Markdown: link title attribute leaks into the href | done |
+| [DH-0203](../DH-0203-markdown-h3-h6-headers-render-visually-identical-no-hierarchy.md) | Markdown: H3-H6 headers render visually identical, no hierarchy | done |
 | [DH-0197](../DH-0197-post-cli-split-residual-doc-style-seams-in-core-stale-function-refs-help-ts-sgr-literal.md) | Post-cli-split residual doc/style seams in Core (stale function refs + help.ts SGR literal) | done |
 | [DH-0196](../DH-0196-refactoring-round-post-cli-ts-split-and-second-wave-feature-sweep.md) | Refactoring round: post-cli.ts-split and second-wave feature sweep | done |
 | [DH-0195](../DH-0195-readme-stale-missing-web-port-host-import-model-and-slash-command-autocomplete.md) | README stale: missing --web-port, --host, --import/--model, and slash-command autocomplete | done |
-| [DH-0194](../DH-0194-agent-should-know-when-running-non-interactively-job-and-adjust-behavior-accordingly.md) | Agent should know when running non-interactively (--job) and adjust behavior accordingly | done |
-| [DH-0191](../DH-0191-consolidate-hand-rolled-status-color-sgr-tables-onto-design-tokens-ts-and-extract-a-shared-sgr-primitive.md) | Consolidate hand-rolled status-color/SGR tables onto design-tokens.ts and extract a shared SGR primitive | done |
-| [DH-0190](../DH-0190-refactoring-round-post-dh-0170-chain-sweep-focus-on-cli-ts-decomposition.md) | Refactoring round: post-DH-0170-chain sweep, focus on cli.ts decomposition | done |
