@@ -78,3 +78,21 @@ export const CONNECTION_TOKENS: Record<ConnectionState, ConnectionToken> = Objec
   reconnecting: { webLabel: "Reconnecting…", tuiLabel: "reconnecting…", sgr: "33", pending: true },
   disconnected: { webLabel: "Disconnected", tuiLabel: "disconnected", sgr: "31", pending: false },
 });
+
+// DH-0191: generic SGR (ANSI) primitive, shared by every terminal-facing surface (src/cli/,
+// src/server/log-analysis.ts, src/tui/ink/tokens.ts) so each stops independently re-deriving
+// the same `\x1b[<code>m...\x1b[0m` wrapping logic. This module was previously "about tables,
+// not helpers" — but it's already the dependency-free root-level shared module every consumer
+// here imports, so it's the natural home rather than adding a new sibling.
+const SGR_PREFIX = "\x1b[";
+
+/** The bare SGR reset escape sequence — terminates any `wrapSgr` color/style run. */
+export const SGR_RESET = "\x1b[0m";
+
+/** Wraps `text` in the SGR escape for `code` (a bare code string, e.g. `"34"`, `"1;36"` — the
+ * same shape as `StatusToken.sgr`/`ConnectionToken.sgr` above) plus a trailing reset. Callers
+ * remain responsible for their own TTY gating (style-guide.md §1: never color-only, and never
+ * emit raw SGR bytes into a piped/non-TTY stream). */
+export function wrapSgr(code: string, text: string): string {
+  return `${SGR_PREFIX}${code}m${text}${SGR_RESET}`;
+}
