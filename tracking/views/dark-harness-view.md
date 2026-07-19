@@ -64,7 +64,6 @@ source: tracking/
 | [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
 | [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
-| [DH-0171](../DH-0171-consolidate-duplicated-provider-adapter-helpers-mapstopreason-cache-marker-walk-error-classify-skeleton-and-fix-bedrock-as-unknown-casts.md) | Consolidate duplicated provider-adapter helpers (mapStopReason, cache-marker walk, error-classify skeleton) and fix bedrock as-unknown casts | bug | stefan |
 | [DH-0172](../DH-0172-introduce-a-shared-tool-input-validation-helper-driven-by-inputschema-remove-per-tool-typeof-boilerplate.md) | Introduce a shared tool-input validation helper driven by inputSchema; remove per-tool typeof boilerplate | bug | stefan |
 | [DH-0173](../DH-0173-split-the-agentruntime-god-class-into-collaborators-and-break-up-spawnagent-runroot.md) | Split the AgentRuntime God class into collaborators and break up spawnAgent/runRoot | bug | stefan |
 | [DH-0174](../DH-0174-split-cli-ts-2041-lines-into-focused-modules-and-extract-a-shared-ansi-color-primitive.md) | Split cli.ts (2041 lines) into focused modules and extract a shared ANSI/color primitive | bug | stefan |
@@ -123,6 +122,7 @@ source: tracking/
 | ID | Title | Resolution |
 | --- | --- | --- |
 | [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | done |
+| [DH-0171](../DH-0171-consolidate-duplicated-provider-adapter-helpers-mapstopreason-cache-marker-walk-error-classify-skeleton-and-fix-bedrock-as-unknown-casts.md) | Consolidate duplicated provider-adapter helpers (mapStopReason, cache-marker walk, error-classify skeleton) and fix bedrock as-unknown casts | done |
 | [DH-0170](../DH-0170-tui-and-web-reimplement-the-same-contract-derived-client-core-sse-transport-event-reducer-connectionstatus-slash-command-parser-twice.md) | TUI and Web reimplement the same contract-derived client core (SSE transport, event reducer, ConnectionStatus, slash-command parser) twice | superseded |
 | [DH-0169](../DH-0169-refactoring-round-first-ever-full-history-sweep.md) | Refactoring round: first-ever full-history sweep | done |
 | [DH-0167](../DH-0167-web-printed-url-hardcodes-localhost-ignoring-security-hostname.md) | --web printed URL hardcodes localhost, ignoring security.hostname | done |
@@ -136,4 +136,3 @@ source: tracking/
 | [DH-0158](../DH-0158-coding-standards-overhaul-wave-4-layer-3-file-migration-14-files.md) | Coding-standards overhaul Wave 4: layer-3 file migration (14 files) | done |
 | [DH-0157](../DH-0157-coding-standards-overhaul-wave-3-layer-2-file-migration-21-files.md) | Coding-standards overhaul Wave 3: layer-2 file migration (21 files) | done |
 | [DH-0156](../DH-0156-coding-standards-overhaul-wave-2-layer-1-file-migration-37-files.md) | Coding-standards overhaul Wave 2: layer-1 file migration (37 files) | done |
-| [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | done |
