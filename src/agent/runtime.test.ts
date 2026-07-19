@@ -594,78 +594,81 @@ describe("AgentRuntime", () => {
   // SessionLogger writing to a real tmp dir, so this proves the reported path is genuinely
   // readable and genuinely contains that agent's own transcript (not just a plausible-looking
   // string).
-  test("DH-0215: root and a sub-agent each see their own sessionId/agentId/log path in the " +
-    "system prompt, and the reported path is a real, readable file containing that agent's " +
-    "own transcript", async () => {
-    receivedSystemPrompts = [];
-    const dh215LogsRoot = mkdtempSync(join(tmpdir(), "dh-logs-runtime-dh0215-"));
-    const sessionId = "session-dh-0215";
-    const logger = new SessionLogger(join(dh215LogsRoot, sessionId));
-    try {
-      const runtime = newAgentRuntime({
-        config: baseConfig(),
-        systemPrompt: "you are a test agent",
-        sessionId,
-        logsRoot: dh215LogsRoot,
-        onLogLine: (agentId, line) => logger.append(agentId, line),
-      });
+  test(
+    "DH-0215: root and a sub-agent each see their own sessionId/agentId/log path in the " +
+      "system prompt, and the reported path is a real, readable file containing that agent's " +
+      "own transcript",
+    async () => {
+      receivedSystemPrompts = [];
+      const dh215LogsRoot = mkdtempSync(join(tmpdir(), "dh-logs-runtime-dh0215-"));
+      const sessionId = "session-dh-0215";
+      const logger = new SessionLogger(join(dh215LogsRoot, sessionId));
+      try {
+        const runtime = newAgentRuntime({
+          config: baseConfig(),
+          systemPrompt: "you are a test agent",
+          sessionId,
+          logsRoot: dh215LogsRoot,
+          onLogLine: (agentId, line) => logger.append(agentId, line),
+        });
 
-      const rootResult = await runtime.runRoot("please just answer", "test-model");
-      expect(rootResult.success).toBe(true);
+        const rootResult = await runtime.runRoot("please just answer", "test-model");
+        expect(rootResult.success).toBe(true);
 
-      const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
-        model: "test-model",
-        prompt: "child instruction",
-      });
-      await runtime.tasks.awaitDone(childTaskId);
+        const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+          model: "test-model",
+          prompt: "child instruction",
+        });
+        await runtime.tasks.awaitDone(childTaskId);
 
-      // Filter by this test's own sessionId rather than positional index — other tests'
-      // background sub-agents may still be settling concurrently and pushing into the same
-      // shared `receivedSystemPrompts` collector.
-      const ownPrompts = receivedSystemPrompts.filter((r) =>
-        r.system?.includes(`session id is \`${sessionId}\``),
-      );
-      const rootSystem = ownPrompts.find((r) =>
-        r.system?.includes(`your own agent id is \`${ROOT_AGENT_ID}\``),
-      )?.system;
-      const childSystem = ownPrompts.find((r) =>
-        r.system?.includes(`your own agent id is \`${childTaskId}\``),
-      )?.system;
-      expect(rootSystem).toContain(`session id is \`${sessionId}\``);
-      expect(rootSystem).toContain(`your own agent id is \`${ROOT_AGENT_ID}\``);
-      expect(childSystem).toContain(`session id is \`${sessionId}\``);
-      expect(childSystem).toContain(`your own agent id is \`${childTaskId}\``);
-      expect(rootSystem).not.toContain(`your own agent id is \`${childTaskId}\``);
+        // Filter by this test's own sessionId rather than positional index — other tests'
+        // background sub-agents may still be settling concurrently and pushing into the same
+        // shared `receivedSystemPrompts` collector.
+        const ownPrompts = receivedSystemPrompts.filter((r) =>
+          r.system?.includes(`session id is \`${sessionId}\``),
+        );
+        const rootSystem = ownPrompts.find((r) =>
+          r.system?.includes(`your own agent id is \`${ROOT_AGENT_ID}\``),
+        )?.system;
+        const childSystem = ownPrompts.find((r) =>
+          r.system?.includes(`your own agent id is \`${childTaskId}\``),
+        )?.system;
+        expect(rootSystem).toContain(`session id is \`${sessionId}\``);
+        expect(rootSystem).toContain(`your own agent id is \`${ROOT_AGENT_ID}\``);
+        expect(childSystem).toContain(`session id is \`${sessionId}\``);
+        expect(childSystem).toContain(`your own agent id is \`${childTaskId}\``);
+        expect(rootSystem).not.toContain(`your own agent id is \`${childTaskId}\``);
 
-      const rootLogPathMatch = rootSystem?.match(/logged automatically to `([^`]+)`/);
-      const childLogPathMatch = childSystem?.match(/logged automatically to `([^`]+)`/);
-      expect(rootLogPathMatch?.[1]).toBe(logger.filePathFor(ROOT_AGENT_ID));
-      expect(childLogPathMatch?.[1]).toBe(logger.filePathFor(childTaskId));
+        const rootLogPathMatch = rootSystem?.match(/logged automatically to `([^`]+)`/);
+        const childLogPathMatch = childSystem?.match(/logged automatically to `([^`]+)`/);
+        expect(rootLogPathMatch?.[1]).toBe(logger.filePathFor(ROOT_AGENT_ID));
+        expect(childLogPathMatch?.[1]).toBe(logger.filePathFor(childTaskId));
 
-      // The reported path is a real file — read it back and confirm it's genuinely that
-      // agent's own transcript (header line naming its own agentId, plus event lines).
-      const rootLogPath = rootLogPathMatch?.[1] ?? "";
-      expect(existsSync(rootLogPath)).toBe(true);
-      const rootLogLines = readFileSync(rootLogPath, "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l));
-      expect(rootLogLines[0].type).toBe("header");
-      expect(rootLogLines[0].agentId).toBe(ROOT_AGENT_ID);
-      expect(rootLogLines.some((l) => l.type === "message")).toBe(true);
+        // The reported path is a real file — read it back and confirm it's genuinely that
+        // agent's own transcript (header line naming its own agentId, plus event lines).
+        const rootLogPath = rootLogPathMatch?.[1] ?? "";
+        expect(existsSync(rootLogPath)).toBe(true);
+        const rootLogLines = readFileSync(rootLogPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l));
+        expect(rootLogLines[0].type).toBe("header");
+        expect(rootLogLines[0].agentId).toBe(ROOT_AGENT_ID);
+        expect(rootLogLines.some((l) => l.type === "message")).toBe(true);
 
-      const childLogPath = childLogPathMatch?.[1] ?? "";
-      expect(existsSync(childLogPath)).toBe(true);
-      const childLogLines = readFileSync(childLogPath, "utf8")
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l));
-      expect(childLogLines[0].type).toBe("header");
-      expect(childLogLines[0].agentId).toBe(childTaskId);
-    } finally {
-      rmSync(dh215LogsRoot, { recursive: true, force: true });
-    }
-  });
+        const childLogPath = childLogPathMatch?.[1] ?? "";
+        expect(existsSync(childLogPath)).toBe(true);
+        const childLogLines = readFileSync(childLogPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l));
+        expect(childLogLines[0].type).toBe("header");
+        expect(childLogLines[0].agentId).toBe(childTaskId);
+      } finally {
+        rmSync(dh215LogsRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("runRoot works without onEvent/onLogLine callbacks", async () => {
     const runtime = newAgentRuntime({

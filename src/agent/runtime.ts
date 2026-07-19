@@ -405,21 +405,6 @@ export class AgentRuntime {
     return `${this.systemPrompt}\n\n${selfInfo}${jobModeSection}`;
   }
 
-  private providerFor(model: ModelConfig): ModelProvider {
-    let provider = this.providers.get(model.provider);
-    if (!provider) {
-      const providerConfig = this.config.provider.find((p) => p.name === model.provider);
-      if (!providerConfig) {
-        throw new ConfigModelError(
-          `model "${model.name}" references unknown provider "${model.provider}"`,
-        );
-      }
-      provider = createProvider(providerConfig);
-      this.providers.set(model.provider, provider);
-    }
-    return provider;
-  }
-
   private buildToolContext(agentId: string): ToolContext {
     // DH-0002: fresh per agent lifetime (declared here, closed over by both the returned
     // object's own field and the searchDeferredTools closure below).
