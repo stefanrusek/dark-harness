@@ -86,6 +86,7 @@ source: tracking/
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | bug | stefan |
 | [DH-0211](../DH-0211-both-uis-pressing-escape-should-stop-the-currently-running-agent.md) | Both UIs: pressing Escape should stop the currently running agent | feature | stefan |
 | [DH-0214](../DH-0214-tui-precomposed-accented-char-extra-combining-mark-drops-the-next-rendered-character.md) | TUI: precomposed accented char + extra combining mark drops the next rendered character | bug | stefan |
+| [DH-0215](../DH-0215-teach-agents-their-own-sessionid-agentid-log-path-jsonl-log-structure-in-the-system-prompt.md) | Teach agents their own sessionId/agentId/log path + JSONL log structure in the system prompt | feature | stefan |
 
 ### implementing
 
