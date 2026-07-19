@@ -58,7 +58,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
-| [DH-0222](../DH-0222-refactoring-round-dh-0219-0220-0221-logo-header-color-wave-sweep.md) | Refactoring round: DH-0219/0220/0221 logo+header+color wave sweep | bug | stefan |
 | [DH-0223](../DH-0223-chooseheadermode-is-exported-and-unit-tested-but-never-called-at-runtime.md) | chooseHeaderMode is exported and unit-tested but never called at runtime | bug | stefan |
 | [DH-0225](../DH-0225-startup-header-health-dot-green-diverges-from-status-tokens-status-dot-green-dh-0221-palette-fragmentation.md) | Startup-header health dot green diverges from STATUS_TOKENS status-dot green (DH-0221 palette fragmentation) | bug | stefan |
 
@@ -110,6 +109,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0222](../DH-0222-refactoring-round-dh-0219-0220-0221-logo-header-color-wave-sweep.md) | Refactoring round: DH-0219/0220/0221 logo+header+color wave sweep | done |
 | [DH-0218](../DH-0218-renderselfinfosection-signature-accreted-into-positional-optional-trap-across-dh-0094-0194-0215.md) | renderSelfInfoSection signature accreted into positional-optional trap across DH-0094/0194/0215 | done |
 | [DH-0217](../DH-0217-spile-ops-new-ticket-py-counter-is-unsafe-for-concurrent-isolated-worktrees-id-collisions.md) | spile-ops new_ticket.py counter is unsafe for concurrent isolated worktrees — ID collisions | done |
 | [DH-0216](../DH-0216-refactoring-round-post-p0-fixes-and-workflow-self-awareness-feature-sweep.md) | Refactoring round: post-P0-fixes and Workflow/self-awareness feature sweep | done |
@@ -124,4 +124,3 @@ source: tracking/
 | [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | done |
 | [DH-0204](../DH-0204-markdown-link-title-attribute-leaks-into-the-href.md) | Markdown: link title attribute leaks into the href | done |
 | [DH-0203](../DH-0203-markdown-h3-h6-headers-render-visually-identical-no-hierarchy.md) | Markdown: H3-H6 headers render visually identical, no hierarchy | done |
-| [DH-0202](../DH-0202-web-model-name-shows-unknown-model-after-sse-reconnect.md) | Web model name shows "(unknown model)" after SSE reconnect | done |
