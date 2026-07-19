@@ -119,9 +119,22 @@ export class AppView {
   ) {
     this.root = createRoot(container);
     deps.doc.addEventListener("keydown", (evt: KeyboardEvent) => {
-      if (evt.key === "Escape" && this.state.modelPickerOpen) {
+      if (evt.key !== "Escape") return;
+      if (this.state.modelPickerOpen) {
         this.closeModelPicker();
+        return;
       }
+      // DH-0211: Escape stops the currently-selected/focused agent, mirroring the TUI's
+      // Ctrl+C convention (DH-0059) — a stop is recoverable, not destructive to data, so no
+      // confirmation prompt is required (same call the TUI makes; see state.ts's handleCtrlC
+      // doc comment). Only fires when nothing higher-priority already consumed the key (the
+      // model picker check above) and there's actually something running/waiting to stop.
+      const agent = selectedAgent(this.state);
+      if (!agent) return;
+      if (agent.status !== "running" && agent.status !== "waiting") return;
+      stopAgent(this.deps.target, agent.agentId, this.deps.fetchImpl, this.commandOptions()).catch(
+        (err) => this.reportError(err),
+      );
     });
     this.renderAll();
   }

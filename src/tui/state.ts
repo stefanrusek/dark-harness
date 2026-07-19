@@ -659,11 +659,43 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
     };
   }
   if (key.kind === "escape") {
-    return noEffects({ ...state, statusMessage: null, reconnectNotice: null });
+    return handleEscape(state);
   }
   // "tab" is intentionally a no-op here — reserved for a possible future completion feature,
   // not a dead/unhandled key (DH-0026 flagged it as unclear; this makes the intent explicit).
   return noEffects(state);
+}
+
+/** DH-0211: Escape in the root view stops the root agent, mirroring many interactive
+ * coding-agent UIs' convention and the TUI's own Ctrl+C behavior (DH-0059) — but, unlike
+ * Ctrl+C, it never quits the process; it only sends `stop_agent`, matching the Web client's
+ * equivalent (app.ts's global `keydown` listener). Reuses `rootActive` — the same "has the
+ * root actually started" guard `handleCtrlC` uses — so an Escape before any activity, or
+ * after the root already reached a terminal status and a fresh `stop_agent` would be a
+ * meaningless no-op, falls back to the pre-existing behavior of just clearing transient
+ * status/reconnect messages instead of sending a wasted command.
+ *
+ * No confirmation prompt: stopping a run is recoverable (the operator can just send another
+ * message afterward) and not destructive to any data, the same reasoning DH-0059 already
+ * established for Ctrl+C — adding a confirmation dialog here but not there would be an
+ * inconsistent UX for what is, from the operator's perspective, the same "stop it" action. */
+function handleEscape(state: TuiState): ReducerResult {
+  if (!state.rootActive || state.rootAgentId === null || state.sessionEnded !== null) {
+    return noEffects({ ...state, statusMessage: null, reconnectNotice: null });
+  }
+  const agent = state.agents.get(state.rootAgentId);
+  if (agent && agent.status !== "running" && agent.status !== "waiting") {
+    return noEffects({ ...state, statusMessage: null, reconnectNotice: null });
+  }
+  return {
+    state: { ...state, statusMessage: "stopping…", reconnectNotice: null },
+    effects: [
+      {
+        type: "send_command",
+        command: { type: "stop_agent", agentId: state.rootAgentId },
+      },
+    ],
+  };
 }
 
 /** Local, never-sent transcript entry text for `/help` (DH-0093 design §3) — lists the

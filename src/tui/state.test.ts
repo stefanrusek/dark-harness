@@ -940,6 +940,70 @@ describe("reducer: key handling — root view", () => {
     expect(next.reconnectNotice).toBeNull();
   });
 
+  test("DH-0211: escape with an active running root agent sends stop_agent instead of quitting", () => {
+    let state = initialState(size());
+    state = {
+      ...state,
+      rootAgentId: "agent-root",
+      rootActive: true,
+      statusMessage: "stale",
+      reconnectNotice: "Reconnected — history may be incomplete.",
+    };
+    const withAgentInfo = reducer(state, {
+      type: "sse_event",
+      event: {
+        type: "agent_spawned",
+        agentId: "agent-root",
+        parentAgentId: null,
+        model: "claude",
+        timestamp: new Date().toISOString(),
+      },
+    }).state;
+    const { state: next, effects } = reducer(withAgentInfo, {
+      type: "key",
+      key: { kind: "escape" },
+    });
+    expect(effects).toEqual([
+      { type: "send_command", command: { type: "stop_agent", agentId: "agent-root" } },
+    ]);
+    expect(next.statusMessage).toBe("stopping…");
+    expect(next.reconnectNotice).toBeNull();
+  });
+
+  test("DH-0211: escape with a terminal-status root agent falls back to clearing messages (no stop_agent)", () => {
+    let state = initialState(size());
+    state = { ...state, rootAgentId: "agent-root", rootActive: true, statusMessage: "stale" };
+    const withStatus = reducer(state, {
+      type: "sse_event",
+      event: {
+        type: "agent_status",
+        agentId: "agent-root",
+        status: "done",
+        timestamp: new Date().toISOString(),
+      },
+    }).state;
+    const { state: next, effects } = reducer(withStatus, {
+      type: "key",
+      key: { kind: "escape" },
+    });
+    expect(effects).toEqual([]);
+    expect(next.statusMessage).toBeNull();
+  });
+
+  test("DH-0211: escape after session_ended falls back to clearing messages (no stop_agent)", () => {
+    let state = initialState(size());
+    state = {
+      ...state,
+      rootAgentId: "agent-root",
+      rootActive: true,
+      sessionEnded: { exitCode: 0 },
+      statusMessage: "stale",
+    };
+    const { state: next, effects } = reducer(state, { type: "key", key: { kind: "escape" } });
+    expect(effects).toEqual([]);
+    expect(next.statusMessage).toBeNull();
+  });
+
   test("tab is an intentional no-op in the root view (previously a dead key)", () => {
     const state = initialState(size());
     const { state: next, effects } = reducer(state, { type: "key", key: { kind: "tab" } });
