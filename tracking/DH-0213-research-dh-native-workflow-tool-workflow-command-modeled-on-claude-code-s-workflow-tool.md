@@ -185,37 +185,68 @@ command surface.
   silent reliability regression versus Claude Code's own tool-forced version — should be
   explicitly deferred, not quietly downgraded.
 
-## Open Questions
+## Architect ruling (Fable, 2026-07-19)
 
-1. Does CLAUDE.md §4 item 8 ("ad-hoc only, no named/predefined agent definitions") block a
-   persistent, checked-in Workflow *script* outright, or does it only govern named *agent
-   personas*? Needs an explicit architect ruling (see "Biggest architectural tension"
-   above) — possibly an ADR amendment — before implementation starts.
-2. Script execution model: in-process `eval`/dynamic `import()` of a trusted Bun-run file,
-   or a subprocess for crash/resource isolation? Does ADR 0003's posture actually settle
-   this, or does "everything is allowed" only cover *tool* permissions, not *arbitrary code
-   execution inside the harness process* (a materially larger blast radius than a Bash
-   tool call, which at least runs as a distinct OS process already)?
-3. Tool vs. slash command vs. both: does a Workflow get invoked by the model as a new
-   `Tool` (peer of `Agent`), by a human operator via a `/workflow <script>` CLI/TUI command,
-   or both from day one? Different audiences (model-driven vs. human-driven) may want
-   different discovery/invocation ergonomics.
-4. Where do Workflow scripts live on disk — a new `workflows/` convention alongside
-   `skillPaths` in `dh.json`, inline in the prompt, or something else? Does this need a
-   `dh.json` schema extension (CLAUDE.md §4 item 6 — extend minimally, architect sign-off
-   for `src/contracts/` changes)?
-5. Is per-`agent()`-call resumability (memoize by content hash, replay unchanged calls)
-   worth building against dh's existing `.dh-logs`/JSONL logging shape, or does it need an
-   entirely separate cache format? DH-0038's resume machinery reconstructs conversational
-   state, not discrete memoized function-call results — these may not share much code.
-6. If/when `phase()`/`log()` progress-tree rendering is built, does it need new SSE event
-   types in `src/contracts/` (architect-reviewed per CLAUDE.md §6 item 2), or can it reuse
-   the existing agent-tree event shape that already powers TUI/Web agent trees for ordinary
-   `Agent` spawns?
-7. Should `parallel()`'s "failed thunk resolves to null rather than rejecting the whole
-   call" semantics be mirrored exactly, or does dh's existing task-failure/error-reporting
-   convention (exit-code contract, ADR 0005) suggest a different failure-shape for a dh
-   context?
+Decisions on every Open Question below, plus the invariant-8 tension. The concrete MVP is
+spun off as **DH-0222** (a `ready` implementation ticket); this ticket stays as the research
+record. See also **ADR 0009** (`docs/adr/0009-workflow-scripts-vs-ad-hoc-agents.md`).
+
+**The ad-hoc-only tension is resolved by ADR 0009, not an amendment.** CLAUDE.md §4 invariant
+8 governs sub-agent *personas/identities* (predefined agent-definition files with a baked
+system prompt / `subagent_type` selected instead of an ad-hoc `{model, prompt}` spawn), not
+deterministic orchestration *control flow*. A Workflow script is the same category as
+`scripts/build.ts` — checked-in trusted automation — and every sub-agent it spawns still goes
+through the identical `spawnAgent({model, prompt, ...})` primitive with no baked identity. So
+invariant 8 does **not** block a Workflow script, and its wording needs no change. ADR 0009
+records the scope note and its guardrails (ad-hoc spawns only; no selectable sub-agent
+personas; same fan-out budget). Reading #1 of "Biggest architectural tension" above is the
+adopted one.
+
+## Open Questions — resolved
+
+1. **Invariant 8 — RESOLVED (does not block).** Governs personas, not control-flow scripts.
+   Recorded as ADR 0009 (a scope clarification, not an amendment). See ruling above.
+2. **Execution model — RESOLVED: in-process dynamic `import()` of a trusted script file, no
+   subprocess.** ADR 0004's trusted-execution posture (plus the fact that a Bash tool already
+   runs arbitrary trusted code) settles this in favor of in-process execution for the MVP.
+   Use dynamic `import()` of a resolved file path — **not** `new Function`/string `eval`:
+   dynamic import gives real module semantics and Bun's native TS loader for free, and matches
+   how checked-in trusted automation already runs. Crash containment for the MVP comes from
+   (a) the existing `spawnAgent` fan-out budget (an unbounded-fan-out script is refused, not
+   run to exhaustion) and (b) wrapping the whole script invocation in try/catch so a script
+   throw becomes a `Workflow` tool-error result, not a host-process crash. A script that hangs
+   the host with an infinite loop is accepted MVP risk — identical to a `Bash` call running
+   `while true`, and no worse under this trust posture. Subprocess isolation is a possible
+   follow-on, not MVP.
+3. **Tool vs. slash command — RESOLVED: tool-only for the MVP.** The MVP ships a single new
+   `Workflow` `Tool` (peer of `Agent`) that the model calls directly. No `/workflow` human
+   CLI/TUI command yet — that needs new CLI plumbing and a separate audience's ergonomics, and
+   should follow once the tool itself is validated. Confirms the "Recommended MVP scope"
+   above.
+4. **On-disk location — RESOLVED: a path argument resolved against `cwd`, no `dh.json`
+   change.** The MVP `Workflow` tool takes a `script` input = a path relative to the agent's
+   `cwd`; the recommended (unenforced) convention is a `workflows/` directory. **No `dh.json`
+   schema extension** — that keeps the MVP off the `src/contracts/` architect gate (§4 item 6)
+   and off any new config surface. A `workflowPaths`-style config key is a possible follow-on
+   if discovery ergonomics demand it, decided then.
+5. **Resumability — RESOLVED: out of MVP scope.** Re-run the script from scratch each
+   invocation. Per-`agent()`-call memoization is real follow-on work; it does not obviously
+   share code with DH-0038's conversational-replay resume machinery (as this ticket notes) and
+   must not block a first landing.
+6. **`phase()`/`log()` progress-tree SSE — RESOLVED: out of MVP scope; when built, prefer
+   reusing the existing agent-tree event shape.** The MVP has no live progress tree. `log()`
+   in the MVP is a plain-text sink appended to the tool's textual output (or a no-op); `phase()`
+   is deferred entirely. If/when a live tree is built (v2), the default is to reuse the
+   existing agent-tree event shape rather than mint new `src/contracts/` event types — but that
+   is a v2 decision requiring an architect pass per §6 item 2 at the time, not now.
+7. **`parallel()` failure-to-null — RESOLVED: mirror Claude Code exactly.** A failed sub-agent
+   inside `parallel()` resolves to `null`; the call does not reject. This is *script-level*
+   control-flow ergonomics and is a different concern from ADR 0006's process exit-code
+   contract, which governs the *`dh` process's* self-reported outcome — a null inside a script
+   does not itself set a nonzero process exit code; the script decides what to do with the
+   nulls (and may itself throw, which surfaces as a `Workflow` tool error). A synchronous
+   throw from `spawnAgent` (fan-out budget exceeded) mid-fan-out must also collapse to that
+   thunk's `null`, not abort the whole `parallel()` — see DH-0222's FRs.
 
 ## Notes
 
@@ -228,3 +259,14 @@ Filed by an ad-hoc research agent per owner request. Read `src/agent/tools/agent
 existing hits). No implementation was done; this ticket is intentionally left in `draft`
 for an architect/owner to pick up, refine into `ready`, and decide the Open Questions above
 before any code is written.
+
+### 2026-07-19 — architect ruling + MVP spun off (Fable)
+Ruled on all seven Open Questions (see "Open Questions — resolved" above) and the invariant-8
+tension. Wrote **ADR 0009** (`docs/adr/0009-workflow-scripts-vs-ad-hoc-agents.md`): invariant 8
+governs sub-agent personas, not orchestration control-flow scripts, so a Workflow script is
+permitted without amending the invariant (guardrails: ad-hoc spawns only, no selectable
+personas, same fan-out budget). Spun off **DH-0222** as the `ready` MVP implementation ticket
+(`agent()` + `parallel()` only, in-process dynamic-import execution, tool-only surface,
+`cwd`-relative script path, no schema-forcing/pipeline/resumability/progress-UI). This ticket
+stays as the research record. Pattern mirrors DH-0219/0220/0221 (research/design doc → scoped
+`ready` implementation ticket).

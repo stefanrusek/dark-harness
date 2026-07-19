@@ -33,8 +33,13 @@ export function buildStartupPostureNote(security: SecurityConfig | undefined): s
  * (header-info.ts) so all three surfaces agree on the same facts. Non-TTY output stays plain
  * (no logo, no color) so a piped/CI run isn't polluted with ASCII art; a real terminal gets
  * the full logo and a bolded version line, matching the style guide §5 "startup blocks read
- * as a panel" convention already used by the rest of this file's startup output. */
-export function printAppHeader(config: DhConfig, configPath: string, io: CliIo): void {
+ * as a panel" convention already used by the rest of this file's startup output.
+ *
+ * DH-0123: `config` is `null` for `dh init`'s pre-write header (no config exists yet at that
+ * point — the whole point of `init`) — `buildHeaderInfo` already documents and handles this
+ * "not loaded yet" shape, rendering the same "config: not found (<path>)" status line `doctor`
+ * shows for a genuinely missing file. */
+export function printAppHeader(config: DhConfig | null, configPath: string, io: CliIo): void {
   const tty = process.stdout.isTTY === true;
   const info = buildHeaderInfo(config, configPath, BUILD_INFO);
   const lines = formatHeaderLines(info, { compact: !tty });

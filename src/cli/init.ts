@@ -2,6 +2,7 @@
 import { DEFAULT_CONFIG_PATH } from "../config/index.ts";
 import type { ExitCode as ExitCodeType } from "../contracts/index.ts";
 import { ExitCode } from "../contracts/index.ts";
+import { printAppHeader } from "./activity-feed.ts";
 import type { CliDeps } from "./deps.ts";
 import { fail } from "./deps.ts";
 import { cliDim, cliSuccessGlyph } from "./styling.ts";
@@ -104,6 +105,14 @@ export async function runInit(argv: string[], deps: CliDeps): Promise<ExitCodeTy
     }
     return fail(io, `unknown flag: ${arg}`);
   }
+
+  // DH-0123: same app header every other invocation prints (`dh doctor` via `runDoctor`),
+  // wired into `init` too so scaffolding a new project doesn't feel like a lesser-polished
+  // path. No config exists yet at this point (that's the whole point of `init`) — `null` is
+  // the shape `buildHeaderInfo`/`printAppHeader` document for exactly this "not loaded yet"
+  // case (header-info.ts), and renders as the same "config: not found (<path>)" status line
+  // doctor would show for a missing file.
+  printAppHeader(null, targetPath, io);
 
   let exists: boolean;
   try {

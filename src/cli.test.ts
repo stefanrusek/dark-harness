@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
 import type { ModelProvider } from "./agent/providers/types.ts";
+import { detectColorLevel } from "./cli/color-context.ts";
 import {
   ActivityFeed,
   AgentRuntimeLoopAdapter,
@@ -31,7 +32,6 @@ import type {
   ProviderConfig,
   ServerSentEvent,
 } from "./contracts/index.ts";
-import { detectColorLevel } from "./cli/color-context.ts";
 import { ExitCode } from "./contracts/index.ts";
 import { BRAND, paint } from "./design-tokens.ts";
 import { buildHeaderInfo, formatHeaderLines, formatVersionString } from "./header-info.ts";
@@ -3244,7 +3244,11 @@ describe("main — dh init", () => {
     expect(io.exitCodes).toEqual([ExitCode.Success]);
     const written = await Bun.file(target).text();
     expect(written).toBe(SAMPLE_DH_JSON);
-    expect(io.stdoutLines[0]).toContain(target);
+    // DH-0123: init now prints the same app header doctor does before its own output —
+    // version line, then config-status line (no config exists yet, so "not found").
+    expect(io.stdoutLines[0]).toContain("dh ");
+    expect(io.stdoutLines[1]).toBe(`config: not found (${target})`);
+    expect(io.stdoutLines[2]).toContain(target);
   });
 
   // DH-0090: dh init used to scaffold anthropic/bedrock provider entries with no
@@ -3435,14 +3439,24 @@ describe("main — dh init", () => {
       const target = join(dir, "dh.json");
       const code = await main(["init", "--config", target], { io });
       expect(code).toBe(ExitCode.Success);
-      expect(io.stdoutLines[0]).toBe(`dh: \x1b[32m✓\x1b[0m wrote a starter config to ${target}.`);
-      expect(io.stdoutLines[1]).toStartWith("\x1b[2mdh:");
-      expect(io.stdoutLines[2]).toStartWith("\x1b[2mdh:");
-      expect(io.stdoutLines[2]).toEndWith("\x1b[0m");
-      expect(io.stdoutLines[3]).toStartWith("\x1b[2mdh:");
-      expect(io.stdoutLines[3]).toContain("gemma4");
-      expect(io.stdoutLines[3]).toEndWith("\x1b[0m");
-      expect(io.stdoutLines[4]).toBe(
+      // DH-0123: on a TTY, the same bolded-version-line + full-logo header `dh doctor` prints
+      // via `printAppHeader` now leads init's output too — logo lines, then a bolded version
+      // line, then the (not-found, pre-write) config-status line, before init's own output.
+      const headerLineCount = io.stdoutLines.length - 5;
+      expect(headerLineCount).toBeGreaterThan(0);
+      const version = io.stdoutLines[headerLineCount - 2] as string;
+      expect(version).toStartWith("\x1b[1mdh ");
+      expect(io.stdoutLines[headerLineCount - 1]).toBe(`config: not found (${target})`);
+      expect(io.stdoutLines[headerLineCount]).toBe(
+        `dh: \x1b[32m✓\x1b[0m wrote a starter config to ${target}.`,
+      );
+      expect(io.stdoutLines[headerLineCount + 1]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[headerLineCount + 2]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[headerLineCount + 2]).toEndWith("\x1b[0m");
+      expect(io.stdoutLines[headerLineCount + 3]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[headerLineCount + 3]).toContain("gemma4");
+      expect(io.stdoutLines[headerLineCount + 3]).toEndWith("\x1b[0m");
+      expect(io.stdoutLines[headerLineCount + 4]).toBe(
         'dh: Next: run "dh doctor" to probe credentials, then "dh" to start.',
       );
     });
@@ -4211,7 +4225,9 @@ describe("main — --server startup block (DH-0067)", () => {
       ...interactiveOverrides(io),
     });
     expect(code).toBe(ExitCode.Success);
-    const i = io.stdoutLines.findIndex((l) => /^dh: web UI ready at http:\/\/localhost:\d+\.$/.test(l));
+    const i = io.stdoutLines.findIndex((l) =>
+      /^dh: web UI ready at http:\/\/localhost:\d+\.$/.test(l),
+    );
     expect(i).toBeGreaterThanOrEqual(0);
     expect(io.stdoutLines[i + 1]).toMatch(/^dh: logs: .*\.dh-logs/);
   });
@@ -4253,10 +4269,14 @@ describe("main — --server startup block (DH-0067)", () => {
       expect(code).toBe(ExitCode.Success);
       const i = io.stdoutLines.findIndex((l) => l.includes("headless server listening on port"));
       expect(i).toBeGreaterThanOrEqual(0);
-      expect(io.stdoutLines[i]).toStartWith(`${DH_PREFIX}\x1b[32m✓\x1b[0m headless server listening on port `);
+      expect(io.stdoutLines[i]).toStartWith(
+        `${DH_PREFIX}\x1b[32m✓\x1b[0m headless server listening on port `,
+      );
       expect(io.stdoutLines[i + 1]).toStartWith(`${DH_PREFIX}\x1b[1mdh `);
       expect(io.stdoutLines[i + 1]).toContain("\x1b[0m — bound to");
-      expect(io.stdoutLines[i + 3]).toStartWith(`${DH_PREFIX}\x1b[33m⚠\x1b[0m plaintext HTTP, no auth`);
+      expect(io.stdoutLines[i + 3]).toStartWith(
+        `${DH_PREFIX}\x1b[33m⚠\x1b[0m plaintext HTTP, no auth`,
+      );
     });
 
     test("--web: 'web UI ready at <url>' substring survives styling intact, URL uncolored", async () => {
