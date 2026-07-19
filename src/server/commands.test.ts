@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentTreeNode, LogMessageEvent } from "../contracts/index.ts";
 import { handleCommand } from "./commands.ts";
-import { FakeAgentLoop } from "./fake-agent-loop.ts";
+import { FakeAgentLoop } from "./__fixtures__/fake-agent-loop.ts";
 import { SessionLogger } from "./logger.ts";
 
 const tree: AgentTreeNode[] = [

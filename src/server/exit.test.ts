@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ExitCode, type SessionEndedEvent } from "../contracts/index.ts";
 import { waitForExitCode } from "./exit.ts";
-import { FakeAgentLoop } from "./fake-agent-loop.ts";
+import { FakeAgentLoop } from "./__fixtures__/fake-agent-loop.ts";
 
 function sessionEnded(exitCode: number): SessionEndedEvent {
   return {

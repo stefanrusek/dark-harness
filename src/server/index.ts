@@ -11,9 +11,6 @@ export { constantTimeEqual, extractBearerToken, isAuthorized } from "./auth.ts";
 export { type CommandContext, type CommandResult, handleCommand } from "./commands.ts";
 export { EventBuffer } from "./event-buffer.ts";
 export { waitForExitCode } from "./exit.ts";
-// Test fixture, not production code — see fake-agent-loop.ts's own doc comment. Exported
-// so other domains (TUI/Web/E2E) can develop against a fake before Core lands.
-export { FakeAgentLoop } from "./fake-agent-loop.ts";
 export {
   type AgentLogSummary,
   type AgentLogTreeNode,

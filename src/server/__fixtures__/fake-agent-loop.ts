@@ -1,7 +1,7 @@
 // Test double standing in for Core's real agent loop (docs/handoffs/server.md: "build
-// against a minimal fake agent-loop interface"). Used by this domain's own tests, and
-// exported for other domains (TUI/Web/E2E) that want a lightweight fixture to develop
-// against before Core's real src/agent/loop.ts lands. Not production code.
+// against a minimal fake agent-loop interface"). Used by this domain's own tests. Not
+// production code, and not part of the server domain's public surface (src/server/index.ts)
+// — import it directly from this test-fixtures directory. See DH-0180.
 
 import type {
   AgentTreeNode,
@@ -9,12 +9,12 @@ import type {
   ModelInfo,
   ServerSentEvent,
   SkillInfo,
-} from "../contracts/index.ts";
+} from "../../contracts/index.ts";
 import type {
   AgentLoopEventListener,
   AgentLoopHandle,
   AgentLoopLogListener,
-} from "./agent-loop.type.ts";
+} from "../agent-loop.type.ts";
 
 export class FakeAgentLoop implements AgentLoopHandle {
   private readonly eventListeners = new Set<AgentLoopEventListener>();
