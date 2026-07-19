@@ -63,7 +63,6 @@ source: tracking/
 | [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
 | [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
-| [DH-0169](../DH-0169-refactoring-round-first-ever-full-history-sweep.md) | Refactoring round: first-ever full-history sweep | bug | stefan |
 | [DH-0170](../DH-0170-tui-and-web-reimplement-the-same-contract-derived-client-core-sse-transport-event-reducer-connectionstatus-slash-command-parser-twice.md) | TUI and Web reimplement the same contract-derived client core (SSE transport, event reducer, ConnectionStatus, slash-command parser) twice | bug | stefan |
 | [DH-0171](../DH-0171-consolidate-duplicated-provider-adapter-helpers-mapstopreason-cache-marker-walk-error-classify-skeleton-and-fix-bedrock-as-unknown-casts.md) | Consolidate duplicated provider-adapter helpers (mapStopReason, cache-marker walk, error-classify skeleton) and fix bedrock as-unknown casts | bug | stefan |
 | [DH-0172](../DH-0172-introduce-a-shared-tool-input-validation-helper-driven-by-inputschema-remove-per-tool-typeof-boilerplate.md) | Introduce a shared tool-input validation helper driven by inputSchema; remove per-tool typeof boilerplate | bug | stefan |
@@ -115,6 +114,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0169](../DH-0169-refactoring-round-first-ever-full-history-sweep.md) | Refactoring round: first-ever full-history sweep | done |
 | [DH-0167](../DH-0167-web-printed-url-hardcodes-localhost-ignoring-security-hostname.md) | --web printed URL hardcodes localhost, ignoring security.hostname | done |
 | [DH-0165](../DH-0165-e2e-web-browser-chromium-fails-in-real-ci-headless-chromium-can-t-connect-to-d-bus-dom-assertions-never-satisfied.md) | E2E (web/browser — Chromium) fails in real CI: headless Chromium can't connect to D-Bus, DOM assertions never satisfied | done |
 | [DH-0164](../DH-0164-gate-yml-never-installs-playwright-s-chromium-e2e-web-tests-fail-closed-with-no-chromium-found.md) | gate.yml never installs Playwright's Chromium, e2e web tests fail closed with No Chromium found | done |
@@ -129,4 +129,3 @@ source: tracking/
 | [DH-0155](../DH-0155-coding-standards-overhaul-wave-1-leaf-layer-file-migration-60-files-layer-0.md) | Coding-standards overhaul Wave 1: leaf-layer file migration (60 files, layer 0) | done |
 | [DH-0154](../DH-0154-gritql-custom-lint-rule-enforce-type-ts-constant-ts-export-restrictions-and-no-side-effects-at-module-scope.md) | GritQL custom lint rule: enforce .type.ts/.constant.ts export restrictions and no-side-effects-at-module-scope | done |
 | [DH-0153](../DH-0153-break-the-agent-runtime-ts-agent-resume-ts-dependency-cycle.md) | Break the agent/runtime.ts <-> agent/resume.ts dependency cycle | done |
-| [DH-0152](../DH-0152-coverage-exclusion-mechanism-for-future-type-ts-constant-ts-files-fix-contracts-index-test-ts-fake-import-workaround.md) | Coverage-exclusion mechanism for future .type.ts / .constant.ts files, fix contracts/index.test.ts fake-import workaround | done |
