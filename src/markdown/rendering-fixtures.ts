@@ -64,8 +64,7 @@ export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
       expect(rows).toHaveLength(1);
       const row = rows[0] as string;
       expect(stripAnsi(row)).toBe(`Heading ${level}`);
-      const codes =
-        level === 1 ? [BOLD, UNDERLINE] : level <= 3 ? [BOLD, CYAN] : [BOLD, CYAN, DIM];
+      const codes = level === 1 ? [BOLD, UNDERLINE] : level <= 3 ? [BOLD, CYAN] : [BOLD, CYAN, DIM];
       expect(row.startsWith(`\x1b[${codes.join(";")}m`)).toBe(true);
       expect(row.endsWith(RESET)).toBe(true);
     },

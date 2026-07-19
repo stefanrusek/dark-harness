@@ -538,7 +538,9 @@ const ESCAPABLE_RE = /[!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~\\]/;
 /** Builds a `link` InlineNode, omitting `title` entirely (rather than setting it to
  * `undefined`) when there is none — required under `exactOptionalPropertyTypes`. */
 function makeLinkNode(children: InlineNode[], url: string, title: string | undefined): InlineNode {
-  return title === undefined ? { kind: "link", children, url } : { kind: "link", children, url, title };
+  return title === undefined
+    ? { kind: "link", children, url }
+    : { kind: "link", children, url, title };
 }
 
 export function parseInline(
@@ -574,9 +576,7 @@ export function parseInline(
       if (link) {
         flush();
         // Images degrade to links: alt text becomes the visible link text (D1).
-        nodes.push(
-          makeLinkNode([{ kind: "text", text: link.label }], link.url, link.title),
-        );
+        nodes.push(makeLinkNode([{ kind: "text", text: link.label }], link.url, link.title));
         i = link.end;
         continue;
       }
