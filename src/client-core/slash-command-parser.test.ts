@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { BUILTIN_COMMAND_NAMES, isBuiltinCommandName, parseSlashCommand } from "./commands.ts";
+import {
+  BUILTIN_COMMAND_NAMES,
+  isBuiltinCommandName,
+  parseSlashCommand,
+} from "./slash-command-parser.ts";
 
-// DH-0093: same test-vector table used to verify src/web/client/commands.ts (or its
-// equivalent parser) so both surfaces agree on the grammar — see the ticket's "shared parser"
-// fallback note.
+// DH-0093 / DH-0183: single shared test-vector table for the grammar both TUI and Web consume
+// via this module — previously duplicated as src/tui/commands.test.ts and
+// src/web/client/slash-commands.test.ts against two byte-identical parser implementations.
 describe("parseSlashCommand", () => {
   test("parses a bare command name with no args", () => {
     expect(parseSlashCommand("/help")).toEqual({ name: "help", args: "" });

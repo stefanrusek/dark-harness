@@ -10,11 +10,11 @@
 // themselves.
 import type { AgentStatus } from "./contracts/log.type.ts";
 
-/** The four connection-pill states (style-guide.md §1.2, DH-0105) — TUI's `ConnectionStatus`
- * (src/tui/connection-status.constant.ts) and Web's `ConnectionStatus`
- * (src/web/client/state.ts) are each defined
- * independently as this same literal union; this module intentionally doesn't import either
- * (neither owns the other) and instead re-states the shared vocabulary once here. */
+/** The four connection-pill states (style-guide.md §1.2, DH-0105) — the client's canonical
+ * `ConnectionStatus` (DH-0183: src/client-core/connection-status.ts, consumed by both TUI and
+ * Web) is this same literal union; this module intentionally doesn't import it (design-tokens
+ * is a lower-level, dependency-free module) and instead re-states the shared vocabulary once
+ * here. */
 export type ConnectionState = "connecting" | "live" | "reconnecting" | "disconnected";
 
 export interface StatusToken {

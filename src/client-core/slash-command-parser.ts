@@ -1,6 +1,9 @@
-// Pure slash-command parsing (DH-0093 design §1). Kept as its own tiny module — like
-// keys.ts/tree.ts — so the reducer (state.ts) never has to know regex details, and so this
-// exact grammar can be unit-tested in isolation.
+// Pure slash-command parsing (DH-0093 design §1). Shared by the TUI and Web clients — DH-0183
+// consolidated this out of `src/tui/commands.ts` and `src/web/client/slash-commands.ts`, which
+// had been two byte-identical, zero-DOM/terminal-coupled implementations kept apart under a
+// domain-boundary excuse that DH-0170's architect review judged too weak to justify the
+// duplication. Kept as its own tiny module — like the rest of `src/client-core/` — so callers
+// never have to know regex details, and so this exact grammar can be unit-tested in isolation.
 //
 // Grammar (from the ticket's architect design, matching observed real-Claude-Code behavior):
 // any input matching `^/\S` is a command attempt, `name` is the run of non-space characters

@@ -34,6 +34,7 @@ needs are requests to the other owner, never a direct edit (PLAYBOOK.md §5).
 | `src/server/` | **Server** | HTTP+SSE server, protocol handlers, JSONL-per-agent session logging, exit-code contract. |
 | `src/tui/` | **TUI** | Console client: alt-screen full-screen TUI, root view + agent tree, SSE client parsing. |
 | `src/web/` | **Web** | Web UI: served client-side only, agent tree, status colors, token/cost display, log download. |
+| `src/client-core/` | **Core** | Shared client-implementation primitives consumed by both TUI and Web (not wire truth — see `src/contracts/` for that): the slash-command parser and the `ConnectionStatus` vocabulary. Sibling to `src/contracts/` but for logic, not schema. Architect-approved ownership decision, DH-0170 (see `docs/adr/`-adjacent ticket notes); established by DH-0183. |
 | `src/prompt/`, `README.md` | **Prompt** | Built-in system prompt, skill enumeration, bundled CLI-tools skill, and the project README (landing page). |
 | `e2e/` | **E2E** | Real-binary end-to-end tests: PTY harness for TUI, headless browser for web, HTTP/SSE across processes, mock provider endpoint. Sequenced after the other domains land. |
 | `docs/adr/` | Coordinator | Locked decisions. |

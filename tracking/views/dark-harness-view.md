@@ -81,7 +81,6 @@ source: tracking/
 | [DH-0168](../DH-0168-web-hardcodes-a-random-port-instead-of-an-operator-chosen-one.md) | --web hardcodes a random port instead of an operator-chosen one | feature | stefan |
 | [DH-0176](../DH-0176-audit-coverage-gate-driven-test-patterns-branch-free-helpers-synthetic-empty-constructors-giant-test-files.md) | Audit coverage-gate-driven test patterns (branch-free helpers, synthetic empty constructors, giant test files) | bug | stefan |
 | [DH-0182](../DH-0182-add-a-cli-flag-to-override-security-hostname-overriding-config.md) | Add a CLI flag to override security.hostname, overriding config | feature | stefan |
-| [DH-0183](../DH-0183-establish-src-client-core-and-consolidate-the-zero-coupling-shared-client-primitives-slash-command-parser-connectionstatus-vocabulary.md) | Establish src/client-core/ and consolidate the zero-coupling shared client primitives (slash-command parser + ConnectionStatus vocabulary) | feature | stefan |
 | [DH-0184](../DH-0184-extract-the-shared-sse-transport-frame-parser-full-jitter-backoff-last-event-id-reconnect-payload-validation-into-src-client-core-resolving-the-validation-strictness-divergence.md) | Extract the shared SSE transport (frame parser + full-jitter backoff + Last-Event-ID reconnect + payload validation) into src/client-core/, resolving the validation-strictness divergence | feature | stefan |
 | [DH-0185](../DH-0185-migrate-the-tui-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the TUI SSE client onto the shared src/client-core/ transport | feature | stefan |
 | [DH-0186](../DH-0186-migrate-the-web-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the Web SSE client onto the shared src/client-core/ transport | feature | stefan |
@@ -117,6 +116,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0183](../DH-0183-establish-src-client-core-and-consolidate-the-zero-coupling-shared-client-primitives-slash-command-parser-connectionstatus-vocabulary.md) | Establish src/client-core/ and consolidate the zero-coupling shared client primitives (slash-command parser + ConnectionStatus vocabulary) | done |
 | [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | done |
 | [DH-0180](../DH-0180-relocate-fakeagentloop-out-of-the-production-server-entrypoint-into-test-only-scope.md) | Relocate FakeAgentLoop out of the production server entrypoint into test-only scope | done |
 | [DH-0179](../DH-0179-revisit-web-static-server-dual-typecheck-split-to-remove-the-loopback-self-proxy-and-any-casts.md) | Revisit web static-server dual-typecheck split to remove the loopback self-proxy and any-casts | done |
@@ -131,4 +131,3 @@ source: tracking/
 | [DH-0164](../DH-0164-gate-yml-never-installs-playwright-s-chromium-e2e-web-tests-fail-closed-with-no-chromium-found.md) | gate.yml never installs Playwright's Chromium, e2e web tests fail closed with No Chromium found | done |
 | [DH-0163](../DH-0163-coverage-backfill-close-the-pre-existing-30-line-gap-across-12-files-99-76-100.md) | Coverage backfill: close the pre-existing ~30-line gap across 12 files (99.76% -> 100%) | done |
 | [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | done |
-| [DH-0161](../DH-0161-pilot-add-as-const-decorations-to-config-validate-ts-s-private-lookup-consts-resolve-remaining-gritql-warnings.md) | Pilot: add as-const decorations to config/validate.ts's private lookup consts, resolve remaining GritQL warnings | done |

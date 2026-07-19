@@ -2,10 +2,12 @@
 // src/contracts/ wherever they're needed (see state.ts, render.ts). This module only
 // describes the client's own view/application state and the pure reducer's vocabulary.
 //
-// DH-0157: `ConnectionStatus`/`CONNECTION_STATUSES` moved out to connection-status.constant.ts
-// (this file may only hold type/interface declarations per the .type.ts standing rule; that
-// pair mixed a constant in, which is now split out).
+// DH-0157: `ConnectionStatus`/`CONNECTION_STATUSES` moved out to a constant module (this file
+// may only hold type/interface declarations per the .type.ts standing rule; that pair mixed a
+// constant in, which is now split out). DH-0183: that module is now
+// `src/client-core/connection-status.ts`, shared with the Web client.
 
+import type { ConnectionStatus } from "../client-core/connection-status.ts";
 import type {
   AgentStatus,
   AgentTreeNode,
@@ -14,7 +16,6 @@ import type {
   ServerSentEvent,
   SkillInfo,
 } from "../contracts/index.ts";
-import type { ConnectionStatus } from "./connection-status.constant.ts";
 import type { KeyEvent } from "./keys.ts";
 
 // DH-0093: `/model` (no arg) picker view — navigated exactly like the tree view

@@ -2,6 +2,7 @@
 // `ServerSentEvent`s (src/contracts/events.type.ts) plus a few UI-only fields (selection,
 // connection status). Kept framework-free and fully unit-testable.
 
+import type { ConnectionStatus } from "../../client-core/connection-status.ts";
 import type {
   AgentStatus,
   AgentTreeNode,
@@ -113,7 +114,10 @@ export interface AgentNode {
 // (docs/design/style-guide.md §1/§6) — "live" (was "open") and "disconnected" (was
 // "closed") are the renamed states; "connecting" and "reconnecting" already matched the
 // shared vocabulary.
-export type ConnectionStatus = "connecting" | "live" | "reconnecting" | "disconnected";
+// DH-0183: the vocabulary itself now lives in `src/client-core/connection-status.ts`
+// (consolidated with the TUI's identical declaration); re-exported here so existing
+// `./state.ts` importers don't all need updating.
+export type { ConnectionStatus } from "../../client-core/connection-status.ts";
 
 export interface WebState {
   /** Insertion-ordered by first-seen; Map preserves insertion order in JS. */

@@ -2,8 +2,8 @@
 // per ADR 0002 (resumable via Last-Event-ID). fetch/delay are injectable so this is testable
 // against a fake streaming Response without real network I/O.
 
+import type { ConnectionStatus } from "../client-core/connection-status.ts";
 import type { ServerSentEvent } from "../contracts/index.ts";
-import type { ConnectionStatus } from "./connection-status.constant.ts";
 import { parseServerSentEvent, SseFrameParser } from "./sse-parser.ts";
 
 // Confirmed against the Server domain's actual route (src/server/server.ts,
@@ -87,7 +87,7 @@ export async function runSseClient(options: SseClientOptions): Promise<void> {
       // The stream ended cleanly (server closed it, no exception) — this is not a fatal
       // condition, the loop immediately retries below just like after a failed attempt, so
       // it's reported the same way the Web client reports it: `reconnecting` (DH-0105; see
-      // the `ConnectionStatus` doc comment in connection-status.constant.ts for why this used to be a
+      // the `ConnectionStatus` doc comment in ../client-core/connection-status.ts for why this used to be a
       // misleadingly-named terminal-sounding `closed`).
       options.onConnectionChange?.("reconnecting");
     } catch {

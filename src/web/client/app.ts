@@ -6,6 +6,7 @@
 
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { parseSlashCommand } from "../../client-core/slash-command-parser.ts";
 import type { ServerSentEvent } from "../../contracts/index.ts";
 import type { HeaderInfo } from "../../header-info.ts";
 import type { ServerTarget } from "../protocol.ts";
@@ -23,7 +24,6 @@ import {
 } from "./commands.ts";
 import { App } from "./components/App.tsx";
 import { type DownloadEnv, downloadLogs } from "./download.ts";
-import { parseSlashCommand } from "./slash-commands.ts";
 import { connectEvents, type SseConnection } from "./sse.ts";
 import {
   addSystemTurn,
@@ -309,7 +309,7 @@ export class AppView {
     // DH-0093 design §1: a recognized slash command never becomes a chat message —
     // intercepted here, the one place a `send_message` call is built from the composer's
     // submitted text. A leading space before the slash, or a bare "/" alone, deliberately
-    // fails to match and falls through to ordinary chat (see slash-commands.ts).
+    // fails to match and falls through to ordinary chat (see client-core/slash-command-parser.ts).
     const parsed = parseSlashCommand(message);
     if (parsed) {
       this.handleSlashCommand(parsed.name, parsed.args);

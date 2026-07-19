@@ -2,8 +2,8 @@
 // here — side effects (HTTP commands, process exit) are described as data and executed by
 // app.ts. This is what makes the TUI's core logic fully unit-testable without a terminal.
 
+import { parseSlashCommand } from "../client-core/slash-command-parser.ts";
 import type { AgentStatus, ModelInfo, ServerSentEvent } from "../contracts/index.ts";
-import { parseSlashCommand } from "./commands.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";
 import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.type.ts";
@@ -558,7 +558,7 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
     // the one place a `send_message` effect is built from `state.input` (design §1). The raw
     // (untrimmed) input is tested: a leading space before the slash, or a bare "/" alone,
     // deliberately fails to match and falls through to ordinary chat, per the grammar's own
-    // rules (see commands.ts).
+    // rules (see client-core/slash-command-parser.ts).
     const parsed = parseSlashCommand(state.input);
     if (parsed) {
       return handleSlashCommand(state, parsed.name, parsed.args);
