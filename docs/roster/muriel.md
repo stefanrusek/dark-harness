@@ -149,3 +149,17 @@ Round due" banner (17 commits since last) — not my task, flagged for Ada.
 - Owner to pick Concept 1/2/3 on DH-0192; then it → `ready` and fans out (Web=Susan for
   logo.svg/favicon/header/social, Prompt=Iris for ASCII/README, TUI=Mary for ASCII render).
 - Refactoring-Round is due (git-hook banner) — Ada's call to dispatch.
+
+### 2026-07-19 — round 4: DH-0192 rescope after owner corrections (color + ASCII)
+
+Owner reviewed round 3's three concepts and corrected on two axes; I reconciled into a revised brief.
+
+**Corrections taken:**
+- Rejected Concept 1 (silhouette evolution): "I like the abstractness of the diamond." Diamond stays plain — dropped scoop/eye/straps entirely.
+- **Reversed my color call.** Owner: "the diamond only looks like a blind when it is black." The blinder reading (the whole creative lead) needs a *dark* mark; amber reads as a decorative gem. So canonical mark color is now **foreground/ink (`currentColor`/`--fg`), NOT amber** — and amber is demoted to accent-only (status/liveness/links/agent-dot). This also inverts which surface was "the bug": the README `◆` was already correct (inherits heading ink); the *app* `.brand::before{color:var(--accent)}` is the odd one out. A wordmark lockup wants mark+words in one color, so ink also makes "◆ Dark Harness" read as one unit.
+- `docs/media/logo.svg` (brackets+dh+dot badge) is NOT the suggestive asset — owner is fine with it (had never seen it rendered pre-review; see DH-0198). No redesign.
+- The actual suggestive asset is the **ASCII banner** (`DH_ASCII_LOGO` figlet). Owner wants it redrawn to resemble logo.svg's brackets-clasping-"dh" concept. Drafted concrete byte-plain-ASCII replacement (rounded badge frame + clean spaced-stem "dh" + `o` dot) in the ticket. Compact `[ dh ]` unchanged (already the concept, never suggestive).
+
+**Status moves:** DH-0192 refining→**ready** (rescoped/retitled to color-standardization + ASCII-redraw; round-1 exploration preserved as superseded). DH-0193 refining→**ready** (dropped Concept-1 caveat; note ink mark reinforces one-unit lockup; spacing unchanged). DH-0198 stubs filled, left **ready** (owner-owned) — corrected its premise: header mark is the `◆` diamond in ink, NOT logo.svg; flagged glyph-vs-inline-SVG as the one open Web/Susan decision. All three touch `.brand` → must be one coordinated Web pass.
+
+**Nothing left at refining / no open question kicked back to owner** — the corrections were explicit enough to execute. Only non-gating flag: amber→accent demotion follows by implication from "black diamond"; noted in DH-0192 Risk so owner can bounce if they disagree.

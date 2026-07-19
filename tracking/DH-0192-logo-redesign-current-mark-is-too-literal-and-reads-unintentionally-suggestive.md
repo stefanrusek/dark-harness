@@ -2,278 +2,257 @@
 spile: ticket
 id: DH-0192
 type: bug
-status: refining
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
 created: 2026-07-19
 relations:
   depends_on: []
-  relates_to: [DH-0121]
+  relates_to: [DH-0121, DH-0193, DH-0198]
   supersedes: []
 implementation:
   - repo: dark-harness
 ---
 
-# DH-0192: Logo redesign: current mark is too literal and reads unintentionally suggestive
+# DH-0192: Brand mark — standardize the diamond on ink (not amber), and redraw the ASCII banner to the bracket lockup
 
 ## Summary
 
-Owner review of DH-0121's delivered logo (docs/media/logo.svg / ASCII banner in src/prompt/banner.ts), 2026-07-19: the current mark is too literal, and unfortunately reads as resembling genitals -- not the intended brand impression. Needs a real redesign pass, not a tweak. Route through Muriel (Design crew) first per CLAUDE.md's design-crew process (owns visual identity, CLAUDE.md section 7) to propose a new concept, then implementation to whichever domain(s) consume the result (Prompt for the ASCII banner text, Web for the SVG asset, TUI for ASCII rendering) -- same fan-out DH-0121 used. Both the SVG (docs/media/logo.svg) and ASCII-art (src/prompt/banner.ts's DH_ASCII_LOGO/DH_ASCII_LOGO_COMPACT) versions need to be revisited together since they're meant to share one visual identity.
+Owner review of DH-0121's delivered logo (docs/media/logo.svg / ASCII banner in
+`src/prompt/banner.constant.ts`), 2026-07-19: the current identity is too literal / reads
+unintentionally suggestive. Original routing: through Muriel (Design crew) first per CLAUDE.md
+§7, then fan-out to the consuming domains (Prompt for ASCII, Web for SVG/CSS, TUI for ASCII
+render) — same fan-out DH-0121 used.
 
-**Owner design lead (2026-07-19):** doesn't dislike the ◆ black-diamond mark itself, and has
-a concrete direction worth exploring before starting from zero — placed next to the words
-"Dark Harness," the diamond reads like a **horse blinder** (the leather flap on a harness
-that blocks peripheral vision), which fits the product name thematically. Worth exploring
-whether the existing mark can be *evolved* toward that reading (shape/negative-space
-adjustments that lean into the blinder association) rather than replaced outright — lower
-risk than a from-scratch redesign, and reuses brand equity already spent on the ◆. Note the
-diamond also isn't rendered consistently black across contexts today (the README shows it
-black; the app doesn't always) — worth deciding whether it should be, as part of the same
-pass.
+**This ticket has been rescoped twice against real owner corrections (see the two dated
+exploration blocks below). The net of both rounds:**
 
-This needs a real design hand (Fable, architect-on-call, standing in for Muriel/Design crew
-per CLAUDE.md §7) to actually explore the concept — not an implementer guessing at shapes.
+1. **Keep the `◆` diamond, and keep it visually abstract** — do **not** evolve its silhouette.
+   The owner rejected the "Blinker" scoop+eye evolution (round 1's recommendation): "I like the
+   abstractness of the diamond, not so much the recommended alternative."
+2. **The mark's canonical color is ink/foreground (currentColor), not amber.** The owner's
+   blinder reading — the whole creative lead — only holds when the diamond is **dark**: "the
+   diamond only looks like a blind when it is black." A hued amber diamond reads as a decorative
+   gem and loses the blinder association. See the color resolution below; this reverses round 1's
+   "amber everywhere" recommendation.
+3. **`docs/media/logo.svg` (the blue-brackets + `dh` + green-dot badge) is *not* the suggestive
+   asset, and the owner is now fine with it** (they had literally never seen it rendered — see
+   DH-0198 — and, shown it clearly, are content with it). It does **not** need a redesign.
+4. **The actual suggestive asset is the ASCII banner** (`DH_ASCII_LOGO`, the figlet-style `dh`):
+   "the ascii version of the old dh logo is the one that is suggestive." The owner wants it
+   redrawn to resemble `logo.svg`'s visual concept — **harness brackets clasping "dh"** — rather
+   than the current figlet blob. Concrete replacement art is drafted below.
+
+So the remaining work is two clean, separable pieces with different owners, both specced to
+`ready` here: **(A) mark color standardization** (Web/Grace — CSS + favicon + social) and
+**(B) ASCII banner redraw** (Prompt/Iris). They are kept in one ticket because they are the two
+halves of the same brand-identity fix; splitting would add tracking overhead for the owner who
+has already iterated twice.
 
 ---
 
-## Design exploration (Fable, architect-on-call for Muriel/Design crew, 2026-07-19)
+## Design exploration — round 2 (Fable, architect-on-call for Muriel/Design crew, 2026-07-19)
 
-### What actually exists today (audited before proposing anything)
+*Round 1's exploration (three silhouette concepts + an "amber everywhere" color call) is
+preserved verbatim at the bottom under "Superseded — round 1" for provenance. Read this section
+for the current design; round 1 is history the owner has explicitly corrected.*
 
-There are **two unrelated marks** in the repo right now, not one:
+### The color resolution (this is the crux — worked through, not picked)
 
-1. **`docs/media/logo.svg`** — a rounded-rect badge containing blue harness *brackets*
-   (`[ ]`-like clasps), the word `dh` in mono, and a small green accent circle. **This is the
-   asset the owner finds too literal / unintentionally suggestive.** It does **not** contain a
-   diamond at all.
-2. **The `◆` glyph (U+25C6)** — the thing the owner actually likes — appears in:
-   - `README.md` title: `# ◆ Dark Harness` — rendered as a plain text glyph, so it takes the
-     heading's **ink/theme text color** (near-black on GitHub light, near-white on dark).
-   - `src/web/client/styles.css` `.brand::before { content: "◆ "; color: var(--accent); }` —
-     rendered **amber `#f5a524`**.
-   - `src/web/client/index.html` favicon — an inline SVG diamond, **amber `#f5a524`**.
-   - `docs/design/social-preview-prompt.md` — amber diamond.
+The owner's correction sets up an apparent conflict: a brand mark "wants" one canonical color,
+but the blinder reading (the creative lead this whole ticket rests on) "only works when the
+diamond is black." Round 1 resolved that conflict the wrong way — it kept amber and treated the
+README's ink diamond as the bug. Taking the owner's observation seriously inverts it:
 
-So the "inconsistency" the owner noticed is not *black-vs-not-black*: in every app surface the
-diamond is **amber**, and only in the README (which can't color a markdown-heading glyph) is it
-**theme ink**. That distinction drives the color recommendation below.
+**The mark's canonical color is the surface's foreground/text color (`currentColor` / the theme
+`--fg`) — i.e. ink: near-black on light surfaces, near-white on dark surfaces. It is *not*
+amber.** Reasoning, in order of weight:
 
-The ASCII banner (`src/prompt/banner.constant.ts`) is a figlet-style `dh` with **no diamond**;
-`DH_ASCII_LOGO_COMPACT` is `[ dh ]`. Neither carries the mark today.
+1. **It's what makes the mark work.** The blinder = dark leather. A hued amber diamond reads as
+   a decorative gem/accent and drops the association; a hue-less, foreground-toned diamond reads
+   as a solid architectural shape — a blind — exactly as the owner observed. The owner named the
+   constraint; ink satisfies it, amber violates it.
+2. **A wordmark lockup wants the mark and the words in one color.** "◆ Dark Harness" reads as a
+   single unit when the diamond shares the wordmark's ink; an amber diamond beside ink words
+   floats as a separate decorative accent, which is precisely the "not consistently colored"
+   discomfort. Same-color = one lockup = the blinder-framing-the-name reading the owner wants.
+3. **"Mark inherits foreground" is a *single* consistent rule** — which resolves the original
+   "not rendered consistently" complaint *better* than forcing amber did. Today's real state:
+   the README `◆` already inherits heading ink (correct), and it's the **app** that's the odd
+   one out (`.brand::before { color: var(--accent) }` paints it amber). So the fix is: the app
+   stops overriding to amber; every surface lets the diamond take foreground ink. The README
+   needs **no change** — it was already right.
+4. **Amber is retained — as the accent, not the mark.** `#f5a524` stays the app's accent color
+   for status/liveness (running agents, links, the agent-node dot — the spirit of the old
+   logo's green dot). The brand becomes a clean **ink mark + warm-amber accent** system, and the
+   mark no longer competes with the accent. Nothing about amber's role in the UI changes; only
+   the *mark* stops borrowing it.
 
-### The one architectural constraint that shapes everything: glyph tier vs. SVG tier
+Note this is theme-relative, not literally `#000`: on the web app's dark background
+(`#0b0d12`) `currentColor` is the light text tone and the diamond is near-white — inverted along
+with the whole UI, standard for any monochrome mark, and still unmistakably the dh diamond. The
+blinder reading is strongest on light surfaces (GitHub README, light theme); on dark surfaces
+the mark inverts with everything else, which is correct and expected.
 
-The mark has to survive in two fundamentally different rendering environments, and this is the
-crux of the whole redesign:
+**Fixed-medium surfaces** (favicon, social-preview image) have no live "surface color" to
+inherit, so they get an explicit choice that honors the same rule: ink on light, light on dark.
+For the favicon, an SVG `@media (prefers-color-scheme)` swap gives the theme-adaptive behavior;
+for the social-preview image, the diamond is the foreground tone against that image's fixed
+background (matching the wordmark on it), **not** amber.
 
-- **Glyph tier** — contexts where the mark is *literally the character `◆`* and no custom
-  geometry is possible: the README heading, the CSS `content:` pseudo-element, plain-text logs,
-  the TUI/ASCII banner. Here you get a diamond and its color, nothing more.
-- **SVG tier** — contexts that render real vector art: `docs/media/logo.svg`, the favicon, the
-  social-preview image, and (if we choose) the web header and README hero via an inline
-  `<img>`.
+### Silhouette: unchanged
 
-**Any evolution that depends on negative-space carving or added strokes exists only in the SVG
-tier — it cannot be reproduced by the bare `◆` glyph.** A redesign that ignores this ships a
-fancy hero mark and a plain diamond everywhere else, and they won't read as the same identity
-unless we plan for it. My recommendation therefore treats this as a deliberate **two-tier mark
-system**: the plain `◆` is the canonical *reduced* form (glyph tier), and the evolved blinder
-art is the *full* form (SVG tier). The reduced form must still be recognizably the same mark —
-which is an argument for evolving the diamond *gently* rather than mutilating its silhouette.
+The `◆` stays a plain, abstract diamond. No scoop, no negative-space eye, no crossing straps —
+all of round 1's shape evolutions are dropped per the owner. This also means **`docs/media/logo.svg`
+does not change** as part of this ticket: it's the separate brackets-badge asset, the owner is
+fine with it, and there is no diamond in it to restyle. (If it is ever unified with the diamond
+mark, that's a future decision the owner has not asked for — do not fold it in here.)
 
-### Three concrete directions
+### Two coexisting brand expressions — intentional, do not "reconcile"
 
-All three assume the mark sits to the **left** of the wordmark "Dark Harness," cupping/opening
-*toward* the text — because a blinder shields one side and leaves the forward view open, and
-here the wordmark *is* the forward view. In all three, the word "Harness" does real semantic
-work: the owner's own observation is that the plain diamond *already* reads as a blinder **next
-to the words** — meaning context carries much of the load and the silhouette needs a lean, not
-a transplant.
+After this ticket the repo intentionally carries **two** brand expressions, and the owner is
+content with both:
 
-#### Concept 1 — "The Blinker" (gentle inner-side evolution) — RECOMMENDED
+- **The `◆` diamond** — the primary mark, glyph-tier: README heading, web header, favicon,
+  social preview. Ink/foreground toned (this ticket).
+- **The bracket lockup `[ dh ]`** — the `logo.svg` badge concept, and now the ASCII banner's
+  identity (below). Owner is fine with `logo.svg` as-is.
 
-Keep the diamond's three **outer** points sharp (top, left, bottom) — the rigid outer edge of
-the leather cup, facing away from the eye. Evolve only the **inner (right, wordmark-facing)**
-side: pull its point inward and bow the two right edges slightly **concave**, so that side
-reads as a scooped leather cup opening toward the wordmark. Punch a single small **circular**
-negative-space hole (a round eye / rosette rivet) just inside the cup. The outer silhouette
-still reads unmistakably as a diamond; the one cupped side + round eye tip it into "blinker."
+Implementers should **not** try to force these into one identity — the owner likes the diamond
+*and* wants the ASCII to look like the brackets. Stated here so nobody "helpfully" unifies them.
 
-Starting SVG geometry (128×128 viewBox, amber fill, `evenodd` to punch the eye — control points
-are a starting point, to be tuned by eye by the implementer):
+### (B) ASCII banner redraw — concrete art
 
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"
-     role="img" aria-label="Dark Harness">
-  <path fill-rule="evenodd" fill="#f5a524" d="
-    M64 16 L16 64 L64 112
-    Q70 84 84 64
-    Q70 44 64 16 Z
-    M70 56 a8 8 0 1 0 0.01 0 Z"/>
-</svg>
+The current `DH_ASCII_LOGO` is the suggestive figlet (its top `_  _` and central `||`
+double-stem are the misread). Redraw it to evoke `logo.svg`'s concept — a rounded badge / harness
+brackets clasping a clean, legible "dh", with the green-dot accent — and drop the blob. Must stay
+**byte-plain ASCII**: no Unicode (no `◆`), no box-drawing, no SGR, per `banner.constant.ts`'s
+existing rule (callers TTY-gate color/glyphs themselves).
+
+**Proposed replacement for `DH_ASCII_LOGO` (primary draft — Iris tunes final kerning):**
+
+```
+ _                       _
+|                         |
+|      |   |              |
+|    __|   |__            |
+|   |  |   |  |           |
+|   |__|   |  |  o        |
+|_                       _|
 ```
 
-Read of that path: `M64 16 L16 64 L64 112` draws the sharp outer half (top→left→bottom); the two
-`Q` curves return bottom→inner-vertex(84,64)→top with the control points pulled toward center to
-bow the right side concave; the trailing `M70 56 a…` is the round eye punched by `fill-rule`.
+Read: the outer `|` frame with `_` corners is the rounded badge / bracket clasp (the `logo.svg`
+silhouette); inside, the left group (`|` stem right, bowl lower-left) is a lowercase **d**, the
+right group (`|` stem left, arch right) is a lowercase **h** — the two stems are held well apart,
+so there is no central double-stem to misread. The `o` is the green agent-node dot from
+`logo.svg`. This is deliberately more legible-as-"dh" and less ornamental than the old figlet.
 
-**Assessment (honest):** This is the direction with the best payoff-to-risk. It keeps the clean
-diamond the owner explicitly likes, leans just far enough that "Harness" completes the blinder
-reading, and is the least likely to look like a gimmick. The reduced glyph tier degrades
-cleanly to a plain `◆` (the eye/scoop are simply absent at glyph tier — acceptable, same mark).
-Two risks I'm designing *against* explicitly: (a) too deep a scoop reads as a crescent/"bitten"
-diamond — keep it shallow; (b) the eye must be a **circle, not a vertical almond** — an almond
-negative-space inside a cupped shape risks re-introducing exactly the anatomical misread that
-started this ticket. Round eye = reads as eye/rivet/harness boss, unambiguous. **This is my
-recommendation, contingent on an owner look, for the reasons in "Status" below.**
+**`DH_ASCII_LOGO_COMPACT` stays `[ dh ]`** — it already *is* the bracket-clasp concept and was
+never the suggestive asset; no change.
 
-#### Concept 2 — "The Rosette Boss" (harness-hardware authenticity)
-
-Keep the `◆` fully intact and whole. Add two **thin crossing straps** behind it — a horizontal
-cheekpiece and a vertical crownpiece — so the diamond reads as the decorative metal **boss /
-rosette at a strap junction**, which is literally what a diamond concho *is* on real harness
-hardware. Straps in a muted ink/border color, diamond in amber on top.
-
-**Assessment:** The most *authentic* and least risky-per-pixel, and it keeps the diamond
-pristine. But it pivots the reading from the owner's specific "blinder" lead to a generic
-"harness hardware" one, and it adds visual complexity (crossing straps) that (a) fights a
-minimalist single-binary-CLI aesthetic and (b) **vanishes at favicon/16px and disappears
-entirely at glyph tier** — leaving a plain diamond with none of the concept. Strong idea,
-weaker fit for a mark that must live mostly as a bare glyph. Good fallback if Concept 1's scoop
-doesn't land for the owner.
-
-#### Concept 3 — "The Shielded-Eye lockup" (minimal mark, context does the work)
-
-Leave the `◆` silhouette essentially unchanged (at most a tiny round eye-dot in the SVG tier).
-Do all the work in the **lockup**: set the diamond tight and vertically centered to the cap
-height immediately left of "Dark," so the pairing itself reads as the blinder framing the
-forward view. This is the lowest-risk option and it *is* also the DH-0193 padding fix — mark
-evolution and spacing resolved in one move — but on its own it's the least visually distinctive
-(it's "a diamond next to words"); it relies entirely on the viewer making the blinder leap the
-owner made.
-
-**Assessment:** Safest, cheapest, most reversible; also the least design-forward. Best thought
-of not as a rival to Concept 1 but as its *lockup layer* — Concept 1's silhouette **plus**
-Concept 3's lockup discipline is the complete answer, which is how I've specced the recommended
-requirements below.
-
-### Recommendation
-
-**Ship Concept 1 ("The Blinker") as the full SVG-tier mark, governed by the two-tier system
-(plain `◆` as the reduced glyph tier), laid out with Concept 3's lockup/padding discipline
-(which also closes DH-0193).** Reasoning: it evolves rather than replaces (reuses the brand
-equity the owner explicitly wants kept), it's the only option that reads specifically as the
-owner's *blinder* lead while staying clean, and its reduced form is a graceful plain diamond
-everywhere the glyph tier forces one. Concept 2 is the fallback if the owner wants the diamond
-untouched.
-
-### Color decision (resolves the "not consistently black" question)
-
-**The mark's one canonical brand color is amber `#f5a524`, in every context that can render
-color** (all SVG-tier surfaces: `logo.svg`, favicon, social preview, and the web header). It is
-**not** black, and it should **not** flip to ink where color is available — a brand mark has one
-color identity. The README/CSS split today is a bug of omission, not intentional variation.
-
-- Where a context **cannot** set a glyph's color — a markdown-heading `◆`, the TUI/ASCII
-  banner, plain-text logs — the mark degrades to the surrounding **ink/default color**. That is
-  an accepted, documented degradation (same spirit as the style guide's "color is never the
-  only signal" and the TTY-gated liveness contract), **not** an inconsistency to chase.
-- **Exception worth fixing:** the README hero *can* render real color via an inline
-  `<img src=".../logo.svg">` in the `# ◆ Dark Harness` heading (GitHub allows `<img>` in
-  headings). Since the README is the most-seen surface, upgrade it from the raw text glyph to
-  the actual amber SVG mark. The `◆` text glyph stays acceptable anywhere an `<img>` is
-  overkill.
-
-Net: **amber everywhere color is possible; ink fallback only where the medium can't carry
-color; README upgraded to the real SVG so it shows canonical amber.**
-
-### ASCII / glyph-tier honesty
-
-The blinker scoop and eye **do not survive to ASCII** — that's expected and fine; ASCII is the
-reduced glyph tier. The ASCII banner should simply carry a **diamond + wordmark**, e.g. a small
-slash-drawn diamond left of the figlet `dh`, and `DH_ASCII_LOGO_COMPACT` becoming `<> dh` (kept
-byte-plain ASCII per banner.constant.ts's existing no-Unicode/no-SGR rule — do **not** bake the
-`◆` U+25C6 glyph into the ASCII constants). Exact ASCII art is Prompt-domain (Iris) execution;
-this ticket only fixes the *identity* it should express (diamond, not the old brackets).
+*(Alternative if the framed-badge look is too heavy at some render widths: drop the outer frame
+and keep just tall `[ ]` brackets around the same "dh" glyphs. Iris's call at execution.)*
 
 ## User Stories
 
-_Provisional on the owner's concept pick (see Status) — written against Concept 1, the
-recommended direction, so blessing it is a short hop to `ready`._
+### As a user seeing `dh`, I want the diamond mark to be the same ink-toned identity as the wordmark on every surface
 
-### As a visitor to the repo, I want the logo to read as a stylized harness blinder next to the wordmark, not as an unintentionally suggestive shape
+- Given any app surface that renders the `◆` mark (web header, favicon, social preview), when it
+  renders, then the mark is the surface's foreground/ink tone (`currentColor` / `--fg`), **not**
+  amber `#f5a524`.
+- Given the web header specifically, when it renders, then `.brand`'s mark no longer takes
+  `var(--accent)`; it takes the foreground text color, matching the "Dark Harness" wordmark
+  beside it.
+- Given the README hero heading, when it renders on GitHub, then the `◆` continues to take the
+  heading's ink color (already correct — asserts no regression, no change required).
+- Given the app's accent color, when status/liveness elements render (running agents, links,
+  agent-node dot), then amber `#f5a524` is still used there — only the *mark* stops using it.
 
-- Given the redesigned `docs/media/logo.svg`, when it is rendered, then it shows the amber
-  Concept-1 blinker mark (diamond with sharp outer points, a shallow concave inner/right side,
-  and a single round negative-space eye) and no longer contains the old blue brackets, `dh`
-  text, or green accent circle.
+### As a visitor, I want the ASCII banner to read as brackets clasping "dh", not as the old suggestive figlet
 
-### As a user seeing `dh` across surfaces, I want the brand mark to be the same identity everywhere
+- Given `DH_ASCII_LOGO`, when it is rendered in the TUI/CLI banner, then it shows the bracket/
+  badge lockup clasping a legible "dh" (per the draft above), is byte-plain ASCII (no Unicode,
+  box-drawing, or SGR), and no longer contains the old figlet form.
+- Given `DH_ASCII_LOGO_COMPACT`, when it renders, then it remains `[ dh ]` (unchanged).
 
-- Given any SVG-tier surface (logo asset, favicon, social preview, web header), when the mark
-  renders, then it is amber `#f5a524`.
-- Given a glyph-tier surface that cannot color a glyph (TUI/ASCII banner, plain-text logs), when
-  the mark renders, then it degrades to the surrounding ink/default color, and this is the only
-  place the mark is non-amber.
-- Given the README hero heading, when it renders on GitHub, then the mark is the actual amber
-  SVG (inline `<img>`), not a raw text glyph.
+### As a user, I want the diamond to stay a plain, abstract diamond
 
-### As a user, I want the reduced (glyph-tier) mark to still read as the same diamond
-
-- Given a context where only the bare `◆` glyph is available, when it renders, then it is a
-  plain diamond in the correct tier color and is recognizably the same mark as the full SVG.
+- Given the `◆` mark on any surface, when it renders, then its silhouette is an unmodified
+  diamond (no scoop, negative-space eye, or added strokes).
 
 ## Functional Requirements
 
-- Replace `docs/media/logo.svg` with the Concept-1 "Blinker" mark (starting SVG above; final
-  scoop depth and eye placement tuned by eye during implementation). Amber `#f5a524`. No
-  brackets/`dh`-text/green-dot.
-- Standardize the mark color to amber `#f5a524` on every color-capable surface; keep the `◆`
-  glyph's ink degradation only where the medium can't carry color; upgrade the README hero to
-  an inline amber SVG `<img>`.
-- Update the ASCII banner identity (`src/prompt/banner.constant.ts`) to express a diamond +
-  wordmark (byte-plain ASCII, no `◆`/SGR), replacing the bracket-era identity. Exact art is
-  Iris/Prompt-domain execution.
-- Keep the two-tier contract: plain `◆` is the canonical reduced form; the blinker art is the
-  full SVG form; both are the same identity.
-- Fan-out on implementation mirrors DH-0121: **Web** (Susan) owns `logo.svg` + favicon + web
-  header + social preview; **Prompt** (Iris) owns the ASCII banner + README; **TUI** (Mary)
-  owns ASCII rendering. Lockup/padding is shared with **DH-0193**.
+- **(A) Color — Web (Susan) / Core-CLI (Grace) as applicable:**
+  - `src/web/client/styles.css`: `.brand::before` (and any structural mark element introduced by
+    DH-0193) uses the foreground/text color, not `var(--accent)`.
+  - `src/web/client/index.html` favicon: ink on light / light on dark (SVG
+    `@media (prefers-color-scheme)`), not fixed amber.
+  - `docs/design/social-preview-prompt.md`: diamond is the foreground tone against the image's
+    background, not amber.
+  - README hero: no change required (already inherits heading ink). Do **not** convert it to an
+    amber `<img>` — that was the reversed round-1 call.
+  - Amber `#f5a524` remains the accent token for status/liveness/links/agent-node — unchanged.
+- **(B) ASCII — Prompt (Iris):** replace `DH_ASCII_LOGO` in `src/prompt/banner.constant.ts` with
+  the bracket-lockup art above (byte-plain ASCII; final kerning Iris's call). Leave
+  `DH_ASCII_LOGO_COMPACT` as `[ dh ]`.
+- **Do not** modify `docs/media/logo.svg` (owner is fine with it; no diamond in it to restyle).
+- **Do not** evolve the `◆` silhouette.
+- Lockup/padding around the mark is DH-0193 and lands in the same pass.
+- DH-0198 (web header never renders a real mark asset) consumes the final mark form settled here
+  — see its cross-reference.
 
 ## Assumptions
 
-- The owner keeps the diamond as the root of the identity (stated explicitly 2026-07-19).
-- GitHub renders an inline `<img>` inside a markdown `#` heading (it does).
+- The owner keeps the `◆` diamond as the primary mark, plain/abstract (stated 2026-07-19).
+- The owner is content with `docs/media/logo.svg` as-is (stated 2026-07-19).
+- Two brand expressions (ink `◆` mark + `[ dh ]` bracket lockup) coexisting is acceptable to the
+  owner and is intentional.
 
 ## Risks
 
-- Design taste is the owner's call. Presented as three options with a clear recommendation, not
-  a fait accompli, per the ticket's original Risk and CLAUDE.md §6's note that taste routes to
-  the owner.
-- Concept 1's scoop, if too deep, reads as a crescent/bitten diamond; the eye, if a vertical
-  almond rather than a circle, risks re-introducing the anatomical misread that started this
-  ticket. Both explicitly designed against above (shallow scoop, round eye) — but this is the
-  concrete reason an owner look before implementation is warranted.
+- Design taste is the owner's call; this round *executes* the owner's explicit corrections rather
+  than proposing new taste, so the residual taste risk is low. The one decision that follows by
+  implication rather than by the owner's literal words is **demoting amber from the mark to
+  accent-only** — it's the direct logical consequence of "the diamond should be black," and is
+  called out here so the owner can bounce it if they disagree, but it is not gating.
 
 ## Open Questions
 
-- Owner: Concept 1 (recommended), Concept 2 (diamond untouched, add crossing straps), or
-  Concept 3 (minimal, lockup-only)? Implementation is specced against Concept 1.
+- None gating. (Round 1's "which concept?" question is resolved: none — plain diamond, ink color,
+  ASCII redrawn to brackets.)
 
 ## Status
 
-**`refining`, deliberately.** The recommendation (Concept 1 + amber-canonical + two-tier) is
-concrete enough to build directly, but design taste is inherently the owner's call more than a
-typical CLAUDE.md §6 escalation, and this ticket's own Risk requires presenting options rather
-than picking one unilaterally — especially given the mark's origin as an *unintended* misread,
-where a second set of eyes before implementation is cheap insurance. On owner sign-off of a
-concept this moves straight to `ready` with the User Stories above (adjusted only if a fallback
-concept is chosen). Padding is fully specced in DH-0193 and lands in the same pass.
+**`ready`.** Both halves execute the owner's explicit 2026-07-19 corrections and have concrete
+FRs, User Stories, and (for the ASCII) drafted art. Fan-out mirrors DH-0121: Web (Susan) owns the
+color standardization (CSS/favicon/social); Prompt (Iris) owns the ASCII redraw; padding is the
+shared DH-0193, same pass. `docs/media/logo.svg` is intentionally untouched.
 
 ## Notes
 
-- 2026-07-19 (Fable): design exploration added; status draft → refining. Audited the true
-  state (two unrelated marks; app-diamond is amber not black), surfaced the glyph-tier vs
-  SVG-tier constraint as the governing architectural decision, recommended Concept 1 with amber
-  as canonical brand color. DH-0193 filled in as the shared lockup/padding half.
+- 2026-07-19 (Fable, round 2): rescoped against two owner corrections. Dropped Concept 1
+  (silhouette stays plain). **Reversed the color call: mark is ink/foreground `currentColor`, not
+  amber** — the blinder reading requires a dark mark; amber demoted to accent-only. Refocused the
+  redesign onto the **ASCII banner** (the actual suggestive asset) with concrete bracket-lockup
+  art; `docs/media/logo.svg` is fine as-is and untouched. Status refining → ready.
+- 2026-07-19 (Fable, round 1): initial exploration (preserved below, superseded).
+
+---
+
+## Superseded — round 1 exploration (2026-07-19, kept for provenance)
+
+*The owner corrected this round: rejected Concept 1's silhouette evolution and reversed the
+amber color call. Retained only as history — do not build from this section.*
+
+Round 1 audited that there are two unrelated marks (`logo.svg` brackets-badge vs. the standalone
+`◆` glyph), surfaced a glyph-tier vs. SVG-tier constraint, and proposed three silhouette concepts
+— **Concept 1 "The Blinker"** (concave inner side + round negative-space eye, recommended),
+Concept 2 "The Rosette Boss" (crossing straps behind an intact diamond), Concept 3
+"Shielded-Eye lockup" (silhouette untouched, work done in the lockup). It recommended Concept 1
+plus **amber `#f5a524` as canonical everywhere color is possible**, with ink only where the
+medium can't carry color, and upgrading the README hero to an inline amber `<img>`. Round 2
+supersedes all of it: silhouette stays plain (owner rejected Concept 1), and the canonical color
+is ink/foreground, not amber (the blinder reading needs a dark mark). The glyph-tier/SVG-tier
+observation remains true but is no longer load-bearing, since nothing is being carved into the
+silhouette.
