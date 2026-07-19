@@ -66,7 +66,6 @@ source: tracking/
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
 | [DH-0173](../DH-0173-split-the-agentruntime-god-class-into-collaborators-and-break-up-spawnagent-runroot.md) | Split the AgentRuntime God class into collaborators and break up spawnAgent/runRoot | bug | stefan |
 | [DH-0174](../DH-0174-split-cli-ts-2041-lines-into-focused-modules-and-extract-a-shared-ansi-color-primitive.md) | Split cli.ts (2041 lines) into focused modules and extract a shared ANSI/color primitive | bug | stefan |
-| [DH-0187](../DH-0187-import-import-a-claude-code-session-directory-into-dh.md) | --import: import a Claude Code session directory into dh | feature | stefan |
 
 ### refining
 
@@ -83,6 +82,7 @@ source: tracking/
 | [DH-0184](../DH-0184-extract-the-shared-sse-transport-frame-parser-full-jitter-backoff-last-event-id-reconnect-payload-validation-into-src-client-core-resolving-the-validation-strictness-divergence.md) | Extract the shared SSE transport (frame parser + full-jitter backoff + Last-Event-ID reconnect + payload validation) into src/client-core/, resolving the validation-strictness divergence | feature | stefan |
 | [DH-0185](../DH-0185-migrate-the-tui-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the TUI SSE client onto the shared src/client-core/ transport | feature | stefan |
 | [DH-0186](../DH-0186-migrate-the-web-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the Web SSE client onto the shared src/client-core/ transport | feature | stefan |
+| [DH-0187](../DH-0187-import-import-a-claude-code-session-directory-into-dh.md) | --import: import a Claude Code session directory into dh | feature | stefan |
 | [DH-0188](../DH-0188-import-claude-code-session-translation-jsonl-writer-server.md) | import: Claude Code session translation + JSONL writer (Server) | feature | stefan |
 | [DH-0189](../DH-0189-import-import-cli-flag-mode-composition-model-selection-core.md) | import: --import CLI flag, mode composition, model selection (Core) | feature | stefan |
 
