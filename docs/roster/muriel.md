@@ -202,3 +202,50 @@ work in parallel — stage by exact filename.
 **Open threads for next round:** none from this ticket — implementation is Grace's per §3
 ownership; no further design follow-up expected unless a new status-dot surface introduces
 its own green later.
+
+### 2026-07-19 — round 6: repo-front polish (README hero + social preview) before showing people
+
+Owner direct feedback ahead of a demo: (1) README hero screenshot/header sits too low;
+(2) no designed GitHub social-preview card exists. Filed two tickets, both owner=Iris (README
+= Prompt domain; `docs/media/` asset is README-adjacent, Prompt), both → **ready**.
+
+**Judgment calls:**
+- **DH-0227 (README hero restructure).** Diagnosed the real cause: the product `<picture>`
+  screenshot is at README L49, *below* two paragraphs + a 25-line "Why this exists" essay —
+  so the fastest "what is this" signal is below the fold on every viewport. Fix is a pure
+  reorder + extracting the first hook clause into a single tagline line: order becomes
+  logo → title → one-line tagline → badges → screenshot → (then) the essay/prose. **Screenshot
+  asset already exists** (`hero-web-dark/light.png`) — explicitly scoped OUT any new capture;
+  this is reorder-only. Gave it a real acceptance test hook: a block-order assertion in the
+  `src/prompt/` README-sync test family (byte offset of the `<picture>` block < the
+  `### Why this exists` heading) so the screenshot can't be silently re-buried later.
+- **DH-0228 (social preview).** Deliberately **superseded the generative-image approach** in
+  `docs/design/social-preview-prompt.md` (which assumed prompting an image model) with a
+  **precise vector composition**: author `docs/media/social-preview.svg` embedding the *actual*
+  `logo.svg` monogram paths (transform+scale 0.78125, its own green→cyan gradient, never
+  recolored) + "Dark Harness" wordmark + shared tagline + recessive agent-node motif on
+  `#0b0d12`, then rasterize to a checked-in 1280×640 PNG. Rationale: guarantees the mark is
+  pixel-identical to the real logo, trivially regenerable, no model-iteration on legibility.
+  Wrote the full coordinate-level composition into the ticket (monogram at (200,175),
+  wordmark x=440/y=312/104px, tagline x=444/y=384/34px, motif in corners) so there's zero
+  design judgment left for Iris. **Decided static asset, NOT a `scripts/` build script** —
+  same footing as `logo.svg`, changes only when the brand changes; a build-pipeline generator
+  would be over-engineering (noted Core/Grace only enters if owner ever wants it scripted).
+  Flagged the font-substitution raster risk (render via headless Chromium or outline the text)
+  and that the final Settings → Social preview upload is a **manual owner action outside
+  ticket scope**.
+- **Durable convention → style-guide §8** (new "README / repo-front conventions"): first-
+  screenful order (mark → name → tagline → badges → screenshot; rationale below the fold), and
+  "on-page hero + external card share one mark, one tagline, one palette." Both tickets cite it.
+
+**Process:** the tracking-reverter (round-3 note) did NOT clobber this round — used the proven
+atomic `cp + transition + git add <exact files> + commit` in one Bash call and verified via
+`git show HEAD:`. Also: minting two tickets bumped `tracking/README.md`'s `counter:` to 228,
+which lands as a separate unstaged change — remember to commit that counter bump too (did, as
+a follow-up commit). Staged by exact filename (other agents had no concurrent tracking work
+this round, but kept the discipline).
+
+**Open threads:** none blocking. Iris implements both independently (they're separate
+surfaces). Owner may bounce the exact tagline wording on either — specified as
+`Point dh at a repo and an instructions file, and it works the job unattended.` (on-page) /
+`Unattended multi-agent harness in a single binary.` (card) — non-gating.
