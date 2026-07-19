@@ -207,6 +207,8 @@ Flags:
 | `--quiet` | Suppress `--server`'s per-agent-lifecycle activity feed and SSE connect/disconnect lines. The one-time startup block still prints regardless. |
 | `--connect <host>` | Connect to a remote `dh --server` instead of starting a local one. |
 | `--port <n>` | Listen port for `--server`, or target port for `--connect`. Default `4000`. |
+| `--web-port <n>` | Pinned listen port for the web UI's static server. Requires `--web`. Default: a random ephemeral port, unless `dh.json`'s `security.webPort` sets one (this flag overrides that). |
+| `--host <name>` | Overrides `dh.json`'s `security.hostname` for this invocation only. |
 | `--instructions <file>` | Path to an instructions file. Without `--job`, launches the interactive session immediately and auto-sends the file's content as the first message once the root agent connects. With `--job`, the root agent starts on it immediately, headlessly. |
 | `--job` | Headless mode: no TUI/Web session attaches; exit when the root agent finishes (see the exit-code table above). Defaults to a full, live, turn-by-turn markdown transcript on stdout — see `--result-only`/`--json` and the output-mode table above. |
 | `--json` | With `--job`: a pure format selector (markdown vs. JSON), orthogonal to breadth. Default breadth: stream NDJSON progress events to stdout as the run happens, closed by a final `job_result` line. With `--result-only`: print a single `job_result` JSON object at the end. Requires `--job`. |
@@ -216,6 +218,8 @@ Flags:
 | `--check` | For each configured model, make one cheap no-op provider call and report pass/fail, then exit. Never enters the agent loop. Same as `dh doctor`. |
 | `--dry-run` | Validate config parsing, instructions-file readability, and provider client construction, then exit `0`. Never calls a model. |
 | `--resume <sessionId>` | Reconstruct the root agent's conversation from a prior `.dh-logs/<sessionId>` directory and continue it as a new session. Not supported together with `--connect`. |
+| `--import <path>` | Translate a real Claude Code session (a backup-archive directory or a live `<id>.jsonl` file) into a new resumable `.dh-logs/<sessionId>` session, then resume it via the same path as `--resume`. Not supported together with `--connect`, `--resume`, `--check`, or `--dry-run`. |
+| `--model <alias>` | Companion flag to `--import`: selects the `dh.json` model alias the imported session resumes under. Must name a model in `dh.json`'s `models[]`. Requires `--import`; without it, import falls back to `dh.json`'s `options.defaultModel`. |
 | `--help`, `-h` | Show usage and exit. |
 | `--version` | Show build identity (version, git sha, dirty flag) and exit. |
 
@@ -365,6 +369,13 @@ Agent output is always Markdown: the built-in system prompt instructs every mode
 plain-text output as Markdown, and both the console TUI and the web UI render it as such
 (headings, bold/italic, inline code, fenced code blocks, lists, blockquotes, links) rather
 than showing raw Markdown syntax or passing through raw escape sequences.
+
+Both the console TUI and the web UI support local slash commands typed into the message
+box — `/model [name]` (show/switch the active model; no arg opens a picker), `/help` (list
+built-ins plus every cached skill command), and `/clear` (clear the local transcript view
+only — it does not reset the agent's own context) — plus `/<skillname>` to invoke a cached
+skill directly. Typing `/` opens an autocomplete dropdown listing the matching built-ins and
+skill commands as you type, navigable with the arrow keys and Enter/Tab to accept.
 
 ## Known gaps
 
