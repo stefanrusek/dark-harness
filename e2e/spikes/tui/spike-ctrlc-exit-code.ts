@@ -11,21 +11,27 @@
 // graceful end of conversation → exit 0 (DH-0059 / ADR 0005 amendment); stopping one mid-work
 // is exit 1. So the spike first confirms the root agent reached "waiting" — deterministically,
 // not with a sleep — by opening the agent tree and polling the RAW capture for the root
-// entry's status glyph in cyan (`\x1b[36m` = waiting, src/tui/render.ts STATUS_COLOR). The
+// entry's status glyph, colored per `STATUS_TOKENS.waiting` (src/design-tokens.ts). The
 // root agent has no "Status:" detail view (Enter on the root tree entry returns to the root
 // transcript view), so the colored glyph is the only on-screen waiting indicator for it.
 //
 // Run: bun e2e/spikes/tui/spike-ctrlc-exit-code.ts
 
+import { STATUS_TOKENS } from "../../../src/design-tokens.ts";
 import { successTurn } from "../../support/mock-provider.ts";
 import type { SpikeCheck } from "./spike-support.ts";
 import { bootLocalTui, expectContains, expectTrue, reportAndExit } from "./spike-support.ts";
 
-// Cyan status dot (●) = "waiting" (src/tui/render.ts STATUS_COLOR). DH-0065 inserted a
-// colored status word ("waiting") between the glyph and the agentId label, so the glyph no
-// longer sits directly adjacent to "agent-root" — check the glyph and the label as two
-// separate substrings of the same raw capture rather than one concatenated string.
-const WAITING_GLYPH = "\x1b[36m●\x1b[39m"; // cyan status dot (●) = "waiting"
+// DH-0212: this used to be a hardcoded "\x1b[36m●\x1b[39m" — stale only on the color byte.
+// DH-0100 (landed earlier, pre-dating this round) recolored "waiting" from cyan to yellow/
+// amber (sgr "33" in STATUS_TOKENS/src/design-tokens.ts); the spike's literal was never
+// updated to match. The `\x1b[39m` reset is still correct as-is: `tmux capture-pane -e`
+// re-serializes SGR state from its own interpreted terminal model rather than passing the
+// real wire bytes through verbatim, so a foreground-only color run comes back out as a
+// foreground-only reset (`\x1b[39m`) even though the actual renderer
+// (src/tui/ink/tokens.ts's `colorizeStatus`) emits a full `\x1b[0m`. Derive the color code
+// from the real shared token instead of a second hardcoded copy so it can't drift again.
+const WAITING_GLYPH = `\x1b[${STATUS_TOKENS.waiting.sgr}m●\x1b[39m`;
 
 const { session, stop } = await bootLocalTui([successTurn("Stop-test reply.")], {
   wrapCommand: (binaryPath) => ["sh", "-c", `"${binaryPath}"; echo "SPIKE-EXIT:$?"; sleep 60`],

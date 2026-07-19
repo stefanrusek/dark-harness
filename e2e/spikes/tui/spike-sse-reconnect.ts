@@ -70,16 +70,50 @@ try {
 
   // Kill the server the client is connected to — its next SSE read fails, driving the
   // client into "connecting"/backoff-retry.
+  //
+  // DH-0212: this used to check `/—\s+(connecting|closed|error)\b/` — stale on two counts.
+  // The actual pending/disconnected vocabulary (src/design-tokens.ts CONNECTION_TOKENS,
+  // rendered by src/tui/ink/TitleBar.tsx) is "connecting…" / "reconnecting…" /
+  // "disconnected", not "closed"/"error" (those words never appear anywhere in the title
+  // bar). And for the two *pending* states, the title bar renders a spinner glyph between
+  // the em dash and the label (`— ⠙ connecting…`), which `\s+` doesn't match, so the regex
+  // could never match even the one real label ("connecting") it did name. Match the actual
+  // label words directly instead of re-deriving the surrounding chrome.
   server.kill();
   const sawDisconnected = await session
-    .waitFor((screen) => /—\s+(connecting|closed|error)\b/.test(screen), 10_000)
+    .waitFor((screen) => /connecting…|reconnecting…|disconnected/.test(screen), 10_000)
     .then(() => true)
     .catch(() => false);
 
-  // Restart a brand-new server process bound to the SAME port so the client's existing
-  // reconnect loop (which retries the same host:port) can actually succeed.
-  secondServer = await spawnDh({ args: ["--server", "--port", String(port)], cwd: serverWs.dir });
-  await secondServer.waitForStdout(/listening on port/, 5_000);
+  // DH-0212: `server.kill()` above only sends the signal — the port isn't necessarily free
+  // the instant the process exits. The first server actually accepted a live SSE connection
+  // (the client under test), so the socket it held goes into TCP TIME_WAIT on close rather
+  // than being immediately reusable; the OS can hold that for well past process exit even
+  // though nothing is listening anymore. Immediately spawning a second server on the SAME
+  // port reliably lost that race ("Failed to start server. Is port N in use?"), timing out
+  // this whole spike before the actual reconnect-indicator check ever ran. Wait for the
+  // first server's process to fully exit, then retry the rebind with backoff — same-port
+  // reuse is a load-bearing part of what's under test here (the client's reconnect loop
+  // retries the same host:port, so switching to a fresh port would stop testing the real
+  // reconnect path), so the fix is patience, not avoiding the port.
+  await server.waitForExit(5_000).catch(() => {
+    // Best-effort: if it doesn't report exit within the window, still attempt the rebind —
+    // a genuine bind failure below will surface via spawnDh/waitForStdout's own error.
+  });
+
+  const REBIND_ATTEMPTS = 6;
+  const REBIND_RETRY_DELAY_MS = 1_000;
+  for (let attempt = 1; attempt <= REBIND_ATTEMPTS; attempt += 1) {
+    secondServer = await spawnDh({ args: ["--server", "--port", String(port)], cwd: serverWs.dir });
+    try {
+      await secondServer.waitForStdout(/listening on port/, 3_000);
+      break;
+    } catch (err) {
+      secondServer.kill();
+      if (attempt === REBIND_ATTEMPTS) throw err;
+      await Bun.sleep(REBIND_RETRY_DELAY_MS);
+    }
+  }
 
   pane = await session.waitFor((screen) => screen.includes("Reconnected"), 15_000);
 

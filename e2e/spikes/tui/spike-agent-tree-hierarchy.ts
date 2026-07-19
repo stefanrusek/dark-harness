@@ -16,6 +16,7 @@
 //
 // Run: bun e2e/spikes/tui/spike-agent-tree-hierarchy.ts
 
+import { STATUS_TOKENS } from "../../../src/design-tokens.ts";
 import { ensureBuilt } from "../../support/build.ts";
 import { startMockAnthropicProvider, successTurn } from "../../support/mock-provider.ts";
 import { startTmuxSession } from "../../support/tmux-pty.ts";
@@ -79,9 +80,15 @@ try {
   // Left-arrow on an empty input opens the Agent Tree view.
   session.sendKeys("Left");
   pane = await session.waitFor((screen) => screen.includes("Agent Tree"), 10_000);
-  // Give the tree a moment to reflect the now-completed child (status transitions land via
-  // a separate SSE event after the tool result).
-  pane = await session.waitFor((screen) => screen.includes("agent-root"), 5_000);
+  // DH-0212: this used to wait only for "agent-root" — trivially already on screen the
+  // instant the tree view opens (the request_agent_tree round-trip resolves before the
+  // child's row paints), so the childLine/childIndent checks below raced the child's own
+  // render and saw a root-only tree. Wait for the child's own description text too, same
+  // poll pattern as spike-tree-scroll.ts.
+  pane = await session.waitFor(
+    (screen) => screen.includes("agent-root") && screen.includes("Say hi as sub-agent"),
+    5_000,
+  );
 
   const lines = pane.split("\n");
   const rootLine = lines.find((l) => l.includes("agent-root"));
@@ -100,7 +107,13 @@ try {
 
   // Poll for the green "done" glyph on the (sub) entry — a plain terminal-status color check
   // to close out the Test Plan's "per-agent status shows the correct label/color" item.
-  const DONE_GLYPH_PREFIX = "\x1b[32m●\x1b[39m";
+  // DH-0212: derive the color code from the shared STATUS_TOKENS (src/design-tokens.ts)
+  // instead of a second hardcoded literal, so it can't silently drift the way
+  // spike-ctrlc-exit-code.ts's waiting-glyph check did (DH-0100 recolored a status without
+  // this spike's copy following). The `\x1b[39m` reset stays as-is — `tmux capture-pane -e`
+  // re-serializes a foreground-only SGR run as a foreground-only reset regardless of what
+  // full-reset byte the renderer actually emitted (see spike-ctrlc-exit-code.ts's comment).
+  const DONE_GLYPH_PREFIX = `\x1b[${STATUS_TOKENS.done.sgr}m●\x1b[39m`;
   let sawDoneGlyph = false;
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
