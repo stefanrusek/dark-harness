@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0147
 type: feature
-status: draft
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
@@ -60,7 +60,10 @@ This is a real behavior change to `--job`'s default output (bare-final-output ->
 - Add `--result-only` as a new CLI flag, valid only alongside `--job`.
 - Change `--job`'s default (no `--result-only`) output from `result.finalOutput` to a full markdown-rendered stream of the conversation.
 - `--json` remains a pure format selector -- combine with either breadth (default full-stream, or `--result-only`) rather than being its own breadth mode. `--json`'s validation (requires `--job`) is unchanged.
-- Design decision needed by whoever implements: stream the default markdown transcript live turn-by-turn as the run progresses (matching `--json`'s existing live-streaming nature -- almost certainly the right call given the *reason* for this default change is watching a long unattended run), vs. building it from the same event stream at the end. Should be confirmed/decided explicitly during implementation, not assumed.
+- **Resolved (owner, 2026-07-19): stream the default markdown transcript live, turn-by-turn**
+  as the run progresses, matching `--json`'s existing live-streaming behavior — the whole
+  point of the new default is watching a long unattended run in progress, not waiting until
+  it finishes.
 - README/CLI-reference docs: name `--job` as headless mode explicitly, and document the full 2x2 output-mode matrix (default breadth x format, `--result-only` breadth x format).
 
 ## Assumptions
@@ -73,6 +76,6 @@ This is a real behavior change to `--job`'s default output (bare-final-output ->
 
 ## Open Questions
 
-- Live-streaming vs. end-of-run rendering for the default markdown transcript (see Functional Requirements) -- needs a real decision during implementation.
+None remaining — resolved in Functional Requirements (live, turn-by-turn streaming).
 
 ## Notes
