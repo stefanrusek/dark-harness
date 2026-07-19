@@ -56,12 +56,12 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
-| [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
 | [DH-0174](../DH-0174-split-cli-ts-2041-lines-into-focused-modules-and-extract-a-shared-ansi-color-primitive.md) | Split cli.ts (2041 lines) into focused modules and extract a shared ANSI/color primitive | bug | stefan |
 | [DH-0191](../DH-0191-consolidate-hand-rolled-status-color-sgr-tables-onto-design-tokens-ts-and-extract-a-shared-sgr-primitive.md) | Consolidate hand-rolled status-color/SGR tables onto design-tokens.ts and extract a shared SGR primitive | bug | stefan |
 | [DH-0192](../DH-0192-logo-redesign-current-mark-is-too-literal-and-reads-unintentionally-suggestive.md) | Logo redesign: current mark is too literal and reads unintentionally suggestive | bug | stefan |
 | [DH-0193](../DH-0193-wordmark-needs-more-padding-wherever-it-s-plugged-in-next-to-the-logo.md) | Wordmark needs more padding wherever it's plugged in next to the logo | bug | stefan |
+| [DH-0194](../DH-0194-agent-should-know-when-running-non-interactively-job-and-adjust-behavior-accordingly.md) | Agent should know when running non-interactively (--job) and adjust behavior accordingly | feature | stefan |
 
 ### refining
 
@@ -78,6 +78,7 @@ source: tracking/
 | [DH-0143](../DH-0143-web-commands-should-autocomplete.md) | Web: / commands should autocomplete | feature | stefan |
 | [DH-0144](../DH-0144-all-recognized-skills-should-be-accessible-as-commands.md) | All recognized skills should be accessible as / commands | feature | stefan |
 | [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
+| [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
 
 ### implementing
 
