@@ -190,6 +190,46 @@ export function renderSelfInfoSection(
 }
 
 /**
+ * DH-0194 (tracking/DH-0194-*.md): tells the agent explicitly when it is running unattended —
+ * the standalone `--instructions`/`--job` path, where `interactive` is `false` on
+ * `AgentRuntime` (see that class's `AgentRuntimeOptions.interactive` doc comment) — as opposed
+ * to an interactive TUI/Web/server session with a live operator watching. Scoping finding: the
+ * signal this needed already existed end-to-end (`src/cli.ts` sets `interactive: true` only for
+ * the four interactive run modes; the standalone job path never sets it, defaulting to
+ * `false`), so no new plumbing was required — this function is called from
+ * `AgentRuntime.buildAgentSystemPrompt()` (`src/agent/runtime.ts`), gated on
+ * `!this.interactive`, reusing that existing per-runtime field rather than adding a parallel
+ * one.
+ *
+ * Deliberately separate from `DISCIPLINE_PROMPT`/`REQUIRED_CONTRACT` above (which are computed
+ * once per config load and are identical for every agent in a runtime) because whether an agent
+ * is unattended is a property of the whole runtime, not something baked into the base prompt at
+ * config-load time — mirrors `renderSelfInfoSection`'s reasoning for being appended per-agent
+ * rather than folded into `BASE_PROMPT`.
+ */
+export function renderJobModeSection(): string {
+  return `## You are running unattended (--job mode)
+
+There is no human operator watching this session in real time. No one will see a clarifying
+question and no one will reply to one — a tool call or final response that asks a question and
+waits for an answer will simply hang forever, since nothing is polling for your output.
+Behave as an unattended batch process, not an interactive assistant:
+
+- **Never ask a clarifying question and wait for a reply.** If you would normally pause to ask
+  an operator something, don't. Make the single most reasonable, defensible judgment call
+  instead and proceed.
+- **State assumptions instead of asking permission.** If you had to guess at scope, intent, or
+  a missing detail, say so plainly in your final output — what you assumed and why — so
+  whoever reads the log afterward can correct it if needed. This is the same "no silent
+  truncation" discipline as elsewhere in this prompt, applied to judgment calls instead of
+  coverage.
+- **Only stop short of finishing if no reasonable path forward exists at all.** Exhaust the
+  reasonable interpretations before giving up; if you truly cannot proceed, report
+  \`TASK_FAILED\` (see above) rather than leaving a turn open waiting on input that will never
+  come.`;
+}
+
+/**
  * Renders the "Available skills" section of the default prompt: name + one-line description
  * per skill, sorted alphabetically for deterministic output. Always non-empty — the bundled
  * cli-tools skill is unconditional.

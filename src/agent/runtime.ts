@@ -21,7 +21,7 @@ import {
   type SkillInfo,
 } from "../contracts/index.ts";
 import { composeSkillInvocation } from "../prompt/index.ts";
-import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
+import { renderJobModeSection, renderSelfInfoSection } from "../prompt/system-prompt.ts";
 import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import { type AgentLoopResult, computeCostUsd, type ModelBinding, runAgentLoop } from "./loop.ts";
 import { McpManager } from "./mcp/manager.ts";
@@ -384,7 +384,13 @@ export class AgentRuntime {
    * into `this.systemPrompt` once; every `runAgentLoop()` call site (`runRoot()`,
    * `spawnAgent()`) calls this with the model it just resolved for that specific agent. */
   private buildAgentSystemPrompt(model: ModelConfig): string {
-    return `${this.systemPrompt}\n\n${renderSelfInfoSection(this.config, model)}`;
+    // DH-0194: `this.interactive` is `false` for the standalone `--instructions`/`--job`
+    // path (no live operator) and `true` for every interactive session (server/TUI/Web) —
+    // see AgentRuntimeOptions.interactive's doc comment above. Sub-agents always run under
+    // this same runtime instance, so they get the same job-mode section as the root when the
+    // whole runtime is non-interactive.
+    const jobModeSection = this.interactive ? "" : `\n\n${renderJobModeSection()}`;
+    return `${this.systemPrompt}\n\n${renderSelfInfoSection(this.config, model)}${jobModeSection}`;
   }
 
   private buildToolContext(agentId: string): ToolContext {

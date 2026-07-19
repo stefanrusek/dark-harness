@@ -12,6 +12,7 @@ import {
   loadSystemPrompt,
   REQUIRED_CONTRACT,
   readProjectClaudeMd,
+  renderJobModeSection,
   renderSelfInfoSection,
   renderSkillsSection,
 } from "./system-prompt.ts";
@@ -54,6 +55,15 @@ describe("renderSkillsSection", () => {
 
   test("still renders a header with no bullets when given no skills", () => {
     expect(renderSkillsSection([])).toBe("## Available skills\n");
+  });
+});
+
+describe("renderJobModeSection", () => {
+  test("names --job mode explicitly and instructs the agent not to wait on a reply", () => {
+    const section = renderJobModeSection();
+    expect(section).toContain("You are running unattended (--job mode)");
+    expect(section).toContain("Never ask a clarifying question and wait for a reply.");
+    expect(section).toContain("TASK_FAILED");
   });
 });
 

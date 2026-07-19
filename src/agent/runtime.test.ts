@@ -552,6 +552,43 @@ describe("AgentRuntime", () => {
     },
   );
 
+  // DH-0194: the standalone --job/--instructions path never sets `interactive` (defaults
+  // false), so the agent must see the unattended-mode instructions in its system prompt.
+  test("DH-0194: a non-interactive runtime (the default, matching --job) includes the job-mode section in the system prompt", async () => {
+    receivedSystemPrompts = [];
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "you are a test agent" });
+    const result = await runtime.runRoot("please just answer");
+    expect(result.success).toBe(true);
+    expect(receivedSystemPrompts[0]?.system).toContain("You are running unattended (--job mode)");
+    expect(receivedSystemPrompts[0]?.system).toContain(
+      "Never ask a clarifying question and wait for a reply.",
+    );
+  });
+
+  // DH-0194: interactive sessions (server/TUI/Web, `interactive: true`) have a live operator,
+  // so the job-mode section must NOT be injected. Exercised via spawnAgent (not runRoot)
+  // because an interactive root pauses "waiting" instead of resolving on its first
+  // non-tool-use turn (Round 5 semantics, see AgentRuntimeOptions.interactive's doc comment)
+  // — a sub-agent always reaches "done" regardless of the runtime's interactive flag (Round
+  // 7 fix, see the test above), so it's the reliable way to await a system prompt here.
+  test("DH-0194: an interactive runtime does not include the job-mode section in the system prompt", async () => {
+    receivedSystemPrompts = [];
+    const runtime = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "you are a test agent",
+      interactive: true,
+    });
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+    });
+    await runtime.tasks.awaitDone(taskId);
+    expect(runtime.tasks.snapshot(taskId).status).toBe("done");
+    expect(receivedSystemPrompts[0]?.system).not.toContain(
+      "You are running unattended (--job mode)",
+    );
+  });
+
   test("runRoot works without onEvent/onLogLine callbacks", async () => {
     const runtime = newAgentRuntime({
       config: baseConfig(),
