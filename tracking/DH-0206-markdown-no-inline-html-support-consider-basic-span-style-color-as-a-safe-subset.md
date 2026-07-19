@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0206
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -99,6 +99,62 @@ below restate it in ticket form. Build against ADR 0009.
   decision record is warranted, not just a ticket note.
 
 ## Notes
+
+### 2026-07-19 — implemented per ADR 0009, → verifying
+
+Built exactly the ADR 0009 design, one implementer pass across all three ownership slices:
+
+- `src/markdown/index.ts`: added the `coloredSpan` `InlineNode` variant, `COLORED_SPAN_OPEN`
+  regex, frozen `NAMED_COLORS` set, and `validateColor` (exported for direct unit testing).
+  Wired into `parseInline`'s `<` handling with the fail-closed algorithm from the ADR
+  (opening-regex match → `validateColor` gate → first-`</span>` search → construct). Amended
+  the file header to describe the one bounded exception and cite ADR 0009.
+- `src/web/client/markdown-dom.ts`: added `case "coloredSpan"` to `renderInlineNode`, setting
+  `span.style.color = node.color` via property assignment only (no string-built `style="…"`,
+  no `innerHTML`).
+- `src/tui/markdown-ansi.ts`: added the fixed `NAME_TO_SGR` map and a `case "coloredSpan"` in
+  `inlineToLines` — named colors get their mapped SGR code from the existing 16-color
+  allowlist, hex/unmapped names render plain with `codes` unchanged.
+
+**User Story → proving test:**
+
+- "operator reading a transcript... Web client... `style.color === 'red'`" →
+  `src/web/client/markdown-dom.test.ts` — "a named-color span renders as a `<span>` with
+  style.color set via property assignment".
+- "...TUI... SGR 31 with trailing reset, row self-contained" →
+  `src/tui/markdown-ansi.test.ts` — "a named color emits the mapped SGR code around the text,
+  with a trailing reset".
+- "...hex... TUI renders plain (no color SGR emitted)... Web `style.color === '#ff0000'`" →
+  `src/tui/markdown-ansi.test.ts` — "a hex color renders as plain text — no color SGR code at
+  all"; `src/web/client/markdown-dom.test.ts` — "a hex-color span sets style.color to the hex
+  value".
+- "security reviewer... every ADR 0009 adversarial input... no `coloredSpan` node produced" →
+  `src/markdown/index.test.ts`, `describe("parseInline — coloredSpan (DH-0206/ADR 0009)")`,
+  adversarial cases 1–9, 11a–11c — one test per numbered case in the ADR's required list (all
+  11 numbered cases covered, 6 split into 6a/6b for the two quote-breakout variants).
+- "valid span, mixed case/quote style/optional `;`... one `coloredSpan` node, lowercased
+  normalized color" → `src/markdown/index.test.ts`, happy-path tests in the same describe
+  block (case 10 in the ADR): named+`;`, named no `;`, 3-digit hex, 6-digit hex, mixed-case
+  tag/attribute/color, single-quoted, plus a nested-formatting-in-children case.
+
+Renderer-level adversarial coverage (ADR 0009's renderer-level bullet): both
+`markdown-dom.test.ts` and `markdown-ansi.test.ts` include an "invalid span shape" case
+(`url(javascript:alert(1))`) confirming no `<span>`/no color SGR is ever produced for a
+grammar-rejected input, on top of the parser-level guarantee.
+
+Gates: `bun test src/markdown/index.test.ts src/web/client/markdown-dom.test.ts
+src/tui/markdown-ansi.test.ts --coverage` → 100% funcs/lines on all three changed files, 247
+passing tests. `bun x biome check` on the six changed files → clean. Full-repo `bun test src`
+and `bun run typecheck`/`bun run lint` were also run; failures observed there are all in files
+outside this ticket's scope (`src/agent/tools/*`, `src/agent/workflow/*`, `src/cli/header.*`)
+from other agents' concurrent uncommitted work on the shared branch, confirmed pre-existing by
+stashing this ticket's changes and re-running — not touched or caused by DH-0206.
+
+Judgment calls: kept the closing-tag search case-sensitive/literal (`</span>` exactly, matching
+the ADR's regex-only spec for the opening tag) — a test originally assumed a mixed-case close
+tag would still match and had to be corrected to reflect the actual (correct, ADR-compliant)
+fail-closed behavior. `orange`/`purple` reuse the yellow/magenta SGR codes per the ADR's own
+`NAME_TO_SGR` table (no new codes introduced).
 
 ### 2026-07-19 — architect sign-off (Fable): blessed, ADR 0009 written, → ready
 

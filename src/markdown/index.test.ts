@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { type BlockNode, parseInline, parseMarkdown, sanitizeText } from "./index.ts";
+import {
+  type BlockNode,
+  parseInline,
+  parseMarkdown,
+  sanitizeText,
+  validateColor,
+} from "./index.ts";
 
 describe("sanitizeText", () => {
   test("is a no-op on plain text", () => {
@@ -609,5 +615,160 @@ describe("parseInline", () => {
 
   test("empty input", () => {
     expect(parseInline("")).toEqual([]);
+  });
+});
+
+describe("validateColor (DH-0206/ADR 0009)", () => {
+  test("accepts 3-digit hex, lowercased", () => {
+    expect(validateColor("#F00")).toBe("#f00");
+  });
+
+  test("accepts 6-digit hex, lowercased", () => {
+    expect(validateColor("#FF0000")).toBe("#ff0000");
+  });
+
+  test("accepts a named color, lowercased and trimmed", () => {
+    expect(validateColor("  Red  ")).toBe("red");
+  });
+
+  test("rejects a non-hex, non-named token", () => {
+    expect(validateColor("javascript:alert(1)")).toBeNull();
+  });
+
+  test("rejects malformed hex (wrong digit count)", () => {
+    expect(validateColor("#ff00")).toBeNull();
+  });
+
+  test("rejects a name outside the curated allowlist", () => {
+    expect(validateColor("rebeccapurple")).toBeNull();
+  });
+});
+
+describe("parseInline — coloredSpan (DH-0206/ADR 0009)", () => {
+  // --- Happy paths ---------------------------------------------------------------------
+
+  test("named color, double-quoted, with trailing semicolon", () => {
+    expect(parseInline('<span style="color: red;">alert</span>')).toEqual([
+      { kind: "coloredSpan", children: [{ kind: "text", text: "alert" }], color: "red" },
+    ]);
+  });
+
+  test("named color, no trailing semicolon", () => {
+    expect(parseInline('<span style="color: red">alert</span>')).toEqual([
+      { kind: "coloredSpan", children: [{ kind: "text", text: "alert" }], color: "red" },
+    ]);
+  });
+
+  test("hex color", () => {
+    expect(parseInline('<span style="color: #f00">alert</span>')).toEqual([
+      { kind: "coloredSpan", children: [{ kind: "text", text: "alert" }], color: "#f00" },
+    ]);
+  });
+
+  test("6-digit hex color", () => {
+    expect(parseInline('<span style="color: #ff0000">alert</span>')).toEqual([
+      { kind: "coloredSpan", children: [{ kind: "text", text: "alert" }], color: "#ff0000" },
+    ]);
+  });
+
+  test("mixed-case tag/attribute/color normalizes (close tag stays lowercase-literal)", () => {
+    expect(parseInline('<SPAN STYLE="COLOR: Red">alert</span>')).toEqual([
+      { kind: "coloredSpan", children: [{ kind: "text", text: "alert" }], color: "red" },
+    ]);
+  });
+
+  test("single-quoted style attribute", () => {
+    expect(parseInline("<span style='color: blue'>alert</span>")).toEqual([
+      { kind: "coloredSpan", children: [{ kind: "text", text: "alert" }], color: "blue" },
+    ]);
+  });
+
+  test("children are themselves parsed inline (nested emphasis)", () => {
+    expect(parseInline('<span style="color: red">**bold**</span>')).toEqual([
+      {
+        kind: "coloredSpan",
+        children: [{ kind: "strong", children: [{ kind: "text", text: "bold" }] }],
+        color: "red",
+      },
+    ]);
+  });
+
+  // --- Adversarial cases (ADR 0009's "Required adversarial tests"): every one of these must
+  // produce literal text, never a coloredSpan node. --------------------------------------
+
+  test("1. url(...) in the color value is blocked by the char class", () => {
+    const nodes = parseInline('<span style="color: url(javascript:alert(1))">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("2. expression(...) in the color value is blocked by the char class", () => {
+    const nodes = parseInline('<span style="color: expression(alert(1))">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("3. a second ';'-separated declaration is not matched by the single-color grammar", () => {
+    const nodes = parseInline('<span style="color: red; background: url(x)">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("4. javascript: is not a hex or named color, validateColor rejects it", () => {
+    const nodes = parseInline('<span style="color: javascript:alert(1)">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("5. an extra attribute after the close-quote breaks the anchored regex", () => {
+    const nodes = parseInline('<span style="color: red" onmouseover="alert(1)">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("6a. an entity-encoded quote-breakout attempt is blocked", () => {
+    const nodes = parseInline('<span style="color: &quot;;alert(1)">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("6b. a raw quote inside the value breaks the backreference", () => {
+    const nodes = parseInline('<span style="color: red" quote=\'">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("7. an unclosed span (no </span>) stays literal", () => {
+    const nodes = parseInline('<span style="color: red">alert');
+    expect(nodes).toEqual([{ kind: "text", text: '<span style="color: red">alert' }]);
+  });
+
+  test("8. a stray </span> with no opener stays literal", () => {
+    expect(parseInline("</span>")).toEqual([{ kind: "text", text: "</span>" }]);
+  });
+
+  test("9. nesting: outer span closes at the first </span>, inner opening degrades to literal", () => {
+    const nodes = parseInline(
+      '<span style="color:red">a <span style="color:blue">b</span> c</span>',
+    );
+    // The outer span's search for `</span>` finds the *first* one — right after the inner "b"
+    // — so the inner opening tag never gets its own close and is captured, unparsed, as part of
+    // the outer span's literal-text children. Only one coloredSpan node is ever produced.
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0]).toEqual({
+      kind: "coloredSpan",
+      children: [{ kind: "text", text: 'a <span style="color:blue">b' }],
+      color: "red",
+    });
+    expect(nodes[1]).toEqual({ kind: "text", text: " c</span>" });
+    expect(JSON.stringify(nodes).match(/coloredSpan/g)?.length).toBe(1);
+  });
+
+  test("11a. <span> with no style attribute stays literal", () => {
+    const nodes = parseInline("<span>x</span>");
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("11b. an attribute before style stays literal", () => {
+    const nodes = parseInline('<span class="x" style="color:red">x</span>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
+  });
+
+  test("11c. the wrong tag name (<div>) stays literal", () => {
+    const nodes = parseInline('<div style="color:red">x</div>');
+    expect(nodes.some((n) => n.kind === "coloredSpan")).toBe(false);
   });
 });

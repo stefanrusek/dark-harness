@@ -102,6 +102,17 @@ function renderInlineNode(doc: Document, node: InlineNode, parent: Node): void {
       parent.appendChild(anchor);
       return;
     }
+    case "coloredSpan": {
+      // DH-0206/ADR 0009: color applied only via the `style.color` DOM property assignment —
+      // never a string-built `style="…"` attribute, never `innerHTML`. `node.color` is already
+      // allowlist-validated by the parser; the CSSOM property setter is a second line of
+      // defence that silently ignores anything it considers invalid.
+      const span = el(doc, "span");
+      span.style.color = node.color;
+      renderInlineNodes(doc, node.children, span);
+      parent.appendChild(span);
+      return;
+    }
   }
 }
 

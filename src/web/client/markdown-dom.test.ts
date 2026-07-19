@@ -242,6 +242,40 @@ describe("renderMarkdownInto — inline constructs", () => {
   });
 });
 
+describe("renderMarkdownInto — coloredSpan (DH-0206/ADR 0009)", () => {
+  test("a named-color span renders as a <span> with style.color set via property assignment", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: red;">alert</span>');
+    const span = root.querySelector("span");
+    expect(span).not.toBeNull();
+    expect(span?.style.color).toBe("red");
+    expect(span?.textContent).toBe("alert");
+    // Never a string-built style attribute or innerHTML sink.
+    expect(root.innerHTML).not.toContain("innerHTML");
+  });
+
+  test("a hex-color span sets style.color to the hex value", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: #ff0000">alert</span>');
+    const span = root.querySelector("span");
+    expect(span?.style.color).toBe("#ff0000");
+    expect(span?.textContent).toBe("alert");
+  });
+
+  test("children render inside the span, including nested inline formatting", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: blue">**bold**</span>');
+    const span = root.querySelector("span");
+    expect(span?.querySelector("strong")?.textContent).toBe("bold");
+  });
+
+  test("an invalid span shape renders no <span> at all (literal text)", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: url(javascript:alert(1))">x</span>');
+    expect(root.querySelector("span")).toBeNull();
+  });
+});
+
 describe("renderMarkdownInto — link scheme filtering (security)", () => {
   test("http/https/mailto links become real anchors with rel/target set", () => {
     const { document, root } = createTestDom();

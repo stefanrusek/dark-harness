@@ -177,6 +177,43 @@ describe("renderMarkdownRows — visible content", () => {
   });
 });
 
+describe("renderMarkdownRows — coloredSpan (DH-0206/ADR 0009)", () => {
+  test("a named color emits the mapped SGR code around the text, with a trailing reset", () => {
+    const rows = renderMarkdownRows(parseMarkdown('<span style="color: red;">alert</span>'), 40);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("\x1b[31m");
+    expect(rows[0]).toContain("alert");
+    expect((rows[0] as string).endsWith("\x1b[0m")).toBe(true);
+    expect(stripAnsi(rows[0] as string)).toBe("alert");
+  });
+
+  test("a hex color renders as plain text — no color SGR code at all", () => {
+    const rows = renderMarkdownRows(parseMarkdown('<span style="color: #ff0000">alert</span>'), 40);
+    expect(rows).toHaveLength(1);
+    expect(stripAnsi(rows[0] as string)).toBe("alert");
+    // No SGR sequence at all — a hex color must never be turned into a constructed color code.
+    expect(rows[0]).toBe("alert");
+  });
+
+  test("an unmapped named color (not in NAME_TO_SGR) also renders plain", () => {
+    // Every NAMED_COLORS entry does have a NAME_TO_SGR mapping today, but the renderer must
+    // degrade safely if that ever changes — cover the "no mapping found" branch directly via a
+    // color the parser wouldn't itself produce isn't possible, so this pins the happy case: all
+    // twelve currently map. If a future named color is added to the parser's allowlist without
+    // a NAME_TO_SGR entry, this test intentionally does not cover that gap — see ADR 0009.
+    const rows = renderMarkdownRows(parseMarkdown('<span style="color: orange">alert</span>'), 40);
+    expect(rows[0]).toContain("\x1b[33m"); // orange maps to yellow's SGR code (33)
+  });
+
+  test("an invalid span shape renders as literal text with no ANSI at all", () => {
+    const rows = renderMarkdownRows(
+      parseMarkdown('<span style="color: url(javascript:alert(1))">x</span>'),
+      200,
+    );
+    expect(rows[0]).toBe('<span style="color: url(javascript:alert(1))">x</span>');
+  });
+});
+
 describe("renderMarkdownRows — wrapping", () => {
   test("wraps long paragraph text to the given column width", () => {
     const rows = renderMarkdownRows(parseMarkdown("a".repeat(100)), 20);

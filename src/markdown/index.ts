@@ -641,6 +641,30 @@ export function parseInline(
       }
     }
 
+    // Colored span (DH-0206/ADR 0009): the one allowlisted HTML-shaped construct. Fails closed
+    // (falls through to literal `<` handling below) on any mismatch of the exact opening-tag
+    // shape, any color that fails `validateColor`, or any missing `</span>` close. Closing at
+    // the *first* `</span>` after the opening tag means a nested `<span…>` inside never gets
+    // paired with its own close, so it degrades to literal text within the outer span's
+    // children — deterministic, injection-free, not required to be pretty (ADR 0009).
+    if (text[i] === "<") {
+      const openMatch = COLORED_SPAN_OPEN.exec(rest);
+      if (openMatch) {
+        const color = validateColor(openMatch[2] as string);
+        if (color !== null) {
+          const openLen = (openMatch[0] as string).length;
+          const closeIdx = text.indexOf("</span>", i + openLen);
+          if (closeIdx !== -1) {
+            flush();
+            const inner = text.slice(i + openLen, closeIdx);
+            nodes.push({ kind: "coloredSpan", children: parseInline(inner, refs), color });
+            i = closeIdx + "</span>".length;
+            continue;
+          }
+        }
+      }
+    }
+
     if (rest.startsWith("``")) {
       const close = text.indexOf("``", i + 2);
       if (close !== -1) {
