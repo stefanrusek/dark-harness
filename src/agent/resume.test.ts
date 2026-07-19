@@ -316,6 +316,87 @@ describe("loadResumeSession — fold rules (D1)", () => {
     ]);
   });
 
+  test("DH-0210: two back-to-back tool-only turns (no text between them) fold into separate turns, not merged tool_results", () => {
+    // Real shape from the owner's failing --import + resume session (.dh-logs/
+    // e6229b4b-9b16-4c4e-b9b1-9f4b04a5b5f3): a ToolSearch call+result immediately followed by
+    // a Bash call+result, with no `message` event in between (the source Claude Code turn had
+    // no leading/trailing text on either tool_use). Before the DH-0210 fix, the `tool_call`
+    // case opened turn 2's assistant message without first flushing turn 1's still-pending
+    // tool_result, so both tool_results were folded into a single user message that landed
+    // after turn 2's assistant message (1 tool_use) — a real Bedrock/Anthropic API rejection
+    // ("toolResult blocks ... exceeds ... toolUse blocks of previous turn").
+    const root = newLogsRoot();
+    writeRootJsonl("s1", [
+      header(),
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:01.000Z",
+        type: "tool_call",
+        toolName: "ToolSearch",
+        toolUseId: "t1",
+        input: { query: "select:Bash" },
+      },
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:02.000Z",
+        type: "tool_result",
+        toolUseId: "t1",
+        output: "[tool schema]",
+        isError: false,
+      },
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:03.000Z",
+        type: "tool_call",
+        toolName: "Bash",
+        toolUseId: "t2",
+        input: { command: "ls" },
+      },
+      {
+        version: 1,
+        timestamp: "2026-07-15T00:00:04.000Z",
+        type: "tool_result",
+        toolUseId: "t2",
+        output: "file.txt",
+        isError: false,
+      },
+    ]);
+    const result = loadResumeSession(root, "s1");
+    expect(result.messages).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "t1", name: "ToolSearch", input: { query: "select:Bash" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", toolUseId: "t1", content: "[tool schema]", isError: false },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "t2", name: "Bash", input: { command: "ls" } }],
+      },
+      {
+        role: "user",
+        content: [{ type: "tool_result", toolUseId: "t2", content: "file.txt", isError: false }],
+      },
+    ]);
+    // The invariant a real provider enforces: every user turn's tool_result count must not
+    // exceed the immediately preceding assistant turn's tool_use count.
+    result.messages.forEach((cur, i) => {
+      if (cur.role !== "user" || i === 0) return;
+      const prev = result.messages[i - 1];
+      const resultCount = cur.content.filter((c) => c.type === "tool_result").length;
+      if (resultCount === 0) return;
+      const toolUseCount =
+        prev?.role === "assistant" ? prev.content.filter((c) => c.type === "tool_use").length : 0;
+      expect(resultCount).toBeLessThanOrEqual(toolUseCount);
+    });
+  });
+
   test("token_usage/status_change/completed/failed lines are not replayed as conversation content", () => {
     const root = newLogsRoot();
     writeRootJsonl("s1", [
