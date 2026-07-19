@@ -19,7 +19,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { chromium } from "playwright";
-import { resolveChromiumExecutable } from "./spikes/web/support.ts";
+import { resolveChromiumExecutable } from "./support/chromium.ts";
 import { ensureBuilt } from "./support/build.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";

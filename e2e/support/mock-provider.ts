@@ -15,6 +15,16 @@
 // body for non-200 responses regardless of the request's `stream` flag.
 
 import { randomUUID } from "node:crypto";
+import {
+  chunkText,
+  clampTurnIndex,
+  jobSuccessTurn as sharedJobSuccessTurn,
+  jobTaskFailedTurn as sharedJobTaskFailedTurn,
+  requireTurns,
+  successTurn as sharedSuccessTurn,
+  taskFailedTurn as sharedTaskFailedTurn,
+  TEXT_DELTA_CHUNK_SIZE,
+} from "./mock-scaffolding";
 
 export interface MockToolCall {
   id?: string;
@@ -78,21 +88,6 @@ export interface MockAnthropicProvider {
   /** Number of `/v1/messages` calls served so far. */
   readonly callCount: number;
   stop(): void;
-}
-
-/** DH-0044: chunk size (chars) for splitting a scripted turn's `text` into multiple
- * `content_block_delta` events — see `turnToStreamResponse` below. Small enough that a
- * realistically "long" scripted turn (a few KB) produces enough deltas to cross
- * `STREAM_FLUSH_BYTES` (1 KiB, src/agent/loop.ts) more than once. */
-const TEXT_DELTA_CHUNK_SIZE = 64;
-
-/** Splits `text` into chunks of at most `size` characters, in order. */
-function chunkText(text: string, size: number): string[] {
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += size) {
-    chunks.push(text.slice(i, i + size));
-  }
-  return chunks;
 }
 
 /** Builds a fake Anthropic-shaped SSE streaming HTTP response (`text/event-stream`, one
@@ -181,9 +176,7 @@ function turnToStreamResponse(turn: MockTurn): Response {
  * agent loop indefinitely — it should still assert `callCount` to catch that).
  */
 export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProvider {
-  if (turns.length === 0) {
-    throw new Error("startMockAnthropicProvider requires at least one scripted turn");
-  }
+  requireTurns(turns, "startMockAnthropicProvider");
   const requests: Record<string, unknown>[] = [];
   let callCount = 0;
 
@@ -196,7 +189,7 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
       }
       const body = (await req.json()) as Record<string, unknown>;
       requests.push(body);
-      const index = Math.min(callCount, turns.length - 1);
+      const index = clampTurnIndex(callCount, turns.length);
       callCount += 1;
       // biome-ignore lint/style/noNonNullAssertion: index is clamped into [0, turns.length)
       const turn = turns[index]!;
@@ -252,14 +245,14 @@ export function startMockAnthropicProvider(turns: MockTurn[]): MockAnthropicProv
  * harness-injected `REPORT_OUTCOME_NUDGE_MESSAGE` reminder turn first (loop.ts), doubling the
  * expected provider call count. */
 export function successTurn(text: string): MockTurn {
-  return { text, stopReason: "end_turn" };
+  return sharedSuccessTurn<MockTurn>(text);
 }
 
 /** A self-reported-failure completion per loop.ts's `TASK_FAILED_MARKER` convention. Same
  * interactive-only caveat as `successTurn` — use `jobTaskFailedTurn` for non-interactive
  * runs. */
 export function taskFailedTurn(text = "Could not complete the task. TASK_FAILED"): MockTurn {
-  return { text, stopReason: "end_turn" };
+  return sharedTaskFailedTurn<MockTurn>(text);
 }
 
 /** DH-0115: non-interactive (`--job`/sub-agent) equivalent of `successTurn` — emits an
@@ -269,20 +262,12 @@ export function taskFailedTurn(text = "Could not complete the task. TASK_FAILED"
  * called. Do not use for interactive (server/TUI/Web) scripted turns: `ReportOutcome` isn't a
  * registered tool there and the call would hit an unknown-tool error. */
 export function jobSuccessTurn(text: string): MockTurn {
-  return {
-    text,
-    toolCalls: [{ name: "ReportOutcome", input: { status: "success", summary: text } }],
-    stopReason: "tool_use",
-  };
+  return sharedJobSuccessTurn<MockTurn>(text);
 }
 
 /** Non-interactive equivalent of `taskFailedTurn` — emits an authoritative
  * `ReportOutcome(status: "failure")` tool call alongside the text, same rationale and
  * interactive-mode caveat as `jobSuccessTurn`. */
 export function jobTaskFailedTurn(text = "Could not complete the task. TASK_FAILED"): MockTurn {
-  return {
-    text,
-    toolCalls: [{ name: "ReportOutcome", input: { status: "failure", summary: text } }],
-    stopReason: "tool_use",
-  };
+  return sharedJobTaskFailedTurn<MockTurn>(text);
 }
