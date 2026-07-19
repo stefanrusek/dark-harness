@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0217
 type: bug
-status: implementing
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-19
 relations:
@@ -95,3 +95,21 @@ process convention or a worktree-aware guard, not intra-process serialization.
   coordinator triage** to decide owner and whether the tooling guard is worth building vs. a
   documented convention alone.
 - Filed by Fable during refactoring round DH-0216.
+- **2026-07-19 — resolved (option 3: guard + documented convention).** Added
+  `common.die_if_linked_worktree()` in `.claude/skills/spile-ops/scripts/common.py`,
+  called from `new_ticket.py` before it reads the counter. It compares
+  `git rev-parse --git-common-dir` vs `--git-dir` (equal for the primary checkout, differ
+  for any linked worktree) and refuses to mint with an error pointing back at the
+  coordinator's primary checkout, referencing this ticket. Documented the convention in
+  `.claude/skills/spile-ops/SKILL.md`'s "Creating a new ticket" section and in
+  `PLAYBOOK.md` §7.1 (wave execution). Verified two ways from the primary checkout:
+  (1) a normal mint still succeeds and bumps the counter correctly (regression check); (2)
+  a throwaway `git worktree add` followed by `new_ticket.py` from inside it exits 1 with
+  the refusal message, creates no ticket file, and leaves the worktree's counter untouched
+  — confirming the guard actually fires for the exact scenario that caused the DH-0213
+  double-mint. The throwaway worktree and its branch were removed after the test (no stray
+  worktrees left behind). No automated test suite exists yet for spile-ops scripts (none
+  pre-existed this ticket either); the guard was verified manually per the ticket's ask
+  since CLAUDE.md §9's TDD/BDD close-out gate applies to `src/` product code, and this is
+  explicitly process tooling outside that gate (§5 of CLAUDE.md scopes the quality gates to
+  the Bun/TypeScript product).

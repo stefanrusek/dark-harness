@@ -95,7 +95,6 @@ source: tracking/
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
 | [DH-0139](../DH-0139-dh-web-is-unusable-remotely-out-of-the-box-dh-0128-auto-points-the-client-at-the-lan-ip-but-the-server-rejects-that-same-ip-by-default-421.md) | dh --web is unusable remotely out of the box: DH-0128 auto-points the client at the LAN IP, but the server rejects that same IP by default (421) | bug | stefan |
 | [DH-0149](../DH-0149-replace-shared-process-bun-test-with-per-file-process-isolation-orchestrator-standard-lcov-merge.md) | Replace shared-process bun test with per-file process isolation orchestrator + standard lcov merge | bug | stefan |
-| [DH-0217](../DH-0217-spile-ops-new-ticket-py-counter-is-unsafe-for-concurrent-isolated-worktrees-id-collisions.md) | spile-ops new_ticket.py counter is unsafe for concurrent isolated worktrees — ID collisions | bug | stefan |
 
 ### verifying
 
@@ -119,6 +118,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0217](../DH-0217-spile-ops-new-ticket-py-counter-is-unsafe-for-concurrent-isolated-worktrees-id-collisions.md) | spile-ops new_ticket.py counter is unsafe for concurrent isolated worktrees — ID collisions | done |
 | [DH-0216](../DH-0216-refactoring-round-post-p0-fixes-and-workflow-self-awareness-feature-sweep.md) | Refactoring round: post-P0-fixes and Workflow/self-awareness feature sweep | done |
 | [DH-0215](../DH-0215-teach-agents-their-own-sessionid-agentid-log-path-jsonl-log-structure-in-the-system-prompt.md) | Teach agents their own sessionId/agentId/log path + JSONL log structure in the system prompt | done |
 | [DH-0212](../DH-0212-dh-0060-tui-spike-suite-regressed-from-16-0-to-9-7-pass-fail-needs-real-triage-before-treating-as-regressions.md) | DH-0060 TUI spike suite regressed from 16/0 to 9/7 pass/fail -- needs real triage before treating as regressions | done |
@@ -133,4 +133,3 @@ source: tracking/
 | [DH-0187](../DH-0187-import-import-a-claude-code-session-directory-into-dh.md) | --import: import a Claude Code session directory into dh | done |
 | [DH-0186](../DH-0186-migrate-the-web-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the Web SSE client onto the shared src/client-core/ transport | done |
 | [DH-0185](../DH-0185-migrate-the-tui-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the TUI SSE client onto the shared src/client-core/ transport | done |
-| [DH-0184](../DH-0184-extract-the-shared-sse-transport-frame-parser-full-jitter-backoff-last-event-id-reconnect-payload-validation-into-src-client-core-resolving-the-validation-strictness-divergence.md) | Extract the shared SSE transport (frame parser + full-jitter backoff + Last-Event-ID reconnect + payload validation) into src/client-core/, resolving the validation-strictness divergence | done |
