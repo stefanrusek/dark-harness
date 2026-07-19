@@ -175,7 +175,7 @@ One glyph per concept, shared across surfaces where the medium allows:
 
 | Glyph | Meaning | Where |
 | --- | --- | --- |
-| `●` | agent status dot (color = status per §1) | TUI tree, Web tree/panel |
+| `●` | status/health dot — color = status per §1; **canonical ok/live green is `STATUS_TOKENS.done.webHex` `#35c469`** (DH-0225), the same green as an agent's `done` status, on every surface including the CLI startup header's health dot — never `BRAND.harnessGreen` `#9ECE6A` for this glyph. `BRAND.harnessGreen` stays in play for non-status-dot brand flourishes (wordmark gradient, `✓ ready` checkmark, `dh:` log prefix) — those are decorative brand accents, not the shared status vocabulary, so they're unaffected by this call. | TUI tree, Web tree/panel, CLI startup header |
 | `⠋⠙⠹…` (braille) | live/pending spinner | TUI/CLI |
 | `⚙` | a tool call or sub-agent spawn in a transcript (dim, subordinate) | TUI/Web transcript |
 | `>` | user turn / input prompt gutter | TUI (`> `, bold yellow), CLI input |
