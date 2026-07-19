@@ -289,9 +289,21 @@ export function Transcript({ agent, sessionEnded, exitCode }: TranscriptProps): 
         className="output-scroll"
         ref={scrollRegionRef}
         onScroll={() => {
+          // DH-0200: track show/hide symmetrically with the actual scroll position, not just
+          // hide-on-near-bottom. Previously this handler only ever cleared jumpVisible; it never
+          // set it, relying entirely on the content-update effect to reveal the button. A manual
+          // mouse-wheel scroll up (no new content involved) could leave the button stuck hidden
+          // if it happened to fire while a prior scroll/render cycle had already cleared it, and
+          // scrolling further away afterward did nothing to bring it back since only new content
+          // landing re-evaluates visibility. Now the scroll handler is itself the source of truth
+          // for the button's visibility whenever the user is the one moving the scroll position.
           const nearBottom = isNearBottom();
           stickToBottomRef.current = nearBottom;
-          if (nearBottom) setJumpVisible(false);
+          if (nearBottom) {
+            setJumpVisible(false);
+          } else if (transcript.length > 0) {
+            setJumpVisible(true);
+          }
         }}
       >
         <div className="agent-transcript" role="log" aria-live="polite">

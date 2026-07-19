@@ -16,6 +16,15 @@
 // a copy of the textarea's current value used only to compute matches. None of that touches
 // the uncontrolled `value`/focus behavior above: the textarea's `value` prop is still never
 // set by React, so DH-0117's regression coverage stays intact.
+//
+// DH-0201: because the textarea is uncontrolled, its pending text lives only in the live DOM
+// node, not in React/app state -- so the node must never unmount while the operator is
+// composing. Previously this component returned `null` when the selected agent wasn't root,
+// which unmounts the `<form>`/`<textarea>` entirely; switching to view a sub-agent (making
+// `shouldShow` false) then back to root remounted a fresh, empty textarea, silently discarding
+// any unsent text. Now the wrapper always stays mounted and is hidden via the `.hidden` CSS
+// class instead, so the textarea DOM node (and whatever the operator typed into it) survives
+// agent selection changes.
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import {
   autocompleteMatches,
@@ -56,8 +65,6 @@ export function Composer({ state, onSend }: ComposerProps): ReactElement | null 
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [dropdown]);
 
-  if (!shouldShow) return null;
-
   const submit = (evt?: { preventDefault(): void }) => {
     evt?.preventDefault();
     const el = textareaRef.current;
@@ -91,7 +98,7 @@ export function Composer({ state, onSend }: ComposerProps): ReactElement | null 
   };
 
   return (
-    <div ref={wrapperRef} className="composer-wrapper">
+    <div ref={wrapperRef} className={`composer-wrapper${shouldShow ? "" : " hidden"}`}>
       <form className="composer" onSubmit={submit}>
         <textarea
           ref={textareaRef}

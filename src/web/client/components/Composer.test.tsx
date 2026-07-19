@@ -38,15 +38,19 @@ function stateWithRootAndChild(): WebState {
 }
 
 describe("Composer", () => {
-  test("renders nothing when no agent is selected", () => {
+  test("hides the composer (via the .hidden class, not unmounting) when no agent is selected", () => {
     const { container } = render(<Composer state={createInitialState()} onSend={() => {}} />);
-    expect(container.querySelector("form")).toBeNull();
+    const form = container.querySelector("form");
+    expect(form).not.toBeNull();
+    expect(form?.classList.contains("hidden")).toBe(true);
   });
 
-  test("renders nothing when a non-root agent is selected", () => {
+  test("hides the composer (via the .hidden class, not unmounting) when a non-root agent is selected", () => {
     const state = { ...stateWithRootAndChild(), selectedAgentId: "child-1" };
     const { container } = render(<Composer state={state} onSend={() => {}} />);
-    expect(container.querySelector("form")).toBeNull();
+    const form = container.querySelector("form");
+    expect(form).not.toBeNull();
+    expect(form?.classList.contains("hidden")).toBe(true);
   });
 
   test("renders the composer for the root agent and submits trimmed, non-empty text", () => {
@@ -273,18 +277,39 @@ describe("Composer", () => {
     expect(sent).toEqual(["hello there"]);
   });
 
-  test("rebuilds the composer on an actual show/hide transition (root -> non-root -> root)", () => {
+  test("keeps the same textarea node across a show/hide transition (root -> non-root -> root)", () => {
     const state = stateWithRootAndChild();
     const { container, rerender } = render(<Composer state={state} onSend={() => {}} />);
     const firstTextarea = container.querySelector("textarea");
     expect(firstTextarea).not.toBeNull();
 
     rerender(<Composer state={{ ...state, selectedAgentId: "child-1" }} onSend={() => {}} />);
-    expect(container.querySelector("form")).toBeNull();
+    const wrapperWhileHidden = container.querySelector(".composer-wrapper");
+    expect(wrapperWhileHidden).not.toBeNull();
+    expect(wrapperWhileHidden?.classList.contains("hidden")).toBe(true);
 
     rerender(<Composer state={{ ...state, selectedAgentId: "root-1" }} onSend={() => {}} />);
     const secondTextarea = container.querySelector("textarea");
     expect(secondTextarea).not.toBeNull();
-    expect(secondTextarea).not.toBe(firstTextarea);
+    expect(secondTextarea).toBe(firstTextarea);
+  });
+
+  // DH-0201 regression: typing unsent text, then switching the viewed agent to a sub-agent
+  // (which hides the composer since only the root agent can be messaged) and back, must not
+  // discard what was typed. Before the fix, switching away unmounted the `<form>`/`<textarea>`
+  // entirely (the component returned `null`), which throws away the uncontrolled textarea's
+  // value -- the only place that pending text lived.
+  test("DH-0201: unsent composer text survives switching to view a sub-agent and back", () => {
+    const state = stateWithRootAndChild();
+    const { container, rerender } = render(<Composer state={state} onSend={() => {}} />);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "unsent draft";
+
+    rerender(<Composer state={{ ...state, selectedAgentId: "child-1" }} onSend={() => {}} />);
+    rerender(<Composer state={{ ...state, selectedAgentId: "root-1" }} onSend={() => {}} />);
+
+    const textareaAfter = container.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textareaAfter).toBe(textarea);
+    expect(textareaAfter.value).toBe("unsent draft");
   });
 });

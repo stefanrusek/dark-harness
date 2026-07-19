@@ -56,7 +56,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
-| [DH-0200](../DH-0200-web-jump-to-latest-button-disappears-after-mouse-wheel-scroll-doesn-t-reappear-consistently.md) | Web: 'Jump to Latest' button disappears after mouse-wheel scroll, doesn't reappear consistently | bug | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
 
 ### refining
@@ -73,8 +72,6 @@ source: tracking/
 | [DH-0192](../DH-0192-logo-redesign-current-mark-is-too-literal-and-reads-unintentionally-suggestive.md) | Brand mark — standardize the diamond on ink (not amber), and redraw the ASCII banner to the bracket lockup | bug | stefan |
 | [DH-0193](../DH-0193-wordmark-needs-more-padding-wherever-it-s-plugged-in-next-to-the-logo.md) | Wordmark needs more padding wherever it's plugged in next to the logo | bug | stefan |
 | [DH-0198](../DH-0198-web-ui-header-never-actually-renders-the-brand-mark-logo-asset.md) | Web UI header never actually renders the brand mark/logo asset | bug | stefan |
-| [DH-0201](../DH-0201-web-switching-to-view-a-sub-agent-erases-the-pending-unsent-operator-message.md) | Web: switching to view a sub-agent erases the pending (unsent) operator message | bug | stefan |
-| [DH-0202](../DH-0202-web-model-name-shows-unknown-model-after-sse-reconnect.md) | Web: model name shows '(unknown model)' after SSE reconnect | bug | stefan |
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | feature | stefan |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | bug | stefan |
 
@@ -120,6 +117,6 @@ source: tracking/
 | [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | done |
 | [DH-0204](../DH-0204-markdown-link-title-attribute-leaks-into-the-href.md) | Markdown: link title attribute leaks into the href | done |
 | [DH-0203](../DH-0203-markdown-h3-h6-headers-render-visually-identical-no-hierarchy.md) | Markdown: H3-H6 headers render visually identical, no hierarchy | done |
-| [DH-0199](../DH-0199-web-consecutive-tool-calls-should-group-into-a-collapsible-expando.md) | Web: consecutive tool calls should group into a collapsible expando | done |
-| [DH-0197](../DH-0197-post-cli-split-residual-doc-style-seams-in-core-stale-function-refs-help-ts-sgr-literal.md) | Post-cli-split residual doc/style seams in Core (stale function refs + help.ts SGR literal) | done |
-| [DH-0196](../DH-0196-refactoring-round-post-cli-ts-split-and-second-wave-feature-sweep.md) | Refactoring round: post-cli.ts-split and second-wave feature sweep | done |
+| [DH-0202](../DH-0202-web-model-name-shows-unknown-model-after-sse-reconnect.md) | Web model name shows "(unknown model)" after SSE reconnect | done |
+| [DH-0201](../DH-0201-web-switching-to-view-a-sub-agent-erases-the-pending-unsent-operator-message.md) | Web switching to view a sub-agent erases the pending unsent operator message | done |
+| [DH-0200](../DH-0200-web-jump-to-latest-button-disappears-after-mouse-wheel-scroll-doesn-t-reappear-consistently.md) | Web "Jump to Latest" button disappears after mouse-wheel scroll-up, doesn't reappear consistently | done |

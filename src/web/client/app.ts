@@ -396,10 +396,18 @@ export class AppView {
 
   /** DH-0024: fires on every SSE reconnect (not the initial connect) — see sse.ts's
    *  `onReconnected` for why this is treated as a possible gap. Shows the dismissible
-   *  banner; the operator dismisses it once they've seen it (`dismissGapBanner`). */
+   *  banner; the operator dismisses it once they've seen it (`dismissGapBanner`).
+   *
+   *  DH-0202: also re-fetches the agent tree, the same bootstrap call used on initial
+   *  connect. A reconnect's `Last-Event-ID` resume only redelivers events *after* the
+   *  resume point — if that skips an agent's original `agent_spawned` event (the only place
+   *  its model name is ever sent), the agent's model would otherwise stay unknown forever.
+   *  `seedFromTree`'s merge (state.ts) patches in a missing `model` on an already-known
+   *  agent without disturbing any other live field, so this is safe to call repeatedly. */
   private handleReconnected(): void {
     this.state = markPossibleGap(this.state);
     this.renderAll();
+    this.bootstrapAgentTree();
   }
 
   private dismissGapBanner = (): void => {

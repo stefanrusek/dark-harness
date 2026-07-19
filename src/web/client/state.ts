@@ -599,7 +599,24 @@ export function seedFromTree(
 
   const next: WebState = { ...state, agents: new Map(state.agents) };
   for (const node of nodes) {
-    if (next.agents.has(node.agentId)) continue; // SSE already told us something more current.
+    const existing = next.agents.get(node.agentId);
+    if (existing) {
+      // SSE already told us something more current for this agent overall (status,
+      // transcript, etc. all stay as SSE reported them) -- but DH-0202: `model` is the one
+      // field that's only ever sent once, on the original `agent_spawned` event. If a
+      // reconnect's replay resumes from a point after that event (Last-Event-ID skips
+      // already-delivered events) or otherwise never redelivers it, `ensureAgent` may have
+      // already created this node from a later event (e.g. `agent_output`) with `model: ""`,
+      // and nothing else ever fixes it up -- the header permanently shows "(unknown model)"
+      // even though the agent's real model is still known to the server. The tree bootstrap
+      // (re-run on every reconnect, see app.ts's `handleReconnected`) is authoritative for
+      // "what model is this agent," so patch it in whenever we're still missing it, without
+      // touching any other live field.
+      if (!existing.model && node.model) {
+        next.agents.set(node.agentId, { ...existing, model: node.model });
+      }
+      continue;
+    }
     next.agents.set(node.agentId, {
       agentId: node.agentId,
       parentAgentId: node.parentAgentId,

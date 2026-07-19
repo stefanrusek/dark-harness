@@ -694,6 +694,36 @@ describe("seedFromTree (Round 2 — fixes the fresh-session bootstrap deadlock)"
     expect(state.agents.size).toBe(0);
     expect(next.agents.size).toBe(1);
   });
+
+  test("DH-0202: patches in a missing model on an already-known agent without clobbering its live fields", () => {
+    let state = createInitialState();
+    // An `agent_output` event (not `agent_spawned`) arrives for an agent id state has never
+    // seen before -- e.g. after an SSE reconnect whose `Last-Event-ID` resume skipped the
+    // original `agent_spawned` event. `ensureAgent` creates the node with `model: ""`, and
+    // the agent is already mid-stream (running, with output), unlike a fresh boot-time node.
+    state = applyEvent(state, statusEvent("root-1", "running"));
+    state = applyEvent(state, output("root-1", "already streaming output"));
+    expect(state.agents.get("root-1")?.model).toBe("");
+
+    // The tree bootstrap re-run on reconnect (app.ts's handleReconnected) is authoritative
+    // for the model name -- seedFromTree must fill it in without reverting status/transcript
+    // back to the tree's stale boot-time snapshot.
+    const next = seedFromTree(state, [
+      treeNode({ agentId: "root-1", model: "opus", status: "waiting" }),
+    ]);
+    expect(next.agents.get("root-1")?.model).toBe("opus");
+    expect(next.agents.get("root-1")?.status).toBe("running");
+    expect(next.agents.get("root-1")?.transcript).toEqual([
+      { role: "assistant", text: "already streaming output", timestamp: expect.any(String) },
+    ]);
+  });
+
+  test("does not overwrite an already-known model even if the tree response disagrees", () => {
+    let state = createInitialState();
+    state = applyEvent(state, spawned("root-1", null, "sonnet"));
+    const next = seedFromTree(state, [treeNode({ agentId: "root-1", model: "some-other-model" })]);
+    expect(next.agents.get("root-1")?.model).toBe("sonnet");
+  });
 });
 
 describe("addUserTurn (Round 4 — local echo of the operator's own sent message)", () => {

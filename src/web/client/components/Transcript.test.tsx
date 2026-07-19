@@ -197,6 +197,27 @@ describe("Transcript", () => {
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
   });
 
+  // DH-0200 regression: a manual mouse-wheel scroll away from the bottom, with no new
+  // content ever arriving, must reveal the jump-to-latest button on its own. Before the fix,
+  // `onScroll` only ever cleared `jumpVisible` (when near the bottom); it never set it, so a
+  // pure scroll-driven move away from the bottom left the button stuck hidden.
+  test("DH-0200: scrolling away from the bottom with no new content reveals jump-to-latest", () => {
+    const agent = agentWithOutput() as AgentNode;
+    const { container } = render(<Transcript agent={agent} sessionEnded={false} exitCode={null} />);
+    const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
+
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 900, clientHeight: 200, scrollTop: 0 });
+    fireEvent.scroll(scrollRegion);
+
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
+
+    // Scrolling further away must not spuriously re-hide it.
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 900, clientHeight: 200, scrollTop: 10 });
+    fireEvent.scroll(scrollRegion);
+    expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(false);
+  });
+
   test("shows a tool-turn marker for a tool call", () => {
     let state = createInitialState();
     state = applyEvent(state, {
