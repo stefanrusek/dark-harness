@@ -83,6 +83,7 @@ source: tracking/
 | [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | bug | stefan |
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | feature | stefan |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | bug | stefan |
+| [DH-0211](../DH-0211-both-uis-pressing-escape-should-stop-the-currently-running-agent.md) | Both UIs: pressing Escape should stop the currently running agent | feature | stefan |
 
 ### implementing
 
