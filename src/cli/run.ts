@@ -258,8 +258,10 @@ export async function runInteractiveMode(
       };
       const term = { columns: process.stdout.columns ?? 0, rows: process.stdout.rows ?? 0 };
       // `--connect` without `--web` is always the interactive TUI/chat-window path — Header
-      // A2 unconditionally (`chooseHeaderMode` exists for the multi-branch local/server case
-      // below, where the choice actually varies).
+      // A2 unconditionally. (DH-0223: each call site below already knows statically which
+      // header it wants — a `chooseHeaderMode(isServer, isWeb)` helper existed here briefly
+      // but was dead code, since none of these branches actually gate on those booleans at
+      // runtime; removed rather than force a call that could only ever return one constant.)
       for (const line of renderHeaderA2(a2Facts, level, term)) io.stdout(line);
       const connectResult = await deps.startTui(targetBaseUrl, config.security?.token);
       if (connectResult.fatalError !== undefined) {

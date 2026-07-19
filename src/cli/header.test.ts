@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ColorLevel } from "../design-tokens.ts";
 import {
-  chooseHeaderMode,
   type HeaderStatusFacts,
   renderHeaderA2,
   renderHeaderB,
@@ -30,21 +29,6 @@ const FACTS_TOKEN: HeaderStatusFacts = {
 
 const BIG_TERM = { columns: 100, rows: 40 };
 const SMALL_TERM = { columns: 60, rows: 20 };
-
-describe("chooseHeaderMode", () => {
-  test("server mode -> b", () => {
-    expect(chooseHeaderMode({ isServer: true, isWeb: false })).toBe("b");
-  });
-  test("web mode -> b", () => {
-    expect(chooseHeaderMode({ isServer: false, isWeb: true })).toBe("b");
-  });
-  test("server+web -> b", () => {
-    expect(chooseHeaderMode({ isServer: true, isWeb: true })).toBe("b");
-  });
-  test("plain interactive -> a2", () => {
-    expect(chooseHeaderMode({ isServer: false, isWeb: false })).toBe("a2");
-  });
-});
 
 describe("shortGitSha", () => {
   test("truncates to 7 chars", () => {

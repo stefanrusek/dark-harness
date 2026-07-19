@@ -5,7 +5,7 @@
 // (status colors) and format.ts (number/cost formatters). Pure functions only, no DOM/node/
 // process/ANSI here — TTY color/glyph decisions and DOM/Ink rendering stay in each surface.
 import type { BuildInfo, DhConfig } from "./contracts/index.ts";
-import { DH_ASCII_LOGO, DH_ASCII_LOGO_COMPACT } from "./prompt/banner.constant.ts";
+import { HEADER_A2_WORDMARK_PLAIN, HEADER_B_GLYPH } from "./prompt/banner.constant.ts";
 
 /**
  * A summary of `dh.json`'s status relevant to an operator connecting from another
@@ -60,8 +60,15 @@ export function buildHeaderInfo(
 ): HeaderInfo {
   return {
     name: "dh",
-    logoFull: DH_ASCII_LOGO,
-    logoCompact: DH_ASCII_LOGO_COMPACT,
+    // DH-0224: brand rebrand rollout — every surface now sources its logo from the same
+    // DH-0220 banner constants the startup header uses instead of the pre-rebrand figlet.
+    // `logoFull` (doctor/init on a TTY) uses Header B's compact two-line block glyph rather
+    // than Header A2's full 12-line wordmark — doctor/init are quick utility commands, not
+    // splash screens, and don't have the vertical space budget for the full banner.
+    // `logoCompact` (TUI/Web empty-state, one line) uses the plain-text "DARK HARNESS"
+    // wordmark fallback — the only single-line brand asset banner.constant.ts exports.
+    logoFull: HEADER_B_GLYPH.join("\n"),
+    logoCompact: HEADER_A2_WORDMARK_PLAIN,
     build,
     config: buildConfigStatusSummary(config, configPath),
   };

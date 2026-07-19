@@ -12,27 +12,21 @@
 // own wordmark/glyph strings (`src/prompt/banner.constant.ts`, Prompt domain). This module
 // owns only the layout/gating/color-application logic around that content — Core's slice of
 // the ticket per its Functional Requirements.
-import { BRAND, type ColorLevel, fgCode, lerpHex, paint, wrapSgr } from "../design-tokens.ts";
+import {
+  BRAND,
+  type ColorLevel,
+  fgCode,
+  lerpHex,
+  paint,
+  STATUS_TOKENS,
+  wrapSgr,
+} from "../design-tokens.ts";
 import {
   HEADER_A2_WORDMARK,
   HEADER_A2_WORDMARK_PLAIN,
   HEADER_B_GLYPH,
   HEADER_B_TAGLINE,
 } from "../prompt/banner.constant.ts";
-
-/** Header A2 (interactive TTY / in-app chat window) vs Header B (web-serve or `--server`
- * "headless" mode). Chosen once at startup from the composed `RunMode`, per the ticket's
- * mode-detection rule: explicit web-serve/headless composition wins over anything else — TTY
- * detection only decides the plain-text fallback *within* whichever header mode this picks,
- * never which header mode is picked (see `sizeGateOk`/`ColorLevel === "none"` below). */
-export type HeaderMode = "a2" | "b";
-
-/** `isServer`: `RunMode.kind === "server"` (the existing "headless server" mode).
- * `isWeb`: the composed mode serves the web UI (`mode.web` on local/connect). Either implies
- * Header B; anything else (a bare interactive TUI, local or `--connect`) is Header A2. */
-export function chooseHeaderMode(opts: { isServer: boolean; isWeb: boolean }): HeaderMode {
-  return opts.isServer || opts.isWeb ? "b" : "a2";
-}
 
 /** Git SHA truncated to 7 chars for on-screen headers — the full SHA remains available via
  * `dh --version` (formatVersionString, header-info.ts), which this function does not touch. */
@@ -73,7 +67,7 @@ export interface HeaderStatusFacts {
 }
 
 function healthDot(level: ColorLevel, healthy: boolean): string {
-  const hex = healthy ? BRAND.harnessGreen : BRAND.leadOrange;
+  const hex = healthy ? STATUS_TOKENS.done.webHex : BRAND.leadOrange;
   return paint(hex, "●", level);
 }
 
