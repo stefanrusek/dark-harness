@@ -542,6 +542,48 @@ function parseReferenceLink(
  * escapable-character set. */
 const ESCAPABLE_RE = /[!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~\\]/;
 
+/** DH-0206/ADR 0009: the exact anchored, case-insensitive opening-tag grammar for the one
+ * allowlisted colored-span construct. Flexible whitespace, single- or double-quote (matched by
+ * backreference `\1`), optional trailing semicolon before the close quote. The captured value's
+ * char class deliberately excludes `; " ' ( ) < > { }` so `url(...)`, `expression(...)`, quote-
+ * breakouts, and nested-tag breakouts can never appear in the captured value at all — this is
+ * the first of two gates; `validateColor` below is the second, authoritative one. */
+const COLORED_SPAN_OPEN =
+  /^<span\s+style\s*=\s*(["'])\s*color\s*:\s*([^;"'(){}<>]+?)\s*;?\s*\1\s*>/i;
+
+/** Curated, letters-only named-color allowlist (DH-0206/ADR 0009) — every name here has a
+ * sensible ANSI-16 mapping for the TUI; hex covers arbitrary colors on the Web side. Frozen so
+ * it can't be mutated at runtime. */
+const NAMED_COLORS = Object.freeze(
+  new Set([
+    "black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "white",
+    "gray",
+    "grey",
+    "orange",
+    "purple",
+  ]),
+);
+
+const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/;
+
+/** DH-0206/ADR 0009: the authoritative color allowlist gate, independent of the grammar's char-
+ * class exclusion above. Accepts only hex `#rgb`/`#rrggbb` or membership in `NAMED_COLORS`,
+ * returning the trimmed/lowercased normalized form; everything else returns `null` (fail
+ * closed), including `url(...)`, `expression(...)`, `javascript:`, and any non-color token. */
+export function validateColor(raw: string): string | null {
+  const value = raw.trim().toLowerCase();
+  if (HEX_COLOR_RE.test(value)) return value;
+  if (NAMED_COLORS.has(value)) return value;
+  return null;
+}
+
 /** Builds a `link` InlineNode, omitting `title` entirely (rather than setting it to
  * `undefined`) when there is none — required under `exactOptionalPropertyTypes`. */
 function makeLinkNode(children: InlineNode[], url: string, title: string | undefined): InlineNode {
