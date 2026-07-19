@@ -1,10 +1,8 @@
 # ◆ Dark Harness
 
+[![CI](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/dark-harness)](https://www.npmjs.com/package/dark-harness)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-
-*(A CI status badge belongs here too, once the repo's public URL is confirmed — see
-[Status / deferred this round](#status--deferred-this-round).)*
 
 **Point `dh` at a repo and an instructions file, and it works the job unattended** — a
 single compiled binary running an LLM agent, sub-agents, a real tool set, skills, and MCP
@@ -404,8 +402,6 @@ should read both before their first change.
 
 ## Status / deferred this round
 
-- The CI badge above is a placeholder — wiring it to a real status requires the repo's public
-  URL, which needs the owner's sign-off before it's published; see `tracking/DH-0068-*.md`.
 - A full logo/wordmark design is still out of scope — the ◆ brand mark above (borrowed from
   the web UI's own `.brand::before`) is the extent of the visual identity for now.
 - The repo has no GitHub social preview image set yet. A ready-to-follow generation prompt
