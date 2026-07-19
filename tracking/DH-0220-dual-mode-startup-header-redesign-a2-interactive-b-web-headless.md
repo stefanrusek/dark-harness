@@ -8,7 +8,7 @@ resolution:
 blocked_by: []
 created: 2026-07-19
 relations:
-  depends_on: [DH-0219]
+  depends_on: [DH-0219, DH-0221]
   relates_to: []
   supersedes: []
 implementation:
@@ -161,12 +161,61 @@ Compact `dh` glyph and status in one frame; version in the frame's nameplate not
   (owner decision) — audit `e2e/` for exact-text assertions on the `dh: ` prefix and update
   deliberately.
 
+## Color system design (Fable architecture pass, 2026-07-19)
+
+The owner routed the "how is truecolor actually built" question to the architect before
+implementation. Decision, in full:
+
+**The truecolor palette + degradation path is NOT built ad hoc inside this ticket — it is
+factored into a small, reusable, independently-gated color-infrastructure module, DH-0221
+(this ticket now `depends_on` it).** DH-0221 carries the concrete module design (function
+signatures, the `nearestAnsi256` downsample, the resolver); the summary below is what this
+ticket's implementer needs to know to build the headers against it.
+
+Key calls (rationale in DH-0221):
+
+1. **Truecolor rides the existing `wrapSgr`/`SGR_RESET` primitive** (DH-0191,
+   `src/design-tokens.ts`). A truecolor foreground is just an SGR parameter string
+   `38;2;r;g;b`; ansi-256 is `38;5;n` — both are the `code` shape `wrapSgr(code, text)`
+   already takes. No parallel escape system, no second reset. The only genuinely new logic is
+   a pure hex→nearest-xterm-256 downsample.
+2. **`STATUS_TOKENS` (semantic status colors) is untouched** and stays ANSI 16-color. The
+   DH-0220/DH-0219 palette is a *separate, orthogonal* brand/role table (`BRAND` in
+   `src/design-tokens.ts`) — a design-system concern, not a status vocabulary. Two tables
+   coexist; they are not unified.
+3. **Degradation is a resolved `ColorLevel` (`"truecolor" | "ansi256" | "none"`)** produced
+   once at startup by `detectColorLevel({ isTTY, env, plain })` in `src/cli/color-context.ts`
+   (Core), then threaded into the renderers. `--plain` / `NO_COLOR` / non-TTY → `"none"`;
+   `COLORTERM` in {`truecolor`,`24bit`} → `"truecolor"`; else `"ansi256"`. `NO_COLOR` honors
+   presence-disables (any value).
+4. **No new npm dependency.** Hand-rolled per the project's minimal-dependency posture
+   (CLAUDE.md §2) — the whole surface is ~5 small pure functions plus one resolver.
+5. **Ownership/location:** pure palette + `nearestAnsi256` + `lerpHex` + `paint`/`fgCode` in
+   `src/design-tokens.ts` (Core, shared — brand hexes double as Web CSS source of truth); the
+   impure resolver in `src/cli/color-context.ts` (Core); header rendering in `src/cli/`
+   (Core); wordmark ASCII-Shadow strings in `src/prompt/banner.constant.ts` (Prompt). No
+   `src/contracts/` change.
+
+**Header renderers here consume, not re-derive:** call
+`paint(BRAND.harnessGreen, text, level)` for solid colors and `lerpHex(BRAND.harnessGreen,
+BRAND.signalCyan, t)` for the A2 wordmark's per-column green→cyan gradient. The plain-text
+fallback path is a single predicate: `level === "none" || sizeGateFails` (all of
+NO_COLOR/--plain/non-TTY collapse into `level === "none"`, and the unicode art is inseparable
+from color in this design).
+
+**Sequencing:** DH-0221 lands and passes its gate first (its `nearestAnsi256`/resolver are
+the sharp 100%-coverage edges); then this ticket builds the two headers on top. DH-0221 is
+also what the owner-added TUI/Web Markdown-color note below draws on — both clients apply the
+same `BRAND` hexes to rendered Markdown.
+
 ## Functional Requirements
 
 - Mode detection: explicit `--headless`/web-serve config wins; otherwise TTY detection via
   `process.stdout.isTTY`. Non-TTY always gets the plain fallback regardless of mode.
-- Implement both headers with the exact layouts/palette above. Reuse DH-0219's shared palette
-  source of truth if one exists.
+- Implement both headers with the exact layouts/palette above. Source the palette and all
+  color rendering from DH-0221's `src/design-tokens.ts` `BRAND`/`paint`/`lerpHex` +
+  `src/cli/color-context.ts` `detectColorLevel` (see "Color system design" above) — do not
+  re-derive hexes, SGR wrapping, or the degrade path locally.
 - `--plain` flag (new) and `NO_COLOR` env var both force the plain-text fallback path.
 - Size gating: A2 requires ≥80 cols/≥30 rows or falls back to plain text (`DARK HARNESS`
   wordmark + `|-`/backtick tree). B requires ≥80 cols (no row minimum specified).

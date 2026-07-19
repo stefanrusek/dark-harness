@@ -71,6 +71,7 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0219](../DH-0219-new-dh-monogram-logo-uppercase-d-h-replaces-diamond-evolution-direction.md) | New DH monogram logo (uppercase D+H, replaces diamond-evolution direction) | feature | stefan |
 | [DH-0220](../DH-0220-dual-mode-startup-header-redesign-a2-interactive-b-web-headless.md) | Dual-mode startup header redesign: A2 (interactive) + B (web/headless) | feature | stefan |
+| [DH-0221](../DH-0221-truecolor-brand-palette-color-level-resolver-shared-color-infrastructure.md) | Truecolor brand palette + color-level resolver (shared color infrastructure) | feature | stefan |
 
 ### implementing
 
