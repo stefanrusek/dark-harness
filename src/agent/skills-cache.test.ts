@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { SkillsCache } from "./skills-cache.ts";
 import { BUILTIN_CLI_TOOLS_SKILL } from "./skills.ts";
+import { SkillsCache } from "./skills-cache.ts";
 
 describe("SkillsCache", () => {
   test("starts with just the builtin skill before discoverSkills() resolves", async () => {

@@ -5,7 +5,7 @@
 // owns the registry (agentId -> CreatedWorktree) and the live-count budget check that used
 // to be two loose fields (`agentWorktree`, `liveWorktreeCount`) directly on AgentRuntime.
 
-import { type CreatedWorktree, WorktreeError, createWorktree } from "./worktree.ts";
+import { type CreatedWorktree, createWorktree, WorktreeError } from "./worktree.ts";
 
 /** DH-0077: default cap on concurrently-live isolation worktrees when `options.
  * maxConcurrentAgents` is left unset — worktree creation has real disk/git overhead a plain

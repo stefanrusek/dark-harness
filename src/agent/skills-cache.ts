@@ -3,7 +3,7 @@
 // just packaged as its own small class instead of a bare field + inline .then() in the
 // constructor.
 
-import { type Skill, discoverSkills } from "../prompt/skills.ts";
+import { discoverSkills, type Skill } from "../prompt/skills.ts";
 import { BUILTIN_CLI_TOOLS_SKILL, loadSkillFromPaths } from "./skills.ts";
 
 /** DH-0093: one eager `discoverSkills()` scan at construction time (not re-scanned per

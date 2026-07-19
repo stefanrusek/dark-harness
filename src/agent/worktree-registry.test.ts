@@ -3,8 +3,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_MAX_CONCURRENT_WORKTREES, WorktreeRegistry } from "./worktree-registry.ts";
 import { WorktreeError } from "./worktree.ts";
+import { DEFAULT_MAX_CONCURRENT_WORKTREES, WorktreeRegistry } from "./worktree-registry.ts";
 
 function makeGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "dh-worktree-registry-test-repo-"));

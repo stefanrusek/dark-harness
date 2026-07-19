@@ -24,9 +24,9 @@ import { composeSkillInvocation } from "../prompt/index.ts";
 import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
 import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import { type AgentLoopResult, computeCostUsd, type ModelBinding, runAgentLoop } from "./loop.ts";
-import { mergeMcpTools } from "./mcp-tools-merge.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { loadProjectMcpServers } from "./mcp/project-config.ts";
+import { mergeMcpTools } from "./mcp-tools-merge.ts";
 import {
   buildPricing,
   cacheOverride,
@@ -35,19 +35,19 @@ import {
   pricingOverride,
   thinkingOverride,
 } from "./model-overrides.ts";
-import { ConfigModelError, ModelRegistry } from "./model-registry.ts";
+import { ModelRegistry } from "./model-registry.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
 import { reconstructSubAgentHistory } from "./resume.ts";
 import { SessionBudget, sessionBudgetOptionsFromConfig } from "./session-budget.ts";
-import { SkillsCache } from "./skills-cache.ts";
 import { loadSkillFromPaths } from "./skills.ts";
+import { SkillsCache } from "./skills-cache.ts";
 import { TaskFinishedError, TaskRegistry, type TaskRunHandle, type TaskSnapshot } from "./tasks.ts";
 import { TodoStore } from "./todos.ts";
 import { buildToolMap, composeTools, reportOutcomeTool } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.type.ts";
-import { WorktreeRegistry } from "./worktree-registry.ts";
 import { type CreatedWorktree, hasChanges, isGitRepo, removeWorktree } from "./worktree.ts";
+import { WorktreeRegistry } from "./worktree-registry.ts";
 
 export interface AgentRuntimeOptions {
   config: DhConfig;
