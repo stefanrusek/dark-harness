@@ -246,6 +246,23 @@ function startMockAnthropicServer(
             "tool_use",
           );
         }
+        // DH-0057 test support: drives the real `AgentRuntime.buildToolContext` ->
+        // `ctx.mcpAuth.complete` facade (runtime.ts, not the tool-level mock used by
+        // mcp-auth.test.ts) — calling `action: "complete"` for a server with no pending flow
+        // still reaches that closure; McpManager.completeAuth() is the one that rejects it.
+        if (text.includes("use-mcpauth-complete")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_mcpauth_complete",
+                name: "McpAuth",
+                input: { server: "ghost", action: "complete" },
+              },
+            ],
+            "tool_use",
+          );
+        }
         // Round 12 test support: a real run_in_background Bash/Agent call whose completion
         // should be proactively delivered into the (interactive) root's conversation.
         if (text.includes("use-background-bash-tool")) {
@@ -834,6 +851,23 @@ describe("AgentRuntime", () => {
     // The skill isn't found (no such path) but the wiring itself must not throw — the
     // Bash-style tool_result error is fed back and the loop still completes.
     expect(result.success).toBe(true);
+  });
+
+  test("buildToolContext wires ctx.mcpAuth.complete so the McpAuth tool can drive it", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+    const result = await runtime.runRoot("use-mcpauth-complete");
+    expect(result.success).toBe(true);
+    const toolResult = logLines.find(
+      (l) => l.type === "tool_result" && l.toolUseId === "tu_mcpauth_complete",
+    );
+    // No pending flow for "ghost" (not even a configured server) — McpManager.completeAuth()
+    // rejects with McpAuthConfigError, which the tool reports informationally, not as a
+    // harness failure. The point of this test is that ctx.mcpAuth.complete() was reached at
+    // all through the real runtime wiring, not the mocked facade mcp-auth.test.ts uses.
+    expect(toolResult && toolResult.type === "tool_result" ? toolResult.output : "").toContain(
+      'Unknown MCP server "ghost"',
+    );
   });
 
   test("buildToolContext wires searchDeferredTools so the ToolSearch tool can query it", async () => {
