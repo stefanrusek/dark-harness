@@ -951,13 +951,7 @@ describe("reducer: key handling — root view", () => {
     };
     const withAgentInfo = reducer(state, {
       type: "sse_event",
-      event: {
-        type: "agent_spawned",
-        agentId: "agent-root",
-        parentAgentId: null,
-        model: "claude",
-        timestamp: new Date().toISOString(),
-      },
+      event: spawned({ agentId: "agent-root", parentAgentId: null, model: "claude" }),
     }).state;
     const { state: next, effects } = reducer(withAgentInfo, {
       type: "key",
@@ -975,12 +969,7 @@ describe("reducer: key handling — root view", () => {
     state = { ...state, rootAgentId: "agent-root", rootActive: true, statusMessage: "stale" };
     const withStatus = reducer(state, {
       type: "sse_event",
-      event: {
-        type: "agent_status",
-        agentId: "agent-root",
-        status: "done",
-        timestamp: new Date().toISOString(),
-      },
+      event: statusEvent({ agentId: "agent-root", status: "done" }),
     }).state;
     const { state: next, effects } = reducer(withStatus, {
       type: "key",
