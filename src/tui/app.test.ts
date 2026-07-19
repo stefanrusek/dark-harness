@@ -12,9 +12,8 @@ import type {
   ServerSentEvent,
 } from "../contracts/index.ts";
 import type { StdinLike, StdoutLike } from "./app.ts";
-import { startTui } from "./app.ts";
+import { EVENTS_PATH, startTui } from "./app.ts";
 import { COMMAND_PATH } from "./http-client.ts";
-import { EVENTS_PATH } from "./sse-client.ts";
 
 function sseFrame(event: ServerSentEvent): string {
   return `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;

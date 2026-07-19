@@ -73,7 +73,18 @@ describe("DH-0093 slash commands under a real PTY + mock provider", () => {
 
     session.sendKeys("Down");
     session.sendKeys("Enter");
-    await session.waitFor((screen) => screen.includes("switching model to model-b"));
+    // DH-0185: the TUI's SSE client now runs through the shared client-core transport, whose
+    // permissive payload validator (DH-0184) no longer drops `model_switched` events behind
+    // the old `KNOWN_TYPES` allowlist bug. The server confirms the switch near-instantly (no
+    // real provider round-trip involved), so the transient local "switching model to
+    // model-b…" status can be fully superseded by the server's "model switched to model-b"
+    // status before the next tmux screen capture — wait for either, since both are valid
+    // proof the switch was accepted.
+    await session.waitFor(
+      (screen) =>
+        screen.includes("switching model to model-b") ||
+        screen.includes("model switched to model-b"),
+    );
     // Back on the root view, ready for the next chat turn.
     await session.waitFor((screen) => screen.includes("Root Agent"));
 

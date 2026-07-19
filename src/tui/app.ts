@@ -1,11 +1,12 @@
 // Thin I/O shell: wires the pure reducer/render/parse modules (state.ts, render.ts,
-// keys.ts) to real terminal + network I/O (sse-client.ts, http-client.ts). Every
+// keys.ts) to real terminal + network I/O (../client-core/sse-transport.ts, http-client.ts). Every
 // side-effecting dependency is injectable via `TuiIO` so this module's *wiring logic* is
 // unit-testable with fakes; only the real `process.stdin` raw-mode/PTY behavior itself
 // (setRawMode, real SIGWINCH delivery) requires an actual terminal — that's covered by the
 // E2E domain's PTY harness (ADR 0008), not here. See docs/handoffs/tui.md status log for
 // the exact list of lines left to E2E.
 
+import { runSseTransport } from "../client-core/sse-transport.ts";
 import { sendCommand } from "./http-client.ts";
 import type { InkMount } from "./ink/mount.ts";
 import { mountInk } from "./ink/mount.ts";
@@ -13,9 +14,13 @@ import { createScrollBus } from "./ink/scroll-bus.ts";
 import { parseKeys } from "./keys.ts";
 import { parseSgrMouseChunk, stripSgrMouseSequences } from "./mouse.ts";
 import { MouseLifecycle } from "./mouse-lifecycle.ts";
-import { runSseClient } from "./sse-client.ts";
 import { initialState, reducer } from "./state.ts";
 import type { Action, Effect, TuiState } from "./types.type.ts";
+
+// Confirmed against the Server domain's actual route (src/server/server.ts,
+// GET /api/events) — see docs/handoffs/tui.md status log. DH-0185: relocated here from the
+// now-deleted sse-client.ts when the TUI moved onto the shared client-core transport.
+export const EVENTS_PATH = "/api/events";
 
 /** DH-0126: lines the transcript scrolls per wheel notch — no per-notch line-count is
  * reported by SGR 1006 (one event = one notch), so this is a fixed, editor-typical step. */
@@ -336,10 +341,10 @@ export async function startTui(
       }, RESIZE_DEBOUNCE_MS);
     });
 
-    // initialState() already reflects "connecting"; runSseClient reports its own
+    // initialState() already reflects "connecting"; runSseTransport reports its own
     // transitions (connecting -> open/error) as they happen.
-    void runSseClient({
-      baseUrl,
+    void runSseTransport({
+      url: `${baseUrl}${EVENTS_PATH}`,
       fetchImpl,
       ...(authHeaders ? { headers: authHeaders } : {}),
       signal: abortController.signal,

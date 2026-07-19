@@ -406,10 +406,12 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
       return noEffects(handleToolCall(state, event, at));
     case "tool_result":
       return noEffects(handleToolResult(state, event, at));
-    // DH-0045: `agent_thinking` is a new additive SSE event type (Core's piece of DH-0045),
-    // not yet in sse-parser.ts's KNOWN_TYPES, so it never actually reaches this reducer at
-    // runtime; this case exists purely to keep this switch's exhaustiveness check compiling.
-    // Full TUI display is deferred to a later round (mirrors Web's state.ts treatment).
+    // DH-0045: `agent_thinking` is an additive SSE event type (Core's piece of DH-0045).
+    // DH-0185: now reaches this reducer at runtime — the shared client-core transport's
+    // permissive `parseServerSentEventPayload` (DH-0184) fixed the old `sse-parser.ts`
+    // `KNOWN_TYPES` allowlist bug that silently dropped it before it ever got here. Full TUI
+    // display is still deferred to a later round (mirrors Web's state.ts treatment); this
+    // case exists to keep this switch's exhaustiveness check compiling until then.
     case "agent_thinking":
       return noEffects(state);
   }
