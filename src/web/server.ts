@@ -211,7 +211,7 @@ export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
   const port = server.port ?? options.port;
   return {
     port,
-    url: `http://localhost:${port}`,
+    url: `http://${options.hostname ?? "localhost"}:${port}`,
     stop: () => server.stop(true),
   };
 }

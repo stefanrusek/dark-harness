@@ -153,5 +153,19 @@ describe("serveWebUi", () => {
       const res = await fetch(handle.url);
       expect(res.status).toBe(200);
     });
+
+    test("DH-0167: handle.url reflects the configured hostname, not a hardcoded localhost", async () => {
+      handle = serveWebUi({
+        port: 0,
+        targetBaseUrl: "http://localhost:4000",
+        hostname: "127.0.0.1",
+      });
+      expect(handle.url).toBe(`http://127.0.0.1:${handle.port}`);
+    });
+
+    test("DH-0167: handle.url falls back to localhost when hostname is unset", async () => {
+      handle = serveWebUi({ port: 0, targetBaseUrl: "http://localhost:4000" });
+      expect(handle.url).toBe(`http://localhost:${handle.port}`);
+    });
   });
 });
