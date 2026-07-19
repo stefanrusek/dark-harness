@@ -68,6 +68,12 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
 
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0195](../DH-0195-readme-stale-missing-web-port-host-import-model-and-slash-command-autocomplete.md) | README stale: missing --web-port, --host, --import/--model, and slash-command autocomplete | bug | stefan |
+
 ### implementing
 
 | ID | Title | Type | Owner |
