@@ -165,6 +165,8 @@ Much improved from previous state! Most features work correctly. Main gaps are:
 - Currently requires manual clicks on "Jump to Latest" button to get to bottom
 - **Related to DH-0129 autoscroll issues** — same scroll-to-bottom logic problem
 - The event stream reconnect works (`Last-Event-ID`), but UX is clunky
+- **Bug:** Model name lost after reconnect — shows "(unknown model)" instead of "bedrock haiku"
+  - Model info should be preserved or re-fetched on reconnect
 
 ### Download Functionality ✅
 - **Download Log button** works correctly
