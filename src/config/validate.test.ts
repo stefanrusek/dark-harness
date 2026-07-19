@@ -498,6 +498,39 @@ describe("validateConfig — rejections", () => {
     expect(config.security?.hostname).toBeUndefined();
   });
 
+  test("DH-0168: rejects a non-number security.webPort", () => {
+    expect(() => validateConfig(baseConfig({ security: { webPort: "8080" } }))).toThrow(
+      /security.webPort must be a positive integer or null/,
+    );
+  });
+
+  test("DH-0168: rejects a non-integer security.webPort", () => {
+    expect(() => validateConfig(baseConfig({ security: { webPort: 8080.5 } }))).toThrow(
+      /security.webPort must be a positive integer or null/,
+    );
+  });
+
+  test("DH-0168: rejects a non-positive security.webPort", () => {
+    expect(() => validateConfig(baseConfig({ security: { webPort: 0 } }))).toThrow(
+      /security.webPort must be a positive integer or null/,
+    );
+  });
+
+  test("DH-0168: accepts and passes through a valid security.webPort", () => {
+    const config = validateConfig(baseConfig({ security: { webPort: 8080 } }));
+    expect(config.security?.webPort).toBe(8080);
+  });
+
+  test("DH-0168: security.webPort omitted (unset) means no webPort field in the result — default random-port behavior unchanged", () => {
+    const config = validateConfig(baseConfig({ security: { token: "t" } }));
+    expect(config.security?.webPort).toBeUndefined();
+  });
+
+  test("DH-0168: security.webPort: null normalizes to omitted, same as hostname/token/tls", () => {
+    const config = validateConfig(baseConfig({ security: { webPort: null } }));
+    expect(config.security?.webPort).toBeUndefined();
+  });
+
   test("rejects a non-integer options.maxTurns", () => {
     expect(() =>
       validateConfig(baseConfig({ options: { defaultModel: "sonnet", maxTurns: 1.5 } })),

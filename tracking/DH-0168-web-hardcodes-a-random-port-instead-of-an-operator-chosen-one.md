@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0168
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-18
 relations:
@@ -183,3 +183,20 @@ These are real but not the *common* case, which is why the default stays random.
 > lives at `docker run` time, not in the image's config). Called out explicitly so the owner
 > can redirect to a `dh.json` field at review if they'd rather — the decision is a defensible
 > architect call, not an owner sign-off.
+
+> [!NOTE]
+> **DH-0168 implementation (2026-07-18/19).** Landed both a `--web-port <N>` CLI flag and a
+> `dh.json` `security.webPort` field per the owner's "both, flag wins" revision above. Flag
+> validated as a positive integer in `parseArgs` (same rule/error shape as `--port`); requires
+> the invocation to actually reach a web mode (reuses `composeMode`'s own connect/server/local
+> precedence rather than re-deriving it). Config field validated in `validateConfig` with the
+> same positive-integer rule, `null`/omitted normalizing to unset like `hostname`/`token`/
+> `tls`. Resolution (`options.webPort ?? config.security?.webPort ?? 0`) is computed once in
+> `main()` right after config load and threaded through `runInteractiveMode`'s new `webPort`
+> parameter to both `serveWebUi({ port: … })` call sites (local `--web` and `--connect --web`).
+> Tests: `src/cli.test.ts` ("DH-0168: ..." cases) cover both call sites, config-field-only,
+> flag-overrides-config, requires-`--web` usage errors (bare and with `--server`), and
+> invalid-value rejection (`0`, negative, non-numeric); `src/config/validate.test.ts`
+> ("DH-0168: ..." cases) cover the config field's own validation and null/omitted
+> normalization. All four quality gates (typecheck/lint/test:coverage at 100% lines for
+> changed code/e2e) green.

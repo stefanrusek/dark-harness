@@ -99,9 +99,14 @@ export interface SecurityConfig {
   /** DH-0022: opt-in bind address for `Bun.serve` (e.g. "127.0.0.1" for loopback-only).
    * Omitted means unchanged default behavior — Bun's own default (all interfaces). Applies
    * to both the `--server` process (src/server/server.ts) and the web UI's static server
-   * (src/web/server.ts) when either is started. Config-only by owner decision (DH-0022),
-   * not a CLI flag. */
+   * (src/web/server.ts) when either is started. Originally config-only (DH-0022); DH-0182
+   * revises that — `dh --host <name>` overrides this field for the invocation when both are
+   * set, per the owner's "flag overrides config" decision covering both host and port. */
   hostname?: string;
+  /** DH-0168: opt-in pinned listen port for the web UI's static server (src/web/server.ts).
+   * Omitted (or `0`) means unchanged default behavior — an OS-assigned random ephemeral
+   * port. `dh --web-port <n>` overrides this field for the invocation when both are set. */
+  webPort?: number;
 }
 
 export interface McpServerConfig {

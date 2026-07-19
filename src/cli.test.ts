@@ -212,6 +212,8 @@ describe("parseArgs", () => {
       dryRun: false,
       resume: null,
       quiet: false,
+      webPort: null,
+      host: null,
     });
   });
 
@@ -224,6 +226,10 @@ describe("parseArgs", () => {
       "example.com",
       "--port",
       "5050",
+      "--web-port",
+      "8080",
+      "--host",
+      "127.0.0.1",
       "--instructions",
       "plan.md",
       "--config",
@@ -250,6 +256,8 @@ describe("parseArgs", () => {
       dryRun: true,
       resume: "abc123",
       quiet: true,
+      webPort: 8080,
+      host: "127.0.0.1",
     });
   });
 
@@ -982,6 +990,160 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(receivedSecurity).toEqual({ hostname: "127.0.0.1" });
+  });
+
+  test("DH-0168: --web-port is passed through to serveWebUi (local --web); unset keeps port 0 (random)", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--web", "--web-port", "8080"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(8080);
+
+    let receivedPortUnset: unknown;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedPortUnset = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPortUnset).toBe(0);
+  });
+
+  test("DH-0168: --web-port is passed through to serveWebUi (--connect --web)", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--connect", "example.com", "--web", "--web-port", "9090"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(9090);
+  });
+
+  test("DH-0168: --web-port overrides dh.json's security.webPort when both are set", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--web", "--web-port", "8080"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { webPort: 1234 } }),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(8080);
+  });
+
+  test("DH-0168: dh.json's security.webPort is used when --web-port is not passed", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { webPort: 1234 } }),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(1234);
+  });
+
+  test("DH-0168: --web-port without --web is a CliUsageError", async () => {
+    const io = fakeIo();
+    const code = await main(["--web-port", "8080"], interactiveOverrides(io));
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines.join("\n")).toMatch(/--web-port requires --web/);
+  });
+
+  test("DH-0168: --web-port with --server (and no --web/--connect) is a CliUsageError", async () => {
+    const io = fakeIo();
+    const code = await main(["--server", "--web-port", "8080"], interactiveOverrides(io));
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines.join("\n")).toMatch(/--web-port requires --web/);
+  });
+
+  test("DH-0168: --web-port 0 is rejected (unset uses the internal 0 sentinel, not an explicit flag value)", () => {
+    expect(() => parseArgs(["--web", "--web-port", "0"])).toThrow(CliUsageError);
+    expect(() => parseArgs(["--web", "--web-port", "0"])).toThrow(
+      /--web-port must be a positive integer/,
+    );
+  });
+
+  test("DH-0168: --web-port -5 and --web-port abc are rejected", () => {
+    expect(() => parseArgs(["--web", "--web-port", "-5"])).toThrow(
+      /--web-port must be a positive integer/,
+    );
+    expect(() => parseArgs(["--web", "--web-port", "abc"])).toThrow(
+      /--web-port must be a positive integer/,
+    );
+  });
+
+  test("DH-0182: --host overrides dh.json's security.hostname for serveWebUi (local --web) and createServer", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown;
+    let receivedSecurity: unknown;
+    await main(["--web", "--host", "0.0.0.0"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("0.0.0.0");
+    expect(receivedSecurity).toEqual({ hostname: "0.0.0.0" });
+  });
+
+  test("DH-0182: --host overrides dh.json's security.hostname for serveWebUi (--connect --web)", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown;
+    await main(["--connect", "example.com", "--web", "--host", "0.0.0.0"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("0.0.0.0");
+  });
+
+  test("DH-0182: --host is used even when dh.json sets no security.hostname at all", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown;
+    await main(["--web", "--host", "0.0.0.0"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("0.0.0.0");
+  });
+
+  test("DH-0182: without --host, dh.json's security.hostname (or its absence) behaves exactly as before", async () => {
+    const io = fakeIo();
+    let sawHostnameKey = true;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        sawHostnameKey = "hostname" in options;
+        return fakeWebUi();
+      },
+    });
+    expect(sawHostnameKey).toBe(false);
   });
 
   test("a startup failure (e.g. the requested port is already in use) maps to HarnessError, local mode", async () => {

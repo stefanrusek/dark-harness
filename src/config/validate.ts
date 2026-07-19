@@ -643,10 +643,25 @@ export function validateConfig(raw: unknown): DhConfig {
       }
       hostname = raw.security.hostname;
     }
+    // DH-0168: opt-in pinned web-UI listen port, same null-means-unset normalization. Must be
+    // a positive integer (0 is the "unset/random" sentinel, expressed by omitting the field
+    // entirely rather than writing `0`) — same rule as the `--web-port` CLI flag.
+    let webPort: number | undefined;
+    if (raw.security.webPort !== undefined && raw.security.webPort !== null) {
+      if (
+        typeof raw.security.webPort !== "number" ||
+        !Number.isInteger(raw.security.webPort) ||
+        raw.security.webPort <= 0
+      ) {
+        throw new ConfigError("security.webPort must be a positive integer or null");
+      }
+      webPort = raw.security.webPort;
+    }
     security = {
       ...(token !== undefined ? { token } : {}),
       ...(tls !== undefined ? { tls } : {}),
       ...(hostname !== undefined ? { hostname } : {}),
+      ...(webPort !== undefined ? { webPort } : {}),
     };
   }
 

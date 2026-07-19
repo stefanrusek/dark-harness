@@ -109,10 +109,26 @@ export interface CliOptions {
    * runInteractiveMode's activity-feed wiring). Does not affect the one-time startup block —
    * that always prints regardless of `--quiet`. */
   quiet: boolean;
+  /** DH-0168: pinned listen port for the web UI's static server. `null` means unset — the
+   * unchanged default (random ephemeral port), unless `dh.json`'s `security.webPort` sets
+   * one. Overrides that config field when both are set. Requires `--web`. */
+  webPort: number | null;
+  /** DH-0182: overrides `dh.json`'s `security.hostname` (DH-0022) for this invocation only.
+   * `null` means unset — `security.hostname` (or its absence) behaves exactly as before. */
+  host: string | null;
 }
 
 const FLAGS_WITH_VALUES = Object.freeze(
-  new Set(["--connect", "--port", "--instructions", "--config", "--env", "--resume"]),
+  new Set([
+    "--connect",
+    "--port",
+    "--instructions",
+    "--config",
+    "--env",
+    "--resume",
+    "--web-port",
+    "--host",
+  ]),
 );
 
 /** DH-0035/DH-0096: the `dh.json` scaffolded by `dh init` — kept byte-for-byte in sync with
@@ -242,6 +258,18 @@ const HELP_FLAG_ITEMS: readonly HelpItem[] = Object.freeze([
   {
     name: "--port <n>",
     desc: "Listen port for --server, or target port for --connect (default 4000).",
+  },
+  {
+    name: "--web-port <n>",
+    desc:
+      "Pin the web UI's listen port (default: random). Requires --web; overrides " +
+      "dh.json's security.webPort when both are set (DH-0168).",
+  },
+  {
+    name: "--host <name>",
+    desc:
+      "Override dh.json's security.hostname (the bind address) for this invocation only " +
+      "(DH-0182).",
   },
   {
     name: "--instructions <file>",
@@ -566,6 +594,8 @@ export function parseArgs(argv: string[]): CliOptions {
     dryRun: false,
     resume: null,
     quiet: false,
+    webPort: null,
+    host: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -609,12 +639,14 @@ export function parseArgs(argv: string[]): CliOptions {
       else if (arg === "--config") options.config = value;
       else if (arg === "--env") options.env = value;
       else if (arg === "--resume") options.resume = value;
-      else {
+      else if (arg === "--host") options.host = value;
+      else if (arg === "--port" || arg === "--web-port") {
         const parsed = Number(value);
         if (!Number.isInteger(parsed) || parsed <= 0) {
-          throw new CliUsageError(`--port must be a positive integer, got "${value}"`);
+          throw new CliUsageError(`${arg} must be a positive integer, got "${value}"`);
         }
-        options.port = parsed;
+        if (arg === "--port") options.port = parsed;
+        else options.webPort = parsed;
       }
       continue;
     }
@@ -626,6 +658,18 @@ export function parseArgs(argv: string[]): CliOptions {
   // error here, not a silent no-op, so an operator's misconfigured invocation fails loudly.
   if (options.json && !options.job) {
     throw new CliUsageError("--json requires --job");
+  }
+
+  // DH-0168: --web-port only means anything on a mode that actually starts the web UI's
+  // static server — reuses composeMode's own connect/server/local precedence (a function
+  // declaration, hoisted, so it's safe to call from here even though it's defined below)
+  // rather than re-deriving that precedence a second time.
+  if (options.webPort !== null) {
+    const mode = composeMode(options);
+    const isWebMode = (mode.kind === "local" || mode.kind === "connect") && mode.web;
+    if (!isWebMode) {
+      throw new CliUsageError("--web-port requires --web");
+    }
   }
 
   return options;
@@ -1136,6 +1180,9 @@ async function runInteractiveMode(
   deps: CliDeps,
   resumeResult?: ResumeResult,
   quiet = false,
+  // DH-0168: resolved (flag-overrides-config) pinned web-UI port; `0` (the default) preserves
+  // today's random-ephemeral-port behavior unchanged.
+  webPort = 0,
 ): Promise<ExitCodeType> {
   const { io } = deps;
   // DH-0122: the app header prints once per invocation, before anything else — including
@@ -1157,7 +1204,7 @@ async function runInteractiveMode(
       const targetBaseUrl = `${scheme}://${host}:${mode.port}`;
       if (mode.web) {
         const handle = deps.serveWebUi({
-          port: 0,
+          port: webPort,
           targetBaseUrl,
           headerInfo,
           ...(config.security?.token ? { token: config.security.token } : {}),
@@ -1321,7 +1368,7 @@ async function runInteractiveMode(
     const baseUrl = `http://localhost:${boundPort}`;
     if (mode.web) {
       webHandle = deps.serveWebUi({
-        port: 0,
+        port: webPort,
         targetBaseUrl: baseUrl,
         headerInfo,
         ...(config.security?.token ? { token: config.security.token } : {}),
@@ -1802,6 +1849,19 @@ export async function main(
     return fail(io, (err as Error).message);
   }
 
+  // DH-0182: `--host` overrides `dh.json`'s `security.hostname` for this invocation only —
+  // merged into `config` once, here, so every downstream read of `config.security?.hostname`
+  // (the local DhServer's bind address, both `serveWebUi` call sites' `hostname` option, and
+  // the printed "bound to <host>:<port>" startup line) picks up the override automatically,
+  // with no further plumbing needed at each read site.
+  const resolvedHostname = options.host ?? config.security?.hostname;
+  if (resolvedHostname !== undefined) {
+    config = { ...config, security: { ...config.security, hostname: resolvedHostname } };
+  }
+  // DH-0168: `--web-port` overrides `dh.json`'s `security.webPort`; `0`/unset on both keeps
+  // today's random-ephemeral-port behavior (serveWebUi's own default when passed `0`).
+  const resolvedWebPort = options.webPort ?? config.security?.webPort ?? 0;
+
   let systemPrompt: string;
   try {
     systemPrompt = await deps.loadSystemPrompt(config);
@@ -1857,6 +1917,7 @@ export async function main(
       deps,
       resumeResult,
       options.quiet,
+      resolvedWebPort,
     );
   }
 
@@ -2010,6 +2071,7 @@ export async function main(
       deps,
       undefined,
       options.quiet,
+      resolvedWebPort,
     );
   }
 
