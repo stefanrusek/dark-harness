@@ -59,7 +59,6 @@ source: tracking/
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
-| [DH-0196](../DH-0196-refactoring-round-post-cli-ts-split-and-second-wave-feature-sweep.md) | Refactoring round: post-cli.ts-split and second-wave feature sweep | bug | stefan |
 | [DH-0197](../DH-0197-post-cli-split-residual-doc-style-seams-in-core-stale-function-refs-help-ts-sgr-literal.md) | Post-cli-split residual doc/style seams in Core (stale function refs + help.ts SGR literal) | bug | stefan |
 
 ### refining
@@ -106,6 +105,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0196](../DH-0196-refactoring-round-post-cli-ts-split-and-second-wave-feature-sweep.md) | Refactoring round: post-cli.ts-split and second-wave feature sweep | done |
 | [DH-0194](../DH-0194-agent-should-know-when-running-non-interactively-job-and-adjust-behavior-accordingly.md) | Agent should know when running non-interactively (--job) and adjust behavior accordingly | done |
 | [DH-0191](../DH-0191-consolidate-hand-rolled-status-color-sgr-tables-onto-design-tokens-ts-and-extract-a-shared-sgr-primitive.md) | Consolidate hand-rolled status-color/SGR tables onto design-tokens.ts and extract a shared SGR primitive | done |
 | [DH-0190](../DH-0190-refactoring-round-post-dh-0170-chain-sweep-focus-on-cli-ts-decomposition.md) | Refactoring round: post-DH-0170-chain sweep, focus on cli.ts decomposition | done |
@@ -120,4 +120,3 @@ source: tracking/
 | [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | done |
 | [DH-0180](../DH-0180-relocate-fakeagentloop-out-of-the-production-server-entrypoint-into-test-only-scope.md) | Relocate FakeAgentLoop out of the production server entrypoint into test-only scope | done |
 | [DH-0179](../DH-0179-revisit-web-static-server-dual-typecheck-split-to-remove-the-loopback-self-proxy-and-any-casts.md) | Revisit web static-server dual-typecheck split to remove the loopback self-proxy and any-casts | done |
-| [DH-0178](../DH-0178-de-duplicate-bun-setup-install-steps-and-centralize-the-pinned-bun-version-across-ci-workflows.md) | De-duplicate Bun setup/install steps and centralize the pinned bun-version across CI workflows | done |
