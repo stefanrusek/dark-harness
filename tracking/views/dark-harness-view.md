@@ -59,7 +59,6 @@ source: tracking/
 | [DH-0200](../DH-0200-web-jump-to-latest-button-disappears-after-mouse-wheel-scroll-doesn-t-reappear-consistently.md) | Web: 'Jump to Latest' button disappears after mouse-wheel scroll, doesn't reappear consistently | bug | stefan |
 | [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
-| [DH-0218](../DH-0218-renderselfinfosection-signature-accreted-into-positional-optional-trap-across-dh-0094-0194-0215.md) | renderSelfInfoSection signature accreted into positional-optional trap across DH-0094/0194/0215 | bug | stefan |
 
 ### refining
 
@@ -114,6 +113,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0218](../DH-0218-renderselfinfosection-signature-accreted-into-positional-optional-trap-across-dh-0094-0194-0215.md) | renderSelfInfoSection signature accreted into positional-optional trap across DH-0094/0194/0215 | done |
 | [DH-0217](../DH-0217-spile-ops-new-ticket-py-counter-is-unsafe-for-concurrent-isolated-worktrees-id-collisions.md) | spile-ops new_ticket.py counter is unsafe for concurrent isolated worktrees — ID collisions | done |
 | [DH-0216](../DH-0216-refactoring-round-post-p0-fixes-and-workflow-self-awareness-feature-sweep.md) | Refactoring round: post-P0-fixes and Workflow/self-awareness feature sweep | done |
 | [DH-0215](../DH-0215-teach-agents-their-own-sessionid-agentid-log-path-jsonl-log-structure-in-the-system-prompt.md) | Teach agents their own sessionId/agentId/log path + JSONL log structure in the system prompt | done |
@@ -128,4 +128,3 @@ source: tracking/
 | [DH-0190](../DH-0190-refactoring-round-post-dh-0170-chain-sweep-focus-on-cli-ts-decomposition.md) | Refactoring round: post-DH-0170-chain sweep, focus on cli.ts decomposition | done |
 | [DH-0189](../DH-0189-import-import-cli-flag-mode-composition-model-selection-core.md) | import: --import CLI flag, mode composition, model selection (Core) | done |
 | [DH-0188](../DH-0188-import-claude-code-session-translation-jsonl-writer-server.md) | import: Claude Code session translation + JSONL writer (Server) | done |
-| [DH-0187](../DH-0187-import-import-a-claude-code-session-directory-into-dh.md) | --import: import a Claude Code session directory into dh | done |

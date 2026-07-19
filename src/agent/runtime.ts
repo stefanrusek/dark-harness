@@ -394,14 +394,11 @@ export class AgentRuntime {
     // (src/server/logger.ts's filePathFor) — one JSONL file per agent, under this session's
     // log directory, named by the agent's own (percent-encoded) id.
     const logFilePath = join(this.logsRoot, this.sessionId, `${encodeURIComponent(agentId)}.jsonl`);
-    const selfInfo = renderSelfInfoSection(
-      this.config,
-      model,
-      undefined,
-      this.sessionId,
+    const selfInfo = renderSelfInfoSection(this.config, model, {
+      sessionId: this.sessionId,
       agentId,
       logFilePath,
-    );
+    });
     return `${this.systemPrompt}\n\n${selfInfo}${jobModeSection}`;
   }
 

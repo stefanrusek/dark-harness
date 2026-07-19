@@ -103,10 +103,12 @@ describe("renderSelfInfoSection", () => {
   test("includes git sha (clean) when BUILD_INFO reports one", () => {
     const config = baseConfig({ models: [sonnet] });
     const section = renderSelfInfoSection(config, sonnet, {
-      version: "1.2.3",
-      gitSha: "abc1234",
-      dirty: false,
-      releaseTag: null,
+      buildInfo: {
+        version: "1.2.3",
+        gitSha: "abc1234",
+        dirty: false,
+        releaseTag: null,
+      },
     });
     expect(section).toContain("git sha abc1234");
     expect(section).not.toContain("dirty working tree");
@@ -115,10 +117,12 @@ describe("renderSelfInfoSection", () => {
   test("flags a dirty working tree when BUILD_INFO reports one", () => {
     const config = baseConfig({ models: [sonnet] });
     const section = renderSelfInfoSection(config, sonnet, {
-      version: "1.2.3",
-      gitSha: "abc1234",
-      dirty: true,
-      releaseTag: null,
+      buildInfo: {
+        version: "1.2.3",
+        gitSha: "abc1234",
+        dirty: true,
+        releaseTag: null,
+      },
     });
     expect(section).toContain("git sha abc1234 (dirty working tree)");
   });
@@ -126,10 +130,12 @@ describe("renderSelfInfoSection", () => {
   test("includes the release tag when BUILD_INFO reports one", () => {
     const config = baseConfig({ models: [sonnet] });
     const section = renderSelfInfoSection(config, sonnet, {
-      version: "1.2.3",
-      gitSha: null,
-      dirty: false,
-      releaseTag: "v1.2.3",
+      buildInfo: {
+        version: "1.2.3",
+        gitSha: null,
+        dirty: false,
+        releaseTag: "v1.2.3",
+      },
     });
     expect(section).toContain("release v1.2.3");
   });

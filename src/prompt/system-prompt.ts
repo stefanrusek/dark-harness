@@ -159,14 +159,25 @@ const BASE_PROMPT = Object.freeze(`${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`);
  * branches deterministically rather than depending on how the test runner itself happened to
  * be invoked.
  */
+/** DH-0218: bundles `renderSelfInfoSection`'s optional inputs into one typed object instead
+ * of a defaulted positional parameter, so related-but-optional fields (DH-0215's session/
+ * agent/log-file identity) can be added as more keys here without reopening the
+ * positional-parameter-order question. */
+export interface SelfInfoOptions {
+  buildInfo?: BuildInfo;
+  /** DH-0215: this agent's own session id, agent id, and JSONL log file path — all three or
+   * none, since the self-info paragraph they drive only renders when all three are known. */
+  sessionId?: string;
+  agentId?: string;
+  logFilePath?: string;
+}
+
 export function renderSelfInfoSection(
   config: DhConfig,
   model: ModelConfig,
-  buildInfo: BuildInfo = BUILD_INFO,
-  sessionId?: string,
-  agentId?: string,
-  logFilePath?: string,
+  options: SelfInfoOptions = {},
 ): string {
+  const { buildInfo = BUILD_INFO, sessionId, agentId, logFilePath } = options;
   const buildBits = [`version ${buildInfo.version}`];
   if (buildInfo.gitSha) {
     buildBits.push(`git sha ${buildInfo.gitSha}${buildInfo.dirty ? " (dirty working tree)" : ""}`);
