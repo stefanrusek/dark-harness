@@ -62,6 +62,7 @@ source: tracking/
 | [DH-0174](../DH-0174-split-cli-ts-2041-lines-into-focused-modules-and-extract-a-shared-ansi-color-primitive.md) | Split cli.ts (2041 lines) into focused modules and extract a shared ANSI/color primitive | bug | stefan |
 | [DH-0191](../DH-0191-consolidate-hand-rolled-status-color-sgr-tables-onto-design-tokens-ts-and-extract-a-shared-sgr-primitive.md) | Consolidate hand-rolled status-color/SGR tables onto design-tokens.ts and extract a shared SGR primitive | bug | stefan |
 | [DH-0196](../DH-0196-refactoring-round-post-cli-ts-split-and-second-wave-feature-sweep.md) | Refactoring round: post-cli.ts-split and second-wave feature sweep | bug | stefan |
+| [DH-0197](../DH-0197-post-cli-split-residual-doc-style-seams-in-core-stale-function-refs-help-ts-sgr-literal.md) | Post-cli-split residual doc/style seams in Core (stale function refs + help.ts SGR literal) | bug | stefan |
 
 ### refining
 
