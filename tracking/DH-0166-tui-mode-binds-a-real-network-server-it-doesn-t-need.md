@@ -2,10 +2,10 @@
 spile: ticket
 id: DH-0166
 type: bug
-status: draft
+status: ready
 owner: stefan
 resolution:
-blocked_by: ["needs architect (Fable) sign-off per CLAUDE.md section 6 item 4 — touches security posture"]
+blocked_by: []
 created: 2026-07-18
 relations:
   depends_on: []
@@ -52,18 +52,57 @@ above — this incident is strong evidence that answer is yes.
   endless "reconnecting…" spinner with a barely-visible one-line status message) after a
   reasonable number of retries.
 
+## Architect Decision (Fable, 2026-07-19) — APPROVED, candidate direction confirmed
+
+Signed off per CLAUDE.md §6 item 4. The candidate direction holds against ADR 0003 with no
+adjustment needed; it is compatible with — arguably required by — the locked posture. Reasoning:
+
+- **ADR 0003 never made a decision about the local same-process IPC channel being externally
+  reachable.** What it locks is: plaintext HTTP + no auth *by default*, `security.token`/
+  `security.tls` as opt-in, and **air-gapping as the primary boundary**. Those are all about
+  the *client↔server* surface an operator deliberately exposes with `--server`/`--web`. Local/
+  TUI-only mode's `DhServer` exists solely so the same process's own TUI has something to talk
+  to; that it currently listens on an externally-reachable interface is an **accidental side
+  effect of unconditionally forwarding `config.security`** into the local-mode server (`run.ts`
+  ~L267), not a deliberate posture decision. Removing that side effect relitigates nothing.
+
+- **Binding local mode loopback-only *tightens* toward ADR 0003's air-gap posture, never
+  against it.** Note the bug is actually broader than the `hostname`-set case: with
+  `security.hostname` *unset* (the common case), local mode's server today binds to **every
+  interface** (`Bun.serve` default), guarded only by the Host-header allowlist (`isAllowedHost`,
+  server.ts L225). Pinning local mode to `127.0.0.1` unconditionally also closes that quieter
+  over-exposure. Strictly more conservative on every path — exactly the direction ADR 0003
+  points.
+
+- **No invariant flips.** `security.token`/`security.tls`/`security.hostname` retain their full
+  meaning for `--server`/`--web`/`--connect --web`, where remote reachability is the operator's
+  actual intent (DH-0022, DH-0182). Only the local/TUI-only path — which has no legitimate
+  remote-reachability use case — stops honoring `hostname`. This is a bug fix, not a schema or
+  posture change; ADR 0003 needs no amendment.
+
 ## Functional Requirements
 
-- Local/TUI-only mode's internal server bind must be loopback-only (`127.0.0.1`), always,
-  regardless of `security.hostname` — that config field should only ever apply to
-  `--server`/`--web` modes where remote reachability is the actual intent.
-- The TUI's own internal SSE client (`baseUrl` in `src/cli/run.ts`) should match whatever
-  address the internal server actually bound to — don't hardcode `localhost` independently
-  of the bind decision; derive both from the same source of truth so they can't drift apart
-  like this again.
-- Consider a retry-count/time cap on the TUI's reconnect loop that surfaces a real error
-  message instead of retrying forever — even after this specific bug is fixed, a *different*
-  future connectivity failure would hit the same silent-infinite-loop UX otherwise.
+- **[Core / Grace — the security-gated primary fix]** Local/TUI-only mode's internal `DhServer`
+  must bind **loopback-only (`127.0.0.1`) unconditionally**, regardless of `security.hostname`
+  (and regardless of it being unset). The `security.hostname` field applies **only** to
+  `--server`/`--web`/`--connect --web` modes, where remote reachability is the actual intent.
+  Concretely: in `runInteractiveMode` (`src/cli/run.ts`), the `mode.kind === "local"` path must
+  not forward `security.hostname` into `deps.createServer(...)` — it must force loopback.
+  (`security.token`/`security.tls`, if set, still pass through to the local server unchanged —
+  only the bind interface is forced; this requirement does not touch auth/TLS.)
+- **[Core / Grace]** The TUI's own internal SSE client `baseUrl` (`src/cli/run.ts` ~L378) must
+  be derived from the same bind decision as the server, not independently hardcoded — so the
+  client address and the bound address are a single source of truth and cannot drift apart
+  again. Since local mode now always binds `127.0.0.1`, `baseUrl` targets `127.0.0.1:${boundPort}`
+  by construction from that shared decision (not a coincidentally-matching `localhost` literal).
+- **[TUI / Mary — secondary, NOT security-gated, independent defense-in-depth]** The TUI's
+  internal-SSE reconnect loop must stop retrying forever: after a bounded number of attempts (or
+  bounded time) against a non-transient failure, it must surface a clear, actionable error
+  instead of an endless `reconnecting…` spinner. This is what turned the underlying bug into a
+  P0 (opaque failure mode), and it guards *future* connectivity failures independently of this
+  specific bind bug. It slices cleanly to the TUI domain and is **not blocked by the security
+  review** — the coordinator may land it alongside the Core fix or split it into a follow-up
+  ticket if it would delay the P0 bind fix.
 
 ## Assumptions
 
