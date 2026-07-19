@@ -182,3 +182,12 @@ Recommended as the more surgical fix, per the assignment's own suggestion, and i
 ### Effort/sequencing recommendation
 
 **Single implementer round, Core domain (Grace)** — this is not a DH-0133-scale decomposition. FR1-FR4 touch `src/agent/runtime.ts` (routing change in `handleTaskSettled()`, small helper), `src/agent/tasks.ts` (a `list()`-based filter, likely already sufficient as a plain function over the existing `list()` return, no schema change), and `src/agent/loop.ts` (one additional condition in the existing nudge branch, one new optional `AgentLoopParams` field threaded from `runtime.ts` the same way `pricing`/`thinking`/etc. already are). All three files are already Core-owned (`src/agent/`), so no cross-domain handoff is needed. Recommend implementing FR1 and FR2/FR3 together in one PR since FR3 depends on FR2's helper and both are needed to fully close the reported incident (FR1 alone would still let the nudge fire and orphan children — just recover from it a turn later instead of never; FR2/FR3 alone doesn't help if the parent ends for an unrelated reason). Test coverage per the User Stories above is `src/agent/runtime.test.ts` and `src/agent/loop.test.ts` additions only — no e2e or integration tier needed (this is deterministic harness-internal behavior, not model-behavior-dependent).
+
+- 2026-07-19: Manual testing pass (`temp-manual-testing.md`) live-verified the core mechanism
+  works: queued 5 messages during an agent sleep period, and the agent successfully resumed
+  and processed them once it came back from the blocking read — confirms the queuing
+  infrastructure itself is functioning. Two real gaps found on top of that, filed as separate
+  tickets rather than folded in here (extend, don't reopen, this ticket's own scope):
+  DH-0207 (no visual "queued" state + no delete/cancel capability in the Web UI) and DH-0208
+  (the driving script/caller has no completion/EOF signal — it hung indefinitely after the
+  queue drained once, with no way to know the run was actually done).
