@@ -38,6 +38,7 @@ source: tracking/
 | [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | status: verifying |
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | status: verifying |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: verifying |
+| [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need | needs architect (Fable) sign-off per CLAUDE.md section 6 item 4 — touches security posture |
 
 ## Board
 
@@ -61,6 +62,14 @@ source: tracking/
 | [DH-0144](../DH-0144-all-recognized-skills-should-be-accessible-as-commands.md) | All recognized skills should be accessible as / commands | feature | stefan |
 | [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
 | [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
+| [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
+| [DH-0168](../DH-0168-web-hardcodes-a-random-port-instead-of-an-operator-chosen-one.md) | --web hardcodes a random port instead of an operator-chosen one | feature | stefan |
+
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0167](../DH-0167-web-printed-url-hardcodes-localhost-ignoring-security-hostname.md) | --web printed URL hardcodes localhost, ignoring security.hostname | bug | stefan |
 
 ### implementing
 
