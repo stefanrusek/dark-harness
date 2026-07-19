@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0209
 type: bug
-status: refining
+status: closed
 owner: stefan
-resolution:
+resolution: duplicate
 blocked_by: []
 created: 2026-07-19
 relations:
@@ -38,3 +38,25 @@ Manual testing finding (2026-07-19): in two separate sub-agent test runs, the su
 ## Open Questions
 
 ## Notes
+
+**Investigation (2026-07-19):** Checked `src/agent/runtime.ts` tool registration. `ReportOutcome`
+is registered once on the `AgentRuntime`'s single shared `toolMap` (constructor, ~line 267:
+`if (!this.interactive && !options.tools) { this.toolMap.set(reportOutcomeTool.name,
+reportOutcomeTool); }`), keyed only on whether the whole runtime is interactive vs
+non-interactive (`--instructions`/`--job` mode) — not per-agent. Both the root's
+`runAgentLoop()` call (`runtime.ts` ~line 1016) and every sub-agent's `runAgentLoop()` call via
+`spawnAgent()` (`runtime.ts` ~line 697) pass this identical `this.toolMap`. There is no
+root-vs-sub-agent asymmetry in tool registration — sub-agents get exactly the same tool set as
+root, including `ReportOutcome`, whenever the runtime is non-interactive.
+
+Cross-checked against DH-0175, which already found: `src/prompt/system-prompt.ts`'s
+`REQUIRED_CONTRACT` teaches `TASK_FAILED` as the mandatory primary failure convention and does
+not mention `ReportOutcome` at all. So the tool is registered but never taught, for every agent
+in the runtime (root and sub-agents alike) — this is exactly the same root cause DH-0175 already
+documented, not a distinct sub-agent-specific registration bug.
+
+**Conclusion:** DH-0209 is a duplicate confirmation of DH-0175's root cause, observed from a
+different angle (manual sub-agent testing) rather than a new/separate bug. No product code
+changes made here. The actual fix (teach `ReportOutcome` in the system prompt, demote
+`TASK_FAILED`) belongs to DH-0175's own P1/P2/P3 process, already scoped and held pending
+prerequisites — not re-implemented in this ticket to avoid duplicating that work.
