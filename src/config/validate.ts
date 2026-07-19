@@ -37,7 +37,18 @@ const KNOWN_MCP_SERVER_KEYS: readonly string[] = [
   "env",
   "url",
   "headers",
+  "auth",
 ] as const;
+
+// DH-0057: OAuth `auth` block on a URL-transport MCP server.
+const KNOWN_MCP_AUTH_KEYS: readonly string[] = [
+  "grant",
+  "scopes",
+  "clientId",
+  "clientSecret",
+  "redirectPort",
+] as const;
+const MCP_AUTH_GRANTS: readonly string[] = ["authorization_code", "client_credentials"] as const;
 
 /** ADR 0007: unknown top-level keys are rejected to catch config typos early. */
 const KNOWN_TOP_LEVEL_KEYS: readonly string[] = [
@@ -481,8 +492,58 @@ export function validateMcpServers(raw: unknown): Record<string, McpServerConfig
         );
       }
     }
+    if (serverConfig.auth !== undefined) {
+      validateMcpServerAuth(serverName, serverConfig.auth, hasStdio);
+    }
   }
   return raw as Record<string, McpServerConfig>;
+}
+
+/** DH-0057: validates the optional per-server `auth` block. OAuth is meaningless over stdio,
+ * so an `auth` block on a `command` (stdio) server is a config error. */
+function validateMcpServerAuth(serverName: string, auth: unknown, hasStdio: boolean): void {
+  if (hasStdio) {
+    throw new ConfigError(
+      `mcpServers["${serverName}"] has an "auth" block but is a stdio ("command") server; OAuth is only valid on a URL-transport ("url") server`,
+    );
+  }
+  if (!isRecord(auth)) {
+    throw new ConfigError(`mcpServers["${serverName}"].auth must be an object`);
+  }
+  for (const key of Object.keys(auth)) {
+    if (!KNOWN_MCP_AUTH_KEYS.includes(key)) {
+      throw new ConfigError(
+        `mcpServers["${serverName}"].auth has unknown key "${key}"; known keys: ${KNOWN_MCP_AUTH_KEYS.join(", ")}`,
+      );
+    }
+  }
+  const grant = auth.grant;
+  if (grant !== undefined && !MCP_AUTH_GRANTS.includes(grant as string)) {
+    throw new ConfigError(
+      `mcpServers["${serverName}"].auth.grant must be one of: ${MCP_AUTH_GRANTS.join(", ")}`,
+    );
+  }
+  if (grant === "client_credentials" && (!auth.clientId || !auth.clientSecret)) {
+    throw new ConfigError(
+      `mcpServers["${serverName}"].auth uses the "client_credentials" grant, which requires both clientId and clientSecret`,
+    );
+  }
+  if (
+    auth.scopes !== undefined &&
+    (!Array.isArray(auth.scopes) || !auth.scopes.every((s) => typeof s === "string"))
+  ) {
+    throw new ConfigError(`mcpServers["${serverName}"].auth.scopes must be an array of strings`);
+  }
+  if (
+    auth.redirectPort !== undefined &&
+    (typeof auth.redirectPort !== "number" ||
+      !Number.isInteger(auth.redirectPort) ||
+      auth.redirectPort <= 0)
+  ) {
+    throw new ConfigError(
+      `mcpServers["${serverName}"].auth.redirectPort must be a positive integer`,
+    );
+  }
 }
 
 /** DH-0010 Part B: validates the optional top-level `compaction` block. `enabled` is

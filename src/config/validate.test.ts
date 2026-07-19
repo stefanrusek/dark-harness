@@ -62,6 +62,88 @@ describe("validateConfig — happy paths", () => {
     expect(config.mcpServers).toBeDefined();
   });
 
+  test("accepts a URL server with an authorization_code auth block", () => {
+    const config = validateConfig(
+      baseConfig({
+        mcpServers: {
+          acme: {
+            url: "https://mcp.acme.example/v1",
+            auth: { grant: "authorization_code", scopes: ["mcp:tools"], redirectPort: 49812 },
+          },
+        },
+      }),
+    );
+    expect(config.mcpServers?.acme?.auth?.grant).toBe("authorization_code");
+  });
+
+  test("accepts a URL server with a client_credentials auth block", () => {
+    const config = validateConfig(
+      baseConfig({
+        mcpServers: {
+          acme: {
+            url: "https://mcp.acme.example/v1",
+            auth: { grant: "client_credentials", clientId: "c", clientSecret: "s" },
+          },
+        },
+      }),
+    );
+    expect(config.mcpServers?.acme?.auth?.grant).toBe("client_credentials");
+  });
+
+  test("stdio server with auth is a config error", () => {
+    expect(() =>
+      validateConfig(baseConfig({ mcpServers: { local: { command: "mcp-server", auth: {} } } })),
+    ).toThrow(/has an "auth" block but is a stdio/);
+  });
+
+  test("rejects a non-object auth block", () => {
+    expect(() =>
+      validateConfig(baseConfig({ mcpServers: { acme: { url: "https://x", auth: "nope" } } })),
+    ).toThrow(/\.auth must be an object/);
+  });
+
+  test("rejects an unknown auth key", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { bogus: 1 } } } }),
+      ),
+    ).toThrow(/\.auth has unknown key "bogus"/);
+  });
+
+  test("rejects an invalid auth grant", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { grant: "device_code" } } } }),
+      ),
+    ).toThrow(/\.auth\.grant must be one of/);
+  });
+
+  test("client_credentials without clientId/clientSecret is a config error", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          mcpServers: { acme: { url: "https://x", auth: { grant: "client_credentials" } } },
+        }),
+      ),
+    ).toThrow(/requires both clientId and clientSecret/);
+  });
+
+  test("rejects non-string-array auth scopes", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { scopes: [1, 2] } } } }),
+      ),
+    ).toThrow(/\.auth\.scopes must be an array of strings/);
+  });
+
+  test("rejects a non-positive-integer redirectPort", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { redirectPort: -1 } } } }),
+      ),
+    ).toThrow(/\.auth\.redirectPort must be a positive integer/);
+  });
+
   test("accepts a security block with a real token and tls", () => {
     const config = validateConfig(
       baseConfig({ security: { token: "abc123", tls: { cert: "/c.pem", key: "/k.pem" } } }),

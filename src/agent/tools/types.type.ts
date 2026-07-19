@@ -3,9 +3,19 @@
 // tool mirrors the semantics of the Claude-Code tool of the same name (HANDOFF.md §4).
 
 import type { DhConfig } from "../../contracts/index.ts";
+import type { McpAuthBeginResult, McpAuthCompleteResult, McpAuthStatus } from "../mcp/manager.ts";
 import type { ProviderCompletionRequest, ProviderCompletionResult } from "../providers/types.ts";
 import type { TaskRegistry } from "../tasks.ts";
 import type { TodoStore } from "../todos.ts";
+
+/** DH-0057: narrow façade over `McpManager`'s OAuth methods, injected onto ToolContext so the
+ * McpAuth tool can drive authorization without importing the runtime (same injection precedent
+ * as `searchDeferredTools`). Not a wire contract — an internal ToolContext extension. */
+export interface McpAuthFacade {
+  status(server: string): McpAuthStatus;
+  begin(server: string): Promise<McpAuthBeginResult>;
+  complete(server: string, timeoutMs: number): Promise<McpAuthCompleteResult>;
+}
 
 /** JSON Schema subset sufficient to describe tool inputs to a model provider. */
 export interface JsonSchema {
@@ -94,6 +104,9 @@ export interface ToolContext {
    * buildToolContext), so this is naturally scoped to "this agent's own conversation," not
    * shared across sibling sub-agents editing the same filesystem. */
   readRegistry: Map<string, { mtimeMs: number; size: number }>;
+  /** DH-0057: OAuth authorization façade over the shared McpManager, backing the McpAuth
+   * tool's status/begin/complete actions. Internal ToolContext wiring, not a wire contract. */
+  mcpAuth: McpAuthFacade;
   /** DH-0002: per-agent set of MCP tool names (`mcp__<server>__<tool>`) this agent's
    * ToolSearch calls have activated via `select:` — same per-ToolContext scoping precedent
    * as `readRegistry`, fresh per agent lifetime (see runtime.ts's buildToolContext). Built-in

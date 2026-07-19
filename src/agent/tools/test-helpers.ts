@@ -36,6 +36,15 @@ export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolConte
     readRegistry: new Map(),
     activatedTools: new Set(),
     todos: new TodoStore(),
+    mcpAuth: {
+      status: () => ({ server: "test", state: "not-configured" }),
+      begin: async () => {
+        throw new Error("mcpAuth.begin not wired in this test context");
+      },
+      complete: async () => {
+        throw new Error("mcpAuth.complete not wired in this test context");
+      },
+    },
     completeWithModel: async () => {
       throw new Error("completeWithModel not wired in this test context");
     },

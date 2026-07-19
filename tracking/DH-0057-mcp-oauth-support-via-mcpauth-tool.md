@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0057
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -398,3 +398,59 @@ export interface McpServerConfig {
 > provider to wire. The single shared-schema edit (`McpServerConfig.auth`) is approved here
 > per §6 trigger 2. The only genuinely deferrable slice is the live-provider integration-tier
 > test (§7), which is not a blocker on landing the mocked core.
+
+### 2026-07-19 — Implementation (Core) → verifying
+
+Implemented exactly per Fable's design. New files: `src/agent/mcp/token-store.ts`,
+`src/agent/mcp/oauth-provider.ts`, `src/agent/mcp/oauth-loopback.ts`, the mock OAuth+MCP
+fixture `src/agent/mcp/__fixtures__/mock-oauth-server.ts` (+ its coverage test). Edits:
+`src/contracts/config.type.ts` (additive `McpServerAuthConfig`/`McpServerConfig.auth`),
+`src/config/validate.ts` (auth-block validation + stdio+auth rejection),
+`src/agent/mcp/connection.ts` (builds one `DhOAuthProvider` per URL+auth connection, hands it
+to the transport), `src/agent/mcp/manager.ts` (`beginAuth`/`completeAuth`/`authStatus`/
+`reconnect` + in-flight loopback-receiver map), `src/agent/tools/mcp-auth.ts` (real two-phase
+tool), `src/agent/tools/types.type.ts` + `src/agent/runtime.ts` (`mcpAuth` façade on
+ToolContext), `src/agent/tools/test-helpers.ts` (façade in the shared test context).
+
+**User Story → proving test (CLAUDE.md §9):**
+- begin returns URL + redirect uri without blocking →
+  `src/agent/tools/mcp-auth.test.ts` › "begin returns authorization URL and redirect uri"
+- complete exchanges code, persists, tools callable →
+  `src/agent/tools/mcp-auth.test.ts` › "complete exchanges code, persists tokens, reconnects server"
+- client_credentials inline single call →
+  `src/agent/tools/mcp-auth.test.ts` › "client_credentials completes in a single call"
+- expired access token auto-refreshes + persists →
+  `src/agent/mcp/oauth-provider.test.ts` › "expired access token auto-refreshes and persists"
+- 0600 per-server file, 0700 dir, secrets not leaked →
+  `src/agent/mcp/token-store.test.ts` › "writes 0600 per-server file, redacts secrets"
+- status reports each state →
+  `src/agent/tools/mcp-auth.test.ts` › "status reports each auth state"
+- complete timeout is actionable (isError:false) →
+  `src/agent/tools/mcp-auth.test.ts` › "complete times out with actionable pending result"
+- CSRF state mismatch rejected →
+  `src/agent/tools/mcp-auth.test.ts` › "complete rejects state mismatch"
+- stdio server with auth is a config error →
+  `src/config/validate.test.ts` › "stdio server with auth is a config error"
+- loopback binds 127.0.0.1 only and closes after use →
+  `src/agent/mcp/oauth-loopback.test.ts` › "binds loopback only and closes after use"
+
+**Deviations from the design (SDK reality):**
+1. `DhOAuthProvider.redirectUrl` returns a **placeholder loopback URL**
+   (`http://127.0.0.1/callback`) for the `authorization_code` grant whenever no interactive
+   flow is live, instead of `undefined`. The SDK's `auth()` decides interactive-vs-
+   non-interactive purely from `!provider.redirectUrl`; returning `undefined` on a plain
+   connect (the auto-refresh path) made it fall through to the machine-to-machine token
+   request and fail. The placeholder keeps it on the refresh branch and is never used as a
+   real redirect (refresh doesn't send `redirect_uri`); a live `begin` overrides it with the
+   real ephemeral loopback URI. `client_credentials` still returns `undefined` as designed.
+2. `begin`/`complete` drive the SDK's `auth(provider, {serverUrl[, authorizationCode]})`
+   orchestrator directly rather than holding a live transport and calling
+   `transport.finishAuth()`. Same effect (discovery/DCR/PKCE/exchange, tokens persisted via
+   the provider) with no need to keep a transport instance alive across the two tool calls;
+   the manager's `reconnect()` then rebuilds the connection off the persisted tokens.
+3. `client_credentials` is emitted via the provider's optional `prepareTokenRequest()` hook
+   (the SDK's documented non-interactive path), not a bespoke grant call.
+
+Gates (new/changed code): typecheck clean for all DH-0057 files; biome clean; `bun test`
+230/230 pass across the touched suites; line coverage 100% on every new/changed product file
+and the fixture. Live-provider integration-tier test (§7) remains deferred to GitHub issue #6.

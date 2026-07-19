@@ -2,8 +2,11 @@
 // parallel at runtime startup, caching discovered tools, and dispatching tool calls —
 // degrading gracefully (never throwing) on any per-server failure (§6 of the ticket).
 
+import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpServerConfig } from "../../contracts/index.ts";
 import { type McpCallResult, McpConnection, type McpDiscoveredTool } from "./connection.ts";
+import { type LoopbackReceiver, startLoopbackReceiver } from "./oauth-loopback.ts";
+import type { StoredOAuthTokens } from "./token-store.ts";
 
 /** Throttle window for the lazy reconnect a `failed` server gets when ToolSearch touches
  * the corpus — at most one attempt per this many ms per server (DH-0002 §6). */
@@ -21,6 +24,85 @@ export interface UnreachableServer {
   error: string;
 }
 
+/** DH-0057: one of the auth states `McpAuth status` reports. */
+export type McpAuthState =
+  | "unknown" // no such mcpServers entry
+  | "not-configured" // entry exists but has no `auth` block
+  | "authenticated" // valid (or refreshable) tokens present
+  | "pending" // a `begin` is awaiting its callback
+  | "needs-auth"; // configured but no usable tokens
+
+export interface McpAuthStatus {
+  server: string;
+  state: McpAuthState;
+  /** epoch ms the access token expires (authenticated/pending), if known. */
+  expiresAt?: number;
+  /** re-echoed authorization URL while pending. */
+  authorizationUrl?: string;
+}
+
+export interface McpAuthBeginResult {
+  grant: "authorization_code" | "client_credentials";
+  /** authorization_code only: the URL for the operator to open. */
+  authorizationUrl?: string;
+  /** authorization_code only: the loopback redirect URI. */
+  redirectUri?: string;
+  /** epoch ms of token expiry when the grant completed inline (client_credentials, or an
+   * already-authenticated authorization_code server). */
+  expiresAt?: number;
+  /** true when tokens already existed / were obtained without an interactive step. */
+  alreadyAuthenticated?: boolean;
+}
+
+export interface McpAuthCompleteResult {
+  expiresAt?: number;
+}
+
+/** DH-0057: raised for an unknown server or one lacking an `auth` block — the tool maps these
+ * to an informational (isError:false) message. */
+export class McpAuthConfigError extends Error {
+  constructor(
+    message: string,
+    readonly state: "unknown" | "not-configured",
+  ) {
+    super(message);
+    this.name = "McpAuthConfigError";
+  }
+}
+
+/** DH-0057: the callback `state` did not match the issued one — a CSRF rejection. */
+export class McpAuthStateMismatchError extends Error {
+  constructor() {
+    super("authorization callback state did not match the issued state (possible CSRF)");
+    this.name = "McpAuthStateMismatchError";
+  }
+}
+
+/** DH-0057: `complete` was called with no `begin` in flight for the server. */
+export class McpAuthNoFlowError extends Error {
+  constructor(server: string) {
+    super(`no authorization is in progress for MCP server "${server}" — call McpAuth begin first`);
+    this.name = "McpAuthNoFlowError";
+  }
+}
+
+/** epoch ms an access token expires, from dh's `obtained_at` stamp + `expires_in`. */
+function tokenExpiresAt(tokens: StoredOAuthTokens | undefined): number | undefined {
+  if (!tokens?.expires_in || !tokens.obtained_at) return undefined;
+  return tokens.obtained_at + tokens.expires_in * 1000;
+}
+
+/** Spreadable `{ expiresAt }` (or empty) that satisfies exactOptionalPropertyTypes. */
+function optionalExpiry(tokens: StoredOAuthTokens | undefined): { expiresAt?: number } {
+  const at = tokenExpiresAt(tokens);
+  return at !== undefined ? { expiresAt: at } : {};
+}
+
+/** Spreadable `{ authorizationUrl }` (or empty) from a possibly-undefined URL. */
+function optionalAuthUrl(url: URL | undefined): { authorizationUrl?: string } {
+  return url ? { authorizationUrl: url.toString() } : {};
+}
+
 /** Fans out over `Record<string, McpServerConfig>`, owning one `McpConnection` per
  * configured server for the lifetime of the owning `AgentRuntime` (shared by root and every
  * sub-agent — one connection per server per process, not per agent). */
@@ -34,6 +116,9 @@ export class McpManager {
    * server; without this, both would spin up a second `McpConnection.connect()` for the
    * same server concurrently. */
   private readonly inFlightConnects = new Map<string, Promise<void>>();
+  /** DH-0057: in-flight interactive OAuth flows — started by `beginAuth`, consumed by
+   * `completeAuth`, keyed by server name. Presence == a `pending` auth state. */
+  private readonly loopbackReceivers = new Map<string, LoopbackReceiver>();
   private readonly now: () => number;
 
   constructor(
@@ -181,10 +266,148 @@ export class McpManager {
     return conn.callTool(toolName, args);
   }
 
+  /** DH-0057: rebuilds the named connection after a successful authorization so the
+   * now-authenticated server's tools become discoverable. Thin wrapper over the existing
+   * connect-and-cache path; never throws (same degrade-gracefully contract). */
+  async reconnect(serverName: string): Promise<void> {
+    const conn = this.connections.get(serverName);
+    if (!conn) return;
+    await conn.close().catch(() => {});
+    await this.connectAndCache(conn);
+  }
+
+  private requireAuthConnection(serverName: string): McpConnection {
+    const conn = this.connections.get(serverName);
+    if (!conn) {
+      throw new McpAuthConfigError(`Unknown MCP server "${serverName}".`, "unknown");
+    }
+    if (!conn.oauthProvider) {
+      throw new McpAuthConfigError(
+        `MCP server "${serverName}" has no "auth" block — nothing to authenticate.`,
+        "not-configured",
+      );
+    }
+    return conn;
+  }
+
+  /** DH-0057: reports the auth state of a server without error (informational). */
+  authStatus(serverName: string): McpAuthStatus {
+    const conn = this.connections.get(serverName);
+    if (!conn) return { server: serverName, state: "unknown" };
+    if (!conn.oauthProvider) return { server: serverName, state: "not-configured" };
+    if (this.loopbackReceivers.has(serverName)) {
+      return {
+        server: serverName,
+        state: "pending",
+        ...optionalAuthUrl(conn.oauthProvider.pendingAuthorizationUrl),
+      };
+    }
+    const tokens = conn.oauthProvider.tokens() as StoredOAuthTokens | undefined;
+    if (tokens?.access_token) {
+      return {
+        server: serverName,
+        state: "authenticated",
+        ...optionalExpiry(tokens),
+      };
+    }
+    return { server: serverName, state: "needs-auth" };
+  }
+
+  /** DH-0057: begins authorization. Non-blocking for `authorization_code` (returns the URL to
+   * relay to the operator, leaving a loopback receiver in flight); runs the whole grant inline
+   * for `client_credentials`. */
+  async beginAuth(serverName: string): Promise<McpAuthBeginResult> {
+    const conn = this.requireAuthConnection(serverName);
+    const provider = conn.oauthProvider;
+    if (!provider) throw new McpAuthConfigError(`Unknown MCP server "${serverName}".`, "unknown");
+    const serverUrl = conn.serverUrl;
+    if (!serverUrl) {
+      throw new McpAuthConfigError(`MCP server "${serverName}" has no URL.`, "not-configured");
+    }
+
+    // Tear down any stale receiver from a previous, abandoned begin.
+    await this.closeReceiver(serverName);
+
+    if (conn.authGrant === "client_credentials") {
+      provider.loopbackRedirectUri = undefined;
+      await auth(provider, { serverUrl });
+      const tokens = provider.tokens() as StoredOAuthTokens | undefined;
+      return {
+        grant: "client_credentials",
+        alreadyAuthenticated: true,
+        ...optionalExpiry(tokens),
+      };
+    }
+
+    const receiver = startLoopbackReceiver(
+      conn.authRedirectPort !== undefined ? { port: conn.authRedirectPort } : {},
+    );
+    provider.loopbackRedirectUri = receiver.redirectUri;
+    provider.resetPendingAuth();
+    try {
+      const result = await auth(provider, { serverUrl });
+      if (result === "AUTHORIZED") {
+        // Existing tokens were still refreshable — no interactive step needed.
+        await receiver.close();
+        const tokens = provider.tokens() as StoredOAuthTokens | undefined;
+        return {
+          grant: "authorization_code",
+          alreadyAuthenticated: true,
+          ...optionalExpiry(tokens),
+        };
+      }
+    } catch (err) {
+      await receiver.close();
+      throw err;
+    }
+    this.loopbackReceivers.set(serverName, receiver);
+    return {
+      grant: "authorization_code",
+      redirectUri: receiver.redirectUri,
+      ...optionalAuthUrl(provider.pendingAuthorizationUrl),
+    };
+  }
+
+  /** DH-0057: blocks up to `timeoutMs` for the operator's redirect, then exchanges the code
+   * for tokens (verifying CSRF `state`), reconnects the server, and reports token expiry. */
+  async completeAuth(serverName: string, timeoutMs: number): Promise<McpAuthCompleteResult> {
+    const conn = this.requireAuthConnection(serverName);
+    const provider = conn.oauthProvider;
+    const serverUrl = conn.serverUrl;
+    if (!provider || !serverUrl) {
+      throw new McpAuthConfigError(`Unknown MCP server "${serverName}".`, "unknown");
+    }
+    const receiver = this.loopbackReceivers.get(serverName);
+    if (!receiver) throw new McpAuthNoFlowError(serverName);
+
+    // waitForCode rejects with LoopbackTimeoutError on timeout — the tool maps that to an
+    // actionable pending result and deliberately leaves the receiver in flight.
+    const { code, state } = await receiver.waitForCode(timeoutMs);
+    if (provider.issuedState !== undefined && state !== provider.issuedState) {
+      throw new McpAuthStateMismatchError();
+    }
+    await auth(provider, { serverUrl, authorizationCode: code });
+    await this.closeReceiver(serverName);
+    await this.reconnect(serverName);
+    const tokens = provider.tokens() as StoredOAuthTokens | undefined;
+    return { ...optionalExpiry(tokens) };
+  }
+
+  private async closeReceiver(serverName: string): Promise<void> {
+    const receiver = this.loopbackReceivers.get(serverName);
+    if (receiver) {
+      this.loopbackReceivers.delete(serverName);
+      await receiver.close().catch(() => {});
+    }
+  }
+
   /** Closes every connection (terminates stdio children). Coordinates with the runtime's
    * own shutdown path (src/cli.ts's signal handling) rather than installing a second,
    * independent shutdown mechanism — see AgentRuntime.close(). */
   async close(): Promise<void> {
+    for (const serverName of [...this.loopbackReceivers.keys()]) {
+      await this.closeReceiver(serverName);
+    }
     await Promise.all([...this.connections.values()].map((c) => c.close()));
   }
 }

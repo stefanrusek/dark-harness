@@ -109,6 +109,21 @@ export interface SecurityConfig {
   webPort?: number;
 }
 
+/** DH-0057: OAuth 2.1 auth for a URL-transport MCP server (architect-approved, Fable). */
+export interface McpServerAuthConfig {
+  /** Grant type. Default "authorization_code" (interactive, PKCE). "client_credentials" is
+   * the non-interactive machine-to-machine grant and requires clientId + clientSecret. */
+  grant?: "authorization_code" | "client_credentials";
+  /** OAuth scopes to request. Optional — the server's protected-resource metadata may imply them. */
+  scopes?: string[];
+  /** Pre-registered client credentials, skipping RFC 7591 dynamic registration.
+   * Omitted => attempt dynamic client registration. Supports $(VAR) interpolation; never logged. */
+  clientId?: string;
+  clientSecret?: string;
+  /** Fixed loopback redirect port for the authorization_code flow. Omitted => ephemeral. */
+  redirectPort?: number;
+}
+
 export interface McpServerConfig {
   /** stdio server */
   command?: string;
@@ -121,6 +136,10 @@ export interface McpServerConfig {
    * invocation timeout (default 60s) for this server. Optional; omitted means "use the
    * McpManager/connection defaults." */
   timeoutMs?: number;
+  /** DH-0057: OAuth 2.1 auth for a URL-transport MCP server. Invalid on a `command` (stdio)
+   * server (config error). Presence causes the connection's transport to be built with an
+   * `authProvider`, enabling auto-refresh and McpAuth-driven authorization. */
+  auth?: McpServerAuthConfig;
 }
 
 export interface DhOptions {

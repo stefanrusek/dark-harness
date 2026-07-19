@@ -465,6 +465,15 @@ export class AgentRuntime {
           ...(unreachable.length > 0 ? { unreachableServers: unreachable } : {}),
         };
       },
+      // DH-0057: narrow OAuth façade over the shared McpManager so the McpAuth tool drives
+      // authorization without importing the runtime (same injection precedent as
+      // searchDeferredTools above).
+      mcpAuth: {
+        status: (server: string) => this.mcpManager.authStatus(server),
+        begin: (server: string) => this.mcpManager.beginAuth(server),
+        complete: (server: string, timeoutMs: number) =>
+          this.mcpManager.completeAuth(server, timeoutMs),
+      },
       // Round 13 (docs/handoffs/core.md): fresh per agent lifetime, matching this
       // ToolContext's own lifetime — see readRegistry's doc comment in tools/types.ts.
       readRegistry: new Map(),
