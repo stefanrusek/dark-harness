@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0228
 type: feature
-status: ready
+status: verifying
 owner: Iris
 resolution:
 blocked_by: []
@@ -196,3 +196,52 @@ mechanically checkable and mark the rest owner-visual:
   node motif as recessive texture only.
 - Sibling ticket **DH-0227** restructures the *on-page* README hero; independent surface,
   independently landable.
+
+### 2026-07-19 — Iris: implemented, moving to verifying
+
+Authored `docs/media/social-preview.svg` exactly per the ticket's coordinate spec: the real
+`logo.svg` monogram paths + `dhGradient` (unrecolored, `#9ECE6A`→`#7DCFFF`) wrapped in
+`<g transform="translate(200,175) scale(0.78125)">`, "Dark Harness" wordmark at (440, 312),
+the shared DH-0227 tagline "Unattended multi-agent harness in a single binary." at (444, 384),
+`#0b0d12` background, and a recessive node-graph motif (4 dots + connecting lines per corner,
+status-palette colors, opacity 0.55/0.22) in the upper-right and lower-left corners only.
+
+Rasterized via headless Chromium (Playwright, reusing `e2e/support/chromium.ts`'s
+`resolveChromiumExecutable`, same pattern as `e2e/spikes/web/hero-screenshot.ts`) rather than
+a local SVG rasterizer, specifically to sidestep the font-substitution risk the ticket flags —
+Chromium ships its own web-safe Helvetica/Arial-class font, so the wordmark renders as a clean
+grotesque sans rather than falling back to a serif. Rasterizer script:
+`docs/media/social-preview.render.ts` (`bun docs/media/social-preview.render.ts`; not part of
+any gate, static-asset regen only, same footing as `logo.svg`).
+
+**Output:** `docs/media/social-preview.png`, confirmed 1280×640 px (PNG IHDR chunk), 35,162
+bytes — a reasonable size for GitHub's social-preview slot (well under GitHub's 1 MB limit,
+no excessive detail to bloat it). Visually inspected the full-size render and it reads clean:
+gradient monogram, bold "Dark Harness" wordmark, dim tagline, motif fully recessive in the
+corners. Did not additionally downscale-and-inspect a literal 280×140 thumbnail file — visual
+review of the full 1280×640 render was sufficient to judge the motif's low-contrast/recessive
+placement and the text's legibility at that scale; per the ticket, final thumbnail-legibility
+judgment is owner-visual, not mechanically provable.
+
+Added `src/prompt/social-preview.test.ts`: asserts the PNG's IHDR dimensions are exactly
+1280×640, and asserts the SVG source contains the logo's signature bowl path data
+(`M46 64 H82 A44 64 0 0 1 82 192 H46`), both exact gradient stop colors, the `#0b0d12`
+background fill, and the literal "Dark Harness" text — covering every mechanically-checkable
+User Story bullet per the ticket's own acceptance-criteria section. `bun test
+src/prompt/social-preview.test.ts --coverage`: 6/6 pass. Full gates: `bun run typecheck`
+clean, `bun run lint` clean, `bun run test:coverage` 147/147 pass (99.81% lines, unrelated
+pre-existing gaps only), `bun run e2e` 41/41 pass.
+
+Updated `docs/design/social-preview-prompt.md`'s header to mark it superseded by this ticket,
+pointing at the realized SVG/PNG and `docs/design/style-guide.md` §8, per the ticket's Notes
+instruction.
+
+**Not done here (explicitly out of scope per the ticket):** uploading
+`docs/media/social-preview.png` to GitHub → Settings → General → Social preview is a manual
+owner action — did not touch repo settings or attempt the `gh api` multipart route.
+
+Left `README.md`, `src/prompt/readme-config-sync.test.ts`, and the DH-0227 ticket/tracking-view
+files untouched even though `git status` shows them modified — that's a concurrent DH-0227
+implementation session's uncommitted work, not mine; only committing the DH-0228 files
+(`docs/media/social-preview.{svg,png,render.ts}`, `src/prompt/social-preview.test.ts`,
+`docs/design/social-preview-prompt.md`, this ticket, and the tracking view).

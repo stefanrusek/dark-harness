@@ -1,8 +1,17 @@
 # Prompt: generate the GitHub social preview image
 
-**Status:** not yet generated — this document is the instructions for whichever future agent
-has image-generation tooling available to produce and set it. This is a natural-language
-prompt for that agent to follow, not a script.
+**Status:** superseded by DH-0228 (2026-07-19). The generative-image approach described below
+was never executed; DH-0228 replaced it with a precise vector composition instead — an exact
+1280×640 SVG (`docs/media/social-preview.svg`) that embeds the *actual* `docs/media/logo.svg`
+monogram geometry (not a model's approximation of it), rasterized to
+`docs/media/social-preview.png`. The brand guidance below (palette, tone, monogram-not-diamond,
+the manual GitHub-Settings upload step) remains valid reference; only the *how* changed. See
+`tracking/DH-0228-*.md` and `docs/design/style-guide.md` §8 for the realized artifact and the
+durable convention it established.
+
+**Original status (superseded):** not yet generated — this document is the instructions for
+whichever future agent has image-generation tooling available to produce and set it. This is a
+natural-language prompt for that agent to follow, not a script.
 
 **Owner:** design crew (Muriel), per `CLAUDE.md` §3 (`docs/design/` is durable, reusable
 design-system material).

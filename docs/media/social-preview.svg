@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-label="Dark Harness — Unattended multi-agent harness in a single binary.">
+  <!-- DH-0228: GitHub social-preview card. Precise vector composition per the ticket's exact
+       coordinate spec — no design judgment left to the implementer. Embeds the real
+       docs/media/logo.svg monogram geometry (transformed/scaled only, never recolored) plus
+       the "Dark Harness" wordmark and the shared README tagline (DH-0227), on the near-black
+       --bg background, with a recessive agent-node-graph motif in the corners. Rasterized to
+       docs/media/social-preview.png at exactly 1280x640 via headless Chromium (see
+       docs/media/social-preview.render.ts) to avoid local-font substitution risk. -->
+  <rect x="0" y="0" width="1280" height="640" fill="#0b0d12"/>
+
+  <!-- Recessive node-graph motif: upper-right corner -->
+  <g opacity="0.22" stroke="#565F89" stroke-width="1.5">
+    <line x1="1080" y1="90" x2="1150" y2="60"/>
+    <line x1="1150" y1="60" x2="1200" y2="100"/>
+    <line x1="1080" y1="90" x2="1140" y2="140"/>
+    <line x1="1140" y1="140" x2="1200" y2="100"/>
+  </g>
+  <g opacity="0.55">
+    <circle cx="1080" cy="90" r="6" fill="#4f8cff"/>
+    <circle cx="1150" cy="60" r="6" fill="#35c469"/>
+    <circle cx="1200" cy="100" r="6" fill="#9a7bd1"/>
+    <circle cx="1140" cy="140" r="6" fill="#f5a524"/>
+  </g>
+
+  <!-- Recessive node-graph motif: lower-left corner -->
+  <g opacity="0.22" stroke="#565F89" stroke-width="1.5">
+    <line x1="80" y1="540" x2="140" y2="510"/>
+    <line x1="140" y1="510" x2="120" y2="570"/>
+    <line x1="80" y1="540" x2="60" y2="590"/>
+    <line x1="120" y1="570" x2="180" y2="580"/>
+  </g>
+  <g opacity="0.55">
+    <circle cx="80" cy="540" r="6" fill="#35c469"/>
+    <circle cx="140" cy="510" r="6" fill="#4f8cff"/>
+    <circle cx="120" cy="570" r="6" fill="#f5a524"/>
+    <circle cx="60" cy="590" r="6" fill="#9a7bd1"/>
+    <circle cx="180" cy="580" r="6" fill="#4f8cff"/>
+  </g>
+
+  <!-- Primary lockup: monogram + wordmark + tagline -->
+  <g transform="translate(200,175) scale(0.78125)">
+    <defs>
+      <linearGradient id="dhGradient" gradientUnits="userSpaceOnUse" x1="39" y1="57" x2="217" y2="199">
+        <stop offset="0%" stop-color="#9ECE6A"/>
+        <stop offset="100%" stop-color="#7DCFFF"/>
+      </linearGradient>
+      <style>
+        .dh-stroke {
+          fill: none;
+          stroke: url(#dhGradient);
+          stroke-width: 14;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+        }
+      </style>
+    </defs>
+    <!-- D: stem + elliptical bowl -->
+    <path class="dh-stroke" d="M46 64 L46 192"/>
+    <path class="dh-stroke" d="M46 64 H82 A44 64 0 0 1 82 192 H46"/>
+    <!-- H: two stems + crossbar -->
+    <path class="dh-stroke" d="M146 64 L146 192"/>
+    <path class="dh-stroke" d="M210 64 L210 192"/>
+    <path class="dh-stroke" d="M146 128 L210 128"/>
+  </g>
+
+  <text x="440" y="312" font-family="'Helvetica Neue', Arial, system-ui, sans-serif" font-weight="700" font-size="104" fill="#e7e9ee">Dark Harness</text>
+  <text x="444" y="384" font-family="'Helvetica Neue', Arial, system-ui, sans-serif" font-weight="400" font-size="34" fill="#8b93a7">Unattended multi-agent harness in a single binary.</text>
+</svg>
