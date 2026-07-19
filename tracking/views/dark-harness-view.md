@@ -73,6 +73,7 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0195](../DH-0195-readme-stale-missing-web-port-host-import-model-and-slash-command-autocomplete.md) | README stale: missing --web-port, --host, --import/--model, and slash-command autocomplete | bug | stefan |
+| [DH-0198](../DH-0198-web-ui-header-never-actually-renders-the-brand-mark-logo-asset.md) | Web UI header never actually renders the brand mark/logo asset | bug | stefan |
 
 ### implementing
 
