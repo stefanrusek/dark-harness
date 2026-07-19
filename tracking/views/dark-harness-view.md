@@ -84,7 +84,6 @@ source: tracking/
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | feature | stefan |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | bug | stefan |
 | [DH-0211](../DH-0211-both-uis-pressing-escape-should-stop-the-currently-running-agent.md) | Both UIs: pressing Escape should stop the currently running agent | feature | stefan |
-| [DH-0212](../DH-0212-dh-0060-tui-spike-suite-regressed-from-16-0-to-9-7-pass-fail-needs-real-triage-before-treating-as-regressions.md) | DH-0060 TUI spike suite regressed from 16/0 to 9/7 pass/fail -- needs real triage before treating as regressions | bug | stefan |
 
 ### implementing
 
@@ -94,6 +93,7 @@ source: tracking/
 | [DH-0139](../DH-0139-dh-web-is-unusable-remotely-out-of-the-box-dh-0128-auto-points-the-client-at-the-lan-ip-but-the-server-rejects-that-same-ip-by-default-421.md) | dh --web is unusable remotely out of the box: DH-0128 auto-points the client at the LAN IP, but the server rejects that same IP by default (421) | bug | stefan |
 | [DH-0149](../DH-0149-replace-shared-process-bun-test-with-per-file-process-isolation-orchestrator-standard-lcov-merge.md) | Replace shared-process bun test with per-file process isolation orchestrator + standard lcov merge | bug | stefan |
 | [DH-0210](../DH-0210-import-resume-chain-toolresult-tooluse-block-count-mismatch-crashes-the-provider-request.md) | --import + resume chain: toolResult/toolUse block count mismatch crashes the provider request | bug | stefan |
+| [DH-0212](../DH-0212-dh-0060-tui-spike-suite-regressed-from-16-0-to-9-7-pass-fail-needs-real-triage-before-treating-as-regressions.md) | DH-0060 TUI spike suite regressed from 16/0 to 9/7 pass/fail -- needs real triage before treating as regressions | bug | stefan |
 
 ### verifying
 
