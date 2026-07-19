@@ -61,6 +61,8 @@ source: tracking/
 | [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
 | [DH-0216](../DH-0216-refactoring-round-post-p0-fixes-and-workflow-self-awareness-feature-sweep.md) | Refactoring round: post-P0-fixes and Workflow/self-awareness feature sweep | bug | stefan |
+| [DH-0217](../DH-0217-spile-ops-new-ticket-py-counter-is-unsafe-for-concurrent-isolated-worktrees-id-collisions.md) | spile-ops new_ticket.py counter is unsafe for concurrent isolated worktrees — ID collisions | bug | stefan |
+| [DH-0218](../DH-0218-renderselfinfosection-signature-accreted-into-positional-optional-trap-across-dh-0094-0194-0215.md) | renderSelfInfoSection signature accreted into positional-optional trap across DH-0094/0194/0215 | bug | stefan |
 
 ### refining
 
