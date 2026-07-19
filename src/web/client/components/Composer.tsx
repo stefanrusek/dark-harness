@@ -99,7 +99,7 @@ export function Composer({ state, onSend }: ComposerProps): ReactElement | null 
 
   return (
     <div ref={wrapperRef} className={`composer-wrapper${shouldShow ? "" : " hidden"}`}>
-      <form className="composer" onSubmit={submit}>
+      <form className={`composer${shouldShow ? "" : " hidden"}`} onSubmit={submit}>
         <textarea
           ref={textareaRef}
           className="composer-input"
