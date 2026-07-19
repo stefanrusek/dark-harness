@@ -24,6 +24,7 @@ import { toolSearchTool } from "./tool-search.ts";
 import type { Tool } from "./types.type.ts";
 import { webFetchTool } from "./web-fetch.ts";
 import { webSearchTool } from "./web-search.ts";
+import { workflowTool } from "./workflow.ts";
 import { writeTool } from "./write.ts";
 
 // DH-0054 (tracking/DH-0054-no-first-class-grep-glob-tools.md): Grep/Glob join the fixed
@@ -50,6 +51,7 @@ export const ALL_TOOLS: readonly Tool[] = Object.freeze([
   todoGetTool,
   todoListTool,
   todoUpdateTool,
+  workflowTool,
 ]);
 
 export function buildToolMap(tools: readonly Tool[] = ALL_TOOLS): Map<string, Tool> {
@@ -95,6 +97,7 @@ export * from "./tool-search.ts";
 export * from "./types.type.ts";
 export * from "./web-fetch.ts";
 export * from "./web-search.ts";
+export * from "./workflow.ts";
 export * from "./write.ts";
 /**
  * DH-0050 (architect design, Fable 2026-07-15): `ReportOutcome` is deliberately NOT part of

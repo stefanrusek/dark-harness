@@ -9,7 +9,7 @@ const BASE_CONFIG: DhConfig = {
 };
 
 describe("tool registry", () => {
-  test("exposes exactly the 19 tools (HANDOFF.md §4's original 12, DH-0054's Grep/Glob, DH-0073's NotebookEdit, DH-0076's Todo family)", () => {
+  test("exposes exactly the 20 tools (HANDOFF.md §4's original 12, DH-0054's Grep/Glob, DH-0073's NotebookEdit, DH-0076's Todo family, DH-0226's Workflow)", () => {
     const names = ALL_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual(
       [
@@ -31,6 +31,7 @@ describe("tool registry", () => {
         "TodoList",
         "TodoUpdate",
         "ToolSearch",
+        "Workflow",
         "Write",
       ].sort(),
     );

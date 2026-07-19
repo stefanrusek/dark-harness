@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0226
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -200,3 +200,74 @@ Spun off from DH-0213 (research) per the 2026-07-19 architect ruling (Fable). Se
 the invariant-8 resolution and DH-0213's "Open Questions — resolved" for the full rationale
 behind each scoping decision. Per CLAUDE.md §9, closing this ticket requires each User Story
 bullet above to name the specific `bun test src` case that proves it.
+
+### 2026-07-19 — implementation, ready -> verifying
+
+Built exactly the MVP scope: `src/agent/tools/workflow.ts` (new `Workflow` `Tool`, peer of
+`Agent`, registered in `ALL_TOOLS`/`src/agent/tools/index.ts`) and
+`src/agent/workflow/runner.ts` (`WorkflowApi`/`buildWorkflowApi`: `agent()`, `parallel()`,
+`log()`). Both files match the ticket's FR signatures as written; no deviations from the
+design were needed — the existing `ctx.spawnAgent`/`ctx.tasks.awaitDone`/`ctx.tasks.snapshot`
+primitives lined up exactly as described.
+
+User Story -> proving test map:
+
+- "run a checked-in orchestration script ... dynamic-imports the file, invokes its default
+  export ... returns the resolved value" ->
+  `src/agent/tools/workflow.test.ts`: "successful script run resolves to the coerced return
+  value plus drained log", "input defaults to {} when omitted".
+- "script path does not resolve to an importable file -> isError naming the path" ->
+  `workflow.test.ts`: "script path that does not resolve to an importable file -> isError,
+  names the path".
+- "script's default export throws/rejects -> caught, isError, no host-process crash" ->
+  `workflow.test.ts`: "script's default export throwing -> caught, isError, carries the error
+  message".
+- "no callable default export -> isError" -> `workflow.test.ts`: "module with no callable
+  default export -> isError, clear message".
+- "`agent()` spawns exactly one sub-agent via `ctx.spawnAgent(...)`, awaits it, resolves to
+  its output" -> `src/agent/workflow/runner.test.ts`: "spawns exactly one sub-agent via
+  ctx.spawnAgent and resolves to its output", "uses opts.model when given, else
+  ctx.config.options.defaultModel", "defaults description to a short label...".
+- "spawned sub-agent finishes `failed` -> `agent()` rejects" -> `runner.test.ts`: "rejects when
+  the spawned sub-agent finishes with status failed".
+- "`opts.model` names an unknown model -> rejects with a clear unknown-model error" ->
+  `runner.test.ts`: "rejects an unknown model name with a clear error".
+- "`parallel()` starts every thunk before any is awaited (barrier), resolves after all settle,
+  preserves order" -> `runner.test.ts`: "starts every thunk before any is awaited (barrier
+  fan-out), preserving order".
+- "a rejecting thunk (including an `agent()` failure or a synchronous throw such as the
+  fan-out budget) maps that slot to `null`; `parallel()` itself never rejects" ->
+  `runner.test.ts`: "an async rejection maps that slot to null...", "a synchronous throw from a
+  thunk (e.g. a fan-out budget check) maps that slot to null...", "a real spawnAgent
+  fan-out-budget throw inside a parallel() thunk maps to null; other thunks still complete"
+  (this one drives a real `ctx.spawnAgent` synchronous throw mid-fan-out, the ticket's
+  sharpest-edge case, per the `Promise.resolve().then(t)` detail in the FR), "an agent()
+  failure inside parallel() maps to null via the same rejection path", "parallel() itself
+  never rejects even when every thunk fails".
+- Realistic multi-agent script, end to end against a scripted/mock provider ->
+  `workflow.test.ts`: "end-to-end: a realistic multi-agent script fans out
+  agent()+parallel() and a failed worker maps to null without failing the run" (unit tier,
+  fixture at `src/agent/workflow/fixtures/multi-agent-script.ts`); real-binary tier:
+  `e2e/workflow-tool.test.ts` — "a Workflow tool_use turn dynamic-imports a real script and
+  fans out a real sub-agent via wf.agent()", the real compiled `dh --server` binary driven
+  over HTTP/SSE against two mock-provider instances (root + the sub-agent's own model),
+  confirming the script loader -> `WorkflowApi` -> `spawnAgent` path is real end to end.
+
+Judgment calls / notes for the reviewer:
+
+- `resolveModel()` in `runner.ts` intentionally duplicates (in miniature) `agent.ts`'s
+  `resolveModelName` logic and error-string wording rather than importing it, because that
+  helper is file-private and shaped around a validated tool `input` object rather than a bare
+  `prompt`/`opts` pair. Extracting a shared helper was considered but judged unnecessary
+  churn for two ~10-line call sites with intentionally-identical wording — flag if a future
+  reviewer wants it factored out.
+- Gate status at hand-off: `bun run typecheck`, this ticket's own unit tests (100% line
+  coverage on every new file: `workflow.ts`, `runner.ts`, both `*.test.ts`, all four
+  `workflow/fixtures/*.ts`), `bunx biome check` on every new/changed file, and the new e2e test
+  against the real compiled binary all pass. The repo-wide `bun run test:coverage` and
+  `bun run lint` runs currently fail on unrelated files (`src/web/client/app.test.ts`,
+  `src/cli/header.test.ts`) — verified via `git stash` that both failures pre-exist / come from
+  other agents' concurrent in-flight work on this shared branch, not from anything touched
+  here; confirmed no DH-0226 file appears in `coverage/lcov.info`'s uncovered-line output.
+  Whoever runs the final repo-wide gate before merge should re-check those two files once the
+  concurrent work lands.
