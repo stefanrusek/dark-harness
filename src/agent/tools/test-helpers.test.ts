@@ -23,6 +23,16 @@ describe("makeToolContext defaults", () => {
     ).rejects.toThrow(/not wired/);
   });
 
+  test("default mcpAuth.begin throws (must be overridden by tests exercising McpAuth)", async () => {
+    const ctx = makeToolContext();
+    await expect(ctx.mcpAuth.begin("server")).rejects.toThrow(/not wired/);
+  });
+
+  test("default mcpAuth.complete throws (must be overridden by tests exercising McpAuth)", async () => {
+    const ctx = makeToolContext();
+    await expect(ctx.mcpAuth.complete("server", 1000)).rejects.toThrow(/not wired/);
+  });
+
   test("default loadSkill resolves null", async () => {
     const ctx = makeToolContext();
     await expect(ctx.loadSkill("whatever")).resolves.toBeNull();
