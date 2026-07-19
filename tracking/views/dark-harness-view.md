@@ -39,6 +39,7 @@ source: tracking/
 | [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | status: verifying |
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: verifying |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need | needs architect (Fable) sign-off per CLAUDE.md section 6 item 4 — touches security posture |
+| [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | status: refining |
 
 ## Board
 
@@ -68,20 +69,29 @@ source: tracking/
 | [DH-0172](../DH-0172-introduce-a-shared-tool-input-validation-helper-driven-by-inputschema-remove-per-tool-typeof-boilerplate.md) | Introduce a shared tool-input validation helper driven by inputSchema; remove per-tool typeof boilerplate | bug | stefan |
 | [DH-0173](../DH-0173-split-the-agentruntime-god-class-into-collaborators-and-break-up-spawnagent-runroot.md) | Split the AgentRuntime God class into collaborators and break up spawnAgent/runRoot | bug | stefan |
 | [DH-0174](../DH-0174-split-cli-ts-2041-lines-into-focused-modules-and-extract-a-shared-ansi-color-primitive.md) | Split cli.ts (2041 lines) into focused modules and extract a shared ANSI/color primitive | bug | stefan |
-| [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
-| [DH-0176](../DH-0176-audit-coverage-gate-driven-test-patterns-branch-free-helpers-synthetic-empty-constructors-giant-test-files.md) | Audit coverage-gate-driven test patterns (branch-free helpers, synthetic empty constructors, giant test files) | bug | stefan |
 | [DH-0177](../DH-0177-e2e-test-support-cleanup-consolidate-mock-provider-scaffolding-and-resolve-the-spikes-tree-s-status-and-gate-dependency.md) | e2e test-support cleanup: consolidate mock-provider scaffolding and resolve the spikes/ tree's status and gate dependency | bug | stefan |
 | [DH-0178](../DH-0178-de-duplicate-bun-setup-install-steps-and-centralize-the-pinned-bun-version-across-ci-workflows.md) | De-duplicate Bun setup/install steps and centralize the pinned bun-version across CI workflows | bug | stefan |
 | [DH-0179](../DH-0179-revisit-web-static-server-dual-typecheck-split-to-remove-the-loopback-self-proxy-and-any-casts.md) | Revisit web static-server dual-typecheck split to remove the loopback self-proxy and any-casts | bug | stefan |
 | [DH-0180](../DH-0180-relocate-fakeagentloop-out-of-the-production-server-entrypoint-into-test-only-scope.md) | Relocate FakeAgentLoop out of the production server entrypoint into test-only scope | bug | stefan |
 | [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | bug | stefan |
 
+### refining
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
+
 ### ready
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0168](../DH-0168-web-hardcodes-a-random-port-instead-of-an-operator-chosen-one.md) | --web hardcodes a random port instead of an operator-chosen one | feature | stefan |
+| [DH-0176](../DH-0176-audit-coverage-gate-driven-test-patterns-branch-free-helpers-synthetic-empty-constructors-giant-test-files.md) | Audit coverage-gate-driven test patterns (branch-free helpers, synthetic empty constructors, giant test files) | bug | stefan |
 | [DH-0182](../DH-0182-add-a-cli-flag-to-override-security-hostname-overriding-config.md) | Add a CLI flag to override security.hostname, overriding config | feature | stefan |
+| [DH-0183](../DH-0183-establish-src-client-core-and-consolidate-the-zero-coupling-shared-client-primitives-slash-command-parser-connectionstatus-vocabulary.md) | Establish src/client-core/ and consolidate the zero-coupling shared client primitives (slash-command parser + ConnectionStatus vocabulary) | feature | stefan |
+| [DH-0184](../DH-0184-extract-the-shared-sse-transport-frame-parser-full-jitter-backoff-last-event-id-reconnect-payload-validation-into-src-client-core-resolving-the-validation-strictness-divergence.md) | Extract the shared SSE transport (frame parser + full-jitter backoff + Last-Event-ID reconnect + payload validation) into src/client-core/, resolving the validation-strictness divergence | feature | stefan |
+| [DH-0185](../DH-0185-migrate-the-tui-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the TUI SSE client onto the shared src/client-core/ transport | feature | stefan |
+| [DH-0186](../DH-0186-migrate-the-web-sse-client-onto-the-shared-src-client-core-transport.md) | Migrate the Web SSE client onto the shared src/client-core/ transport | feature | stefan |
 
 ### implementing
 
