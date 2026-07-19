@@ -21,10 +21,11 @@ const FACTS_NO_TOKEN: HeaderStatusFacts = {
 };
 
 const FACTS_TOKEN: HeaderStatusFacts = {
-  ...FACTS_NO_TOKEN,
+  version: FACTS_NO_TOKEN.version,
+  gitSha: FACTS_NO_TOKEN.gitSha,
+  configLine: FACTS_NO_TOKEN.configLine,
+  bindHost: FACTS_NO_TOKEN.bindHost,
   hasToken: true,
-  webUiUrl: undefined,
-  logDir: undefined,
 };
 
 const BIG_TERM = { columns: 100, rows: 40 };
