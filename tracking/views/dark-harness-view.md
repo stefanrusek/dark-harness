@@ -63,8 +63,13 @@ source: tracking/
 | [DH-0147](../DH-0147-document-job-as-headless-mode-and-print-a-markdown-transcript-instead-of-just-final-output.md) | Document --job as headless mode; default to a full markdown transcript stream, add --result-only | feature | stefan |
 | [DH-0148](../DH-0148-dh-instructions-file-no-job-should-launch-the-interactive-session-first-then-run-the-instructions-live-in-it.md) | dh --instructions <file> (no --job) should launch the interactive session first, then run the instructions live in it | feature | stefan |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
-| [DH-0168](../DH-0168-web-hardcodes-a-random-port-instead-of-an-operator-chosen-one.md) | --web hardcodes a random port instead of an operator-chosen one | feature | stefan |
 | [DH-0169](../DH-0169-refactoring-round-first-ever-full-history-sweep.md) | Refactoring round: first-ever full-history sweep | bug | stefan |
+
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0168](../DH-0168-web-hardcodes-a-random-port-instead-of-an-operator-chosen-one.md) | --web hardcodes a random port instead of an operator-chosen one | feature | stefan |
 
 ### implementing
 
