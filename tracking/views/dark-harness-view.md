@@ -39,6 +39,8 @@ source: tracking/
 | [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: verifying |
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need | needs architect (Fable) sign-off per CLAUDE.md section 6 item 4 — touches security posture |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | status: refining |
+| [DH-0192](../DH-0192-logo-redesign-current-mark-is-too-literal-and-reads-unintentionally-suggestive.md) | Logo redesign: current mark is too literal and reads unintentionally suggestive | status: refining |
+| [DH-0193](../DH-0193-wordmark-needs-more-padding-wherever-it-s-plugged-in-next-to-the-logo.md) | Wordmark needs more padding wherever it's plugged in next to the logo | status: refining |
 
 ## Board
 
@@ -59,14 +61,15 @@ source: tracking/
 | [DH-0166](../DH-0166-tui-mode-binds-a-real-network-server-it-doesn-t-need.md) | TUI mode binds a real network server it doesn't need 🔒 | bug | stefan |
 | [DH-0174](../DH-0174-split-cli-ts-2041-lines-into-focused-modules-and-extract-a-shared-ansi-color-primitive.md) | Split cli.ts (2041 lines) into focused modules and extract a shared ANSI/color primitive | bug | stefan |
 | [DH-0191](../DH-0191-consolidate-hand-rolled-status-color-sgr-tables-onto-design-tokens-ts-and-extract-a-shared-sgr-primitive.md) | Consolidate hand-rolled status-color/SGR tables onto design-tokens.ts and extract a shared SGR primitive | bug | stefan |
-| [DH-0192](../DH-0192-logo-redesign-current-mark-is-too-literal-and-reads-unintentionally-suggestive.md) | Logo redesign: current mark is too literal and reads unintentionally suggestive | bug | stefan |
-| [DH-0193](../DH-0193-wordmark-needs-more-padding-wherever-it-s-plugged-in-next-to-the-logo.md) | Wordmark needs more padding wherever it's plugged in next to the logo | bug | stefan |
+| [DH-0196](../DH-0196-refactoring-round-post-cli-ts-split-and-second-wave-feature-sweep.md) | Refactoring round: post-cli.ts-split and second-wave feature sweep | bug | stefan |
 
 ### refining
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
+| [DH-0192](../DH-0192-logo-redesign-current-mark-is-too-literal-and-reads-unintentionally-suggestive.md) | Logo redesign: current mark is too literal and reads unintentionally suggestive | bug | stefan |
+| [DH-0193](../DH-0193-wordmark-needs-more-padding-wherever-it-s-plugged-in-next-to-the-logo.md) | Wordmark needs more padding wherever it's plugged in next to the logo | bug | stefan |
 
 ### ready
 
