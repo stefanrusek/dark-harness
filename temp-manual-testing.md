@@ -166,6 +166,11 @@ Much improved from previous state! Most features work correctly. Main gaps are:
 - **Related to DH-0129 autoscroll issues** — same scroll-to-bottom logic problem
 - The event stream reconnect works (`Last-Event-ID`), but UX is clunky
 
+### Download Functionality ✅
+- **Download Log button** works correctly
+- **Download Session Bundle button** works correctly
+- Both successfully export data from the Web UI
+
 ### Error Display in Web UI
 - Unclear what the expected visual treatment is — need design guidance
 - Currently sub-agent failures show an indicator and "agent failed" status
