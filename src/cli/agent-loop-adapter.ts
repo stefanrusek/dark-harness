@@ -53,13 +53,14 @@ export class AgentRuntimeLoopAdapter implements AgentLoopHandle {
     config: DhConfig;
     systemPrompt: string;
     client: SessionClientKind;
-    // DH-0116: runMode() generates this once and uses it as the logDir/DhServer sessionId
-    // too — passed through so AgentRuntime stamps the SAME id into every log header it
-    // writes, instead of defaulting to a fresh randomUUID() of its own that would mismatch
-    // the directory those headers land in (breaking --resume's header/directory consistency
-    // check, resume.ts's loadHop). Optional here only so unit tests constructing this
-    // adapter directly (not through runMode()) don't all need an unused id — AgentRuntime's
-    // own randomUUID() fallback covers that case, same as before this fix.
+    // DH-0116: runInteractiveMode() (src/cli/run.ts) generates this once and uses it as the
+    // logDir/DhServer sessionId too — passed through so AgentRuntime stamps the SAME id into
+    // every log header it writes, instead of defaulting to a fresh randomUUID() of its own
+    // that would mismatch the directory those headers land in (breaking --resume's
+    // header/directory consistency check, resume.ts's loadHop). Optional here only so unit
+    // tests constructing this adapter directly (not through runInteractiveMode()) don't all
+    // need an unused id — AgentRuntime's own randomUUID() fallback covers that case, same as
+    // before this fix.
     sessionId?: string;
     resume?: AgentRuntimeOptions["resume"];
   }) {

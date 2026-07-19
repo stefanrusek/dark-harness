@@ -838,7 +838,7 @@ export class AgentRuntime {
     // SSE event from AgentRuntime itself; only src/cli.ts's own .catch() on the interactive
     // path happened to notice (and, until this fix, only logged a plain "message" line, never
     // structured status_change — the gap DH-0131 was filed for). The standalone `--instructions`/
-    // `--job` path (cli.ts's runInstructionsMode) has no equivalent handling at all, so it
+    // `--job` path (cli.ts's `main()`) has no equivalent handling at all, so it
     // logged nothing whatsoever for this failure class. Wrapping model/provider resolution in
     // the same try/catch as runAgentLoop() makes AgentRuntime itself the single place this is
     // handled, for every caller.

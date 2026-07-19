@@ -239,7 +239,8 @@ export async function runInteractiveMode(
     // written into, breaking --resume's header/directory consistency check (resume.ts).
     const sessionId = randomUUID();
     const logsRoot = join(process.cwd(), ".dh-logs");
-    // DH-0037: see createStandaloneRuntime's identical call above for the rationale.
+    // DH-0037: see createStandaloneRuntime's identical call (src/cli/agent-loop-adapter.ts)
+    // for the rationale.
     pruneLogDirectories(logsRoot, config.logRetention, Date.now(), sessionId);
     const logDir = join(logsRoot, sessionId);
     const agentLoop = deps.createAgentLoop(

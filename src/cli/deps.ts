@@ -97,7 +97,8 @@ export interface CliDeps {
      * always carries its own `sessionId` — this is only optional here so the many
      * hand-written fakes in cli.test.ts that stub `createRuntime` without a session/log
      * directory (they don't exercise `summary.json`) don't all need updating just to satisfy
-     * the type. Absent, `summary.json` writing is skipped (see `runInstructionsMode`).
+     * the type. Absent, `summary.json` writing is skipped (see `main()` in `src/cli.ts`,
+     * where the `--instructions`/`--job` summary.json logic now lives).
      */
     sessionId?: string;
   };

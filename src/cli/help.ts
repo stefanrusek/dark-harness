@@ -2,8 +2,9 @@
 // DH-0103: reuse the TUI's word-boundary-aware wrapper for --help's description wrapping
 // rather than a third implementation — a pure text utility (no TUI-specific deps), so a
 // direct import is clean per the ticket's own preference over extracting a shared module.
+import { wrapSgr } from "../design-tokens.ts";
 import { wrapText } from "../tui/width.ts";
-import { CLI_RESET, cliBold, cliDim } from "./styling.ts";
+import { cliBold, cliDim } from "./styling.ts";
 
 /** Content for `--help`/`-h` (DH-0103): the flag/subcommand names and their descriptions are
  * unchanged from the prior static `HELP_TEXT`, but layout (column width, wrapping, styling)
@@ -153,8 +154,6 @@ const HELP_FOOTER =
  * sentence fragment per wrapped line without degenerating into one word per row. */
 const HELP_MIN_DESC_COLUMN = 24;
 
-const HELP_CYAN_BOLD = "\x1b[1;36m";
-
 /** `name` styled bold (TTY only) — flag/subcommand names pop against dim descriptions. */
 function helpNameStyle(name: string, tty: boolean): string {
   return cliBold(name, tty);
@@ -163,7 +162,7 @@ function helpNameStyle(name: string, tty: boolean): string {
 /** Section header (`Usage:`/`Flags:`) styled bold+cyan (TTY only) per style-guide §2.2/§2.3
  * ("cyan reserved for structural/informational chrome — not a status"). */
 function helpSectionHeader(title: string, tty: boolean): string {
-  return tty ? `${HELP_CYAN_BOLD}${title}${CLI_RESET}` : title;
+  return tty ? wrapSgr("1;36", title) : title;
 }
 
 /** Renders one `name` + word-wrapped `desc` item as one or more lines, hang-indented to
