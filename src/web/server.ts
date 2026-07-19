@@ -131,7 +131,7 @@ function getInnerServer(): InnerServerHandle {
   return innerServer;
 }
 
-const assetCache = new Map<string, Response>();
+const assetCache = Object.freeze(new Map<string, Response>());
 
 async function proxyToInner(path: string, development: boolean): Promise<Response> {
   if (!development) {
