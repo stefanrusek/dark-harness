@@ -93,7 +93,6 @@ source: tracking/
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
 | [DH-0139](../DH-0139-dh-web-is-unusable-remotely-out-of-the-box-dh-0128-auto-points-the-client-at-the-lan-ip-but-the-server-rejects-that-same-ip-by-default-421.md) | dh --web is unusable remotely out of the box: DH-0128 auto-points the client at the LAN IP, but the server rejects that same IP by default (421) | bug | stefan |
 | [DH-0149](../DH-0149-replace-shared-process-bun-test-with-per-file-process-isolation-orchestrator-standard-lcov-merge.md) | Replace shared-process bun test with per-file process isolation orchestrator + standard lcov merge | bug | stefan |
-| [DH-0178](../DH-0178-de-duplicate-bun-setup-install-steps-and-centralize-the-pinned-bun-version-across-ci-workflows.md) | De-duplicate Bun setup/install steps and centralize the pinned bun-version across CI workflows | bug | stefan |
 
 ### verifying
 
@@ -121,6 +120,7 @@ source: tracking/
 | [DH-0181](../DH-0181-extract-a-shared-tree-connector-prefix-helper-for-the-dh-logs-dump-and-the-tui-tree.md) | Extract a shared tree-connector prefix helper for the dh logs dump and the TUI tree | done |
 | [DH-0180](../DH-0180-relocate-fakeagentloop-out-of-the-production-server-entrypoint-into-test-only-scope.md) | Relocate FakeAgentLoop out of the production server entrypoint into test-only scope | done |
 | [DH-0179](../DH-0179-revisit-web-static-server-dual-typecheck-split-to-remove-the-loopback-self-proxy-and-any-casts.md) | Revisit web static-server dual-typecheck split to remove the loopback self-proxy and any-casts | done |
+| [DH-0178](../DH-0178-de-duplicate-bun-setup-install-steps-and-centralize-the-pinned-bun-version-across-ci-workflows.md) | De-duplicate Bun setup/install steps and centralize the pinned bun-version across CI workflows | done |
 | [DH-0177](../DH-0177-e2e-test-support-cleanup-consolidate-mock-provider-scaffolding-and-resolve-the-spikes-tree-s-status-and-gate-dependency.md) | e2e test-support cleanup: consolidate mock-provider scaffolding and resolve the spikes/ tree's status and gate dependency | done |
 | [DH-0171](../DH-0171-consolidate-duplicated-provider-adapter-helpers-mapstopreason-cache-marker-walk-error-classify-skeleton-and-fix-bedrock-as-unknown-casts.md) | Consolidate duplicated provider-adapter helpers (mapStopReason, cache-marker walk, error-classify skeleton) and fix bedrock as-unknown casts | done |
 | [DH-0170](../DH-0170-tui-and-web-reimplement-the-same-contract-derived-client-core-sse-transport-event-reducer-connectionstatus-slash-command-parser-twice.md) | TUI and Web reimplement the same contract-derived client core (SSE transport, event reducer, ConnectionStatus, slash-command parser) twice | superseded |
@@ -132,4 +132,3 @@ source: tracking/
 | [DH-0162](../DH-0162-gritql-rule-accept-object-freeze-wrapped-values-as-safe-add-autofix-to-wrap-remaining-flagged-consts.md) | GritQL rule: accept Object.freeze()-wrapped values as safe, add autofix to wrap remaining flagged consts | done |
 | [DH-0161](../DH-0161-pilot-add-as-const-decorations-to-config-validate-ts-s-private-lookup-consts-resolve-remaining-gritql-warnings.md) | Pilot: add as-const decorations to config/validate.ts's private lookup consts, resolve remaining GritQL warnings | done |
 | [DH-0160](../DH-0160-refine-no-module-scope-side-effects-gritql-rule-allow-private-consts-with-literal-as-const-initializers.md) | Refine no-module-scope-side-effects GritQL rule: allow private consts with literal/as-const initializers | done |
-| [DH-0159](../DH-0159-coding-standards-overhaul-waves-5-9-root-layer-file-migration-entrypoint-guards-11-files.md) | Coding-standards overhaul Waves 5-9: root-layer file migration + entrypoint guards (11 files) | done |

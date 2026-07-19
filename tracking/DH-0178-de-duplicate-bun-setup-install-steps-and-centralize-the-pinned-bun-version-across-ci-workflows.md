@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0178
 type: bug
-status: implementing
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-18
 relations:
@@ -85,4 +85,9 @@ each `Setup Bun and install dependencies` call (all three call sites), and narro
 composite action itself to only `oven-sh/setup-bun` + `bun install` (dropped its
 `fetch-depth`/`fetch-tags` inputs along with the checkout step). Re-verifying in a fresh CI
 run before closing.
+
+**Confirmed green:** real CI run
+[29670773665](https://github.com/stefanrusek/dark-harness/actions/runs/29670773665)
+completed with no failed steps across the full gate (typecheck, lint, coverage,
+completeness, all e2e steps) with the fix in place. Closing.
 
