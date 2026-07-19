@@ -18,9 +18,9 @@ import { randomUUID } from "node:crypto";
 import {
   chunkText,
   clampTurnIndex,
+  requireTurns,
   jobSuccessTurn as sharedJobSuccessTurn,
   jobTaskFailedTurn as sharedJobTaskFailedTurn,
-  requireTurns,
   successTurn as sharedSuccessTurn,
   taskFailedTurn as sharedTaskFailedTurn,
   TEXT_DELTA_CHUNK_SIZE,

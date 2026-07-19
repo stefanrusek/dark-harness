@@ -48,9 +48,9 @@ import { fromUtf8, toUtf8 } from "@smithy/core/serde";
 import {
   chunkText,
   clampTurnIndex,
+  requireTurns,
   jobSuccessTurn as sharedJobSuccessTurn,
   jobTaskFailedTurn as sharedJobTaskFailedTurn,
-  requireTurns,
   successTurn as sharedSuccessTurn,
   taskFailedTurn as sharedTaskFailedTurn,
   TEXT_DELTA_CHUNK_SIZE,
