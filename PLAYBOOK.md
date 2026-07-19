@@ -340,6 +340,16 @@ something surprising or risky is found (a real bug, a design conflict, a stale-w
 mismatch) — this authorization removes routine "here's what landed, what next?"
 check-ins, not visibility into outcomes.
 
+**Ticket minting stays in the primary checkout.** `new_ticket.py` (spile-ops) allocates the
+next `DH-NNNN` ID from `tracking/README.md`'s `counter:` field, a tracked file with one
+physical copy per worktree. If a wave's isolated worktrees each mint tickets independently,
+they can mint the same ID from the same stale counter value, discovered only when the
+branches merge (this happened for real — `DH-0213` minted twice during refactoring round
+DH-0216, see `tracking/DH-0217-*.md`). The tool itself now refuses to mint from a linked
+worktree (`git rev-parse --git-common-dir` vs `--git-dir`); the underlying convention is
+still: any ticket-filing need discovered mid-dispatch is relayed back to the coordinator's
+own primary checkout to mint, never run in place inside the dispatched worktree.
+
 ---
 
 ## 8. Bootstrap — authoring the founding handoff
