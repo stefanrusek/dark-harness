@@ -21,36 +21,33 @@ import {
   type SkillInfo,
 } from "../contracts/index.ts";
 import { composeSkillInvocation } from "../prompt/index.ts";
-import { discoverSkills, type Skill } from "../prompt/skills.ts";
 import { renderSelfInfoSection } from "../prompt/system-prompt.ts";
 import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import { type AgentLoopResult, computeCostUsd, type ModelBinding, runAgentLoop } from "./loop.ts";
+import { mergeMcpTools } from "./mcp-tools-merge.ts";
 import { McpManager } from "./mcp/manager.ts";
 import { loadProjectMcpServers } from "./mcp/project-config.ts";
-import { buildMcpTools } from "./mcp/tools.ts";
-import { createProvider } from "./providers/index.ts";
+import {
+  buildPricing,
+  cacheOverride,
+  compactionOverride,
+  contextWindowOverride,
+  pricingOverride,
+  thinkingOverride,
+} from "./model-overrides.ts";
+import { ConfigModelError, ModelRegistry } from "./model-registry.ts";
 import type { ModelProvider, ProviderMessage } from "./providers/types.ts";
 import { reconstructSubAgentHistory } from "./resume.ts";
-import { BUILTIN_CLI_TOOLS_SKILL, loadSkillFromPaths } from "./skills.ts";
-import { TaskFinishedError, TaskRegistry, type TaskSnapshot } from "./tasks.ts";
+import { SessionBudget, sessionBudgetOptionsFromConfig } from "./session-budget.ts";
+import { SkillsCache } from "./skills-cache.ts";
+import { loadSkillFromPaths } from "./skills.ts";
+import { TaskFinishedError, TaskRegistry, type TaskRunHandle, type TaskSnapshot } from "./tasks.ts";
 import { TodoStore } from "./todos.ts";
 import { buildToolMap, composeTools, reportOutcomeTool } from "./tools/index.ts";
 import { runToolSearch } from "./tools/tool-search.ts";
 import type { Tool, ToolContext } from "./tools/types.type.ts";
-import {
-  type CreatedWorktree,
-  createWorktree,
-  hasChanges,
-  isGitRepo,
-  removeWorktree,
-  WorktreeError,
-} from "./worktree.ts";
-
-/** DH-0077: default cap on concurrently-live isolation worktrees when `options.
- * maxConcurrentAgents` is left unset — worktree creation has real disk/git overhead a plain
- * in-process sub-agent spawn doesn't, so it's never left fully unbounded even when the
- * general agent-fanout budget is. */
-const DEFAULT_MAX_CONCURRENT_WORKTREES = 4;
+import { WorktreeRegistry } from "./worktree-registry.ts";
+import { type CreatedWorktree, hasChanges, isGitRepo, removeWorktree } from "./worktree.ts";
 
 export interface AgentRuntimeOptions {
   config: DhConfig;
@@ -100,96 +97,12 @@ export interface AgentRuntimeOptions {
   logsRoot?: string;
 }
 
-/** Builds loop.ts's `AgentLoopParams.pricing` from a model's optional config prices — round
- * 6b. Returns undefined when neither price is configured (so `costUsd` stays undefined,
- * per computeCostUsd()'s own doc comment in loop.ts), otherwise an object with only the
- * configured keys present (exactOptionalPropertyTypes forbids passing `undefined` through
- * explicitly). */
-function buildPricing(model: ModelConfig):
-  | {
-      inputPricePerMToken?: number;
-      outputPricePerMToken?: number;
-      cacheReadPricePerMToken?: number;
-      cacheWritePricePerMToken?: number;
-    }
-  | undefined {
-  if (model.inputPricePerMToken === undefined && model.outputPricePerMToken === undefined) {
-    return undefined;
-  }
-  return {
-    ...(model.inputPricePerMToken !== undefined
-      ? { inputPricePerMToken: model.inputPricePerMToken }
-      : {}),
-    ...(model.outputPricePerMToken !== undefined
-      ? { outputPricePerMToken: model.outputPricePerMToken }
-      : {}),
-    // DH-0010 Part A: threaded straight through — computeCostUsd (loop.ts) applies the
-    // 0.1x/1.25x default multipliers itself when these are unset.
-    ...(model.cacheReadPricePerMToken !== undefined
-      ? { cacheReadPricePerMToken: model.cacheReadPricePerMToken }
-      : {}),
-    ...(model.cacheWritePricePerMToken !== undefined
-      ? { cacheWritePricePerMToken: model.cacheWritePricePerMToken }
-      : {}),
-  };
-}
-
-/** Spreadable helper: `{ pricing: ... }` when configured, `{}` otherwise — kept as its own
- * function (rather than inlining the ternary at each call site) because
- * `exactOptionalPropertyTypes` rejects a ternary whose branches are `{ pricing: X }` and
- * `{}` when `X` itself is `T | undefined` (it can't narrow the conditional's own type), so
- * this needs the `undefined` check and the object literal built in one place. */
-function pricingOverride(
-  model: ModelConfig,
-):
-  | { pricing: { inputPricePerMToken?: number; outputPricePerMToken?: number } }
-  | Record<string, never> {
-  const pricing = buildPricing(model);
-  if (pricing === undefined) return {};
-  return { pricing };
-}
-
-/** DH-0045: `{ thinking: ... }` when configured, `{}` otherwise — same spreadable-helper
- * pattern as `pricingOverride` above, for the same `exactOptionalPropertyTypes` reason. */
-function thinkingOverride(
-  model: ModelConfig,
-): { thinking: NonNullable<ModelConfig["thinking"]> } | Record<string, never> {
-  if (model.thinking === undefined) return {};
-  return { thinking: model.thinking };
-}
-
-/** DH-0010 Part A: `{ cache: ... }` when configured, `{}` otherwise — same spreadable-helper
- * pattern as `pricingOverride`/`thinkingOverride` above. */
-function cacheOverride(model: ModelConfig): { cache: boolean } | Record<string, never> {
-  if (model.cache === undefined) return {};
-  return { cache: model.cache };
-}
-
-/** DH-0010 Part B: `{ contextWindow: ... }` when configured, `{}` otherwise — same
- * spreadable-helper pattern as `pricingOverride`/`thinkingOverride`/`cacheOverride` above. */
-function contextWindowOverride(
-  model: ModelConfig,
-): { contextWindow: number } | Record<string, never> {
-  if (model.contextWindow === undefined) return {};
-  return { contextWindow: model.contextWindow };
-}
-
-/** DH-0010 Part B: `{ compaction: ... }` when the top-level config block is present,
- * `{}` otherwise — session-wide (not per-model), so this reads `DhConfig.compaction`
- * directly rather than a `ModelConfig` field. */
-function compactionOverride(
-  config: DhConfig,
-): { compaction: { enabled: boolean; thresholdPercent?: number } } | Record<string, never> {
-  if (config.compaction === undefined) return {};
-  return { compaction: config.compaction };
-}
-
-export class ConfigModelError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ConfigModelError";
-  }
-}
+// DH-0173: pure per-model AgentLoopParams override helpers (buildPricing/pricingOverride/
+// thinkingOverride/cacheOverride/contextWindowOverride/compactionOverride) now live in
+// model-overrides.ts; ConfigModelError/model+provider resolution now lives in
+// model-registry.ts. Re-exported below so existing external imports of `ConfigModelError`
+// from this module (src/agent/runtime.test.ts) keep working unchanged.
+export { ConfigModelError } from "./model-registry.ts";
 
 export class RootNotListeningError extends Error {
   constructor() {
@@ -246,7 +159,9 @@ export class AgentRuntime {
    * server's connect+discovery cycle resolves; `loop.ts`'s per-turn `toolDefs` read makes
    * newly-added entries visible without any further plumbing. */
   private readonly mcpManager: McpManager;
-  private readonly providers = new Map<string, ModelProvider>();
+  /** DH-0173: model-alias resolution + per-provider-name provider caching, extracted from
+   * this class into model-registry.ts. */
+  private readonly models: ModelRegistry;
   private readonly onEvent: ((event: ServerSentEvent) => void) | undefined;
   private readonly onLogLine: ((agentId: string, line: LogLine) => void) | undefined;
   private readonly interactive: boolean;
@@ -291,8 +206,16 @@ export class AgentRuntime {
   // extend that to cumulative cost/tokens, wall-clock duration, and sub-agent fan-out, all
   // optional (config.options.max*) and all enforced here since AgentRuntime, not loop.ts, is
   // the layer that sees every agent in the session, not just one loop's own turns.
-  private cumulativeCostUsd = 0;
-  private cumulativeTokens = 0;
+  // DH-0173: cumulative cost/token state + cap-crossing math extracted into session-budget.ts
+  // (SessionBudget) — this class still owns *reacting* to a trip (stopping every live agent),
+  // since only it has the task registry/root state needed to do that.
+  private readonly budget: SessionBudget;
+  /** DH-0173: separate from `budget.isTripped` (which guards the cheap `recordUsage()`
+   * early-return) — this guards `tripBudget()`'s own one-time "log + stop everything" action,
+   * since the wall-clock timer path calls `tripBudget()` directly without going through
+   * `recordUsage()` first, so it needs its own idempotency flag rather than assuming
+   * `budget.isTripped` was already true when it fires. */
+  private budgetActionTaken = false;
   private sessionStartMs: number | undefined;
   private wallClockTimer: ReturnType<typeof setTimeout> | undefined;
   /** agentId -> nesting depth (root is 0). Populated by spawnAgent(); never evicted (mirrors
@@ -312,33 +235,13 @@ export class AgentRuntime {
    * in the runtime. */
   private readonly agentCwd = new Map<string, string>();
   private liveAgentCount = 0;
-  /** DH-0077: agentId -> its isolation worktree, only populated for sub-agents spawned with
-   * `isolation: "worktree"`. Removed once the sub-agent's task settles and cleanup (or
-   * hand-off, if it has changes) has run — see spawnAgent()'s `run` finally block below. */
-  private readonly agentWorktree = new Map<string, CreatedWorktree>();
-  /** DH-0077: separate from `liveAgentCount` — worktree creation has real disk/git overhead
-   * a plain in-process sub-agent spawn doesn't, so it gets its own budget check, tied to the
-   * same `options.maxConcurrentAgents` config knob (falling back to a small built-in default
-   * when that's unset) rather than introducing a new dh.json field for it. */
-  private liveWorktreeCount = 0;
-  private budgetTripped = false;
-  /** DH-0093: one eager `discoverSkills()` scan at construction time (not re-scanned per
-   * `listSkills()` call) — same fire-and-forget-eagerly pattern as `McpManager.connectAll()`
-   * above. Starts with just the builtin `cli-tools` entry so `listSkills()` never has a gap
-   * before the on-disk scan resolves; `discoverSkills()`'s own results are prepended by (never
-   * shadow) it once ready. */
-  private skillsCache: Skill[] = [BUILTIN_CLI_TOOLS_SKILL];
-  /** DH-0165: resolves once the eager `discoverSkills()` scan above has populated
-   * `skillsCache` with the real on-disk results — `listSkills()` awaits this before reading
-   * the cache. Without it, a `list_skills` command that lands before the scan resolves (a
-   * real, CI-reproduced race: TUI/Web fire `list_skills` once at startup, right after the
-   * "ready" banner, which can beat an async `readdir`-based scan on a loaded/slow-disk CI
-   * runner) sees only the builtin `cli-tools` entry — every on-disk skill (e.g. an operator's
-   * own `/greet`) looks "unknown" to the client's local skills cache, which never even
-   * attempts the wire round-trip that would otherwise re-check the server (src/tui/state.ts's
-   * `handleSlashCommand`). Invisible locally, where the scan resolves in well under a
-   * millisecond. */
-  private skillsReady: Promise<void>;
+  /** DH-0077: isolation-worktree lifecycle (agentId -> its CreatedWorktree, plus the
+   * concurrency budget) — extracted into worktree-registry.ts (WorktreeRegistry). */
+  private readonly worktrees = new WorktreeRegistry();
+  /** DH-0093: eager skills scan, extracted into skills-cache.ts (SkillsCache) — see that
+   * class's own doc comment for the "builtin-first, replaced once discoverSkills() resolves"
+   * timing this preserves unchanged. */
+  private readonly skills: SkillsCache;
 
   constructor(options: AgentRuntimeOptions) {
     this.config = options.config;
@@ -370,7 +273,8 @@ export class AgentRuntime {
     // McpConnection itself), so this fire-and-forget `.then()` is safe: it never produces an
     // unhandled rejection, and startup never blocks on or fails because of it.
     this.mcpManager = new McpManager(this.config.mcpServers);
-    void this.mcpManager.connectAll().then(() => this.mergeMcpTools());
+    this.models = new ModelRegistry(this.config);
+    void this.mcpManager.connectAll().then(() => mergeMcpTools(this.mcpManager, this.toolMap));
     // DH-0091: pick up a project's own `.mcp.json` (working-directory root only, same scoping
     // DH-0055 assumes for CLAUDE.md) alongside dh.json's own `mcpServers` — read once here at
     // construction time, consistent with connectAll()'s own eager-at-startup timing above.
@@ -382,17 +286,14 @@ export class AgentRuntime {
     // gracefully, never block startup" contract connectAll() already has.
     void this.loadAndMergeProjectMcpServers();
     // DH-0093: eager, fire-and-forget scan at construction time — same timing precedent as
-    // connectAll() above. discoverSkills() never throws (per-directory failures are swallowed
-    // internally), so this can't produce an unhandled rejection; listSkills() just sees the
-    // builtin-only cache until this resolves.
-    this.skillsReady = discoverSkills(options.config.skillPaths).then((discovered) => {
-      this.skillsCache = [BUILTIN_CLI_TOOLS_SKILL, ...discovered];
-    });
+    // connectAll() above; see SkillsCache's own doc comment.
+    this.skills = new SkillsCache(options.config.skillPaths);
     this.onEvent = options.onEvent;
     this.onLogLine = options.onLogLine;
     this.client = options.client;
     this.resume = options.resume;
     this.logsRoot = options.logsRoot ?? join(this.cwd, ".dh-logs");
+    this.budget = new SessionBudget(sessionBudgetOptionsFromConfig(this.config));
     // DH-0012: wired to handleTaskSettled() so every *background* Bash/Agent task's
     // completion pushes a notification into its parent's conversation — see that method's
     // doc comment for the full design, including the orphaned-grandchild case. Retention cap
@@ -419,22 +320,14 @@ export class AgentRuntime {
     cacheReadTokens = 0,
     cacheWriteTokens = 0,
   ): void {
-    if (this.budgetTripped) return;
-    this.cumulativeTokens += inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
-    if (costUsd !== undefined) this.cumulativeCostUsd += costUsd;
-
-    const { maxCostUsd, maxTotalTokens } = this.config.options;
-    if (maxCostUsd !== undefined && this.cumulativeCostUsd >= maxCostUsd) {
-      this.tripBudget(
-        `cumulative cost $${this.cumulativeCostUsd.toFixed(4)} reached configured options.maxCostUsd ($${maxCostUsd})`,
-      );
-      return;
-    }
-    if (maxTotalTokens !== undefined && this.cumulativeTokens >= maxTotalTokens) {
-      this.tripBudget(
-        `cumulative tokens ${this.cumulativeTokens} reached configured options.maxTotalTokens (${maxTotalTokens})`,
-      );
-    }
+    const tripReason = this.budget.recordUsage(
+      inputTokens,
+      outputTokens,
+      costUsd,
+      cacheReadTokens,
+      cacheWriteTokens,
+    );
+    if (tripReason !== undefined) this.tripBudget(tripReason);
   }
 
   /** DH-0013: stops every live agent in the session (root + every running/waiting sub-agent
@@ -444,8 +337,9 @@ export class AgentRuntime {
    * operator-initiated TaskStop/stopRoot() when reading the log back. Idempotent — a second
    * budget crossing (e.g. both cost and wall-clock firing close together) is a no-op. */
   private tripBudget(reason: string): void {
-    if (this.budgetTripped) return;
-    this.budgetTripped = true;
+    if (this.budgetActionTaken) return;
+    this.budgetActionTaken = true;
+    this.budget.markTripped();
 
     const logReason = (agentId: string) => {
       this.onLogLine?.(agentId, {
@@ -484,16 +378,6 @@ export class AgentRuntime {
     }
   }
 
-  private resolveModel(name: string): ModelConfig {
-    const model = this.config.models.find((m) => m.name === name);
-    if (!model) {
-      throw new ConfigModelError(
-        `unknown model "${name}"; known models: ${this.config.models.map((m) => m.name).join(", ")}`,
-      );
-    }
-    return model;
-  }
-
   /** DH-0094: the base system prompt (`this.systemPrompt`, fixed for the runtime's lifetime)
    * plus a self-awareness section computed fresh for *this* agent's resolved model — a
    * sub-agent may run a different `ModelConfig` than its parent/root, so this can't be baked
@@ -501,21 +385,6 @@ export class AgentRuntime {
    * `spawnAgent()`) calls this with the model it just resolved for that specific agent. */
   private buildAgentSystemPrompt(model: ModelConfig): string {
     return `${this.systemPrompt}\n\n${renderSelfInfoSection(this.config, model)}`;
-  }
-
-  private providerFor(model: ModelConfig): ModelProvider {
-    let provider = this.providers.get(model.provider);
-    if (!provider) {
-      const providerConfig = this.config.provider.find((p) => p.name === model.provider);
-      if (!providerConfig) {
-        throw new ConfigModelError(
-          `model "${model.name}" references unknown provider "${model.provider}"`,
-        );
-      }
-      provider = createProvider(providerConfig);
-      this.providers.set(model.provider, provider);
-    }
-    return provider;
   }
 
   private buildToolContext(agentId: string): ToolContext {
@@ -543,7 +412,7 @@ export class AgentRuntime {
         // waiting for the next runtime restart. Never throws (McpManager.
         // reconnectFailedServers() swallows per-server errors internally).
         await this.mcpManager.reconnectFailedServers();
-        this.mergeMcpTools();
+        mergeMcpTools(this.mcpManager, this.toolMap);
 
         const { tools: mcpTools, unreachable } = this.mcpManager.listAllTools();
         const corpus = [
@@ -591,8 +460,8 @@ export class AgentRuntime {
       // what makes its token usage feed the same session-wide cumulative cost/token budgets
       // (DH-0013) and `token_usage` SSE/log reporting every agent turn already gets.
       completeWithModel: async (modelName, request) => {
-        const model = this.resolveModel(modelName);
-        const provider = this.providerFor(model);
+        const model = this.models.resolveModel(modelName);
+        const provider = this.models.providerFor(model);
         const result = await provider.complete({ ...request, model: model.model });
         const costUsd = computeCostUsd(
           buildPricing(model),
@@ -629,17 +498,6 @@ export class AgentRuntime {
     };
   }
 
-  /** DH-0002: merges every currently-discovered MCP tool into the shared `toolMap`, in
-   * place, so `loop.ts`'s fresh-per-turn `toolDefs` read (params.tools) picks up tools that
-   * finish connecting after construction with no further plumbing. Idempotent — re-adding an
-   * already-present tool just overwrites it with (functionally identical) fresh state; safe
-   * to call after every reconnect attempt. */
-  private mergeMcpTools(): void {
-    for (const tool of buildMcpTools(this.mcpManager)) {
-      this.toolMap.set(tool.name, tool);
-    }
-  }
-
   /** DH-0091: reads `<cwd>/.mcp.json` (if any) and adds its `mcpServers` to `mcpManager` —
    * see the constructor's call site and project-config.ts's doc comment for the full
    * precedence rationale. Never throws: a missing file is a no-op (per
@@ -656,7 +514,7 @@ export class AgentRuntime {
     }
     if (projectServers === undefined) return;
     await this.mcpManager.addServers(projectServers);
-    this.mergeMcpTools();
+    mergeMcpTools(this.mcpManager, this.toolMap);
   }
 
   /** DH-0002: closes every MCP connection (terminating stdio children). Coordinates with
@@ -700,72 +558,30 @@ export class AgentRuntime {
       seedHistory?: ProviderMessage[];
     },
   ): string {
-    // DH-0013: fan-out budget checks — depth first (cheaper, no model/provider resolution
-    // needed to reject), then concurrency. Both throw synchronously; the Agent tool
-    // (tools/agent.ts) catches and surfaces this as a normal tool-error result.
-    const parentDepth = this.agentDepth.get(parentAgentId) ?? 0;
-    const depth = parentDepth + 1;
-    const maxAgentDepth = this.config.options.maxAgentDepth;
-    if (maxAgentDepth !== undefined && depth > maxAgentDepth) {
-      throw new Error(
-        `spawn refused: this sub-agent would be at nesting depth ${depth}, exceeding the ` +
-          `configured options.maxAgentDepth (${maxAgentDepth}).`,
-      );
-    }
+    const depth = this.checkFanoutBudget(parentAgentId);
     const maxConcurrentAgents = this.config.options.maxConcurrentAgents;
-    if (maxConcurrentAgents !== undefined && this.liveAgentCount >= maxConcurrentAgents) {
-      throw new Error(
-        `spawn refused: ${this.liveAgentCount} sub-agent(s) already live, at the configured ` +
-          `options.maxConcurrentAgents (${maxConcurrentAgents}) limit.`,
-      );
-    }
 
-    const model = this.resolveModel(params.model);
-    const provider = this.providerFor(model);
+    const model = this.models.resolveModel(params.model);
+    const provider = this.models.providerFor(model);
     const agentId = params.id ?? `agent-${randomUUID()}`;
     this.agentDepth.set(agentId, depth);
 
-    // DH-0077: worktree isolation requested — validated (and, if valid, actually created)
-    // synchronously here, so a bad request (not a git repo, budget exceeded, git failure)
-    // refuses synchronously exactly like the depth/concurrency checks above, rather than
-    // silently no-oping or only failing once the sub-agent's task starts running.
     let worktree: CreatedWorktree | undefined;
-    if (params.isolation === "worktree") {
-      const parentCwd = this.agentCwd.get(parentAgentId) ?? this.cwd;
-      if (!isGitRepo(parentCwd)) {
-        this.agentDepth.delete(agentId);
-        throw new Error(
-          `spawn refused: isolation: "worktree" requires the parent agent's cwd (${parentCwd}) to be inside a git repository.`,
-        );
-      }
-      // DH-0077: worktree creation has real disk/git overhead a plain in-process sub-agent
-      // spawn doesn't — capped separately from (but tied to the same knob as)
-      // maxConcurrentAgents, falling back to a small built-in default when unset so this is
-      // never accidentally unbounded.
-      const worktreeCap = maxConcurrentAgents ?? DEFAULT_MAX_CONCURRENT_WORKTREES;
-      if (this.liveWorktreeCount >= worktreeCap) {
-        this.agentDepth.delete(agentId);
-        throw new Error(
-          `spawn refused: ${this.liveWorktreeCount} isolated worktree(s) already live, at ` +
-            `the ${maxConcurrentAgents !== undefined ? "configured options.maxConcurrentAgents" : "default worktree"} ` +
-            `(${worktreeCap}) limit.`,
-        );
-      }
-      try {
-        worktree = createWorktree(parentCwd, agentId);
-      } catch (err) {
-        this.agentDepth.delete(agentId);
-        throw new WorktreeError(
-          `spawn refused: failed to create isolation worktree: ${(err as Error).message}`,
-        );
-      }
+    try {
+      worktree = this.reserveWorktreeIfRequested(
+        parentAgentId,
+        agentId,
+        params.isolation,
+        maxConcurrentAgents,
+      );
+    } catch (err) {
+      this.agentDepth.delete(agentId);
+      throw err;
     }
 
     if (worktree) {
       // DH-0077: this sub-agent runs against its isolated worktree, not the parent's cwd.
       this.agentCwd.set(agentId, worktree.path);
-      this.agentWorktree.set(agentId, worktree);
-      this.liveWorktreeCount += 1;
     } else {
       // DH-0070: inherit the spawning agent's own cwd at spawn time — not the runtime's
       // process-wide `this.cwd` — so a sub-agent spawned from a sub-agent (grandchild) would
@@ -784,118 +600,177 @@ export class AgentRuntime {
       id: agentId,
       background: params.background ?? true,
       ...(params.description !== undefined ? { description: params.description } : {}),
-      run: async (handle) => {
-        // DH-0013: decrement liveAgentCount once this sub-agent's own loop settles
-        // (success or failure alike) — see spawnAgent()'s increment above and its own doc
-        // comment for why this lives in `run` rather than a `background`-gated hook (TaskRegistry's
-        // `onSettled` only fires for background tasks; `run` itself is awaited unconditionally).
-        try {
-          const result = await runAgentLoop({
-            sessionId: this.sessionId,
-            agentId,
-            parentAgentId,
-            model: model.name,
-            providerModel: model.model,
-            systemPrompt: this.buildAgentSystemPrompt(model),
-            instruction: params.prompt,
-            ...(params.description !== undefined ? { description: params.description } : {}),
-            provider,
-            tools: this.toolMap,
-            toolContext: this.buildToolContext(agentId),
-            registerSendMessage: handle.registerSendMessage,
-            // Round 3 (docs/handoffs/core.md status log): this AbortSignal was already sitting
-            // right here in scope — TaskRegistry.stop(id) calls this same task's
-            // AbortController, which previously only reached the Bash tool's own
-            // run_in_background subprocess handling. Passing it through here is what makes
-            // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
-            signal: handle.signal,
-            ...(params.seedHistory
-              ? { resume: { messages: params.seedHistory, fromSessionId: this.sessionId } }
-              : {}),
-            // Round 7 fix (docs/handoffs/core.md status log): sub-agents never inherit the
-            // root/runtime's `interactive` flag. Round 5's "pause instead of end" semantics
-            // exist so an operator can keep talking to an interactive root — but a sub-agent
-            // spawned via the `Agent` tool has no operator; if it inherited `interactive: true`
-            // from an interactive server/TUI/Web root, it would pause in "waiting" forever on
-            // its first non-tool-use turn instead of reaching "done"/"failed", hanging the
-            // `Agent` tool's blocking (`run_in_background: false`) `awaitDone` wait. Sub-agents
-            // always get non-interactive (terminate-on-first-non-tool-use-turn) semantics,
-            // regardless of the root's mode. This does NOT affect `SendMessage`-driven
-            // steering of a still-running sub-agent — `registerSendMessage`'s sink is wired up
-            // unconditionally in loop.ts regardless of `interactive`, so a sub-agent can still
-            // be steered mid-conversation while it's actively looping; `interactive` only
-            // controls what happens when the model itself produces a non-tool-use turn.
-            interactive: false,
-            hasPendingChildren: () => this.tasks.hasNonTerminalChildren(agentId),
-            client: this.client,
-            ...(this.config.options.maxTurns !== undefined
-              ? { maxTurns: this.config.options.maxTurns }
-              : {}),
-            ...pricingOverride(model),
-            ...thinkingOverride(model),
-            ...cacheOverride(model),
-            ...contextWindowOverride(model),
-            ...compactionOverride(this.config),
-            onEvent: (event) => {
-              if (event.type === "agent_output") handle.append(event.chunk);
-              // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
-              // turn, so the task registry's own status (what getAgentTree() actually reads —
-              // see TaskRegistry.snapshot()) needs to track the loop's mid-conversation
-              // waiting/running transitions explicitly instead of only being set once when
-              // `run()` resolves/rejects.
-              if (event.type === "agent_status" && event.agentId === agentId) {
-                this.tasks.setStatus(agentId, event.status);
-              }
-              // DH-0013: this sub-agent's own token usage counts toward the session-wide
-              // cumulative cost/token budgets, same as the root's.
-              if (event.type === "token_usage") {
-                this.recordUsageAndCheckBudgets(
-                  event.inputTokens,
-                  event.outputTokens,
-                  event.costUsd,
-                  event.cacheReadTokens ?? 0,
-                  event.cacheWriteTokens ?? 0,
-                );
-              }
-              this.onEvent?.(event);
-            },
-            ...(this.onLogLine
-              ? { onLogLine: (line: LogLine) => this.onLogLine?.(agentId, line) }
-              : {}),
-          });
-          if (!result.success) {
-            throw new Error(result.finalOutput || "sub-agent reported failure");
-          }
-        } finally {
-          this.liveAgentCount -= 1;
-          // DH-0077: settle this sub-agent's isolation worktree, if any — clean it up
-          // automatically when it ends up with no changes, or otherwise leave it in place
-          // and append a note to this sub-agent's own output (surfaced via TaskSnapshot.
-          // output — Monitor/TaskOutput/the Agent tool's blocking result all read it) so the
-          // dispatching agent can review/merge the changes itself. Runs regardless of
-          // whether the loop above succeeded or failed — a failed sub-agent may still have
-          // left useful partial work in its worktree worth surfacing.
-          const worktreeForAgent = this.agentWorktree.get(agentId);
-          if (worktreeForAgent) {
-            this.agentWorktree.delete(agentId);
-            this.liveWorktreeCount -= 1;
-            try {
-              if (hasChanges(worktreeForAgent)) {
-                handle.append(
-                  `\n[isolation worktree] changes retained at ${worktreeForAgent.path} on branch ${worktreeForAgent.branch} — review/merge manually, then remove the worktree/branch yourself when done.`,
-                );
-              } else {
-                removeWorktree(worktreeForAgent);
-              }
-            } catch (err) {
-              handle.append(
-                `\n[isolation worktree] warning: failed to inspect/clean up worktree at ${worktreeForAgent.path} (branch ${worktreeForAgent.branch}): ${(err as Error).message}`,
-              );
-            }
-          }
-        }
-      },
+      run: (handle) => this.runSubAgent(agentId, parentAgentId, model, provider, params, handle),
     });
+  }
+
+  /** DH-0013: fan-out budget checks — depth first (cheaper, no model/provider resolution
+   * needed to reject), then concurrency. Both throw synchronously; the Agent tool
+   * (tools/agent.ts) catches and surfaces this as a normal tool-error result. Returns the
+   * depth the new sub-agent would be at (parent's own depth + 1) for the caller to record. */
+  private checkFanoutBudget(parentAgentId: string): number {
+    const parentDepth = this.agentDepth.get(parentAgentId) ?? 0;
+    const depth = parentDepth + 1;
+    const maxAgentDepth = this.config.options.maxAgentDepth;
+    if (maxAgentDepth !== undefined && depth > maxAgentDepth) {
+      throw new Error(
+        `spawn refused: this sub-agent would be at nesting depth ${depth}, exceeding the ` +
+          `configured options.maxAgentDepth (${maxAgentDepth}).`,
+      );
+    }
+    const maxConcurrentAgents = this.config.options.maxConcurrentAgents;
+    if (maxConcurrentAgents !== undefined && this.liveAgentCount >= maxConcurrentAgents) {
+      throw new Error(
+        `spawn refused: ${this.liveAgentCount} sub-agent(s) already live, at the configured ` +
+          `options.maxConcurrentAgents (${maxConcurrentAgents}) limit.`,
+      );
+    }
+    return depth;
+  }
+
+  /** DH-0077: worktree isolation requested — validated (and, if valid, actually created)
+   * synchronously here, so a bad request (not a git repo, budget exceeded, git failure)
+   * refuses synchronously exactly like `checkFanoutBudget()`'s checks, rather than silently
+   * no-oping or only failing once the sub-agent's task starts running. Returns undefined when
+   * `isolation` wasn't requested. */
+  private reserveWorktreeIfRequested(
+    parentAgentId: string,
+    agentId: string,
+    isolation: "worktree" | undefined,
+    maxConcurrentAgents: number | undefined,
+  ): CreatedWorktree | undefined {
+    if (isolation !== "worktree") return undefined;
+    const parentCwd = this.agentCwd.get(parentAgentId) ?? this.cwd;
+    if (!isGitRepo(parentCwd)) {
+      throw new Error(
+        `spawn refused: isolation: "worktree" requires the parent agent's cwd (${parentCwd}) to be inside a git repository.`,
+      );
+    }
+    return this.worktrees.reserve(agentId, parentCwd, maxConcurrentAgents);
+  }
+
+  /** The `run` callback passed to `tasks.start()` for a sub-agent — runs its `runAgentLoop()`
+   * call to completion, then settles bookkeeping (live-agent count, isolation worktree)
+   * regardless of success/failure. Split out of `spawnAgent()` (DH-0173) so that method is
+   * just id/budget/worktree setup + task registration, not also owning the full run body. */
+  private async runSubAgent(
+    agentId: string,
+    parentAgentId: string,
+    model: ModelConfig,
+    provider: ModelProvider,
+    params: { prompt: string; description?: string; seedHistory?: ProviderMessage[] },
+    handle: TaskRunHandle,
+  ): Promise<void> {
+    // DH-0013: decrement liveAgentCount once this sub-agent's own loop settles
+    // (success or failure alike) — see spawnAgent()'s increment above and its own doc
+    // comment for why this lives here rather than a `background`-gated hook (TaskRegistry's
+    // `onSettled` only fires for background tasks; `run` itself is awaited unconditionally).
+    try {
+      const result = await runAgentLoop({
+        sessionId: this.sessionId,
+        agentId,
+        parentAgentId,
+        model: model.name,
+        providerModel: model.model,
+        systemPrompt: this.buildAgentSystemPrompt(model),
+        instruction: params.prompt,
+        ...(params.description !== undefined ? { description: params.description } : {}),
+        provider,
+        tools: this.toolMap,
+        toolContext: this.buildToolContext(agentId),
+        registerSendMessage: handle.registerSendMessage,
+        // Round 3 (docs/handoffs/core.md status log): this AbortSignal was already sitting
+        // right here in scope — TaskRegistry.stop(id) calls this same task's
+        // AbortController, which previously only reached the Bash tool's own
+        // run_in_background subprocess handling. Passing it through here is what makes
+        // stopAgent(subAgentId) actually stop the sub-agent's *loop*, not just bookkeeping.
+        signal: handle.signal,
+        ...(params.seedHistory
+          ? { resume: { messages: params.seedHistory, fromSessionId: this.sessionId } }
+          : {}),
+        // Round 7 fix (docs/handoffs/core.md status log): sub-agents never inherit the
+        // root/runtime's `interactive` flag. Round 5's "pause instead of end" semantics
+        // exist so an operator can keep talking to an interactive root — but a sub-agent
+        // spawned via the `Agent` tool has no operator; if it inherited `interactive: true`
+        // from an interactive server/TUI/Web root, it would pause in "waiting" forever on
+        // its first non-tool-use turn instead of reaching "done"/"failed", hanging the
+        // `Agent` tool's blocking (`run_in_background: false`) `awaitDone` wait. Sub-agents
+        // always get non-interactive (terminate-on-first-non-tool-use-turn) semantics,
+        // regardless of the root's mode. This does NOT affect `SendMessage`-driven
+        // steering of a still-running sub-agent — `registerSendMessage`'s sink is wired up
+        // unconditionally in loop.ts regardless of `interactive`, so a sub-agent can still
+        // be steered mid-conversation while it's actively looping; `interactive` only
+        // controls what happens when the model itself produces a non-tool-use turn.
+        interactive: false,
+        hasPendingChildren: () => this.tasks.hasNonTerminalChildren(agentId),
+        client: this.client,
+        ...(this.config.options.maxTurns !== undefined
+          ? { maxTurns: this.config.options.maxTurns }
+          : {}),
+        ...pricingOverride(model),
+        ...thinkingOverride(model),
+        ...cacheOverride(model),
+        ...contextWindowOverride(model),
+        ...compactionOverride(this.config),
+        onEvent: (event) => {
+          if (event.type === "agent_output") handle.append(event.chunk);
+          // Round 5: an interactive sub-agent's loop no longer returns on a non-tool-use
+          // turn, so the task registry's own status (what getAgentTree() actually reads —
+          // see TaskRegistry.snapshot()) needs to track the loop's mid-conversation
+          // waiting/running transitions explicitly instead of only being set once when
+          // `run()` resolves/rejects.
+          if (event.type === "agent_status" && event.agentId === agentId) {
+            this.tasks.setStatus(agentId, event.status);
+          }
+          // DH-0013: this sub-agent's own token usage counts toward the session-wide
+          // cumulative cost/token budgets, same as the root's.
+          if (event.type === "token_usage") {
+            this.recordUsageAndCheckBudgets(
+              event.inputTokens,
+              event.outputTokens,
+              event.costUsd,
+              event.cacheReadTokens ?? 0,
+              event.cacheWriteTokens ?? 0,
+            );
+          }
+          this.onEvent?.(event);
+        },
+        ...(this.onLogLine
+          ? { onLogLine: (line: LogLine) => this.onLogLine?.(agentId, line) }
+          : {}),
+      });
+      if (!result.success) {
+        throw new Error(result.finalOutput || "sub-agent reported failure");
+      }
+    } finally {
+      this.liveAgentCount -= 1;
+      this.settleSubAgentWorktree(agentId, handle);
+    }
+  }
+
+  /** DH-0077: settles this sub-agent's isolation worktree, if any — clean it up
+   * automatically when it ends up with no changes, or otherwise leave it in place and
+   * append a note to this sub-agent's own output (surfaced via TaskSnapshot.output —
+   * Monitor/TaskOutput/the Agent tool's blocking result all read it) so the dispatching
+   * agent can review/merge the changes itself. Runs regardless of whether the loop above
+   * succeeded or failed — a failed sub-agent may still have left useful partial work in its
+   * worktree worth surfacing. Split out of `runSubAgent()`'s `finally` block (DH-0173). */
+  private settleSubAgentWorktree(agentId: string, handle: TaskRunHandle): void {
+    const worktreeForAgent = this.worktrees.release(agentId);
+    if (!worktreeForAgent) return;
+    try {
+      if (hasChanges(worktreeForAgent)) {
+        handle.append(
+          `\n[isolation worktree] changes retained at ${worktreeForAgent.path} on branch ${worktreeForAgent.branch} — review/merge manually, then remove the worktree/branch yourself when done.`,
+        );
+      } else {
+        removeWorktree(worktreeForAgent);
+      }
+    } catch (err) {
+      handle.append(
+        `\n[isolation worktree] warning: failed to inspect/clean up worktree at ${worktreeForAgent.path} (branch ${worktreeForAgent.branch}): ${(err as Error).message}`,
+      );
+    }
   }
 
   /** Runs the root agent to completion (not tracked as a task — it IS the session).
@@ -964,51 +839,9 @@ export class AgentRuntime {
     let model: ModelConfig;
     let provider: ModelProvider;
     try {
-      // DH-0038: an explicit modelName argument always wins; otherwise a resumed session
-      // defaults to the original root header's model alias (D3) rather than
-      // config.options.defaultModel, so a resume never silently switches models.
-      // DH-0093: a pending switch_model() call made before the root ever started wins over the
-      // resume/defaultModel fallback (but not over an explicit modelName argument) — see
-      // pendingInitialModel's own doc comment.
-      model = this.resolveModel(
-        modelName ??
-          this.pendingInitialModel ??
-          this.resume?.model ??
-          this.config.options.defaultModel,
-      );
-      provider = this.providerFor(model);
+      ({ model, provider } = this.resolveRootModel(modelName));
     } catch (err) {
-      this.rootStarted = true;
-      this.rootStatus = "failed";
-      const message = err instanceof Error ? err.message : String(err);
-      this.onLogLine?.(ROOT_AGENT_ID, {
-        version: 1,
-        timestamp: new Date().toISOString(),
-        type: "message",
-        role: "system",
-        content: `Root agent failed to start: ${message}`,
-      });
-      this.onLogLine?.(ROOT_AGENT_ID, {
-        version: 1,
-        timestamp: new Date().toISOString(),
-        type: "status_change",
-        status: "failed",
-      });
-      this.onEvent?.({
-        version: 1,
-        id: randomUUID(),
-        timestamp: new Date().toISOString(),
-        type: "agent_status",
-        agentId: ROOT_AGENT_ID,
-        status: "failed",
-      });
-      this.onEvent?.({
-        version: 1,
-        id: randomUUID(),
-        timestamp: new Date().toISOString(),
-        type: "session_ended",
-        exitCode: ExitCode.HarnessError,
-      });
+      this.reportRootStartFailure(err);
       throw err;
     }
 
@@ -1016,133 +849,221 @@ export class AgentRuntime {
     this.rootModel = model.name;
     this.rootStatus = "running";
     this.rootController = new AbortController();
-
-    // DH-0013: wall-clock budget, started once per runtime instance (runRoot() is only
-    // meaningfully called once per session in practice — see AgentRuntimeOptions' own doc
-    // comments). Unref'd so a configured cap alone never keeps the process alive past
-    // whatever would otherwise have ended it.
-    if (this.sessionStartMs === undefined) {
-      this.sessionStartMs = Date.now();
-      const maxWallClockMs = this.config.options.maxWallClockMs;
-      if (maxWallClockMs !== undefined) {
-        this.wallClockTimer = setTimeout(() => {
-          this.tripBudget(
-            `wall-clock duration exceeded the configured options.maxWallClockMs (${maxWallClockMs}ms)`,
-          );
-        }, maxWallClockMs);
-        (this.wallClockTimer as unknown as { unref?: () => void }).unref?.();
-      }
-    }
+    this.startWallClockBudgetIfNeeded();
 
     let result: AgentLoopResult;
     try {
-      result = await runAgentLoop({
-        sessionId: this.sessionId,
-        agentId: ROOT_AGENT_ID,
-        parentAgentId: null,
-        model: model.name,
-        providerModel: model.model,
-        systemPrompt: this.buildAgentSystemPrompt(model),
-        instruction,
-        provider,
-        tools: this.toolMap,
-        toolContext: this.buildToolContext(ROOT_AGENT_ID),
-        registerSendMessage: (fn) => {
-          this.rootSendMessage = fn;
-        },
-        // DH-0093: mirrors registerSendMessage above — lets switchModel() push a new binding
-        // into the root's currently-running loop once it's live.
-        registerModelSwitch: (fn) => {
-          this.rootModelSwitch = fn;
-        },
-        signal: this.rootController.signal,
-        interactive: this.interactive,
-        hasPendingChildren: () => this.tasks.hasNonTerminalChildren(ROOT_AGENT_ID),
-        client: this.client,
-        ...(this.config.options.maxTurns !== undefined
-          ? { maxTurns: this.config.options.maxTurns }
-          : {}),
-        ...pricingOverride(model),
-        ...thinkingOverride(model),
-        ...cacheOverride(model),
-        ...contextWindowOverride(model),
-        ...compactionOverride(this.config),
-        ...(this.resume
-          ? { resume: { messages: this.resume.messages, fromSessionId: this.resume.fromSessionId } }
-          : {}),
-        onEvent: (event) => {
-          // Round 5: keep rootStatus (what getAgentTree() reads) in sync with the loop's own
-          // mid-conversation waiting/running transitions, the same way spawnAgent() keeps the
-          // task registry in sync for sub-agents — runRoot() isn't a TaskRegistry entry, so it
-          // needs the same bookkeeping done by hand here.
-          if (event.type === "agent_status" && event.agentId === ROOT_AGENT_ID) {
-            this.rootStatus = event.status;
-          }
-          // DH-0013: the root's own token usage counts toward the session-wide cumulative
-          // cost/token budgets, same as every sub-agent's.
-          if (event.type === "token_usage") {
-            this.recordUsageAndCheckBudgets(
-              event.inputTokens,
-              event.outputTokens,
-              event.costUsd,
-              event.cacheReadTokens ?? 0,
-              event.cacheWriteTokens ?? 0,
-            );
-          }
-          this.onEvent?.(event);
-        },
-        ...(this.onLogLine
-          ? { onLogLine: (line: LogLine) => this.onLogLine?.(ROOT_AGENT_ID, line) }
-          : {}),
-      });
+      result = await this.runRootLoop(instruction, model, provider);
     } catch (err) {
-      this.rootStatus = "failed";
-      // DH-0131 fix: this path (runAgentLoop() itself throwing mid-run — a harness error
-      // after the loop already wrote its header line) used to emit only session_ended below,
-      // never a status_change log line or an agent_status SSE event — the same class of gap
-      // as the pre-loop resolveModel()/providerFor() catch above, just further along.
-      const message = err instanceof Error ? err.message : String(err);
-      this.onLogLine?.(ROOT_AGENT_ID, {
-        version: 1,
-        timestamp: new Date().toISOString(),
-        type: "message",
-        role: "system",
-        content: `Root agent failed: ${message}`,
-      });
-      this.onLogLine?.(ROOT_AGENT_ID, {
-        version: 1,
-        timestamp: new Date().toISOString(),
-        type: "status_change",
-        status: "failed",
-      });
-      this.onEvent?.({
-        version: 1,
-        id: randomUUID(),
-        timestamp: new Date().toISOString(),
-        type: "agent_status",
-        agentId: ROOT_AGENT_ID,
-        status: "failed",
-      });
-      this.onEvent?.({
-        version: 1,
-        id: randomUUID(),
-        timestamp: new Date().toISOString(),
-        type: "session_ended",
-        exitCode: ExitCode.HarnessError,
-      });
+      this.reportRootLoopFailure(err);
       throw err;
     }
 
+    return this.finalizeRootRun(result);
+  }
+
+  /** DH-0038/DH-0093: resolves the model+provider `runRoot()` should use for this run — an
+   * explicit `modelName` argument always wins; otherwise a resumed session defaults to the
+   * original root header's model alias (D3) rather than `config.options.defaultModel`, so a
+   * resume never silently switches models; a pending `switchModel()` call made before the
+   * root ever started wins over the resume/defaultModel fallback (but not over an explicit
+   * `modelName` argument) — see `pendingInitialModel`'s own doc comment. Split out of
+   * `runRoot()` (DH-0173) as its own named phase; still throws `ConfigModelError` synchronously
+   * on an unknown alias, same as before — `runRoot()`'s own try/catch handles that. */
+  private resolveRootModel(modelName: string | undefined): {
+    model: ModelConfig;
+    provider: ModelProvider;
+  } {
+    const model = this.models.resolveModel(
+      modelName ??
+        this.pendingInitialModel ??
+        this.resume?.model ??
+        this.config.options.defaultModel,
+    );
+    const provider = this.models.providerFor(model);
+    return { model, provider };
+  }
+
+  /** Emits the "root failed to start" status_change/agent_status/session_ended trio for a
+   * synchronous model/provider resolution failure (before the loop ever started) — split out
+   * of `runRoot()`'s catch block (DH-0173). */
+  private reportRootStartFailure(err: unknown): void {
+    this.rootStarted = true;
+    this.rootStatus = "failed";
+    const message = err instanceof Error ? err.message : String(err);
+    this.onLogLine?.(ROOT_AGENT_ID, {
+      version: 1,
+      timestamp: new Date().toISOString(),
+      type: "message",
+      role: "system",
+      content: `Root agent failed to start: ${message}`,
+    });
+    this.onLogLine?.(ROOT_AGENT_ID, {
+      version: 1,
+      timestamp: new Date().toISOString(),
+      type: "status_change",
+      status: "failed",
+    });
+    this.onEvent?.({
+      version: 1,
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: "agent_status",
+      agentId: ROOT_AGENT_ID,
+      status: "failed",
+    });
+    this.onEvent?.({
+      version: 1,
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: "session_ended",
+      exitCode: ExitCode.HarnessError,
+    });
+  }
+
+  /** DH-0131 fix: this path (runAgentLoop() itself throwing mid-run — a harness error after
+   * the loop already wrote its header line) needs the same status_change/agent_status/
+   * session_ended trio as `reportRootStartFailure()` above, just further along (the loop had
+   * already started). Split out of `runRoot()`'s second catch block (DH-0173). */
+  private reportRootLoopFailure(err: unknown): void {
+    this.rootStatus = "failed";
+    const message = err instanceof Error ? err.message : String(err);
+    this.onLogLine?.(ROOT_AGENT_ID, {
+      version: 1,
+      timestamp: new Date().toISOString(),
+      type: "message",
+      role: "system",
+      content: `Root agent failed: ${message}`,
+    });
+    this.onLogLine?.(ROOT_AGENT_ID, {
+      version: 1,
+      timestamp: new Date().toISOString(),
+      type: "status_change",
+      status: "failed",
+    });
+    this.onEvent?.({
+      version: 1,
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: "agent_status",
+      agentId: ROOT_AGENT_ID,
+      status: "failed",
+    });
+    this.onEvent?.({
+      version: 1,
+      id: randomUUID(),
+      timestamp: new Date().toISOString(),
+      type: "session_ended",
+      exitCode: ExitCode.HarnessError,
+    });
+  }
+
+  /** DH-0013: wall-clock budget, started once per runtime instance (runRoot() is only
+   * meaningfully called once per session in practice — see AgentRuntimeOptions' own doc
+   * comments). Unref'd so a configured cap alone never keeps the process alive past whatever
+   * would otherwise have ended it. Split out of `runRoot()` (DH-0173). */
+  private startWallClockBudgetIfNeeded(): void {
+    if (this.sessionStartMs !== undefined) return;
+    this.sessionStartMs = Date.now();
+    const maxWallClockMs = this.config.options.maxWallClockMs;
+    if (maxWallClockMs === undefined) return;
+    this.wallClockTimer = setTimeout(() => {
+      this.tripBudget(
+        `wall-clock duration exceeded the configured options.maxWallClockMs (${maxWallClockMs}ms)`,
+      );
+    }, maxWallClockMs);
+    (this.wallClockTimer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  /** The actual `runAgentLoop()` call for the root agent, with its onEvent/onLogLine wiring —
+   * split out of `runRoot()` (DH-0173) as its own named phase. Does not itself catch/report
+   * failures; `runRoot()`'s own try/catch around this call does that via
+   * `reportRootLoopFailure()`. */
+  private async runRootLoop(
+    instruction: string,
+    model: ModelConfig,
+    provider: ModelProvider,
+  ): Promise<AgentLoopResult> {
+    // biome-ignore lint/style/noNonNullAssertion: runRoot() always sets rootController just before calling this method.
+    const rootController = this.rootController!;
+    return runAgentLoop({
+      sessionId: this.sessionId,
+      agentId: ROOT_AGENT_ID,
+      parentAgentId: null,
+      model: model.name,
+      providerModel: model.model,
+      systemPrompt: this.buildAgentSystemPrompt(model),
+      instruction,
+      provider,
+      tools: this.toolMap,
+      toolContext: this.buildToolContext(ROOT_AGENT_ID),
+      registerSendMessage: (fn) => {
+        this.rootSendMessage = fn;
+      },
+      // DH-0093: mirrors registerSendMessage above — lets switchModel() push a new binding
+      // into the root's currently-running loop once it's live.
+      registerModelSwitch: (fn) => {
+        this.rootModelSwitch = fn;
+      },
+      signal: rootController.signal,
+      interactive: this.interactive,
+      hasPendingChildren: () => this.tasks.hasNonTerminalChildren(ROOT_AGENT_ID),
+      client: this.client,
+      ...(this.config.options.maxTurns !== undefined
+        ? { maxTurns: this.config.options.maxTurns }
+        : {}),
+      ...pricingOverride(model),
+      ...thinkingOverride(model),
+      ...cacheOverride(model),
+      ...contextWindowOverride(model),
+      ...compactionOverride(this.config),
+      ...(this.resume
+        ? { resume: { messages: this.resume.messages, fromSessionId: this.resume.fromSessionId } }
+        : {}),
+      onEvent: (event) => {
+        // Round 5: keep rootStatus (what getAgentTree() reads) in sync with the loop's own
+        // mid-conversation waiting/running transitions, the same way spawnAgent() keeps the
+        // task registry in sync for sub-agents — runRoot() isn't a TaskRegistry entry, so it
+        // needs the same bookkeeping done by hand here.
+        if (event.type === "agent_status" && event.agentId === ROOT_AGENT_ID) {
+          this.rootStatus = event.status;
+        }
+        // DH-0013: the root's own token usage counts toward the session-wide cumulative
+        // cost/token budgets, same as every sub-agent's.
+        if (event.type === "token_usage") {
+          this.recordUsageAndCheckBudgets(
+            event.inputTokens,
+            event.outputTokens,
+            event.costUsd,
+            event.cacheReadTokens ?? 0,
+            event.cacheWriteTokens ?? 0,
+          );
+        }
+        this.onEvent?.(event);
+      },
+      ...(this.onLogLine
+        ? { onLogLine: (line: LogLine) => this.onLogLine?.(ROOT_AGENT_ID, line) }
+        : {}),
+    });
+  }
+
+  /** Finalizes root status + emits `session_ended` once the loop itself has resolved
+   * (success or self-reported failure) — split out of `runRoot()` (DH-0173) as its own named
+   * phase. */
+  private finalizeRootRun(result: AgentLoopResult): {
+    success: boolean;
+    finalOutput: string;
+    turns: number;
+    outcome?: ReportedOutcome;
+    reportedBy?: OutcomeReportedBy;
+  } {
     // DH-0017 fix: this used to unconditionally set "failed" on any non-success result,
     // clobbering the "stopped" status the loop's own reportStopped() (loop.ts) already wrote
     // via the onEvent handler above moments earlier for a deliberate TaskStop/stopRoot(). Only
     // fall back to "failed" when the loop didn't already report a more specific terminal
     // status — mirrors TaskRegistry.start()'s own `if (task.status !== "stopped")` guard for
     // exactly the same reason.
-    // Cast needed: TS narrows `this.rootStatus` to the literal type it was last assigned
-    // synchronously within this function ("running", a few lines up), not accounting for the
-    // onEvent handler above mutating it during the awaited runAgentLoop() call.
-    if ((this.rootStatus as AgentStatus) !== "stopped") {
+    if (this.rootStatus !== "stopped") {
       this.rootStatus = result.success ? "done" : "failed";
     }
     // DH-0013: the root loop itself has ended (success, failure, or stop) — the wall-clock
@@ -1268,7 +1189,7 @@ export class AgentRuntime {
     if (agentId !== ROOT_AGENT_ID) {
       throw new RootOnlyModelSwitchError(agentId);
     }
-    const model = this.resolveModel(modelName);
+    const model = this.models.resolveModel(modelName);
 
     if (!this.rootStarted) {
       this.pendingInitialModel = modelName;
@@ -1276,7 +1197,7 @@ export class AgentRuntime {
       return;
     }
 
-    const provider = this.providerFor(model);
+    const provider = this.models.providerFor(model);
     this.rootModel = model.name;
     this.rootModelSwitch?.({
       model: model.name,
@@ -1294,8 +1215,8 @@ export class AgentRuntime {
    * wire `SkillInfo` shape. Backed by the eager `skillsCache` scan (see its own doc comment),
    * never re-scanned per call. */
   async listSkills(): Promise<SkillInfo[]> {
-    await this.skillsReady;
-    return this.skillsCache.map(({ name, description }) => ({ name, description }));
+    await this.skills.ready;
+    return this.skills.list().map(({ name, description }) => ({ name, description }));
   }
 
   /** DH-0093: loads the named skill (via `loadSkillFromPaths`, the same lookup the `Skill`
