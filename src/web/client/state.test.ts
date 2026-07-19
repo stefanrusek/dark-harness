@@ -391,6 +391,9 @@ describe("markPossibleGap / dismissPossibleGap (DH-0024)", () => {
       expect.objectContaining({ role: "tool", text: "Bash: echo hi" }),
     ]);
     expect(after?.transcript[0]?.toolError).toBeUndefined();
+    // DH-0199: the resolving tool_result's durationMs is recorded on the marker turn even on
+    // success, so the click-to-expand detail view has something to show beyond "✓ ok".
+    expect(after?.transcript[0]?.durationMs).toBe(12);
     expect(after?.pendingToolCall).toBeNull();
   });
 

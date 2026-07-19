@@ -44,6 +44,14 @@ export interface Turn {
    * tokens instead of the generic dim tool-marker styling. Mirrors src/tui/state.ts's
    * identical field. */
   terminalStatus?: AgentStatus;
+  /** DH-0199: wall-clock duration (ms) of the matching `tool_result`, set once it resolves a
+   * `"tool"` marker turn's `pendingToolCall`. Meaningless on every other role, and absent on
+   * a standalone error marker synthesized with no matching call (resume gap — see
+   * `handleToolResult`). Surfaced in the tool-call detail expansion alongside the input
+   * summary already in `text` — `ToolResultEvent` deliberately carries no output content (see
+   * its doc comment in src/contracts/events.type.ts), so duration + success/failure is the
+   * full "result" a client can ever show. */
+  durationMs?: number;
 }
 
 export interface AgentNode {
@@ -418,7 +426,9 @@ function handleToolResult(
     const turn = node.transcript[pending.turnIndex];
     node.transcript = turn
       ? node.transcript.map((t, i) =>
-          i === pending.turnIndex && event.isError ? { ...t, toolError: true } : t,
+          i === pending.turnIndex
+            ? { ...t, durationMs: event.durationMs, ...(event.isError ? { toolError: true } : {}) }
+            : t,
         )
       : node.transcript;
     node.pendingToolCall = null;
