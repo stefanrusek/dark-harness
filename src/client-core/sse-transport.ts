@@ -1,0 +1,165 @@
+// Shared SSE transport: connects to a server SSE stream and invokes `onEvent` per event,
+// reconnecting with `Last-Event-ID` and full-jitter backoff on drop, per ADR 0002 (resumable
+// via Last-Event-ID). DH-0184 extracted this out of `src/tui/sse-client.ts` and
+// `src/web/client/sse.ts` (see DH-0170's architect decomposition notes) — both clients
+// independently arrived at the same design (fetch-based, not `EventSource`, since the Web
+// client's bearer-token auth needs custom headers `EventSource` can't set) and had converged
+// on byte-equivalent backoff constants. `fetchImpl`/`delayImpl`/`randomImpl` are injectable so
+// this is testable against a fake streaming `Response` without real network I/O or real
+// timers.
+//
+// This module ships the reconnect *driver*; it does not build the request URL/headers beyond
+// what's passed in, and it does not own any client-specific `ConnectionStatus` display wiring
+// beyond invoking the `onConnectionChange` callback with the shared vocabulary
+// (`./connection-status.ts`). Migrating the TUI and Web clients onto this module is out of
+// scope here — see DH-0185 (TUI) and DH-0186 (Web).
+
+import type { ServerSentEvent } from "../contracts/index.ts";
+import type { ConnectionStatus } from "./connection-status.ts";
+import {
+  computeBackoffDelayMs,
+  DEFAULT_MAX_RECONNECT_DELAY_MS,
+  DEFAULT_RECONNECT_DELAY_MS,
+} from "./sse-backoff.ts";
+import { SseFrameParser } from "./sse-frame-parser.ts";
+import { parseServerSentEventPayload } from "./sse-payload.ts";
+
+export interface SseTransportOptions {
+  /** Full URL of the SSE endpoint (e.g. `${baseUrl}/api/events`). Built by the caller so this
+   * module stays agnostic of how each client composes its server target. */
+  url: string;
+  fetchImpl?: typeof fetch;
+  /** Static headers sent on every (re)connect attempt, in addition to `accept` and (when a
+   * prior frame supplied one) `Last-Event-ID` — both of which this module sets itself. */
+  headers?: Record<string, string>;
+  onEvent: (event: ServerSentEvent) => void;
+  onConnectionChange?: (status: ConnectionStatus) => void;
+  /** A frame's `data:` payload failed to parse as a `ServerSentEvent` — see
+   * `./sse-payload.ts` for the (deliberately permissive) validation rules. */
+  onParseError?: (rawData: string) => void;
+  /** Reconnected successfully after one or more failed attempts. Not called for the very
+   * first connection of the session — only when a prior attempt actually failed (DH-0024).
+   * Callers use this to show an explicit "reconnected — history may be incomplete" notice,
+   * since the server-side event buffer may not have retained everything that happened while
+   * disconnected. */
+  onReconnected?: () => void;
+  reconnectDelayMs?: number;
+  maxReconnectDelayMs?: number;
+  delayImpl?: (ms: number) => Promise<void>;
+  /** Injectable source of randomness for reconnect jitter, defaulting to `Math.random`.
+   * Overridable so tests can assert exact computed delays deterministically. */
+  randomImpl?: () => number;
+  signal?: AbortSignal;
+}
+
+function defaultDelay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Connect to a server's SSE stream and invoke `onEvent` per event, reconnecting with
+ * `Last-Event-ID` on drop until `options.signal` aborts. Runs until abort — callers should
+ * `void` this and hold the `AbortController` used to stop it.
+ */
+export async function runSseTransport(options: SseTransportOptions): Promise<void> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const delay = options.delayImpl ?? defaultDelay;
+  const random = options.randomImpl ?? Math.random;
+  const reconnectDelayMs = options.reconnectDelayMs ?? DEFAULT_RECONNECT_DELAY_MS;
+  const maxReconnectDelayMs = options.maxReconnectDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY_MS;
+  let lastEventId: string | null = null;
+  let consecutiveFailures = 0;
+
+  while (!(options.signal?.aborted ?? false)) {
+    // `connecting` only for the very first attempt of the session (no `Last-Event-ID` seen
+    // yet); any attempt after a prior drop is `reconnecting` (docs/design/style-guide.md
+    // §1/§6).
+    options.onConnectionChange?.(lastEventId !== null ? "reconnecting" : "connecting");
+    try {
+      await connectOnce(
+        options,
+        fetchImpl,
+        lastEventId,
+        (id) => {
+          lastEventId = id;
+        },
+        () => {
+          // A real HTTP-level connection was established. Notify only when this follows one or
+          // more failures — the operator's view may have missed events while disconnected.
+          if (consecutiveFailures > 0) options.onReconnected?.();
+          consecutiveFailures = 0;
+        },
+      );
+      // The stream ended cleanly (server closed it, no exception) — not fatal, the loop
+      // immediately retries below just like after a failed attempt, so it's reported the
+      // same way: `reconnecting`.
+      options.onConnectionChange?.("reconnecting");
+    } catch {
+      if (options.signal?.aborted) break;
+      // A failed attempt always leads to another retry (this transport never gives up on its
+      // own) — that's exactly what the shared `reconnecting` state means, not a fatal
+      // `error`.
+      options.onConnectionChange?.("reconnecting");
+      // Compute the wait using the failure streak *before* this one counts, so the very
+      // first retry is jittered around the plain `base` delay rather than already doubled —
+      // only the second and later consecutive failures actually back off further.
+      const waitMs = computeBackoffDelayMs(
+        consecutiveFailures,
+        reconnectDelayMs,
+        maxReconnectDelayMs,
+        random,
+      );
+      consecutiveFailures += 1;
+      if (options.signal?.aborted) break;
+      await delay(waitMs);
+      continue;
+    }
+    if (options.signal?.aborted) break;
+    await delay(
+      computeBackoffDelayMs(consecutiveFailures, reconnectDelayMs, maxReconnectDelayMs, random),
+    );
+  }
+  // The loop only exits via `signal.aborted` — the one genuine "given up" case. Report it
+  // here too so a header/status display doesn't freeze on a stale `reconnecting`/`live` label
+  // when the operator (or the owning client) deliberately tears the connection down.
+  options.onConnectionChange?.("disconnected");
+}
+
+async function connectOnce(
+  options: SseTransportOptions,
+  fetchImpl: typeof fetch,
+  lastEventId: string | null,
+  setLastEventId: (id: string) => void,
+  onOpen: () => void,
+): Promise<void> {
+  const headers: Record<string, string> = { accept: "text/event-stream", ...options.headers };
+  if (lastEventId !== null) headers["Last-Event-ID"] = lastEventId;
+
+  const response = await fetchImpl(options.url, {
+    headers,
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`SSE connection failed: HTTP ${response.status}`);
+  }
+  onOpen();
+  options.onConnectionChange?.("live");
+
+  const parser = new SseFrameParser();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    const frames = parser.push(decoder.decode(value, { stream: true }));
+    for (const frame of frames) {
+      if (frame.id !== null) setLastEventId(frame.id);
+      const event = parseServerSentEventPayload(frame.data);
+      if (event) {
+        options.onEvent(event);
+      } else {
+        options.onParseError?.(frame.data);
+      }
+    }
+  }
+}
