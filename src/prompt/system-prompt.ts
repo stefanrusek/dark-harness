@@ -163,6 +163,9 @@ export function renderSelfInfoSection(
   config: DhConfig,
   model: ModelConfig,
   buildInfo: BuildInfo = BUILD_INFO,
+  sessionId?: string,
+  agentId?: string,
+  logFilePath?: string,
 ): string {
   const buildBits = [`version ${buildInfo.version}`];
   if (buildInfo.gitSha) {
@@ -176,7 +179,7 @@ export function renderSelfInfoSection(
     otherModels.length > 0
       ? otherModels.map((m) => `- **${m.name}** -> provider model \`${m.model}\``).join("\n")
       : "(no other models are configured in this session's dh.json)";
-  return [
+  const lines = [
     "## About this dh instance",
     "",
     `You are running dh (Dark Harness), ${buildBits.join(", ")}.`,
@@ -186,7 +189,14 @@ export function renderSelfInfoSection(
     "Other model configs available in this session's `dh.json` (a sub-agent you spawn via the " +
       "`Agent` tool may run under any of these, including this one):",
     otherModelsText,
-  ].join("\n");
+  ];
+  if (sessionId !== undefined && agentId !== undefined && logFilePath !== undefined) {
+    lines.push(
+      "",
+      `Your session id is \`${sessionId}\` and your own agent id is \`${agentId}\`. Every message, tool call, and result you (and any sub-agents you spawn) produce is logged automatically to \`${logFilePath}\` — your own JSONL transcript, which you can \`Read\` at any time to review your prior turns. The file is one JSON object per line: the first line is a header (session/agent/parent metadata), and every line after that is a typed event — \`message\`, \`tool_call\`, \`tool_result\`, \`token_usage\`, \`status_change\`, or \`completed\` (and a few rarer types), each carrying a \`type\` field and a timestamp. Sub-agents you spawn get their own sibling log files under the same session directory, named by their own agent id.`,
+    );
+  }
+  return lines.join("\n");
 }
 
 /**

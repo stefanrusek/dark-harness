@@ -383,14 +383,41 @@ export class AgentRuntime {
    * sub-agent may run a different `ModelConfig` than its parent/root, so this can't be baked
    * into `this.systemPrompt` once; every `runAgentLoop()` call site (`runRoot()`,
    * `spawnAgent()`) calls this with the model it just resolved for that specific agent. */
-  private buildAgentSystemPrompt(model: ModelConfig): string {
+  private buildAgentSystemPrompt(model: ModelConfig, agentId: string): string {
     // DH-0194: `this.interactive` is `false` for the standalone `--instructions`/`--job`
     // path (no live operator) and `true` for every interactive session (server/TUI/Web) —
     // see AgentRuntimeOptions.interactive's doc comment above. Sub-agents always run under
     // this same runtime instance, so they get the same job-mode section as the root when the
     // whole runtime is non-interactive.
     const jobModeSection = this.interactive ? "" : `\n\n${renderJobModeSection()}`;
-    return `${this.systemPrompt}\n\n${renderSelfInfoSection(this.config, model)}${jobModeSection}`;
+    // DH-0215: this agent's own log file, following SessionLogger's real naming convention
+    // (src/server/logger.ts's filePathFor) — one JSONL file per agent, under this session's
+    // log directory, named by the agent's own (percent-encoded) id.
+    const logFilePath = join(this.logsRoot, this.sessionId, `${encodeURIComponent(agentId)}.jsonl`);
+    const selfInfo = renderSelfInfoSection(
+      this.config,
+      model,
+      undefined,
+      this.sessionId,
+      agentId,
+      logFilePath,
+    );
+    return `${this.systemPrompt}\n\n${selfInfo}${jobModeSection}`;
+  }
+
+  private providerFor(model: ModelConfig): ModelProvider {
+    let provider = this.providers.get(model.provider);
+    if (!provider) {
+      const providerConfig = this.config.provider.find((p) => p.name === model.provider);
+      if (!providerConfig) {
+        throw new ConfigModelError(
+          `model "${model.name}" references unknown provider "${model.provider}"`,
+        );
+      }
+      provider = createProvider(providerConfig);
+      this.providers.set(model.provider, provider);
+    }
+    return provider;
   }
 
   private buildToolContext(agentId: string): ToolContext {
@@ -678,7 +705,7 @@ export class AgentRuntime {
         parentAgentId,
         model: model.name,
         providerModel: model.model,
-        systemPrompt: this.buildAgentSystemPrompt(model),
+        systemPrompt: this.buildAgentSystemPrompt(model, agentId),
         instruction: params.prompt,
         ...(params.description !== undefined ? { description: params.description } : {}),
         provider,
@@ -998,7 +1025,7 @@ export class AgentRuntime {
       parentAgentId: null,
       model: model.name,
       providerModel: model.model,
-      systemPrompt: this.buildAgentSystemPrompt(model),
+      systemPrompt: this.buildAgentSystemPrompt(model, ROOT_AGENT_ID),
       instruction,
       provider,
       tools: this.toolMap,

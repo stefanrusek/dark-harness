@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0215
 type: feature
-status: ready
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-19
 relations:
@@ -80,3 +80,33 @@ Owner observation (2026-07-19): cloud agents (Claude Code sub-agents in this ver
 ## Open Questions
 
 ## Notes
+
+### 2026-07-19 — Implemented and verified
+
+- `renderSelfInfoSection` (`src/prompt/system-prompt.ts`) gained three new optional trailing
+  params (`sessionId`, `agentId`, `logFilePath`); when all three are present it appends a
+  paragraph with the session id, agent id, the exact log file path, and a concise description
+  of the JSONL structure (header line + `message`/`tool_call`/`tool_result`/`token_usage`/
+  `status_change`/`completed` typed event lines).
+- Verified the real current filename convention against `SessionLogger.filePathFor()`
+  (`src/server/logger.ts`) rather than assuming the ticket's guess: it is
+  `<logsRoot>/<sessionId>/<encodeURIComponent(agentId)>.jsonl` (no `agent-` prefix — that
+  guess was stale post-DH-0173). `AgentRuntime.buildAgentSystemPrompt()`
+  (`src/agent/runtime.ts`) now takes `(model, agentId)` and computes this same path via
+  `join(this.logsRoot, this.sessionId, encodeURIComponent(agentId) + ".jsonl")`. Both call
+  sites (root loop, sub-agent loop) pass their own agent id (`ROOT_AGENT_ID` / the spawned
+  sub-agent's id).
+- Test coverage: `src/agent/runtime.test.ts` — new "DH-0215" test asserts root and a sub-agent
+  each get distinct sessionId/agentId/log-path text in their system prompts, that the reported
+  path matches a real `SessionLogger.filePathFor()`, and — the load-bearing check — reads the
+  actual file back off disk and confirms its header line's `agentId` matches. All three User
+  Stories are covered by this one test. 100% line coverage maintained
+  (`bun run test:coverage`).
+- Real-session verification (not just unit tests): built the release binary
+  (`bun scripts/build.ts`) and drove it end-to-end via the e2e mock-provider harness
+  (`--instructions ... --job` against `startMockAnthropicProvider`) — confirmed the actual
+  system prompt sent to the model contained a real UUID session id, `agent-root` as the agent
+  id, and a log path that, when read from disk, was a real file whose header line matched.
+  Scratch verification script was not committed (ad hoc, not part of the repo).
+- All four gates green locally: `bun run typecheck`, `bun run lint`, `bun run test:coverage`
+  (100.00% lines), `bun run e2e`.
