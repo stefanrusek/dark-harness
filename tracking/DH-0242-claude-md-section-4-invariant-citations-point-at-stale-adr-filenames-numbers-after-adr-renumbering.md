@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0242
 type: bug
-status: refining
+status: verifying
 owner: Coordinator
 resolution:
 blocked_by: []
@@ -88,3 +88,31 @@ are untouched — so it is a routine Coordinator ticket, not a §6 architect esc
 ## Notes
 
 Filed by Fable during refactoring round 3 (DH-0241).
+
+### 2026-07-20 — Fixed
+
+Corrected all six stale citations in CLAUDE.md:
+
+- §3 "ADR 0005's amendment" (build-identity stamping) → confirmed by reading ADR bodies that
+  `docs/adr/0005-jsonl-per-agent-logging.md` is the one that actually carries the
+  `LogHeader.build` amendment (`scripts/build.ts`, `--define` stamping, gitSha/releaseTag) —
+  now cited explicitly by filename.
+- §4.1: `adr/0001-single-binary-modes.md` → `docs/adr/0001-single-binary-multi-mode.md`
+- §4.3: `adr/0003-security-posture.md` → `docs/adr/0004-security-posture.md`
+- §4.4: `adr/0004-jsonl-logging.md` → `docs/adr/0005-jsonl-per-agent-logging.md`
+- §4.5: `adr/0005-exit-code-contract.md` → `docs/adr/0006-exit-code-contract.md`
+- §4.6: `adr/0006-dhjson-schema.md` → `docs/adr/0007-dhjson-schema.md`
+- §4.7 (duplicate of §4.3): `adr/0003-security-posture.md` → `docs/adr/0004-security-posture.md`
+
+Swept README.md, docs/handoffs/*, docs/roster/*, and the rest of CLAUDE.md for other ADR
+citations from the same renumbering: none found stale — README.md's
+`docs/adr/0004-security-posture.md` and `docs/adr/0007-dhjson-schema.md` links and
+`docs/handoffs/core.md`'s `docs/adr/0005-jsonl-per-agent-logging.md` reference were already
+correct. (Some closed/historical `tracking/DH-*.md` tickets still contain the old pre-
+renumber filenames in their body text — left untouched as dated historical records, per
+tracking/'s role as a point-in-time log rather than living documentation.)
+
+Diff scoped strictly to citation strings — no invariant wording changed. Gates: typecheck
+clean, lint clean, `test:coverage` 146/146 passed at 100% line coverage (no test asserts on
+CLAUDE.md's ADR citation text), `e2e` 41/41 passed (one earlier run had an unrelated
+`web.test.ts` stream flake that did not reproduce on rerun).

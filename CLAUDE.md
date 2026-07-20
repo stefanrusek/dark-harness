@@ -30,7 +30,7 @@ needs are requests to the other owner, never a direct edit (PLAYBOOK.md §5).
 | Path | Owning domain | Contents |
 | --- | --- | --- |
 | `src/contracts/` | **Contracts** (shared — changes need architect sign-off, see §6) | SSE event schema, POST command schema, log-line schema, `dh.json` schema, exit codes. The single source of wire truth. Every other domain imports from here; nothing redeclares a wire type locally. |
-| `src/agent/`, `src/config/`, `src/cli.ts`, `scripts/` | **Core** | Agent loop, tool implementations (Bash, Read, Edit, Write, Agent, ToolSearch, Skill, TaskOutput, SendMessage, Monitor, TaskStop, McpAuth), provider adapters (anthropic-type, bedrock-type), `dh.json` loading/validation + `$(VAR)` interpolation, the CLI entry point (flag parsing, mode composition: `--web`, `--server`, `--connect`, `--job`, `--instructions`, `--config`, `--port`), and build tooling (`scripts/build.ts`, which stamps build identity into the compiled binary — see ADR 0005's amendment). |
+| `src/agent/`, `src/config/`, `src/cli.ts`, `scripts/` | **Core** | Agent loop, tool implementations (Bash, Read, Edit, Write, Agent, ToolSearch, Skill, TaskOutput, SendMessage, Monitor, TaskStop, McpAuth), provider adapters (anthropic-type, bedrock-type), `dh.json` loading/validation + `$(VAR)` interpolation, the CLI entry point (flag parsing, mode composition: `--web`, `--server`, `--connect`, `--job`, `--instructions`, `--config`, `--port`), and build tooling (`scripts/build.ts`, which stamps build identity into the compiled binary — see ADR 0005 (`docs/adr/0005-jsonl-per-agent-logging.md`)'s amendment). |
 | `src/server/` | **Server** | HTTP+SSE server, protocol handlers, JSONL-per-agent session logging, exit-code contract. |
 | `src/tui/` | **TUI** | Console client: alt-screen full-screen TUI, root view + agent tree, SSE client parsing. |
 | `src/web/` | **Web** | Web UI: served client-side only, agent tree, status colors, token/cost display, log download. |
@@ -47,24 +47,24 @@ needs are requests to the other owner, never a direct edit (PLAYBOOK.md §5).
 ## 4. Invariants (locked decisions — reference the ADR, do not relitigate)
 
 1. One binary, two logical processes (server, client) composed by flags. Web UI is
-   **always client-served**, never by `--server`. See `docs/adr/0001-single-binary-modes.md`.
+   **always client-served**, never by `--server`. See `docs/adr/0001-single-binary-multi-mode.md`.
 2. Client↔server protocol is **HTTP + SSE**, not WebSocket. Versioned JSON events, resumable
    via `Last-Event-ID`. See `docs/adr/0002-http-sse-protocol.md`.
 3. **Plaintext HTTP by default, no auth.** Optional `security.token` (bearer, constant-time
    compare, never logged) and `security.tls` (cert/key) are opt-in via `dh.json`. Air-gapping
-   remains the primary posture. See `docs/adr/0003-security-posture.md`.
+   remains the primary posture. See `docs/adr/0004-security-posture.md`.
 4. **JSONL-per-agent logging**: one file per agent, first line is a metadata header (session
    id, agent id, parent agent id, spawn timestamp, model, instructions summary/hash),
    subsequent lines are timestamped events. Logs are automatic — agents never call a logging
-   tool. See `docs/adr/0004-jsonl-logging.md`.
+   tool. See `docs/adr/0005-jsonl-per-agent-logging.md`.
 5. **Exit codes:** `0` success, `1` self-reported task failure, `2+` harness error. See
-   `docs/adr/0005-exit-code-contract.md`.
+   `docs/adr/0006-exit-code-contract.md`.
 6. **`dh.json` schema** (models/providers/options/skillPaths/mcpServers/systemPrompt/
    security) is as specified in `HANDOFF.md` §5 and Addendum B — extend minimally, never
-   restructure without an ADR. See `docs/adr/0006-dhjson-schema.md`.
+   restructure without an ADR. See `docs/adr/0007-dhjson-schema.md`.
 7. **Permissions: everything is allowed, always.** No approval prompts, no permission modes.
    Documentation must steer operators toward air-gapped deployment. See
-   `docs/adr/0003-security-posture.md`.
+   `docs/adr/0004-security-posture.md`.
 8. **Sub-agents are ad-hoc only** — no named/predefined agent definition files; `Agent` takes
    a model name + prompt; arbitrary nesting depth; `run_in_background` defaults to `true`
    everywhere, overridable in config.

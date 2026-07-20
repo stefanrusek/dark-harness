@@ -52,7 +52,7 @@ source: tracking/
 | [DH-0238](../DH-0238-adr-number-collision-two-adrs-both-numbered-0009-colored-span-markdown-vs-workflow-scripts-invariant.md) | ADR number collision: two ADRs both numbered 0009 (colored-span markdown vs Workflow-scripts invariant) | status: verifying |
 | [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | status: refining |
 | [DH-0241](../DH-0241-refactoring-round-3-closing-round-of-3-verify-dh-0240-clean-broadened-full-repo-sweep.md) | Refactoring round 3 (closing round of 3): verify DH-0240 clean, broadened full-repo sweep | status: refining |
-| [DH-0242](../DH-0242-claude-md-section-4-invariant-citations-point-at-stale-adr-filenames-numbers-after-adr-renumbering.md) | CLAUDE.md section 4 invariant citations point at stale ADR filenames/numbers after ADR renumbering | status: refining |
+| [DH-0242](../DH-0242-claude-md-section-4-invariant-citations-point-at-stale-adr-filenames-numbers-after-adr-renumbering.md) | CLAUDE.md section 4 invariant citations point at stale ADR filenames/numbers after ADR renumbering | status: verifying |
 | [DH-0243](../DH-0243-dead-export-cli-reset-in-src-cli-styling-ts-has-zero-consumers.md) | Dead export: CLI_RESET in src/cli/styling.ts has zero consumers | status: verifying |
 | [DH-0244](../DH-0244-byte-identical-clearcienvforinteractiveinkrender-duplicated-across-two-tui-side-effect-modules.md) | Byte-identical clearCiEnvForInteractiveInkRender duplicated across two TUI side-effect modules | status: verifying |
 
@@ -81,7 +81,6 @@ source: tracking/
 | [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | bug | stefan |
 | [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | bug | stefan |
 | [DH-0241](../DH-0241-refactoring-round-3-closing-round-of-3-verify-dh-0240-clean-broadened-full-repo-sweep.md) | Refactoring round 3 (closing round of 3): verify DH-0240 clean, broadened full-repo sweep | feature | Coordinator |
-| [DH-0242](../DH-0242-claude-md-section-4-invariant-citations-point-at-stale-adr-filenames-numbers-after-adr-renumbering.md) | CLAUDE.md section 4 invariant citations point at stale ADR filenames/numbers after ADR renumbering | bug | Coordinator |
 
 ### implementing
 
@@ -120,6 +119,7 @@ source: tracking/
 | [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool 🔒 | bug | iris |
 | [DH-0237](../DH-0237-required-contract-in-system-prompt-ts-has-accreted-the-whole-output-format-section-doc-comment-is-now-stale-and-override-inheritance-is-undocumented.md) | REQUIRED_CONTRACT in system-prompt.ts has accreted the whole Output-format section; doc comment is now stale and override-inheritance is undocumented | bug | stefan |
 | [DH-0238](../DH-0238-adr-number-collision-two-adrs-both-numbered-0009-colored-span-markdown-vs-workflow-scripts-invariant.md) | ADR number collision: two ADRs both numbered 0009 (colored-span markdown vs Workflow-scripts invariant) | bug | stefan |
+| [DH-0242](../DH-0242-claude-md-section-4-invariant-citations-point-at-stale-adr-filenames-numbers-after-adr-renumbering.md) | CLAUDE.md section 4 invariant citations point at stale ADR filenames/numbers after ADR renumbering | bug | Coordinator |
 | [DH-0243](../DH-0243-dead-export-cli-reset-in-src-cli-styling-ts-has-zero-consumers.md) | Dead export: CLI_RESET in src/cli/styling.ts has zero consumers | bug | Core |
 | [DH-0244](../DH-0244-byte-identical-clearcienvforinteractiveinkrender-duplicated-across-two-tui-side-effect-modules.md) | Byte-identical clearCiEnvForInteractiveInkRender duplicated across two TUI side-effect modules | bug | TUI |
 
