@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0232
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -68,3 +68,12 @@ The underlines on these links did not terminate properly and extended into text 
 **Likely root cause:** In `src/tui/markdown-ansi.ts`, the `inlineToLines` function's handling of the `link` inline node type does not emit the SGR underline reset code (`\x1b[24m` or `\x1b[0m`) immediately after the link text. The underline styling state persists through subsequent inline nodes until the next explicit reset or style change.
 
 Related: DH-0109 implemented full Markdown support including links; this is a rendering polish issue.
+
+### 2026-07-19 — Verification: bug already fixed by DH-0065, not reproducible on current main
+
+Read `src/tui/markdown-ansi.ts` and `src/web/client/markdown-dom.ts` in full and reproduced the exact scenarios in the ticket (including the four-link list example and a link glued directly to trailing text with no space, per FR #4) against current `main`. Neither renderer leaks the link's underline/blue styling into following text.
+
+- **TUI:** `serializeRow` (added in commit `fe5c6ef`, "TUI: fix inline Markdown style bleed in serializeRow (DH-0065)") already emits an explicit `RESET` whenever a segment transitions from a styled segment to one with different/no codes — this is a general fix, not link-specific, and it already covers the `link` case's own trailing `" (url)"` segment (which carries plain/unstyled codes) as well as whatever inline node follows the link. `fe5c6ef` landed before this ticket was filed, so the "likely root cause" in this ticket's diagnosis (link case missing its own SGR-24 reset) describes a bug that predates DH-0065 and was already fixed generically by it. Direct repro: `renderMarkdownRows(parseMarkdown("[link](https://example.com)trailing"), 80)` produces `"[4;34mlink[0m (https://example.com)trailing[0m"` — reset immediately after "link", no escape codes before "trailing". No production code change was needed.
+- **Web:** confirmed no real bug, as the ticket's own Open Questions flagged as the likely outcome. `renderInlineNode`'s `link` case creates a real `<a>` element and appends the link's children as descendants; any text node that follows in the parent (e.g. from a sibling `text` inline node) is appended as the anchor's *sibling*, not its descendant, so no CSS applied to the anchor (underline via default `<a>` styling or `styles.css`) can cascade onto it — DOM/CSS scoping has no ANSI-style "persistent terminal state" failure mode to begin with.
+- Added regression tests pinning the "link immediately followed by other text, no space" case (FR #4) to both `src/tui/markdown-ansi.test.ts` and `src/web/client/markdown-dom.test.ts` so this stays covered going forward, even though no source change was required.
+- Gates: `bun run typecheck` and `bun run lint` clean. `bun test src/tui/markdown-ansi.test.ts src/web/client/markdown-dom.test.ts` — 131/131 pass, including the two new DH-0232 tests. Full `bun run test:coverage` shows one unrelated pre-existing failure in `src/web/client/app.test.ts` (queued-turn cancel button) caused by concurrent uncommitted work from other agents on DH-0230/DH-0231 in `src/tui/` (`app.ts`, `mouse.ts`, `Composer.tsx`) sharing this checkout — confirmed unrelated by stashing only this ticket's two changed files and re-running, which reproduces the same failure with or without this ticket's changes. Coverage itself is 100%. `bun run e2e` likewise has one unrelated PTY-boot timeout/tmux failure, same root cause (shared TUI files mid-edit by concurrent agents), not touching `markdown-ansi.ts` or `markdown-dom.ts`.

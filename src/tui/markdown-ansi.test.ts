@@ -349,6 +349,32 @@ describe("renderMarkdownRows — style-bleed regression (DH-0065)", () => {
     const plain = stripAnsi(rows.join("\n"));
     expect(plain).toBe("plain then bold");
   });
+
+  // DH-0232: a link immediately followed by other text with no space between them (e.g.
+  // "[link](url)trailing") — the underline+blue styling must terminate at the link's own
+  // trailing " (url)" segment and never bleed into "trailing". `serializeRow`'s per-segment
+  // reset-on-transition logic (DH-0065) already covers this generically, but there was no
+  // test pinning the no-space case specifically, which is what this ticket's manual testing
+  // report called out.
+  test("DH-0232: link's underline+blue does not bleed into text glued immediately after it (no space)", () => {
+    const rows = renderMarkdownRows(parseMarkdown("[link](https://example.com)trailing"), 80);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as string;
+    expect(stripAnsi(row)).toBe("link (https://example.com)trailing");
+    const linkEnd = row.indexOf("link") + "link".length;
+    const trailingIdx = row.indexOf("trailing");
+    expect(trailingIdx).toBeGreaterThan(-1);
+    // A RESET must appear between the end of the styled link text and "trailing" — not only
+    // as the row's final trailing reset.
+    expect(row.slice(linkEnd, trailingIdx)).toContain(RESET);
+    // And "trailing" itself must carry no active SGR state: no unclosed style-opening escape
+    // sits between the last reset before it and its own start.
+    const resetBeforeTrailing = row.lastIndexOf(RESET, trailingIdx);
+    expect(resetBeforeTrailing).toBeGreaterThan(-1);
+    // The " (https://example.com)" URL parenthetical sits between that reset and "trailing" —
+    // plain literal text, not a style-opening escape. No `\x1b[` sequence appears in that gap.
+    expect(row.slice(resetBeforeTrailing + RESET.length, trailingIdx)).not.toContain("\x1b[");
+  });
 });
 
 describe("renderBlocks (exported alias used internally for nested rendering)", () => {

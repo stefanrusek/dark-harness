@@ -41,6 +41,8 @@ source: tracking/
 | [DH-0226](../DH-0226-workflow-tool-mvp-deterministic-sub-agent-orchestration-script-agent-parallel.md) | Workflow tool MVP: deterministic sub-agent orchestration script (agent() + parallel()) | status: verifying |
 | [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | status: verifying |
 | [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | status: verifying |
+| [DH-0229](../DH-0229-ascii-art-blocks-need-monospace-color-support-in-web-and-system-prompt-guidance.md) | ASCII art blocks need monospace + color support in web and system prompt guidance | status: verifying |
+| [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | status: verifying |
 | [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) | DH-0206 |
 | [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool | DH-0226 |
 
@@ -60,7 +62,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
-| [DH-0229](../DH-0229-ascii-art-blocks-need-monospace-color-support-in-web-and-system-prompt-guidance.md) | ASCII art blocks need monospace + color support in web and system prompt guidance | feature | stefan |
 
 ### refining
 
@@ -74,9 +75,6 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0230](../DH-0230-tui-rapid-scroll-produces-garbage-escape-sequences-race-condition.md) | TUI rapid scroll produces garbage escape sequences (race condition) | bug | stefan |
 | [DH-0231](../DH-0231-tui-input-box-does-not-wrap-long-lines.md) | TUI input box does not wrap long lines | bug | stefan |
-| [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | bug | stefan |
-| [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) 🔒 | bug | iris |
-| [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool 🔒 | bug | iris |
 
 ### implementing
 
@@ -107,6 +105,10 @@ source: tracking/
 | [DH-0226](../DH-0226-workflow-tool-mvp-deterministic-sub-agent-orchestration-script-agent-parallel.md) | Workflow tool MVP: deterministic sub-agent orchestration script (agent() + parallel()) | feature | stefan |
 | [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | feature | Iris |
 | [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | feature | Iris |
+| [DH-0229](../DH-0229-ascii-art-blocks-need-monospace-color-support-in-web-and-system-prompt-guidance.md) | ASCII art blocks need monospace + color support in web and system prompt guidance | feature | stefan |
+| [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | bug | stefan |
+| [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) 🔒 | bug | iris |
+| [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool 🔒 | bug | iris |
 
 ## Recently Closed
 

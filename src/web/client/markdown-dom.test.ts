@@ -330,4 +330,23 @@ describe("renderMarkdownInto — link scheme filtering (security)", () => {
     const anchor = root.querySelector("a");
     expect(anchor?.querySelector("strong")?.textContent).toBe("bold link");
   });
+
+  // DH-0232: a link immediately followed by other text with no space (e.g. "[x](url)text")
+  // must not have the underline styling bleed into that trailing text. The DOM naturally
+  // scopes an <a> element's own styling to its own subtree — a sibling text node right after
+  // the closing </a> is never inside it — so this confirms the Web renderer has no analogue
+  // of the TUI's ANSI SGR-state-persists-across-segments failure mode (already fixed for the
+  // TUI in DH-0065, see markdown-ansi.test.ts).
+  test("DH-0232: link immediately followed by text with no space — trailing text is not inside the anchor", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, "[link](https://example.com)trailing");
+    const anchor = root.querySelector("a");
+    expect(anchor?.textContent).toBe("link");
+    const p = root.querySelector("p");
+    // The anchor's next sibling is a plain text node, not nested inside the <a> — so no CSS
+    // applied to the anchor (e.g. `a { text-decoration: underline }`) can cascade onto it.
+    expect(anchor?.nextSibling?.nodeType).toBe(3); // Node.TEXT_NODE
+    expect(anchor?.nextSibling?.textContent).toBe("trailing");
+    expect(p?.textContent).toBe("linktrailing");
+  });
 });
