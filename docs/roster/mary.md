@@ -708,3 +708,43 @@ concurrent background rounds, confirmed via `git stash` — not from this change
 `bun test src/markdown src/tui src/web --coverage`: 757 pass, 0 fail;
 `rendering-fixtures.ts`/`markdown-ansi.ts` 100%/100%, `markdown-dom.ts` 100% line (pre-existing
 99.21% branch, untouched by this ticket). Closed DH-0108 via spile-ops.
+
+### 2026-07-19 — DH-0231: input box wraps long lines
+
+Small, self-contained fix (concurrent DH-0230/DH-0232 rounds were touching `src/tui/mouse.ts`
+and markdown rendering in this same shared worktree — stayed strictly out of both). Root cause
+was exactly what the ticket assumed: `src/tui/ink/Composer.tsx`'s input row was a
+`<Box height={1}><Text>...</Text></Box>` with no `width` and no `wrap` — Ink/Yoga sizes an
+unconstrained `Box` to fit its content, not the terminal, so a long line just grew wider than
+the pane instead of wrapping. Fix: `Composer` takes an optional `cols` prop (default 80, so
+untouched callers keep working), the input row became `<Box width={cols}><Text
+wrap="wrap">...</Text></Box>` with the fixed `height={1}` dropped so the box grows to fit
+however many wrapped rows are needed; `RootView.tsx` now passes its already-computed
+`innerCols` through. Confirmed `state.input`/`inputCursor` is a plain string with no
+wrap-inserted breaks (only real newlines from bracketed paste) before touching anything, per
+the task brief's instruction to verify rather than assume — so history nav/submission needed
+zero changes, exactly the "wrapping is purely visual" default the ticket's Open Questions
+pointed at.
+
+Worth remembering for a future round: this session's `git stash pop` (used twice, to isolate
+my own changes for a clean e2e-regression comparison) once popped a *stale, unrelated* stash
+containing pre-DH-0147/0148 versions of `src/cli.ts` — clearly an orphaned stash from a much
+earlier session, not live concurrent work (confirmed by reading the conflicting hunk: the
+"stashed" side referenced a `--job --json`-only code shape that predates the `--instructions`
+interactive-launch branch already merged upstream). Resolved by keeping the upstream side for
+all three conflicted files (`src/cli.ts`, `src/contracts/index.ts`,
+`src/prompt/readme-config-sync.test.ts` — none of them mine) and `git add`ing them unstaged
+again before committing only my own ticket's files. If a future round hits an unexpected
+`git pull --rebase` "unmerged files" error in a shared worktree like this one, check whether
+it's a leftover stash conflict before assuming `pull` itself is broken — `git stash list` and
+reading the conflicting hunks' content (which side matches current `HEAD` behavior) settles it
+fast.
+
+Gates: `bun run typecheck`/`lint` clean; `bun run test:coverage` 145/147 (the 2 failures are
+DH-0230's own in-progress `src/tui/mouse.test.ts`/`src/web/client/app.test.ts` work, confirmed
+unrelated via `git status`), 100% overall line coverage; `src/tui/ink/Composer.tsx` and its
+test file both fully covered. `bun run e2e`: `e2e/tui.test.ts`'s PTY boot test times out;
+confirmed via `git stash` (targeted, this-ticket-only stash) that it fails identically without
+this change — pre-existing sandbox/tmux-PTY gap, not a regression. Transitioned DH-0231 to
+`verifying` via spile-ops. Commit `dfb861a`, pushed clean (no upstream commits to reconcile at
+push time).
