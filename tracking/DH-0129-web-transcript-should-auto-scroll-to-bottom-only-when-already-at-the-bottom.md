@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0129
 type: feature
-status: verifying
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-17
 relations:
@@ -73,3 +73,56 @@ Owner request 2026-07-17: standard chat-UI scroll behavior -- the Web transcript
   share root cause with this undershoot (both point at the same `stickToBottomRef`/
   scroll-tracking area). Needs another real fix pass, not just re-verification — the ticket
   is not actually done.
+- 2026-07-20: Real root cause found and fixed, with live-browser numeric proof (owner reported
+  "web autoscroll still doesn't work" in a fresh retest, and this ticket was the most likely
+  match). Root cause: `.output-scroll` has `scroll-behavior: smooth` (styles.css), so a plain
+  `region.scrollTop = region.scrollHeight` assignment in `scrollToBottom()` (`Transcript.tsx`)
+  does not land instantly -- it animates over several frames. While that animation is in
+  flight, the browser fires real native `scroll` events on every frame, and the DH-0200
+  `onScroll` handler treats every one of those as a genuine user-driven scroll: it recomputes
+  `isNearBottom()` against the region's *already-grown* `scrollHeight` but the *not-yet-caught-
+  up* mid-animation `scrollTop`, which reads as "not near the bottom" and clears
+  `stickToBottomRef` -- stranding the in-flight animation wherever it happened to be and
+  silently disabling further auto-follow for that render. This is exactly the "partially
+  follows, stops short" symptom from the 07-19 note, and explains why it hit the
+  operator-message path hardest: an operator send's local echo (`addUserTurn`) is immediately
+  followed by a separate `agent_status: running` SSE render (mounting `ThinkingIndicator`,
+  itself a second, smaller undershoot mechanism also fixed this round -- see below), each one
+  restarting a smooth-scroll animation that the next one's own scroll events could cancel out
+  from under it. Agent-streamed replies mostly dodged it because every chunk re-triggers
+  `scrollToBottom()` in quick succession, usually catching up before the next race window --
+  not immune, just lower odds, which is why "may also not be autoscrolling (unconfirmed)" was
+  correctly flagged for tool-call turns and anything else with the same shape.
+  Two fixes landed together in `src/web/client/components/Transcript.tsx`: (1) `scrollToBottom()`
+  now temporarily forces `element.style.scrollBehavior = "auto"` for the duration of its own
+  `scrollTop` write, making every programmatic "chase the bottom" jump land synchronously and
+  immune to being second-guessed by its own in-flight animation's scroll events -- CSS smooth
+  scrolling is untouched for any other scroll source (keyboard/touch/mouse wheel); (2) the
+  content-update effect's dependency array now includes a `thinking` flag mirroring
+  `ThinkingIndicator`'s own render gate (`agent.status`/`agent.turnOpen`/last-turn-role), so the
+  indicator mounting/unmounting after an operator send re-triggers the scroll effect instead of
+  silently growing the region unwatched.
+  Verification: added a `Transcript.test.tsx` regression case reproducing the exact
+  local-echo-then-thinking-indicator two-render sequence (fails against the pre-fix effect
+  deps, passes after). Then did real, live verification per this ticket's own bar (unit tests
+  alone are not sufficient close-out evidence, per prior rounds' history): built the real
+  binary (`bun run build`) and drove `dh --web` with a real headless Chromium (Playwright,
+  same harness as `e2e/web.test.ts`), sending a short operator message, letting a short mock
+  agent reply land, then sending a long operator message (~4400 chars, forces real wrapping/
+  scrolling) and letting an 80-line mock agent reply stream in, reading
+  `scrollTop`/`scrollHeight`/`clientHeight` off `.output-scroll` after each step (3s settle
+  wait to rule out the CSS animation itself as a confound). Pre-fix, the long-message step
+  reproducibly showed `scrollTop=970 scrollHeight=3110 clientHeight=286` (`delta` from true
+  bottom = 1854px, i.e. materially short, not just off-by-a-few-pixels). Post-fix, every step
+  landed exactly on the true bottom: `scrollTop=2824 scrollHeight=3110 clientHeight=286`
+  (`scrollHeight - clientHeight = 2824 = scrollTop`, `delta=0`), reproduced across repeated
+  runs, for both the operator-send and the agent-streamed-reply steps.
+  Gates: `bun run typecheck` clean for `src/web`/root project (a pre-existing, unrelated
+  TypeScript error in `src/tui/ink/TranscriptPane.tsx` comes from concurrent in-progress
+  DH-0246 TUI work in the same shared worktree, confirmed by diffing against what this ticket
+  actually touches -- not something this ticket's changes caused or are blocked by).
+  `bun x biome check src/transcript-grouping.ts src/web/` clean. `bun test src/web --coverage`
+  354/354 pass at 100% coverage for every file this change touches. `bun run e2e` 41/41 pass
+  (real compiled binary, mock-provider-backed). Status moves to closed -- this is real,
+  numeric, live-browser proof the undershoot is gone, matching the bar this ticket's own
+  history set for "done."

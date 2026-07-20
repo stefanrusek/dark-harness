@@ -184,6 +184,67 @@ describe("Transcript", () => {
     expect(container.querySelector(".jump-to-latest")?.classList.contains("hidden")).toBe(true);
   });
 
+  // DH-0129 undershoot regression: after an operator send, `ThinkingIndicator` mounts (via
+  // agent_status -> running) in a SEPARATE render from the user-turn append that preceded it.
+  // Before the fix, the scroll effect's dependency array didn't include the thinking-indicator
+  // gate (agent.status/turnOpen), so this second render's DOM growth was never scrolled to --
+  // the view stopped short of the true bottom until real output later arrived.
+  test("DH-0129: auto-scrolls again when the thinking indicator mounts after an operator send", () => {
+    const agent = agentWithOutput() as AgentNode;
+    const { container, rerender } = render(
+      <Transcript
+        agent={agent}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
+    );
+    const scrollRegion = container.querySelector(".output-scroll") as HTMLElement;
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 500, clientHeight: 200, scrollTop: 300 });
+    fireEvent.scroll(scrollRegion);
+
+    // Step 1: the local echo appends the operator's turn. scrollHeight grows to 700 and the
+    // effect scrolls to it -- this alone is not the bug.
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 700, clientHeight: 200 });
+    const withUserTurn: AgentNode = {
+      ...agent,
+      transcript: [
+        ...agent.transcript,
+        { role: "user", text: "more", timestamp: "2026-01-01T00:00:02Z" },
+      ],
+    };
+    rerender(
+      <Transcript
+        agent={withUserTurn}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
+    );
+    expect(scrollRegion.scrollTop).toBe(700);
+
+    // Step 2: the `agent_status: "running"` SSE event lands moments later, mounting
+    // ThinkingIndicator -- growing scrollHeight further WITHOUT touching transcript.length or
+    // the last turn's text. Before the fix, this render never re-ran the scroll effect.
+    mutateScrollMetrics(scrollRegion, { scrollHeight: 760, clientHeight: 200 });
+    const withThinking: AgentNode = {
+      ...withUserTurn,
+      status: "running",
+      turnOpen: false,
+    };
+    rerender(
+      <Transcript
+        agent={withThinking}
+        sessionEnded={false}
+        exitCode={null}
+        onCancelQueuedMessage={() => {}}
+      />,
+    );
+
+    expect(container.querySelector(".turn-thinking")).not.toBeNull();
+    expect(scrollRegion.scrollTop).toBe(760);
+  });
+
   test("stays put and reveals the jump-to-latest button when content grows while scrolled away", () => {
     const agent = agentWithOutput() as AgentNode;
     const { container, rerender } = render(

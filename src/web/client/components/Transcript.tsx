@@ -10,68 +10,13 @@
 //   src/tui/state.ts's appendTerminalMarker) -- styled here via DH-0137's shared STATUS_TOKENS.
 import { type ReactElement, useEffect, useRef, useState } from "react";
 import { STATUS_TOKENS } from "../../../design-tokens.ts";
+import { groupTranscript } from "../../../transcript-grouping.ts";
 import { formatExitCode } from "../format.ts";
 import type { AgentNode, Turn } from "../state.ts";
 import { JumpToLatestButton } from "./JumpToLatestButton.tsx";
 import { MarkdownContent } from "./MarkdownContent.tsx";
 
 const NEAR_BOTTOM_THRESHOLD_PX = 48;
-
-/** DH-0199: `groupTranscript`'s output — either a single turn to render as-is, or a run of
- * 2+ consecutive plain tool-call turns to render as one collapsible `ToolCallGroup`.
- * `startIndex` is the transcript index of the item's first turn, used as its React key (see
- * the transcript-append-only-index-stability comment above `turnRows`'s definition). */
-type RenderItem =
-  | { kind: "turn"; startIndex: number; turn: Turn }
-  | { kind: "group"; startIndex: number; turns: Turn[] };
-
-/** Whether `turn` is a plain tool-call marker eligible for grouping — a `role: "tool"` turn
- * that is NOT a terminal-status marker (DH-0130's "Agent done/failed/stopped" turns stay
- * standalone and visually distinct; grouping them with ordinary tool calls would bury the
- * one event an operator scanning the transcript most needs to notice). */
-function isGroupableToolTurn(turn: Turn): boolean {
-  return turn.role === "tool" && !turn.terminalStatus;
-}
-
-/**
- * DH-0199: scans `transcript` for maximal runs of consecutive groupable tool-call turns (see
- * `isGroupableToolTurn`) — any other-role turn (including a terminal-status marker) breaks a
- * run. A run of 2+ becomes one `"group"` item; a lone tool call (run length 1) renders
- * standalone via `"turn"`, unchanged from pre-DH-0199 behavior, so a single tool call between
- * two agent turns doesn't get wrapped in a pointless one-item expando.
- */
-function groupTranscript(transcript: Turn[]): RenderItem[] {
-  const items: RenderItem[] = [];
-  let i = 0;
-  while (i < transcript.length) {
-    // `i < transcript.length` guarantees a value here; `noUncheckedIndexedAccess` can't see
-    // that invariant across the loop bound, hence the assertion rather than an unreachable
-    // (and therefore uncoverable) defensive branch.
-    const turn = transcript[i] as Turn;
-    if (!isGroupableToolTurn(turn)) {
-      items.push({ kind: "turn", startIndex: i, turn });
-      i++;
-      continue;
-    }
-    const run: Turn[] = [];
-    const startIndex = i;
-    while (i < transcript.length) {
-      const candidate = transcript[i] as Turn;
-      if (!isGroupableToolTurn(candidate)) break;
-      run.push(candidate);
-      i++;
-    }
-    if (run.length >= 2) {
-      items.push({ kind: "group", startIndex, turns: run });
-    } else {
-      // run.length === 1 here: the while loop above always pushes at least one turn before
-      // `i` can have advanced past `startIndex` (the branch above already excluded the
-      // non-groupable case), so `run[0]` is always defined.
-      items.push({ kind: "turn", startIndex, turn: run[0] as Turn });
-    }
-  }
-  return items;
-}
 
 function turnRoleLabel(role: Turn["role"]): string {
   if (role === "user") return "You";
@@ -274,12 +219,36 @@ export function Transcript({
   const scrollToBottom = () => {
     const region = scrollRegionRef.current;
     if (!region) return;
+    // DH-0129 undershoot fix: `.output-scroll` has `scroll-behavior: smooth` (styles.css) so a
+    // plain `scrollTop` assignment animates over several frames rather than landing instantly.
+    // While that animation is in flight, the browser fires real native `scroll` events on every
+    // frame — and `onScroll` below (added for DH-0200) treats every such event as user-driven,
+    // recomputing `isNearBottom()` against the (already-grown) `scrollHeight` but the
+    // (not-yet-arrived) mid-animation `scrollTop`. That almost always reads as "not near
+    // bottom," which clears `stickToBottomRef` and strands the animation wherever it happened
+    // to be mid-flight — visibly undershooting the true bottom. This was the actual mechanism
+    // behind the 2026-07-19 live-retest report ("partially follows, stops short"): it hit
+    // hardest on operator sends (local echo + a fast-following `agent_status: running` each
+    // grow the region, racing the still-animating prior scroll) but the same race is possible
+    // for tool-call turns and any other content growth close on the heels of a scroll.
+    // Force an instant jump here by disabling `scroll-behavior` for the duration of this one
+    // assignment, restoring it immediately after -- CSS smooth-scrolling stays intact for any
+    // other scroll source (e.g. keyboard/touch), it's specifically this component's own
+    // "chase the bottom" writes that must land synchronously and can't be second-guessed by an
+    // in-flight animation's own scroll events.
+    const previousScrollBehavior = region.style.scrollBehavior;
+    region.style.scrollBehavior = "auto";
     region.scrollTop = region.scrollHeight;
+    region.style.scrollBehavior = previousScrollBehavior;
     stickToBottomRef.current = true;
     setJumpVisible(false);
   };
 
   const lastTurnTextLength = transcript.at(-1)?.text.length ?? 0;
+
+  const showThinking = agent && agent.status === "running" && !agent.turnOpen;
+  const lastTurn = transcript.at(-1);
+  const thinking = showThinking && lastTurn?.role !== "assistant";
 
   // Re-runs on every transcript-affecting change (agent identity, turn count, last turn's
   // text length) rather than depending on `transcript`/`agent` object identity, matching the
@@ -289,6 +258,19 @@ export function Transcript({
   // is intentionally included even though the body doesn't read it directly — it's what makes
   // the effect re-fire when a streaming chunk extends the current turn without changing
   // `transcript.length`.
+  //
+  // `thinking` is ALSO intentionally included even though the body doesn't read it directly
+  // (DH-0129 undershoot fix): `ThinkingIndicator` is rendered outside `turnRows`/`transcript`
+  // (see below), gated on `agent.status`/`agent.turnOpen`/last-turn-role rather than anything
+  // this effect otherwise watches. For an operator-sent message, the sequence is (1) the local
+  // echo appends a user turn -> this effect fires and scrolls to the *current* scrollHeight,
+  // then (2) the next `agent_status: "running"` SSE event mounts `ThinkingIndicator`, growing
+  // scrollHeight further -- but without `thinking` as a dependency, that DOM growth never
+  // re-triggered scrollToBottom(), so the view visibly stopped short of the true bottom until
+  // the first real output chunk arrived (which happens to touch `lastTurnTextLength` and
+  // papers over the gap for agent-streamed replies, which is why only the operator-message
+  // path showed the undershoot). Including `thinking` makes the effect re-fire exactly when
+  // the indicator mounts/unmounts, closing the gap for both paths.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above.
   useEffect(() => {
     const agentChanged = agent?.agentId !== lastAgentId.current;
@@ -305,11 +287,7 @@ export function Transcript({
     } else if (transcript.length > 0) {
       setJumpVisible(true);
     }
-  }, [agent?.agentId, transcript.length, lastTurnTextLength]);
-
-  const showThinking = agent && agent.status === "running" && !agent.turnOpen;
-  const lastTurn = transcript.at(-1);
-  const thinking = showThinking && lastTurn?.role !== "assistant";
+  }, [agent?.agentId, transcript.length, lastTurnTextLength, thinking]);
   const queuedIds = new Set((agent?.queuedMessages ?? []).map((entry) => entry.id));
   // transcript is append-only (never reordered/spliced), so each item's `startIndex` (a
   // transcript index) is a stable identity — see `groupTranscript`/`RenderItem` above.

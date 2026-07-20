@@ -31,7 +31,6 @@ source: tracking/
 | [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) | status: verifying |
 | [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history | status: verifying |
 | [DH-0128](../DH-0128-urgent-web-ui-connecting-from-a-separate-machine-loads-the-shell-but-sticks-on-reconnecting.md) | URGENT: Web UI connecting from a separate machine loads the shell but sticks on 'Reconnecting...' | status: verifying |
-| [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom | status: verifying |
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | status: verifying |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | status: refining |
 | [DH-0219](../DH-0219-new-dh-monogram-logo-uppercase-d-h-replaces-diamond-evolution-direction.md) | New DH monogram logo (uppercase D+H, replaces diamond-evolution direction) | status: verifying |
@@ -109,7 +108,6 @@ source: tracking/
 | [DH-0125](../DH-0125-tui-add-a-status-row-under-the-input-box-model-progress-git-branch-path.md) | TUI: add a status row under the input box (model, progress, git branch/path) | feature | stefan |
 | [DH-0126](../DH-0126-urgent-tui-mouse-scroll-wheel-fills-the-input-textbox-with-garbage-instead-of-scrolling-history.md) | URGENT: TUI mouse scroll wheel fills the input textbox with garbage instead of scrolling history | bug | stefan |
 | [DH-0128](../DH-0128-urgent-web-ui-connecting-from-a-separate-machine-loads-the-shell-but-sticks-on-reconnecting.md) | URGENT: Web UI connecting from a separate machine loads the shell but sticks on 'Reconnecting...' | bug | stefan |
-| [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom | feature | stefan |
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | bug | stefan |
 | [DH-0219](../DH-0219-new-dh-monogram-logo-uppercase-d-h-replaces-diamond-evolution-direction.md) | New DH monogram logo (uppercase D+H, replaces diamond-evolution direction) | feature | stefan |
 | [DH-0220](../DH-0220-dual-mode-startup-header-redesign-a2-interactive-b-web-headless.md) | Dual-mode startup header redesign: A2 (interactive) + B (web/headless) | feature | stefan |
