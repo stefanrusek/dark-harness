@@ -82,6 +82,12 @@ source: tracking/
 | [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | bug | stefan |
 | [DH-0241](../DH-0241-refactoring-round-3-closing-round-of-3-verify-dh-0240-clean-broadened-full-repo-sweep.md) | Refactoring round 3 (closing round of 3): verify DH-0240 clean, broadened full-repo sweep | feature | Coordinator |
 
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0245](../DH-0245-tui-header-a2-never-actually-reaches-the-interactive-session-flashes-pre-mount-replaced-by-uncolored-empty-state-text-that-vanishes-on-first-message.md) | TUI: Header A2 never actually reaches the interactive session -- flashes pre-mount, replaced by uncolored empty-state text that vanishes on first message | bug | stefan |
+
 ### implementing
 
 | ID | Title | Type | Owner |
