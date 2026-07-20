@@ -355,3 +355,73 @@ Gates: `typecheck` clean; `test:coverage` 146/146 pass (100% on the two changed 
 DH-0227 to `verifying` — implementation done, dated Notes entry added to the ticket; not
 mine to close since a Prompt/design ticket's close-out is the coordinator's call per
 CLAUDE.md §8.
+
+### 2026-07-19 — DH-0229/DH-0233/DH-0234: colored-span docs + Available tools section (combined pass)
+
+Three tickets in one edit to `src/prompt/system-prompt.ts` since they all touch the same
+"Output format" area — avoided sequencing them separately to dodge conflicting concurrent
+edits.
+
+**DH-0233** (colored spans): the "Output format" section said "raw HTML is never
+interpreted," contradicting DH-0206/ADR 0009's landed `<span style="color:...">` allowlist.
+Rewrote it to document the one exception precisely: the exact recognized shape, the full
+`NAMED_COLORS` allowlist read straight from `src/markdown/index.ts` (black, red, green,
+yellow, blue, magenta, cyan, white, gray/grey, orange, purple), hex `#rgb`/`#rrggbb` support,
+the TUI limitation (hex degrades to plain text — 16-color ANSI only, named colors render
+everywhere), and an ADR 0009 citation. Kept the security boundary explicit: everything else
+in angle brackets is still always literal text, unconditionally.
+
+**DH-0229** (ASCII art) — this was the one with real judgment involved. A live `dh` session
+had already made a small edit (commit `d956ad8`) telling agents to wrap colored ASCII art in
+a literal `<pre style="...">` tag. I verified against the actual renderer code before
+building on it — `grep`ed `src/markdown/index.ts` for `<pre`/`"pre"` (no match: there is no
+HTML `pre` AST node, only the single allowlisted `coloredSpan` inline node) and read
+`src/web/client/markdown-dom.ts`'s `codeBlock` case (`code.textContent = block.text` —
+fenced blocks are never inline-parsed either, so they can't carry a colored span). Conclusion:
+the committed guidance doesn't work — a literal `<pre>` tag would render as the literal
+characters `<pre style="...">`, not a monospace wrapper, in both clients. I did not touch
+`src/web/` or `src/tui/` (this is a rendering-architecture gap, not a missing CSS rule — a
+real fix would mean a new AST node type, which is ADR-governed per ADR 0009's own precedent
+and belongs to Web/TUI/architect, not a quick Prompt-only patch). Instead corrected the
+prompt: multi-line colored spans render fine directly (newlines inside/between spans become
+real line breaks in both clients) with no wrapper tag at all, explicitly told agents *not* to
+use `<pre>`, and gave the honest tradeoff — colored spans (approximate alignment, real color)
+vs. a plain fenced code block (exact monospace alignment, no color), pick one per block. Also
+filled in the ticket's TODO stubs (it was `draft`) with this finding as the actual scope.
+
+**DH-0234** (tool discoverability): added a new `AVAILABLE_TOOLS_SECTION` constant and
+`## Available tools` heading — separate from `## Available skills` (loaded skill packages
+stay their own concept) — grouped by category (file I/O, shell, task tracking, sub-agent
+orchestration, MCP) rather than one flat list of 15+ tools, per the ticket's own Risks note.
+Workflow got the fuller treatment the ticket asked for: read the real `WorkflowApi` shape
+(`src/agent/workflow/runner.ts`: `agent(prompt, opts?)`, `parallel(thunks)`, `log(message)`)
+and the tool's actual input schema (`src/agent/tools/workflow.ts`) before writing the example,
+so it matches the real API rather than a guess. Left the ticket's auto-generation-from-
+tool-metadata idea as a Notes entry recommending a real follow-up ticket rather than building
+it now (bigger, cross-cutting change to every `Tool` definition in `src/agent/tools/`, Core's
+territory) or filing it myself (a metadata-shape design call I don't own outright).
+
+**Near-miss worth remembering:** mid-round I ran a scoped `git stash push -- <one file>` to
+compare coverage against a clean baseline, and by the time I popped it a concurrent agent had
+landed a commit on this same shared branch (`014c402`). The pop's 3-way merge conflicted on
+three files I never touched (`src/cli.ts`, `src/contracts/index.ts`,
+`src/prompt/readme-config-sync.test.ts`) — stash apply operates as a full-tree merge even
+when path-scoped, so a HEAD move between push and pop can conflict on unrelated files.
+Resolved with `git checkout --ours -- <file>` for each (confirmed after: `git diff HEAD --
+<file>` empty, i.e. exactly HEAD, no content lost — the "theirs" side was my stash's stale
+pre-pull snapshot of those files, correctly discarded). **Lesson: avoid `git stash` entirely
+on this shared branch for anything more than a few seconds — prefer `git diff`/a throwaway
+worktree/a temp branch for before/after comparisons**, since any stash can straddle a
+concurrent commit landing mid-operation.
+
+All three tickets moved to `verifying` via `spile-ops/scripts/transition.py` with dated Notes
+entries (each ticket's own file has the specifics). Gates: `typecheck` clean, `lint` clean
+(`biome check .`, 418 files), `bun test src/prompt --coverage` 100%/100% funcs+lines on
+`system-prompt.ts` for changed code (pre-existing 2-line gap in `renderSelfInfoSection`
+unrelated, unchanged before/after). Full-repo `test:coverage` has a pre-existing, unrelated
+flake in `src/web/client/app.test.ts` that reproduces even with my change fully reverted —
+not mine to fix, flagging for Susan/whoever owns that suite. Did not run `bun run e2e` this
+round (time-boxed; nothing in this change touches the compiled-binary run paths e2e exercises
+— pure prompt text). Committed as `ecf8002` (only my four files: `system-prompt.ts` + the
+three ticket files — left the other agents' concurrently-dirty `src/tui/*` files untouched)
+and pushed.
