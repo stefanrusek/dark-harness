@@ -83,6 +83,12 @@ source: tracking/
 | [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | bug | stefan |
 | [DH-0241](../DH-0241-refactoring-round-3-closing-round-of-3-verify-dh-0240-clean-broadened-full-repo-sweep.md) | Refactoring round 3 (closing round of 3): verify DH-0240 clean, broadened full-repo sweep | feature | Coordinator |
 
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0246](../DH-0246-tui-consecutive-tool-calls-should-group-into-a-collapsible-expando-mirroring-dh-0199-s-web-design.md) | TUI: consecutive tool calls should group into a collapsible expando, mirroring DH-0199's Web design | feature | stefan |
+
 ### implementing
 
 | ID | Title | Type | Owner |
