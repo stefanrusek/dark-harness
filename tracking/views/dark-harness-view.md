@@ -129,6 +129,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0247](../DH-0247-header-b-framed-panel-s-right-border-drifts-no-padding-to-frame-width-on-dynamic-content-rows.md) | Header B: framed panel's right border drifts, no padding to frame width on dynamic content rows | done |
 | [DH-0240](../DH-0240-mcp-oauth-dh-0057-dead-code-unused-resourcemetadataurl-field-and-unreachable-alreadyauthenticated-flag-on-the-client-credentials-return.md) | MCP OAuth (DH-0057) dead code: unused resourceMetadataUrl field and unreachable alreadyAuthenticated flag on the client_credentials return | done |
 | [DH-0236](../DH-0236-dead-code-dh-ascii-logo-dh-ascii-logo-compact-unused-after-dh-0224-migrated-every-surface-to-the-monogram-assets.md) | Dead code: DH_ASCII_LOGO / DH_ASCII_LOGO_COMPACT unused after DH-0224 migrated every surface to the monogram assets | done |
 | [DH-0225](../DH-0225-startup-header-health-dot-green-diverges-from-status-tokens-status-dot-green-dh-0221-palette-fragmentation.md) | Startup-header health dot green diverges from STATUS_TOKENS status-dot green (DH-0221 palette fragmentation) | done |
@@ -143,4 +144,3 @@ source: tracking/
 | [DH-0211](../DH-0211-both-uis-pressing-escape-should-stop-the-currently-running-agent.md) | Both UIs: pressing Escape should stop the currently running agent | done |
 | [DH-0210](../DH-0210-import-resume-chain-toolresult-tooluse-block-count-mismatch-crashes-the-provider-request.md) | --import + resume chain: toolResult/toolUse block count mismatch crashes the provider request | done |
 | [DH-0209](../DH-0209-sub-agents-may-lack-access-to-reportoutcome-falling-back-to-task-failed-confusion.md) | Sub-agents may lack access to ReportOutcome, falling back to TASK_FAILED confusion | duplicate |
-| [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | done |

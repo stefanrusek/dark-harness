@@ -1,4 +1,22 @@
 import { describe, expect, test } from "bun:test";
+
+const ESC = String.fromCharCode(27);
+/** Strips `ESC [ ... m` SGR sequences for measuring a rendered line's true visible width. */
+function stripSgr(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === ESC && text[i + 1] === "[") {
+      const end = text.indexOf("m", i);
+      i = end === -1 ? text.length : end + 1;
+      continue;
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+}
+
 import { type ColorLevel, fgCode, nearestAnsi256 } from "../design-tokens.ts";
 import {
   type HeaderStatusFacts,
@@ -175,5 +193,18 @@ describe("renderHeaderB", () => {
       expect(joined).not.toContain("web ui");
       expect(joined).toContain("required");
     });
+
+    if (level !== "none") {
+      test(`${level}: every framed row's right border lands at the same visible column (DH-0247)`, () => {
+        const lines = renderHeaderB(FACTS_NO_TOKEN, level);
+        const framedRows = lines.filter((l) => l.includes("│"));
+        expect(framedRows.length).toBeGreaterThan(0);
+        const rightEdgeColumns = framedRows.map((l) => stripSgr(l).length);
+        const [first, ...rest] = rightEdgeColumns;
+        for (const col of rest) {
+          expect(col).toBe(first);
+        }
+      });
+    }
   }
 });

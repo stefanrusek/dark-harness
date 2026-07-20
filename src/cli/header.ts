@@ -174,29 +174,39 @@ export function renderHeaderB(facts: HeaderStatusFacts, level: ColorLevel): stri
   const nameplate = ` dh ${facts.version} ${label("─", level)} ${shortGitSha(facts.gitSha)} `;
   const topFill = "─".repeat(Math.max(0, width + 2 - visibleLen(nameplate) - 2));
   const lines: string[] = [];
+  // DH-0247: each row's right border must land at the same column as the frame's own
+  // corners — pad the content to the interior width (`width - 2`, matching the "  " lead-in
+  // after the left `│`) using visibleLen() so SGR-colored text doesn't over-count. Previously
+  // several rows appended the closing `│` immediately after the content with no padding (or
+  // hand-tuned, easily-stale padding), so the right edge drifted to wherever that row's own
+  // text happened to end.
+  const row = (content: string): string => {
+    const pad = Math.max(0, width - 2 - visibleLen(content));
+    return `  ${frame("│")}  ${content}${" ".repeat(pad)}${frame("│")}`;
+  };
   lines.push(`  ${frame("╭─")}${nameplate}${frame(`${topFill}╮`)}`);
   lines.push(
-    `  ${frame("│")}  ${paint(lerpHex(BRAND.harnessGreen, BRAND.signalCyan, 0.5), HEADER_B_GLYPH[0] as string, level)}    ${value(HEADER_B_TAGLINE[0] as string, level)}${" ".repeat(6)}${frame("│")}`,
+    row(
+      `${paint(lerpHex(BRAND.harnessGreen, BRAND.signalCyan, 0.5), HEADER_B_GLYPH[0] as string, level)}    ${value(HEADER_B_TAGLINE[0] as string, level)}`,
+    ),
   );
   lines.push(
-    `  ${frame("│")}  ${paint(lerpHex(BRAND.harnessGreen, BRAND.signalCyan, 0.5), HEADER_B_GLYPH[1] as string, level)}    ${label(HEADER_B_TAGLINE[1] as string, level)}${" ".repeat(1)}${frame("│")}`,
+    row(
+      `${paint(lerpHex(BRAND.harnessGreen, BRAND.signalCyan, 0.5), HEADER_B_GLYPH[1] as string, level)}    ${label(HEADER_B_TAGLINE[1] as string, level)}`,
+    ),
   );
   lines.push(`  ${frame(`├${"─".repeat(width)}┤`)}`);
+  lines.push(row(`${label("config", level)}  ${value(facts.configLine, level)}`));
   lines.push(
-    `  ${frame("│")}  ${label("config", level)}  ${value(facts.configLine, level)}${frame("│")}`,
-  );
-  lines.push(
-    `  ${frame("│")}  ${label("bind", level)}    ${value(facts.bindHost, level)}    ${label("auth", level)}  ${authText(facts, level)}${frame("│")}`,
+    row(
+      `${label("bind", level)}    ${value(facts.bindHost, level)}    ${label("auth", level)}  ${authText(facts, level)}`,
+    ),
   );
   if (facts.webUiUrl) {
-    lines.push(
-      `  ${frame("│")}  ${label("web ui", level)}  ${url(facts.webUiUrl, level)}${frame("│")}`,
-    );
+    lines.push(row(`${label("web ui", level)}  ${url(facts.webUiUrl, level)}`));
   }
   if (facts.logDir) {
-    lines.push(
-      `  ${frame("│")}  ${label("logs", level)}    ${value(shortLogDir(facts.logDir), level)}${frame("│")}`,
-    );
+    lines.push(row(`${label("logs", level)}    ${value(shortLogDir(facts.logDir), level)}`));
   }
   lines.push(`  ${frame(`╰${"─".repeat(width)}╯`)}`);
   lines.push(`  ${paint(BRAND.harnessGreen, "✓", level)} ready — waiting for clients`);
