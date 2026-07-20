@@ -166,6 +166,13 @@ and still miss the experience of actually using the tool. Durable, reusable desi
 scoped spikes and mockups belong in that ticket's own Spile sidecar directory instead
 (`tracking/DH-NNNN-slug/`) and are not authoritative beyond that ticket.
 
+**Owner feedback (2026-07-20):** the owner explicitly appreciates small, considered polish
+touches — e.g. the DH-0219/0245 logo/header being genuinely reactive (real color, persists in
+the interactive transcript, scrolls with content) rather than a static asset bolted on. Treat
+this as encouragement, not a new mandatory bar: keep bringing that level of care to felt-
+experience work when it fits the ticket, but don't gold-plate unrelated tickets to manufacture
+a "little touch" that wasn't asked for.
+
 ## 8. Workflow rules
 
 - Directory ownership (§3) is the primary collision-avoidance mechanism.
