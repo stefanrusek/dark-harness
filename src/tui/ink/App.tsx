@@ -9,6 +9,7 @@ import { AgentTree } from "./AgentTree.tsx";
 import { AgentView } from "./AgentView.tsx";
 import { Header } from "./Header.tsx";
 import { PickerView } from "./PickerView.tsx";
+import type { RootViewHeader } from "./RootView.tsx";
 import { RootView } from "./RootView.tsx";
 import { StatusRow } from "./StatusRow.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
@@ -19,6 +20,11 @@ export interface AppProps {
   /** DH-0126: wired through to whichever `<TranscriptPane>` is currently mounted. Optional —
    * omitted by existing tests that render `<App>` standalone with no scroll behavior needed. */
   scrollBus?: ScrollBus;
+  /** DH-0245: the real Header A2 facts/colorLevel, threaded from `startTui`'s caller
+   * (`run.ts`) through `mountInk` — forwarded to `<RootView>` only (the interactive
+   * root/chat view is the only place the ticket's in-session banner applies). Optional —
+   * omitted by existing tests/other views that don't exercise this feature. */
+  header?: RootViewHeader;
 }
 
 // DH-0136 reserved 2 for `<TitleBar>` (title line + divider); DH-0122 adds 1 for `<Header>`'s
@@ -31,7 +37,7 @@ const MARGIN = 1;
 // frame's total row count matching the terminal exactly (App.test.tsx's frame-height checks).
 const STATUS_ROW_ROWS = 1;
 
-export function App({ state, scrollBus }: AppProps) {
+export function App({ state, scrollBus, header }: AppProps) {
   const { rows, cols } = state.size;
   const innerCols = Math.max(1, cols - 2 * MARGIN);
   const footerRows = state.view.kind === "root" ? 2 : 1;
@@ -47,6 +53,7 @@ export function App({ state, scrollBus }: AppProps) {
           contentRows={contentRows}
           cols={innerCols}
           {...(scrollBus ? { scrollBus } : {})}
+          {...(header ? { header } : {})}
         />
       )}
       {state.view.kind === "tree" && (

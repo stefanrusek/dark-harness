@@ -263,7 +263,13 @@ export async function runInteractiveMode(
       // but was dead code, since none of these branches actually gate on those booleans at
       // runtime; removed rather than force a call that could only ever return one constant.)
       for (const line of renderHeaderA2(a2Facts, level, term)) io.stdout(line);
-      const connectResult = await deps.startTui(targetBaseUrl, config.security?.token);
+      // DH-0245: the same facts/colorLevel the pre-mount print above just used, threaded
+      // into the mounted Ink session so its own in-transcript banner (RootView/
+      // TranscriptPane) renders identical content in identical color, rather than the print
+      // above being the only place Header A2 is ever actually visible.
+      const connectResult = await deps.startTui(targetBaseUrl, config.security?.token, {
+        header: { facts: a2Facts, level },
+      });
       if (connectResult.fatalError !== undefined) {
         io.stderr(`dh: error: ${connectResult.fatalError}`);
         return ExitCode.HarnessError;
@@ -495,7 +501,13 @@ export async function runInteractiveMode(
     const term = { columns: process.stdout.columns ?? 0, rows: process.stdout.rows ?? 0 };
     for (const line of renderHeaderA2(a2Facts, level, term)) io.stdout(line);
 
-    const tuiResult = await deps.startTui(baseUrl, config.security?.token, { ownsServer: true });
+    // DH-0245: see the `--connect` branch's identical comment above — same facts/colorLevel,
+    // threaded into the mounted Ink session so the banner persists (and stays in real color)
+    // once Ink's alt-screen clear wipes this pre-mount print.
+    const tuiResult = await deps.startTui(baseUrl, config.security?.token, {
+      ownsServer: true,
+      header: { facts: a2Facts, level },
+    });
     // DH-0059 backstop: guarantees no orphaned root agent regardless of *how* the TUI
     // resolved — a graceful Ctrl+C shutdown already stopped it (this is then a no-op re-abort
     // of an already-idempotent stopRoot()), but a force quit, the TUI's own fallback timer, or

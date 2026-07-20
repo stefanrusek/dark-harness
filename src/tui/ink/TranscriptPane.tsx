@@ -81,6 +81,15 @@ export interface TranscriptPaneProps {
   /** DH-0124: may contain "\n" to render a multi-line empty state (e.g. RootView's
    * header + friendly first-message prompt); split into one row per line. */
   emptyText: string;
+  /** DH-0245: lines always shown at the top of the pane, ahead of `emptyText`/the real
+   * transcript, whether or not any turns exist yet — a synthetic leading entry in this
+   * pane's own row list so it participates in the same windowing/scroll-offset math
+   * (`scroll-viewport.ts`) as everything else: it persists once the first turn is sent (the
+   * body switches from `emptyText` to `renderTranscript`'s output, but these rows stay put
+   * at the top) and scrolls back into view when the operator scrolls to offset 0. Used by
+   * `RootView` for the in-session Header A2 banner; omitted (or empty) elsewhere (e.g.
+   * `AgentView`'s per-agent pane has no such banner). */
+  headerLines?: string[];
   /** DH-0126: wheel-scroll trigger, wired up by whichever view (root/agent) currently mounts
    * this pane — see app.ts/mouse.ts for where the raw SGR events are parsed. Optional so
    * existing tests that render `<TranscriptPane>` standalone don't need to supply one. */
@@ -92,10 +101,13 @@ export function TranscriptPane({
   cols,
   height,
   emptyText,
+  headerLines,
   scrollBus,
 }: TranscriptPaneProps) {
-  const lines =
+  const bodyLines =
     transcript.length === 0 ? emptyText.split("\n") : renderTranscript(transcript, cols);
+  const lines =
+    headerLines && headerLines.length > 0 ? [...headerLines, "", ...bodyLines] : bodyLines;
   const [offset, setOffset] = useState(() => toBottom(lines.length, height).offset);
 
   // Re-subscribe each render so the listener closes over the current lines/height — a scroll

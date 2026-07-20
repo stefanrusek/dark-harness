@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { render } from "ink-testing-library";
 import React from "react";
+import type { HeaderStatusFacts } from "../../cli/header.ts";
 import { initialState, reducer } from "../state.ts";
 import { flattenTree } from "../tree.ts";
 import type { TuiState } from "../types.type.ts";
@@ -93,5 +94,21 @@ describe("App", () => {
     const statusRowIndex = appSource.indexOf("<StatusRow");
     expect(rootViewIndex).toBeGreaterThan(-1);
     expect(statusRowIndex).toBeGreaterThan(rootViewIndex);
+  });
+
+  test("DH-0245: a `header` prop reaches <RootView> — the in-session Header A2 banner renders in the root view", () => {
+    const state = rootState(); // 24x80: below the 30-row size gate, so this exercises the
+    // plain-fallback path deterministically regardless of test-runner terminal assumptions.
+    const facts: HeaderStatusFacts = {
+      version: "0.1.0",
+      gitSha: "abc1234",
+      configLine: "dh.json — 1 model",
+      bindHost: "127.0.0.1:4096",
+      hasToken: false,
+    };
+    const { lastFrame } = render(
+      React.createElement(App, { state, header: { facts, level: "truecolor" } }),
+    );
+    expect(lastFrame() ?? "").toContain(facts.configLine);
   });
 });

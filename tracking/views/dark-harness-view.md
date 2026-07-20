@@ -55,6 +55,7 @@ source: tracking/
 | [DH-0242](../DH-0242-claude-md-section-4-invariant-citations-point-at-stale-adr-filenames-numbers-after-adr-renumbering.md) | CLAUDE.md section 4 invariant citations point at stale ADR filenames/numbers after ADR renumbering | status: verifying |
 | [DH-0243](../DH-0243-dead-export-cli-reset-in-src-cli-styling-ts-has-zero-consumers.md) | Dead export: CLI_RESET in src/cli/styling.ts has zero consumers | status: verifying |
 | [DH-0244](../DH-0244-byte-identical-clearcienvforinteractiveinkrender-duplicated-across-two-tui-side-effect-modules.md) | Byte-identical clearCiEnvForInteractiveInkRender duplicated across two TUI side-effect modules | status: verifying |
+| [DH-0245](../DH-0245-tui-header-a2-never-actually-reaches-the-interactive-session-flashes-pre-mount-replaced-by-uncolored-empty-state-text-that-vanishes-on-first-message.md) | TUI: Header A2 never actually reaches the interactive session -- flashes pre-mount, replaced by uncolored empty-state text that vanishes on first message | status: verifying |
 
 ## Board
 
@@ -81,12 +82,6 @@ source: tracking/
 | [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | bug | stefan |
 | [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | bug | stefan |
 | [DH-0241](../DH-0241-refactoring-round-3-closing-round-of-3-verify-dh-0240-clean-broadened-full-repo-sweep.md) | Refactoring round 3 (closing round of 3): verify DH-0240 clean, broadened full-repo sweep | feature | Coordinator |
-
-### ready
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0245](../DH-0245-tui-header-a2-never-actually-reaches-the-interactive-session-flashes-pre-mount-replaced-by-uncolored-empty-state-text-that-vanishes-on-first-message.md) | TUI: Header A2 never actually reaches the interactive session -- flashes pre-mount, replaced by uncolored empty-state text that vanishes on first message | bug | stefan |
 
 ### implementing
 
@@ -128,6 +123,7 @@ source: tracking/
 | [DH-0242](../DH-0242-claude-md-section-4-invariant-citations-point-at-stale-adr-filenames-numbers-after-adr-renumbering.md) | CLAUDE.md section 4 invariant citations point at stale ADR filenames/numbers after ADR renumbering | bug | Coordinator |
 | [DH-0243](../DH-0243-dead-export-cli-reset-in-src-cli-styling-ts-has-zero-consumers.md) | Dead export: CLI_RESET in src/cli/styling.ts has zero consumers | bug | Core |
 | [DH-0244](../DH-0244-byte-identical-clearcienvforinteractiveinkrender-duplicated-across-two-tui-side-effect-modules.md) | Byte-identical clearCiEnvForInteractiveInkRender duplicated across two TUI side-effect modules | bug | TUI |
+| [DH-0245](../DH-0245-tui-header-a2-never-actually-reaches-the-interactive-session-flashes-pre-mount-replaced-by-uncolored-empty-state-text-that-vanishes-on-first-message.md) | TUI: Header A2 never actually reaches the interactive session -- flashes pre-mount, replaced by uncolored empty-state text that vanishes on first message | bug | stefan |
 
 ## Recently Closed
 

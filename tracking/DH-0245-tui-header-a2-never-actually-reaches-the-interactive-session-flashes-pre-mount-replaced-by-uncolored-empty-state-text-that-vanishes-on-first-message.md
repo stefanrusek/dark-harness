@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0245
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -131,3 +131,84 @@ prop — confirmed this is what actually vanishes on the first message, and conf
 that none of `TitleBar`/`Header`/`RootView`'s empty-state path route through `paint()`/`BRAND`,
 explaining the reported total absence of color in the header despite the terminal supporting
 it and markdown colored-spans working correctly elsewhere in the same session.
+
+### 2026-07-20 — Mary, implemented and verified
+
+Structural shape chosen: **synthetic leading rows in `TranscriptPane`'s own `lines` array**
+(the ticket's own suggested default), not a separate persistent `<Box>` — `TranscriptPane`
+already worked in a flat `string[]` "already-wrapped visual rows" domain (`renderTranscript`
+returns raw ANSI-styled lines, `emptyText` was already a `\n`-joined string prepended the
+same way), so a new optional `headerLines?: string[]` prop that's unconditionally prepended
+(`[...headerLines, "", ...bodyLines]`, `bodyLines` being either `emptyText` or the real
+turns) got the same scroll/windowing participation (`scroll-viewport.ts`) for free — no
+change to `scroll-viewport.ts` itself was needed, confirming the ticket's own Assumption.
+`RootView` builds `headerLines` by calling `renderHeaderA2(header.facts, header.level, {
+columns: state.size.cols, rows: state.size.rows })` directly — the *exact* function
+`run.ts`'s pre-mount print already calls, so the plain-fallback path (User Story 4) falls out
+for free with zero new fallback string. `header.facts`/`header.level` are the same
+`HeaderStatusFacts`/`ColorLevel` `run.ts` already resolves for its own pre-mount print,
+threaded through unchanged via a new optional `header` field on `StartTuiOptions` ->
+`mountInk`'s new 5th param (captured in a closure, since it's static for the session, unlike
+`state` which changes every render) -> `App`'s new `header` prop -> `RootView` only (not
+`AgentView` — its own per-agent pane has no such banner, out of the ticket's scope).
+`buildRootEmptyText` (`RootView.tsx`) shrank to just the "Type a message below to get
+started." hint — the app-identity banner itself moved to `headerLines`, so keeping the old
+`formatEmptyStateLines`-sourced logo there too would have double-printed it.
+
+User Story -> proving test:
+- **Story 1** (real Header A2 content, in real color, before any message): `RootView.test.tsx`
+  `"User Story 1: with a header prop and a large/truecolor terminal, shows Header A2's real
+  gradient wordmark content, in real color"` — asserts a real truecolor SGR escape
+  (`\x1b[38;2;`) and the `facts.configLine` status-tree content are both present pre-first-
+  message.
+- **Story 2** (persists once the first message is sent): `TranscriptPane.test.tsx` `"DH-0245
+  User Story 2: headerLines persist once the first turn is sent — still present in the render
+  tree immediately after"` — asserts `headerLines` content survives a `rerender` with a
+  non-empty transcript.
+- **Story 3** (scrolling to the top reveals it again): `TranscriptPane.test.tsx` `"DH-0245
+  User Story 3: scrolling to the very top reveals headerLines again"` — with 20 turns
+  overflowing a 3-row viewport, asserts the banner is scrolled out of view at the bottom and
+  reappears after a large negative `scrollBus` delta clamps the offset to 0.
+- **Story 4** (small-terminal/no-color plain fallback matches `renderHeaderA2`'s own
+  fallback): `RootView.test.tsx` `"User Story 4: on a terminal below the size gate, uses the
+  exact same plain-fallback content renderHeaderA2 itself falls back to"` — compares the
+  rendered frame against `renderHeaderA2`'s own direct output for the same facts/terminal size
+  (line-for-line `toContain`, single source of truth by construction, not by convention) plus
+  a companion `"level: 'none'"` test for the color-unavailable (not just size-gate) trigger.
+
+End-to-end wiring also covered: `App.test.tsx` (`header` prop reaches `<RootView>`),
+`app.test.ts` (`opts.header` reaches the real mounted Ink tree via `startTui` against a fake
+stdout, asserting `facts.configLine` lands in the captured writes).
+
+Real-PTY verification (per the ticket's own Risk note — `lastFrame()` alone wasn't trusted):
+built the real compiled binary (`bun run build` -> `dist/dh`), ran it under a real `tmux`
+session (100x35, `COLORTERM=truecolor`) against the repo's real `dh.json` + `secrets.env`
+(no mock). Confirmed, reading the raw captured pane (`tmux capture-pane -e`) with real SGR
+truecolor escapes intact:
+1. On first launch, the gradient wordmark + status tree render inside the mounted Ink
+   session (not just the pre-mount flash) with real per-character `\x1b[38;2;R;G;Bm`
+   truecolor codes, before any message was sent.
+2. After sending a real chat message ("hello there") and getting a real model reply, the
+   banner's tail (config/bind/logs lines) remained visible above the conversation — it did
+   not vanish.
+3. Simulating 15 SGR mouse wheel-up events (`\x1b[<64;10;10M`, matching the real wire format
+   `mouse.ts` parses) scrolled the transcript to the top and revealed the full wordmark again,
+   above the "0 tok" status line at frame top — confirming the scroll-to-top behavior in a
+   real terminal, not just the pure `scroll-viewport.ts` unit tests.
+
+Gates: `bun run typecheck` clean; `bun run lint` clean; `bun run test:coverage`
+(`bun scripts/test-isolated.ts --coverage`) 100.0% line coverage (15668/15668), 145/146 test
+files passed — the one failure (`src/web/client/app.test.ts`, a DH-0135 composer-focus test,
+Susan's domain) reproduces only under full-suite parallel load and passes standalone
+(`bun test src/web/client/app.test.ts`: 43/43); this exact flake was already documented as
+pre-existing by a prior round (`docs/roster/mary.md`'s DH-0230 entry), confirmed unrelated —
+this ticket touched no `src/web/` file.
+
+Files touched: `src/tui/ink/TranscriptPane.tsx` (`headerLines` prop),
+`src/tui/ink/RootView.tsx` (`header` prop, `renderHeaderA2` call, shrunk
+`buildRootEmptyText`), `src/tui/ink/App.tsx` (`header` prop threaded to `<RootView>`),
+`src/tui/ink/mount.ts` (`header` param, closed over across rerenders), `src/tui/app.ts`
+(`StartTuiOptions.header`), `src/cli/deps.ts` (`CliDeps.startTui`'s `opts` type),
+`src/cli/run.ts` (both `deps.startTui` call sites now pass `{ header: { facts: a2Facts,
+level } }` — the same `a2Facts`/`level` already built for the pre-mount print, no new facts
+computation). No `src/contracts/` change, no ADR/invariant touched.

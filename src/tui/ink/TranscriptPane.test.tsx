@@ -203,6 +203,71 @@ describe("TranscriptPane", () => {
     expect(lastFrame() ?? "").toContain("msg 9");
   });
 
+  test("DH-0245: headerLines are prepended even when the transcript is empty", () => {
+    const { lastFrame } = render(
+      React.createElement(TranscriptPane, {
+        transcript: [],
+        cols: 40,
+        height: 5,
+        emptyText: "Type a message below to get started.",
+        headerLines: ["[ dh banner ]"],
+      }),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[ dh banner ]");
+    expect(frame).toContain("Type a message below to get started.");
+  });
+
+  test("DH-0245 User Story 2: headerLines persist once the first turn is sent — still present in the render tree immediately after", () => {
+    let transcript: Turn[] = [];
+    const { lastFrame, rerender } = render(
+      React.createElement(TranscriptPane, {
+        transcript,
+        cols: 40,
+        height: 5,
+        emptyText: "Type a message below to get started.",
+        headerLines: ["[ dh banner ]"],
+      }),
+    );
+    expect(lastFrame() ?? "").toContain("[ dh banner ]");
+    transcript = [turn({ role: "user", text: "first message" })];
+    rerender(
+      React.createElement(TranscriptPane, {
+        transcript,
+        cols: 40,
+        height: 5,
+        emptyText: "Type a message below to get started.",
+        headerLines: ["[ dh banner ]"],
+      }),
+    );
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("[ dh banner ]");
+    expect(frame).toContain("first message");
+  });
+
+  test("DH-0245 User Story 3: scrolling to the very top reveals headerLines again", async () => {
+    const transcript: Turn[] = Array.from({ length: 20 }, (_, i) =>
+      turn({ role: "user", text: `msg ${i}` }),
+    );
+    const scrollBus = createScrollBus();
+    const { lastFrame } = render(
+      React.createElement(TranscriptPane, {
+        transcript,
+        cols: 40,
+        height: 3,
+        emptyText: "",
+        headerLines: ["[ dh banner ]"],
+        scrollBus,
+      }),
+    );
+    // At the bottom (default), the banner (top of the pane's row list) is scrolled out of view.
+    expect(lastFrame() ?? "").not.toContain("[ dh banner ]");
+    await flush();
+    scrollBus.emit(-1000); // far more than needed — scrollBy clamps to the top.
+    await flush();
+    expect(lastFrame() ?? "").toContain("[ dh banner ]");
+  });
+
   test("without a scrollBus prop, emitting on an unrelated bus has no effect (no crash, offset unchanged)", () => {
     const transcript: Turn[] = Array.from({ length: 10 }, (_, i) =>
       turn({ role: "user", text: `msg ${i}` }),

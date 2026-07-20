@@ -12,6 +12,7 @@ import { render as inkRender } from "ink";
 import React from "react";
 import type { TuiState } from "../types.type.ts";
 import { App } from "./App.tsx";
+import type { RootViewHeader } from "./RootView.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
 
 export interface InkMount {
@@ -22,12 +23,17 @@ export interface InkMount {
 /** Mount the Ink root component against real (or fake, in tests) stdio. No component in the
  * tree calls Ink's own `useInput`/`usePaste`, so this does not touch stdin raw-mode — that
  * stays owned by app.ts's own `stdin.on("data", ...)` wiring, unchanged by this migration.
- * `scrollBus` (DH-0126) is optional so existing test callers don't need to supply one. */
+ * `scrollBus` (DH-0126) is optional so existing test callers don't need to supply one.
+ * `header` (DH-0245) is likewise optional and, when supplied, is the same object on every
+ * subsequent `rerender` — it's static for the life of one session (the facts/colorLevel
+ * `run.ts` resolved once at startup), so it's captured here rather than threaded back through
+ * `state`. */
 export function mountInk(
   state: TuiState,
   stdout: unknown,
   stdin: unknown,
   scrollBus?: ScrollBus,
+  header?: RootViewHeader,
 ): InkMount {
   // Ink's `render()` wants a real Node `WriteStream`/`ReadStream`; callers (app.ts) pass its
   // own minimal test-fakeable `StdoutLike`/`StdinLike` instead.
@@ -35,20 +41,20 @@ export function mountInk(
   const inkStdout = stdout as any;
   // biome-ignore lint/suspicious/noExplicitAny: see comment above.
   const inkStdin = stdin as any;
-  const instance = inkRender(
-    React.createElement(App, { state, ...(scrollBus ? { scrollBus } : {}) }),
-    {
-      stdout: inkStdout,
-      stdin: inkStdin,
-      exitOnCtrlC: false,
-      patchConsole: false,
-    },
-  );
+  const props = (s: TuiState) => ({
+    state: s,
+    ...(scrollBus ? { scrollBus } : {}),
+    ...(header ? { header } : {}),
+  });
+  const instance = inkRender(React.createElement(App, props(state)), {
+    stdout: inkStdout,
+    stdin: inkStdin,
+    exitOnCtrlC: false,
+    patchConsole: false,
+  });
   return {
     rerender(next: TuiState) {
-      instance.rerender(
-        React.createElement(App, { state: next, ...(scrollBus ? { scrollBus } : {}) }),
-      );
+      instance.rerender(React.createElement(App, props(next)));
     },
     unmount() {
       instance.unmount();

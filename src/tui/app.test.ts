@@ -294,6 +294,33 @@ describe("startTui", () => {
     await done;
   });
 
+  test("DH-0245: an `opts.header` reaches the mounted Ink tree — the in-session Header A2 banner is written to the real stdout", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout(); // 80x24: below the 30-row size gate, so this exercises
+    // the plain-fallback content deterministically, matching renderHeaderA2's own gate.
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+      header: {
+        facts: {
+          version: "0.1.0",
+          gitSha: "abc1234",
+          configLine: "dh.json — 2 models",
+          bindHost: "127.0.0.1:4096",
+          hasToken: false,
+        },
+        level: "truecolor",
+      },
+    });
+    await flush(5, stdout);
+
+    expect(stdout.allWrites()).toContain("dh.json — 2 models");
+
+    stdin.type("\x03");
+    await done;
+  });
+
   test("typing and pressing enter sends a send_message command for the root agent", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();

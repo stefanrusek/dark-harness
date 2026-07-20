@@ -10,6 +10,7 @@ import { runSseTransport } from "../client-core/sse-transport.ts";
 import { sendCommand } from "./http-client.ts";
 import type { InkMount } from "./ink/mount.ts";
 import { mountInk } from "./ink/mount.ts";
+import type { RootViewHeader } from "./ink/RootView.tsx";
 import { createScrollBus } from "./ink/scroll-bus.ts";
 import { parseKeys } from "./keys.ts";
 import { MouseChunkAssembler } from "./mouse.ts";
@@ -127,6 +128,12 @@ export interface StartTuiOptions {
    * at the production cap sits behind minutes of jittered backoff). Production callers omit
    * it. */
   maxSseFailures?: number;
+  /** DH-0245: Header A2's facts + the real `ColorLevel` `run.ts` already resolved (via
+   * `detectColorLevel`) for its own pre-mount stdout print — passed through unchanged so the
+   * in-session root-view banner renders the same content, in the same color, through the same
+   * `renderHeaderA2` pipeline, rather than defaulting to `"none"`/re-deriving it. Omitted by
+   * every existing test that doesn't exercise this feature. */
+  header?: RootViewHeader;
 }
 
 /**
@@ -330,7 +337,7 @@ export async function startTui(
 
     stdout.write(ALT_SCREEN_ENTER + HIDE_CURSOR + BRACKETED_PASTE_ENABLE);
     mouseLifecycle.enable();
-    inkInstance = mountInk(state, stdout, stdin, scrollBus);
+    inkInstance = mountInk(state, stdout, stdin, scrollBus, opts.header);
     stdin.setRawMode?.(true);
     stdin.setEncoding?.("utf8");
     stdin.resume?.();
