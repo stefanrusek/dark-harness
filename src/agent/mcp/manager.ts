@@ -334,7 +334,6 @@ export class McpManager {
       const tokens = provider.tokens() as StoredOAuthTokens | undefined;
       return {
         grant: "client_credentials",
-        alreadyAuthenticated: true,
         ...optionalExpiry(tokens),
       };
     }

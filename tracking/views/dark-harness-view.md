@@ -68,7 +68,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
-| [DH-0240](../DH-0240-mcp-oauth-dh-0057-dead-code-unused-resourcemetadataurl-field-and-unreachable-alreadyauthenticated-flag-on-the-client-credentials-return.md) | MCP OAuth (DH-0057) dead code: unused resourceMetadataUrl field and unreachable alreadyAuthenticated flag on the client_credentials return | bug | stefan |
 
 ### refining
 
@@ -120,6 +119,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0240](../DH-0240-mcp-oauth-dh-0057-dead-code-unused-resourcemetadataurl-field-and-unreachable-alreadyauthenticated-flag-on-the-client-credentials-return.md) | MCP OAuth (DH-0057) dead code: unused resourceMetadataUrl field and unreachable alreadyAuthenticated flag on the client_credentials return | done |
 | [DH-0236](../DH-0236-dead-code-dh-ascii-logo-dh-ascii-logo-compact-unused-after-dh-0224-migrated-every-surface-to-the-monogram-assets.md) | Dead code: DH_ASCII_LOGO / DH_ASCII_LOGO_COMPACT unused after DH-0224 migrated every surface to the monogram assets | done |
 | [DH-0225](../DH-0225-startup-header-health-dot-green-diverges-from-status-tokens-status-dot-green-dh-0221-palette-fragmentation.md) | Startup-header health dot green diverges from STATUS_TOKENS status-dot green (DH-0221 palette fragmentation) | done |
 | [DH-0223](../DH-0223-chooseheadermode-is-exported-and-unit-tested-but-never-called-at-runtime.md) | chooseHeaderMode is exported and unit-tested but never called at runtime | done |
@@ -134,4 +134,3 @@ source: tracking/
 | [DH-0210](../DH-0210-import-resume-chain-toolresult-tooluse-block-count-mismatch-crashes-the-provider-request.md) | --import + resume chain: toolResult/toolUse block count mismatch crashes the provider request | done |
 | [DH-0209](../DH-0209-sub-agents-may-lack-access-to-reportoutcome-falling-back-to-task-failed-confusion.md) | Sub-agents may lack access to ReportOutcome, falling back to TASK_FAILED confusion | duplicate |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | done |
-| [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | done |

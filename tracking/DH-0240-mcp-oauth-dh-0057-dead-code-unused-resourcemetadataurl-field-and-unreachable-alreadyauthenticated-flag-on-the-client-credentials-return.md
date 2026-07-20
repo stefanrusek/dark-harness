@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0240
 type: bug
-status: draft
+status: closed
 owner: stefan
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-19
 relations:
@@ -93,3 +93,16 @@ the façade is being edited for the above fixes.
 
 - Filed by refactoring round 2 (DH-0239). Markdown colored-span rendering and the
   DH-0230/0231/0232 TUI fixes were re-reviewed in the same round and came back clean.
+
+- 2026-07-19: Implemented both removals. Confirmed via repo-wide grep that
+  `resourceMetadataUrl` had no reader/writer anywhere (including no on-disk token file
+  consumer) before deleting it from `StoredMcpAuth` (`src/agent/mcp/token-store.ts`).
+  Removed `alreadyAuthenticated: true` from the `client_credentials` return in
+  `McpManager.beginAuth` (`src/agent/mcp/manager.ts`); left the `authorization_code`/
+  `AUTHORIZED` return's `alreadyAuthenticated: true` at manager.ts:353-357 untouched, as
+  required. Skipped the optional façade-naming-drift note (status/begin/complete vs
+  authStatus/beginAuth/completeAuth) — not touching that surface otherwise, so not free.
+  Gates: `bun run typecheck` clean, `bun run lint` clean, `bun run test:coverage` 100%
+  (146/146, MCP OAuth suite 82/82 passing), `bun run e2e` 40/41 (one flaky, pre-existing
+  headless-browser hook timeout in e2e/web.test.ts unrelated to src/agent/mcp/ — passes
+  standalone). Closing directly as trivial per CLAUDE.md workflow.

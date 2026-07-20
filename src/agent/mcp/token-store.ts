@@ -33,7 +33,6 @@ export interface StoredMcpAuth {
   tokens?: StoredOAuthTokens;
   /** Transient PKCE verifier: present only between `begin` and `complete`. */
   codeVerifier?: string;
-  resourceMetadataUrl?: string;
   updatedAt: number;
 }
 
