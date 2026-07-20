@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0248
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -236,5 +236,49 @@ Implementation owner: **Susan** (`src/web/`). Touches `AppHeader.tsx`, `styles.c
 (recommended, non-gating) `App.tsx`'s sidebar `.brand` row. No `src/contracts/` change, no
 change to `header-info.ts`'s shared builders (masthead consumes the existing `HeaderInfo` /
 `ConfigStatusSummary` shape as-is), no ADR/invariant touched.
+
+## Notes
+
+### 2026-07-20 — Implemented (Susan)
+
+Rebuilt `AppHeader.tsx` as a three-zone masthead (brand: `<LogoMark>` at 28px + gradient
+"Dark Harness" wordmark · build: version string · right-aligned config-instrument chip row),
+still mounted in the existing fixed `.app-header-slot` grid area. Added
+`--brand-grad-start`/`--brand-grad-end` to `:root` (and kept, unchanged, in the light-theme
+override) matching `LogoMark`'s SVG gradient stops exactly. Dropped the sidebar `.brand`
+row's literal "Dark Harness" text (kept the small `<LogoMark>` as the nav identity anchor,
+`role="img" aria-label="Dark Harness"` on the row) per the ticket's non-gating recommendation
+— confirmed live (see verification below) that this avoids two stacked wordmarks.
+
+**User Story -> test mapping** (`src/web/client/components/AppHeader.test.tsx` unless noted):
+- "real branded masthead at launch" -> `renders the LogoMark SVG and the 'Dark Harness' wordmark`
+- "wordmark carries the brand gradient" -> `wordmark carries the shared brand gradient sourced from the CSS custom properties`
+- "masthead keeps every config fact" -> `config chip row carries every fact formatConfigStatusLine renders...`, `bind chip falls back to 'all interfaces'...`, `the masthead's config chip row is present, proving no information regression...`
+- "no-token surfaced as a visible warning" -> `auth chip shows the warning-accent '⚠ no token' glyph+class...`, `auth chip shows a neutral 'token required' chip...`
+- "masthead stays visible the whole session" -> `App.test.tsx`: `DH-0248: the masthead lives in the fixed .app-header-slot, never inside .output-scroll`
+- "legible in light and dark mode" -> covered by the `color: var(--text)` fallback assertion inside `wordmark carries the shared brand gradient...` plus live dark/light screenshots (below)
+- "subtle branded entrance, gated by reduced-motion" -> `the wordmark entrance animation is gated behind prefers-reduced-motion: no-preference`
+
+**Visual verification (real headless Chromium, real compiled binary, no mocks below the
+network boundary):** built `dist/dh`, spawned it via the e2e suite's own
+`spawnDh`/`startMockAnthropicProvider`/`createWorkspace`/`resolveChromiumExecutable` helpers
+against a real `dh.json` (2 models, `security.hostname: 127.0.0.1`, no token), loaded the real
+page in Playwright under both `colorScheme: "light"` and `colorScheme: "dark"`, and both
+read computed styles and took screenshots. Confirmed: the wordmark's computed
+`background-image` is the real rendered gradient
+(`linear-gradient(90deg, rgb(158, 206, 106), rgb(125, 207, 255))`), `-webkit-text-fill-color`
+is transparent (gradient clip active) with the `--brand-grad-start`/`--brand-grad-end`
+custom properties resolving to `#9ece6a`/`#7dcfff` on the live page; the config chip row
+rendered real data (`config dh.json · 2 models`, `bind 127.0.0.1`, `⚠ no token`); the sidebar
+`.brand` row's text content is empty (mark only, no duplicate wordmark); the masthead
+`<svg>` mount is present. Legible and correctly styled in both light and dark screenshots.
+
+**Gates:** `bun run typecheck` clean for the `src/web` project (root project's one failure,
+`src/cli/header.test.ts`, is pre-existing/unrelated — confirmed via `git log` it isn't touched
+by this diff). `bun run lint` clean. `bun run test:coverage`: 147/147 files pass, 100% lines
+project-wide, `AppHeader.tsx`/`App.tsx` both 100% funcs/lines. `bun run e2e`: 41/41 pass
+(built `dist/dh` first). One `app.test.ts` reconnect test flaked once under `test:coverage`'s
+parallel run and passed clean on every other run (before and after this diff, unrelated to
+this change) — not a regression.
 </content>
 </invoke>
