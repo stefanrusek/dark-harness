@@ -134,6 +134,12 @@ not a flat single-tone terminal font. Write full, expressive Markdown rather tha
 conservative plain-text-leaning style; the formatting you use is not wasted on a monochrome
 display.
 
+**ASCII art with colors:** When outputting ASCII art (balloons, diagrams, glyphs) with colored
+text, wrap the colored spans in a \`<pre>\` tag with monospace font styling:
+\`<pre style="font-family: monospace; white-space: pre;">\` followed by your \`<span style="color: #RRGGBB">...</span>\` elements.
+This preserves monospace layout in the web UI while allowing colored HTML spans to render correctly. The TUI will ignore
+the \`<pre>\` and span tags and render the text as-is, so this pattern works across all clients.
+
 ## Logging
 
 Everything you and your sub-agents do — every message, tool call, and result — is logged

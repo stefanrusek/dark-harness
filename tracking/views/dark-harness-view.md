@@ -24,7 +24,6 @@ source: tracking/
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | status: verifying |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions | deferred (2026-07-16): GitHub issue #7 created to gauge demand |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut | status: verifying |
-| [DH-0109](../DH-0109-missing-markdown-features-gfm-table-rendering-and-other-explicitly-out-of-scope-constructs.md) | Missing Markdown features: GFM table rendering (and other explicitly-out-of-scope constructs) | status: verifying |
 | [DH-0115](../DH-0115-e2e-reportoutcome-nudge-doubling-successturn-taskfailedturn-mock-helpers-predate-dh-0050.md) | e2e ReportOutcome-nudge doubling: successTurn/taskFailedTurn mock helpers predate DH-0050 | status: verifying |
 | [DH-0122](../DH-0122-every-dh-run-should-print-an-application-header-name-logo-version-build-config-status.md) | Every dh run should print an application header (name, logo, version/build, config status) | status: verifying |
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | status: verifying |
@@ -34,11 +33,7 @@ source: tracking/
 | [DH-0128](../DH-0128-urgent-web-ui-connecting-from-a-separate-machine-loads-the-shell-but-sticks-on-reconnecting.md) | URGENT: Web UI connecting from a separate machine loads the shell but sticks on 'Reconnecting...' | status: verifying |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom | status: verifying |
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | status: verifying |
-| [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | status: verifying |
-| [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | status: verifying |
-| [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | status: verifying |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | status: refining |
-| [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | status: verifying |
 | [DH-0219](../DH-0219-new-dh-monogram-logo-uppercase-d-h-replaces-diamond-evolution-direction.md) | New DH monogram logo (uppercase D+H, replaces diamond-evolution direction) | status: verifying |
 | [DH-0220](../DH-0220-dual-mode-startup-header-redesign-a2-interactive-b-web-headless.md) | Dual-mode startup header redesign: A2 (interactive) + B (web/headless) | status: verifying |
 | [DH-0221](../DH-0221-truecolor-brand-palette-color-level-resolver-shared-color-infrastructure.md) | Truecolor brand palette + color-level resolver (shared color infrastructure) | status: verifying |
@@ -46,6 +41,8 @@ source: tracking/
 | [DH-0226](../DH-0226-workflow-tool-mvp-deterministic-sub-agent-orchestration-script-agent-parallel.md) | Workflow tool MVP: deterministic sub-agent orchestration script (agent() + parallel()) | status: verifying |
 | [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | status: verifying |
 | [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | status: verifying |
+| [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) | DH-0206 |
+| [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool | DH-0226 |
 
 ## Board
 
@@ -63,6 +60,7 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
+| [DH-0229](../DH-0229-ascii-art-blocks-need-monospace-color-support-in-web-and-system-prompt-guidance.md) | ASCII art blocks need monospace + color support in web and system prompt guidance | feature | stefan |
 
 ### refining
 
@@ -83,7 +81,6 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0057](../DH-0057-mcp-oauth-support-via-mcpauth-tool.md) | MCP OAuth support via McpAuth tool | feature | stefan |
 | [DH-0088](../DH-0088-update-readme-with-real-download-install-instructions-once-release-binaries-are-cut.md) | Update README with real download/install instructions once release binaries are cut | feature | stefan |
-| [DH-0109](../DH-0109-missing-markdown-features-gfm-table-rendering-and-other-explicitly-out-of-scope-constructs.md) | Missing Markdown features: GFM table rendering (and other explicitly-out-of-scope constructs) | feature | stefan |
 | [DH-0115](../DH-0115-e2e-reportoutcome-nudge-doubling-successturn-taskfailedturn-mock-helpers-predate-dh-0050.md) | e2e ReportOutcome-nudge doubling: successTurn/taskFailedTurn mock helpers predate DH-0050 | bug | stefan |
 | [DH-0122](../DH-0122-every-dh-run-should-print-an-application-header-name-logo-version-build-config-status.md) | Every dh run should print an application header (name, logo, version/build, config status) | feature | stefan |
 | [DH-0123](../DH-0123-dh-init-output-doesn-t-look-great.md) | dh init output doesn't look great | bug | stefan |
@@ -93,10 +90,6 @@ source: tracking/
 | [DH-0128](../DH-0128-urgent-web-ui-connecting-from-a-separate-machine-loads-the-shell-but-sticks-on-reconnecting.md) | URGENT: Web UI connecting from a separate machine loads the shell but sticks on 'Reconnecting...' | bug | stefan |
 | [DH-0129](../DH-0129-web-transcript-should-auto-scroll-to-bottom-only-when-already-at-the-bottom.md) | Web transcript should auto-scroll to bottom only when already at the bottom | feature | stefan |
 | [DH-0131](../DH-0131-sub-agent-failure-transitions-are-not-recorded-in-the-jsonl-log-as-a-structured-status-change-event.md) | Sub-agent failure transitions are not recorded in the JSONL log as a structured status_change event | bug | stefan |
-| [DH-0140](../DH-0140-agent-message-queue.md) | Agents need an incoming-event message queue: mid-turn events (e.g. background sub-agent completions) are currently orphaned, not queued | feature | stefan |
-| [DH-0141](../DH-0141-formalize-a-periodic-refactoring-round-mechanism.md) | Formalize a periodic refactoring-round mechanism | feature | stefan |
-| [DH-0145](../DH-0145-src-tui-app-test-ts-fails-in-ci-yoga-layout-top-level-await-wasm-init-races-ink-s-synchronous-mount-not-a-dh-0126-ordering-bug.md) | src/tui/app.test.ts fails in CI: yoga-layout top-level-await WASM init races Ink's synchronous mount, not a DH-0126 ordering bug | bug | stefan |
-| [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | feature | stefan |
 | [DH-0219](../DH-0219-new-dh-monogram-logo-uppercase-d-h-replaces-diamond-evolution-direction.md) | New DH monogram logo (uppercase D+H, replaces diamond-evolution direction) | feature | stefan |
 | [DH-0220](../DH-0220-dual-mode-startup-header-redesign-a2-interactive-b-web-headless.md) | Dual-mode startup header redesign: A2 (interactive) + B (web/headless) | feature | stefan |
 | [DH-0221](../DH-0221-truecolor-brand-palette-color-level-resolver-shared-color-infrastructure.md) | Truecolor brand palette + color-level resolver (shared color infrastructure) | feature | stefan |
@@ -123,4 +116,4 @@ source: tracking/
 | [DH-0209](../DH-0209-sub-agents-may-lack-access-to-reportoutcome-falling-back-to-task-failed-confusion.md) | Sub-agents may lack access to ReportOutcome, falling back to TASK_FAILED confusion | duplicate |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | done |
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | done |
-| [DH-0205](../DH-0205-markdown-escaped-characters-render-their-literal-backslash.md) | Markdown: escaped characters render their literal backslash | done |
+| [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | done |
