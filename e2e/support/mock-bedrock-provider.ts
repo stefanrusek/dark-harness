@@ -45,6 +45,16 @@ import http2 from "node:http2";
 // hand-rolling the framing/CRC32 logic a second time.
 import { EventStreamCodec } from "@smithy/core/event-streams";
 import { fromUtf8, toUtf8 } from "@smithy/core/serde";
+import {
+  chunkText,
+  clampTurnIndex,
+  requireTurns,
+  jobSuccessTurn as sharedJobSuccessTurn,
+  jobTaskFailedTurn as sharedJobTaskFailedTurn,
+  successTurn as sharedSuccessTurn,
+  taskFailedTurn as sharedTaskFailedTurn,
+  TEXT_DELTA_CHUNK_SIZE,
+} from "./mock-scaffolding";
 
 export interface MockBedrockToolCall {
   toolUseId?: string;
@@ -73,20 +83,6 @@ export interface MockBedrockProvider {
   modelIds: string[];
   readonly callCount: number;
   stop(): void;
-}
-
-/** DH-0044: chunk size (chars) for splitting a scripted turn's `text` into multiple
- * `contentBlockDelta` frames — mirrors `mock-provider.ts`'s identical constant/rationale, so
- * a sufficiently long scripted turn produces enough deltas to cross the agent loop's
- * `STREAM_FLUSH_BYTES` threshold (src/agent/loop.ts) more than once. */
-const TEXT_DELTA_CHUNK_SIZE = 64;
-
-function chunkText(text: string, size: number): string[] {
-  const chunks: string[] = [];
-  for (let i = 0; i < text.length; i += size) {
-    chunks.push(text.slice(i, i + size));
-  }
-  return chunks;
 }
 
 /** Builds the ordered sequence of `ConverseStreamOutput` union-member payloads (event-type ->
@@ -163,9 +159,7 @@ function encodeEvent(eventType: string, payload: unknown): Uint8Array {
 export async function startMockBedrockProvider(
   turns: MockBedrockTurn[],
 ): Promise<MockBedrockProvider> {
-  if (turns.length === 0) {
-    throw new Error("startMockBedrockProvider requires at least one scripted turn");
-  }
+  requireTurns(turns, "startMockBedrockProvider");
   const requests: Record<string, unknown>[] = [];
   const modelIds: string[] = [];
   let callCount = 0;
@@ -185,7 +179,7 @@ export async function startMockBedrockProvider(
       modelIds.push(decodeURIComponent(match[1] ?? ""));
       const body = raw.length > 0 ? (JSON.parse(raw) as Record<string, unknown>) : {};
       requests.push(body);
-      const index = Math.min(callCount, turns.length - 1);
+      const index = clampTurnIndex(callCount, turns.length);
       callCount += 1;
       // biome-ignore lint/style/noNonNullAssertion: index is clamped into [0, turns.length)
       const turn = turns[index]!;
@@ -215,14 +209,14 @@ export async function startMockBedrockProvider(
  * for interactive (server/TUI/Web) scripted turns — see `mock-provider.ts`'s identical
  * caveat. For non-interactive (`--job`/sub-agent) turns, use `jobSuccessTurn` instead. */
 export function successTurn(text: string): MockBedrockTurn {
-  return { text, stopReason: "end_turn" };
+  return sharedSuccessTurn<MockBedrockTurn>(text);
 }
 
 /** A self-reported-failure completion per loop.ts's `TASK_FAILED_MARKER` convention. Same
  * interactive-only caveat as `successTurn` — use `jobTaskFailedTurn` for non-interactive
  * runs. */
 export function taskFailedTurn(text = "Could not complete the task. TASK_FAILED"): MockBedrockTurn {
-  return { text, stopReason: "end_turn" };
+  return sharedTaskFailedTurn<MockBedrockTurn>(text);
 }
 
 /** DH-0115: non-interactive (`--job`/sub-agent) equivalent of `successTurn` — emits an
@@ -230,22 +224,14 @@ export function taskFailedTurn(text = "Could not complete the task. TASK_FAILED"
  * resolves in exactly one provider call (DH-0050 tier 1), instead of triggering the harness's
  * missed-call nudge turn. Do not use for interactive scripted turns. */
 export function jobSuccessTurn(text: string): MockBedrockTurn {
-  return {
-    text,
-    toolCalls: [{ name: "ReportOutcome", input: { status: "success", summary: text } }],
-    stopReason: "tool_use",
-  };
+  return sharedJobSuccessTurn<MockBedrockTurn>(text);
 }
 
 /** Non-interactive equivalent of `taskFailedTurn` — same rationale as `jobSuccessTurn`. */
 export function jobTaskFailedTurn(
   text = "Could not complete the task. TASK_FAILED",
 ): MockBedrockTurn {
-  return {
-    text,
-    toolCalls: [{ name: "ReportOutcome", input: { status: "failure", summary: text } }],
-    stopReason: "tool_use",
-  };
+  return sharedJobTaskFailedTurn<MockBedrockTurn>(text);
 }
 
 /** Dummy static AWS credentials — enough for the SDK to sign requests locally; the mock

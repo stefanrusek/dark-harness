@@ -15,7 +15,7 @@
 // in this test or in `--connect --web` itself.
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { resolveChromiumExecutable } from "./spikes/web/support.ts";
+import { resolveChromiumExecutable } from "./support/chromium.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
@@ -66,35 +66,63 @@ describe("--connect --web: a real web client process against a real remote dh --
     expect(stdout).toContain(`connected to http://localhost:${port}`);
 
     const executablePath = await resolveChromiumExecutable();
-    const browser = await chromium.launch({ executablePath, headless: true });
+    const browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      // DH-0165: GitHub Actions' runners have no D-Bus session bus, which some headless
+      // Chromium subsystems (network proxy resolution, etc) try to reach on launch and hang
+      // or crash waiting for; --no-sandbox/--disable-dev-shm-usage/--disable-gpu are the
+      // standard trio for running headless Chromium inside an unprivileged CI container.
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
     cleanups.addProcess(() => browser.close());
     const context = await browser.newContext();
     const page = await context.newPage();
-    await page.goto(webUrl);
-
-    await page.waitForSelector(".dh-app");
-    await page.waitForFunction(
-      "document.querySelector('.connection-pill')?.textContent === 'Live'",
+    page.on("console", (m) => console.error(`[page console ${m.type()}] ${m.text()}`));
+    page.on("pageerror", (e) => console.error(`[page error] ${e.message}`));
+    page.on("requestfailed", (r) =>
+      console.error(`[request failed] ${r.url()} ${r.failure()?.errorText}`),
     );
+    // DH-0165: this test timed out at the exact same 45s in real CI with no diagnostic at all
+    // — the previous /skillname investigation (same file's TUI/PTY sibling) found that a bare
+    // `test(...)` timeout swallows whatever detail a failing `await` would otherwise carry.
+    // Wrap the whole browser-driven sequence so a CI failure's log actually shows page
+    // console/network activity plus the last DOM state instead of a bare timeout line.
+    try {
+      await page.goto(webUrl);
 
-    const rootHeader = page.locator(".agent-header-name");
-    await rootHeader.waitFor({ state: "visible" });
-    expect(await rootHeader.textContent()).toBe("Root agent");
-    const composerInput = page.locator(".composer-input");
-    await composerInput.waitFor({ state: "visible" });
+      await page.waitForSelector(".dh-app");
+      await page.waitForFunction(
+        "document.querySelector('.connection-pill')?.textContent === 'Live'",
+      );
 
-    await composerInput.fill("hi from a remote web client");
-    await page.getByRole("button", { name: "Send" }).click();
+      const rootHeader = page.locator(".agent-header-name");
+      await rootHeader.waitFor({ state: "visible" });
+      expect(await rootHeader.textContent()).toBe("Root agent");
+      const composerInput = page.locator(".composer-input");
+      await composerInput.waitFor({ state: "visible" });
 
-    // Proves this rendered live over the wire from the *remote* server's own SSE stream —
-    // not a local in-process agent loop, since the web client process here holds no model
-    // config that could actually run the turn itself.
-    await page.waitForFunction(
-      "document.querySelector('.agent-transcript .turn-assistant .turn-text')?.textContent === " +
-        "'Hello from the remote server, via the web client!'",
-      undefined,
-      { timeout: 15_000 },
-    );
+      await composerInput.fill("hi from a remote web client");
+      await page.getByRole("button", { name: "Send" }).click();
+
+      // Proves this rendered live over the wire from the *remote* server's own SSE stream —
+      // not a local in-process agent loop, since the web client process here holds no model
+      // config that could actually run the turn itself.
+      await page.waitForFunction(
+        "document.querySelector('.agent-transcript .turn-assistant .turn-text')?.textContent === " +
+          "'Hello from the remote server, via the web client!'",
+        undefined,
+        { timeout: 15_000 },
+      );
+    } catch (err) {
+      console.error(`connect-web browser sequence failed; last DOM:\n${await page.content()}`);
+      throw err;
+    }
     // Per Core Round 5's interactive semantics (DH-0059), a root agent with no tool call in
     // its turn parks at "waiting" rather than reaching "done"/session end on its own — see
     // e2e/web.test.ts (DH-0062) for the same fix against the local --web scenario.
@@ -108,5 +136,16 @@ describe("--connect --web: a real web client process against a real remote dh --
       body: JSON.stringify({ type: "request_agent_tree" }),
     });
     expect(treeRes.status).toBe(200);
-  }, 30_000);
+    // DH-0165: CI's gate.yml groups this file's Chromium launch back-to-back with
+    // e2e/web.test.ts's and e2e/streaming.test.ts's own browser launches in the same
+    // `bun test` invocation (see gate.yml's "E2E (web/browser — Chromium)" step) — by the
+    // time this test's own two `dh` processes (server + connected --web client) and browser
+    // launch, the runner has already spent real wall-clock time on two prior full browser
+    // sessions. 30s (then 45s) was still tight enough to time out in real CI even though this
+    // test passes comfortably (and quickly) run in isolation, locally — and 45s exactly
+    // swallowed the try/catch diagnostics above the same way the bare bun-test-level timeout
+    // did for the /skillname TUI/PTY test earlier in this same investigation (see
+    // e2e/slash-commands.test.ts's own DH-0165 comment), so this also gives real headroom
+    // below the outer budget for that catch block to actually run and log.
+  }, 90_000);
 });

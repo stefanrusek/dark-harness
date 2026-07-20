@@ -3,10 +3,10 @@
 import { Box } from "ink";
 import { BUILD_INFO } from "../../config/build-info.ts";
 import { buildHeaderInfo, formatEmptyStateLines } from "../../header-info.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { Composer } from "./Composer.tsx";
-import { TranscriptPane } from "./TranscriptPane.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
+import { TranscriptPane } from "./TranscriptPane.tsx";
 import { rootAgent } from "./tokens.ts";
 
 export interface RootViewProps {
@@ -38,7 +38,7 @@ export function RootView({ state, contentRows, cols, scrollBus }: RootViewProps)
         {...(scrollBus ? { scrollBus } : {})}
       />
       <Box paddingLeft={1}>
-        <Composer state={state} />
+        <Composer state={state} cols={Math.max(1, cols - 1)} />
       </Box>
     </Box>
   );

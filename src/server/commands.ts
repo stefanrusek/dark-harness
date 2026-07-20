@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type {
   AgentTreeNode,
@@ -8,7 +8,7 @@ import type {
   ListModelsResponse,
   ListSkillsResponse,
 } from "../contracts/index.ts";
-import type { AgentLoopHandle } from "./agent-loop.ts";
+import type { AgentLoopHandle } from "./agent-loop.type.ts";
 import type { SessionLogger } from "./logger.ts";
 import { buildTar } from "./tar.ts";
 
@@ -27,6 +27,8 @@ function isClientCommand(value: unknown): value is ClientCommand {
   switch (v.type) {
     case "send_message":
       return typeof v.agentId === "string" && typeof v.message === "string";
+    case "cancel_queued_message":
+      return typeof v.agentId === "string" && typeof v.messageId === "string";
     case "request_agent_tree":
       return true;
     case "download_logs":
@@ -130,6 +132,18 @@ export async function handleCommand(command: unknown, ctx: CommandContext): Prom
       }
       ctx.agentLoop.sendMessage(command.agentId, command.message);
       return { kind: "json", status: 200, body: { ok: true } };
+    case "cancel_queued_message":
+      if (!findAgent(ctx.agentLoop.getAgentTree(), command.agentId)) {
+        return unknownAgentError(command.agentId);
+      }
+      if (!ctx.agentLoop.cancelQueuedMessage(command.agentId, command.messageId)) {
+        return {
+          kind: "json",
+          status: 404,
+          body: { ok: false, error: `no queued message with id: ${command.messageId}` },
+        };
+      }
+      return { kind: "json", status: 200, body: { ok: true } };
     case "stop_agent":
       if (!findAgent(ctx.agentLoop.getAgentTree(), command.agentId)) {
         return unknownAgentError(command.agentId);
@@ -159,7 +173,11 @@ export async function handleCommand(command: unknown, ctx: CommandContext): Prom
         };
       }
     case "list_skills":
-      return { kind: "json", status: 200, body: { ok: true, skills: ctx.agentLoop.listSkills() } };
+      return {
+        kind: "json",
+        status: 200,
+        body: { ok: true, skills: await ctx.agentLoop.listSkills() },
+      };
     case "invoke_skill":
       // DH-0093: an unknown skill name (UnknownSkillError) is the one error class this
       // command can reject with — surfaced as a 404 ack, per the ticket's design.

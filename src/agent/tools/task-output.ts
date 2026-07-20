@@ -9,9 +9,10 @@
 
 import { TaskNotFoundError } from "../tasks.ts";
 import { capOutput } from "./output-cap.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
-export const taskOutputTool: Tool = {
+export const taskOutputTool: Tool = Object.freeze<Tool>({
   name: "TaskOutput",
   description:
     "Retrieve new output and status of a background task or sub-agent by id. By default " +
@@ -31,13 +32,18 @@ export const taskOutputTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const taskId = input.task_id;
-    if (typeof taskId !== "string" || taskId.length === 0) {
-      return {
-        output: "TaskOutput tool error: 'task_id' must be a non-empty string.",
-        isError: true,
-      };
-    }
+    // 'full' isn't scoped in — it has no error path of its own (read as `=== true`).
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: { task_id: taskOutputTool.inputSchema.properties.task_id },
+        required: ["task_id"],
+      },
+      "TaskOutput",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const taskId = input.task_id as string;
     const full = input.full === true;
 
     try {
@@ -61,4 +67,4 @@ export const taskOutputTool: Tool = {
       return { output: `TaskOutput tool error: ${err.message}`, isError: true };
     }
   },
-};
+});

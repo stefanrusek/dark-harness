@@ -3,7 +3,8 @@
 
 import { isAbsolute, resolve } from "node:path";
 import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
@@ -20,7 +21,7 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
-export const editTool: Tool = {
+export const editTool: Tool = Object.freeze<Tool>({
   name: "Edit",
   description:
     "Replace an exact string match in a file. Fails if old_string is missing, or " +
@@ -38,18 +39,26 @@ export const editTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const filePath = input.file_path;
-    const oldString = input.old_string;
-    const newString = input.new_string;
-    if (typeof filePath !== "string" || filePath.length === 0) {
-      return { output: "Edit tool error: 'file_path' must be a non-empty string.", isError: true };
-    }
-    if (typeof oldString !== "string") {
-      return { output: "Edit tool error: 'old_string' must be a string.", isError: true };
-    }
-    if (typeof newString !== "string") {
-      return { output: "Edit tool error: 'new_string' must be a string.", isError: true };
-    }
+    // Scoped to file_path/old_string/new_string only — 'replace_all' has no error path of its
+    // own (it's just read as `=== true`), so running the shared validator over the whole
+    // schema would risk pre-empting that with a spurious "must be a boolean" error.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: {
+          file_path: editTool.inputSchema.properties.file_path,
+          old_string: editTool.inputSchema.properties.old_string,
+          new_string: editTool.inputSchema.properties.new_string,
+        },
+        required: ["file_path", "old_string", "new_string"],
+      },
+      "Edit",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const filePath = input.file_path as string;
+    const oldString = input.old_string as string;
+    const newString = input.new_string as string;
     if (oldString === newString) {
       return {
         output: "Edit tool error: 'old_string' and 'new_string' must differ.",
@@ -93,4 +102,4 @@ export const editTool: Tool = {
       isError: false,
     };
   },
-};
+});

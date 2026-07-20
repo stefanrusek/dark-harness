@@ -1,11 +1,13 @@
 // Pure state management for the web UI. No DOM, no network — a reducer over
-// `ServerSentEvent`s (src/contracts/events.ts) plus a few UI-only fields (selection,
+// `ServerSentEvent`s (src/contracts/events.type.ts) plus a few UI-only fields (selection,
 // connection status). Kept framework-free and fully unit-testable.
 
+import type { ConnectionStatus } from "../../client-core/connection-status.ts";
 import type {
   AgentStatus,
   AgentTreeNode,
   ModelInfo,
+  QueuedMessage,
   ServerSentEvent,
   SkillInfo,
 } from "../../contracts/index.ts";
@@ -43,6 +45,22 @@ export interface Turn {
    * tokens instead of the generic dim tool-marker styling. Mirrors src/tui/state.ts's
    * identical field. */
   terminalStatus?: AgentStatus;
+  /** DH-0199: wall-clock duration (ms) of the matching `tool_result`, set once it resolves a
+   * `"tool"` marker turn's `pendingToolCall`. Meaningless on every other role, and absent on
+   * a standalone error marker synthesized with no matching call (resume gap — see
+   * `handleToolResult`). Surfaced in the tool-call detail expansion alongside the input
+   * summary already in `text` — `ToolResultEvent` deliberately carries no output content (see
+   * its doc comment in src/contracts/events.type.ts), so duration + success/failure is the
+   * full "result" a client can ever show. */
+  durationMs?: number;
+  /** DH-0207: set (via `correlateQueuedMessages` below) once an `agent_queue` snapshot
+   * reveals this "user" turn's send is currently sitting in the agent's not-yet-delivered
+   * queue, rather than already injected into its conversation. Left set even after the entry
+   * is delivered/cancelled — whether the turn is *currently* queued is always re-derived by
+   * checking membership in `AgentNode.queuedMessages`, not by clearing this field, so a
+   * delivered turn silently reverts to looking like any other sent message with no extra
+   * bookkeeping. */
+  queuedMessageId?: string;
 }
 
 export interface AgentNode {
@@ -54,7 +72,7 @@ export interface AgentNode {
    * `description` parameter — the sidebar/tree row's primary label, falling back to
    * `model (shortAgentId)` only when absent (the root agent, which was never spawned via the
    * Agent tool, or a pre-DH-0069 logged session). See `AgentSpawnedEvent.description`
-   * (src/contracts/events.ts). */
+   * (src/contracts/events.type.ts). */
   description?: string;
   /** Ordered conversation turns for this agent. See `Turn` above. */
   transcript: Turn[];
@@ -97,7 +115,7 @@ export interface AgentNode {
   /**
    * ISO timestamp of the most recent status transition (or, for a freshly-observed node,
    * the moment it was first seen). Every `ServerSentEvent` already carries a `timestamp`
-   * (src/contracts/events.ts), so this is derived client-side with no wire-protocol change.
+   * (src/contracts/events.type.ts), so this is derived client-side with no wire-protocol change.
    *
    * Purpose (docs/handoffs/web.md Round 3): `running` is otherwise a single undifferentiated
    * status with no elapsed-time signal, and since the Anthropic provider adapter calls
@@ -107,13 +125,20 @@ export interface AgentNode {
    * stalled."
    */
   statusSince: string;
+  /** DH-0207/DH-0208: the latest `agent_queue` SSE snapshot for this agent — entries not yet
+   * injected into its conversation. Empty (never `undefined`) until the first `agent_queue`
+   * event arrives, so callers never need an existence check before reading `.length`. */
+  queuedMessages: QueuedMessage[];
 }
 
 // DH-0105: canonical four-state connection vocabulary shared with the TUI
 // (docs/design/style-guide.md §1/§6) — "live" (was "open") and "disconnected" (was
 // "closed") are the renamed states; "connecting" and "reconnecting" already matched the
 // shared vocabulary.
-export type ConnectionStatus = "connecting" | "live" | "reconnecting" | "disconnected";
+// DH-0183: the vocabulary itself now lives in `src/client-core/connection-status.ts`
+// (consolidated with the TUI's identical declaration); re-exported here so existing
+// `./state.ts` importers don't all need updating.
+export type { ConnectionStatus } from "../../client-core/connection-status.ts";
 
 export interface WebState {
   /** Insertion-ordered by first-seen; Map preserves insertion order in JS. */
@@ -154,7 +179,12 @@ export interface WebState {
 export interface ErrorLogEntry {
   message: string;
   timestamp: string;
+  /** DH-0151: monotonic id for stable React keys — timestamp+message alone can collide when
+   * two errors land in the same millisecond with the same text. */
+  id: number;
 }
+
+let nextErrorLogId = 0;
 
 const MAX_ERROR_LOG_ENTRIES = 50;
 
@@ -173,7 +203,7 @@ const MAX_TRANSCRIPT_CHARS = 200_000;
  * value is threaded through some other way. */
 export const DEFAULT_COMPLETED_RETENTION = 50;
 
-const TERMINAL_STATUSES = new Set<AgentStatus>(["done", "failed", "stopped"]);
+const TERMINAL_STATUSES = Object.freeze(new Set<AgentStatus>(["done", "failed", "stopped"]));
 
 /** Evict the oldest terminal (done/failed/stopped) agents from `state.agents` beyond
  * `retention` most-recent terminal entries, in first-seen (`spawnOrder`) order. Active agents
@@ -250,6 +280,7 @@ function ensureAgent(state: WebState, agentId: string, timestamp: string): Agent
     turnOpen: false,
     pendingToolCall: null,
     statusSince: timestamp,
+    queuedMessages: [],
   };
   state.agents.set(agentId, node);
   return node;
@@ -409,7 +440,9 @@ function handleToolResult(
     const turn = node.transcript[pending.turnIndex];
     node.transcript = turn
       ? node.transcript.map((t, i) =>
-          i === pending.turnIndex && event.isError ? { ...t, toolError: true } : t,
+          i === pending.turnIndex
+            ? { ...t, durationMs: event.durationMs, ...(event.isError ? { toolError: true } : {}) }
+            : t,
         )
       : node.transcript;
     node.pendingToolCall = null;
@@ -421,6 +454,35 @@ function handleToolResult(
 }
 
 /** Applies one SSE event to state, returning a new `WebState` (state is not mutated). */
+/** DH-0207: matches each not-yet-correlated entry in a fresh `agent_queue` snapshot to the
+ * "user" turn its local echo (`addUserTurn`, at send time) already created, so the render
+ * layer can tell "queued" turns apart from delivered ones (see `Turn.queuedMessageId`'s doc
+ * comment). The server never tells a client which turn produced which queue entry — this is
+ * inferred client-side by matching text, newest-unmatched-turn-first, which is safe because
+ * `AgentQueueEvent` only ever ADDS an id this client hasn't seen before once per real send
+ * (the server generates each id exactly once, at the moment `runAgentLoop`'s `pendingMessages`
+ * sink receives that send). Returns `transcript` unchanged (same reference) if nothing new
+ * needed correlating. */
+function correlateQueuedMessages(transcript: Turn[], queue: QueuedMessage[]): Turn[] {
+  const known = new Set(
+    transcript.map((turn) => turn.queuedMessageId).filter((id): id is string => id !== undefined),
+  );
+  let next = transcript;
+  for (const entry of queue) {
+    if (known.has(entry.id)) continue;
+    for (let i = next.length - 1; i >= 0; i--) {
+      const turn = next[i];
+      if (turn?.role !== "user" || turn.text !== entry.message || turn.queuedMessageId) {
+        continue;
+      }
+      next = [...next.slice(0, i), { ...turn, queuedMessageId: entry.id }, ...next.slice(i + 1)];
+      known.add(entry.id);
+      break;
+    }
+  }
+  return next;
+}
+
 export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
   const next: WebState = {
     ...state,
@@ -526,6 +588,17 @@ export function applyEvent(state: WebState, event: ServerSentEvent): WebState {
       next.agents.set(event.agentId, node);
       return next;
     }
+    // DH-0207/DH-0208: a full snapshot of `event.agentId`'s not-yet-delivered queue — see
+    // `AgentQueueEvent`'s own doc comment (src/contracts/events.type.ts). Correlates any
+    // newly-queued entry to the local-echo "user" turn it came from, then stores the raw
+    // snapshot so the render layer can check membership per turn.
+    case "agent_queue": {
+      const node = { ...ensureAgent(next, event.agentId, event.timestamp) };
+      node.transcript = correlateQueuedMessages(node.transcript, event.queue);
+      node.queuedMessages = event.queue;
+      next.agents.set(event.agentId, node);
+      return next;
+    }
     default:
       // Exhaustiveness check: fails to compile if a new ServerSentEvent variant is added to
       // src/contracts/ without a case here (assertNever's parameter type is `never`, which
@@ -580,7 +653,24 @@ export function seedFromTree(
 
   const next: WebState = { ...state, agents: new Map(state.agents) };
   for (const node of nodes) {
-    if (next.agents.has(node.agentId)) continue; // SSE already told us something more current.
+    const existing = next.agents.get(node.agentId);
+    if (existing) {
+      // SSE already told us something more current for this agent overall (status,
+      // transcript, etc. all stay as SSE reported them) -- but DH-0202: `model` is the one
+      // field that's only ever sent once, on the original `agent_spawned` event. If a
+      // reconnect's replay resumes from a point after that event (Last-Event-ID skips
+      // already-delivered events) or otherwise never redelivers it, `ensureAgent` may have
+      // already created this node from a later event (e.g. `agent_output`) with `model: ""`,
+      // and nothing else ever fixes it up -- the header permanently shows "(unknown model)"
+      // even though the agent's real model is still known to the server. The tree bootstrap
+      // (re-run on every reconnect, see app.ts's `handleReconnected`) is authoritative for
+      // "what model is this agent," so patch it in whenever we're still missing it, without
+      // touching any other live field.
+      if (!existing.model && node.model) {
+        next.agents.set(node.agentId, { ...existing, model: node.model });
+      }
+      continue;
+    }
     next.agents.set(node.agentId, {
       agentId: node.agentId,
       parentAgentId: node.parentAgentId,
@@ -596,6 +686,7 @@ export function seedFromTree(
       turnOpen: false,
       pendingToolCall: null,
       statusSince: nowIso,
+      queuedMessages: [],
     });
   }
 
@@ -631,7 +722,7 @@ export function logError(
   message: string,
   timestamp: string = new Date().toISOString(),
 ): WebState {
-  const entries = [...state.errorLog, { message, timestamp }];
+  const entries = [...state.errorLog, { message, timestamp, id: nextErrorLogId++ }];
   const errorLog =
     entries.length > MAX_ERROR_LOG_ENTRIES
       ? entries.slice(entries.length - MAX_ERROR_LOG_ENTRIES)

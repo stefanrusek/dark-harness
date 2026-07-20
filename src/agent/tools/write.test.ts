@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readTool } from "./read.ts";
 import { makeToolContext } from "./test-helpers.ts";
-import type { ToolContext } from "./types.ts";
+import type { ToolContext } from "./types.type.ts";
 import { writeTool } from "./write.ts";
 
 let dir: string;

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
-import type { Turn } from "../types.ts";
-import { TranscriptPane, renderTranscript } from "./TranscriptPane.tsx";
+import type { Turn } from "../types.type.ts";
 import { createScrollBus } from "./scroll-bus.ts";
+import { renderTranscript, TranscriptPane } from "./TranscriptPane.tsx";
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 10));
@@ -80,6 +80,26 @@ describe("TranscriptPane", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("[ dh ]");
     expect(frame).toContain("dh 0.1.0 (abc123)");
+  });
+
+  test("DH-0214: a precomposed accented char followed by an extra combining mark doesn't drop the next character through Ink's real render path", () => {
+    // "café" (precomposed é) + a literal U+0301 combining acute accent stacked on top of it —
+    // two accents effectively on the same "e". Ink's own Output.get() grid-placement layer
+    // (node_modules/ink/build/output.js, via @alcalzone/ansi-tokenize) gives that extra
+    // combining mark its own one-column grid cell, unlike src/tui/width.ts's correct 0-column
+    // model — every character after it drifts one column right and the trailing "." fell off
+    // the row before the fix. This exercises Ink's real layout/render (ink-testing-library),
+    // not just renderTranscript's string output, since the drop happens downstream of it.
+    const doubleAccented = `caf${"é"}́ done.`; // café + combining acute (U+0301) + " done."
+    const { lastFrame } = render(
+      React.createElement(TranscriptPane, {
+        transcript: [turn({ role: "user", text: doubleAccented })],
+        cols: 40,
+        height: 3,
+        emptyText: "",
+      }),
+    );
+    expect(lastFrame() ?? "").toContain("done.");
   });
 
   test("DH-0126: windows to only the last `height` rows when content overflows the viewport", () => {

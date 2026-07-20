@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { LogLine, ServerSentEvent } from "../contracts/index.ts";
 import {
+  computeCostUsd,
   type ModelBinding,
   REPORT_OUTCOME_NUDGE_MESSAGE,
+  runAgentLoop,
   STOPPED_BETWEEN_TURNS_REASON,
   STOPPED_DURING_PROVIDER_CALL_REASON,
   TASK_FAILED_MARKER,
-  computeCostUsd,
-  runAgentLoop,
 } from "./loop.ts";
 import type {
   ModelProvider,
@@ -99,7 +99,7 @@ describe("runAgentLoop", () => {
     expect(result.finalOutput).toBe("All done, task succeeded.");
     expect(result.turns).toBe(3);
 
-    // Events shaped per src/contracts/events.ts
+    // Events shaped per src/contracts/events.type.ts
     expect(events.some((e) => e.type === "agent_spawned")).toBe(true);
     expect(events.some((e) => e.type === "agent_output" && e.chunk.includes("All done"))).toBe(
       true,
@@ -108,7 +108,7 @@ describe("runAgentLoop", () => {
     const statusEvent = events.find((e) => e.type === "agent_status");
     expect(statusEvent && statusEvent.type === "agent_status" && statusEvent.status).toBe("done");
 
-    // Log lines shaped per src/contracts/log.ts
+    // Log lines shaped per src/contracts/log.type.ts
     expect(logLines[0]?.type).toBe("header");
     expect(logLines.some((l) => l.type === "tool_call" && l.toolName === "Bash")).toBe(true);
     expect(logLines.some((l) => l.type === "tool_result")).toBe(true);
@@ -121,7 +121,7 @@ describe("runAgentLoop", () => {
     });
 
     // DH-0089: tool_call/tool_result SSE events are emitted, shaped per
-    // src/contracts/events.ts, and appear immediately before their JSONL counterparts.
+    // src/contracts/events.type.ts, and appear immediately before their JSONL counterparts.
     const toolCallEvent = events.find((e) => e.type === "tool_call");
     expect(toolCallEvent).toMatchObject({
       type: "tool_call",
@@ -478,6 +478,121 @@ describe("runAgentLoop", () => {
       m.content.some((c) => c.type === "text" && c.text.includes("steer towards X")),
     );
     expect(hasInjected).toBe(true);
+  });
+
+  // DH-0207/DH-0208: registerCancelQueuedMessage/onQueueChange — the mechanism behind the
+  // Web UI's per-message cancel button and the agent_queue completion/EOF signal. Mirrors
+  // the "SendMessage injection" test above's shape (tool_use turn then two end_turn turns,
+  // the send fired synchronously right after kicking off the loop) rather than interactive
+  // mode's wait/signal machinery, since these two behaviors don't depend on interactive mode.
+  test("onQueueChange reports the queue growing on send and emptying on drain", async () => {
+    let sendFn: ((message: string) => void) | undefined;
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo first", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const queueSnapshots: Array<Array<{ id: string; message: string }>> = [];
+    const { params } = baseParams({
+      provider,
+      registerSendMessage: (fn) => {
+        sendFn = fn;
+      },
+      onQueueChange: (queue) => {
+        queueSnapshots.push(queue.map((e) => ({ id: e.id, message: e.message })));
+      },
+    });
+    const resultPromise = runAgentLoop(params);
+    sendFn?.("queued message");
+    await resultPromise;
+    // First snapshot: one entry just queued. Last snapshot: drained back to empty at the top
+    // of the next turn.
+    expect(queueSnapshots[0]?.length).toBe(1);
+    expect(queueSnapshots[0]?.[0]?.message).toBe("queued message");
+    expect(queueSnapshots.at(-1)).toEqual([]);
+  });
+
+  test("registerCancelQueuedMessage removes a still-queued entry and reports it via onQueueChange, returning false for an unknown id", async () => {
+    let sendFn: ((message: string) => void) | undefined;
+    let cancelFn: ((messageId: string) => boolean) | undefined;
+    const provider = scriptedProvider([
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo first", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // DH-0050: one nudge-ack turn.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const queueSnapshots: Array<Array<{ id: string; message: string }>> = [];
+    const { params } = baseParams({
+      provider,
+      registerSendMessage: (fn) => {
+        sendFn = fn;
+      },
+      registerCancelQueuedMessage: (fn) => {
+        cancelFn = fn;
+      },
+      onQueueChange: (queue) => {
+        queueSnapshots.push(queue.map((e) => ({ id: e.id, message: e.message })));
+      },
+    });
+    const resultPromise = runAgentLoop(params);
+    sendFn?.("cancel me");
+    const queuedId = queueSnapshots[0]?.[0]?.id;
+    expect(queuedId).toBeDefined();
+    // Unknown id: no-op, reports false, no further onQueueChange emission.
+    expect(cancelFn?.("unknown-id")).toBe(false);
+    const snapshotCountBeforeCancel = queueSnapshots.length;
+    const cancelResult = queuedId !== undefined ? cancelFn?.(queuedId) : undefined;
+    expect(cancelResult).toBe(true);
+    expect(queueSnapshots.length).toBe(snapshotCountBeforeCancel + 1);
+    expect(queueSnapshots.at(-1)).toEqual([]);
+    const result = await resultPromise;
+    // Nothing was ever injected — the cancelled message never reaches the conversation.
+    expect(result.success).toBe(true);
+    const anyCallMentionsCancelled = provider.calls.some((c) =>
+      c.messages.some((m) =>
+        m.content.some((b) => b.type === "text" && b.text.includes("cancel me")),
+      ),
+    );
+    expect(anyCallMentionsCancelled).toBe(false);
   });
 });
 
@@ -1065,72 +1180,75 @@ describe("runAgentLoop — Round 5: interactive mode pauses instead of ending on
 });
 
 describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral identity", () => {
-  test("with only non-deferred (built-in-shaped) tools, the tools array sent to the " +
-    "provider is identical across every turn and matches what the pre-DH-0002 " +
-    "compute-toolDefs-once code would have produced", async () => {
-    const provider = scriptedProvider([
-      {
-        stopReason: "tool_use",
-        content: [
-          {
-            type: "tool_use",
-            id: "call-1",
-            name: "Bash",
-            input: { command: "echo hi", run_in_background: false },
-          },
-        ],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "tool_use",
-        content: [
-          {
-            type: "tool_use",
-            id: "call-2",
-            name: "Bash",
-            input: { command: "echo hi again", run_in_background: false },
-          },
-        ],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "done" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      // DH-0050: one nudge-ack turn.
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "done" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-    ]);
-    // Every tool in this Map is built-in-shaped: `deferred` is never set (mirrors ALL_TOOLS —
-    // no MCP tool ever gets merged in when no mcpServers are configured, per runtime.ts).
-    const tools = buildToolMap();
-    const { params } = baseParams({ provider, tools });
+  test(
+    "with only non-deferred (built-in-shaped) tools, the tools array sent to the " +
+      "provider is identical across every turn and matches what the pre-DH-0002 " +
+      "compute-toolDefs-once code would have produced",
+    async () => {
+      const provider = scriptedProvider([
+        {
+          stopReason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "call-1",
+              name: "Bash",
+              input: { command: "echo hi", run_in_background: false },
+            },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "tool_use",
+          content: [
+            {
+              type: "tool_use",
+              id: "call-2",
+              name: "Bash",
+              input: { command: "echo hi again", run_in_background: false },
+            },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "done" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        // DH-0050: one nudge-ack turn.
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "done" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]);
+      // Every tool in this Map is built-in-shaped: `deferred` is never set (mirrors ALL_TOOLS —
+      // no MCP tool ever gets merged in when no mcpServers are configured, per runtime.ts).
+      const tools = buildToolMap();
+      const { params } = baseParams({ provider, tools });
 
-    const result = await runAgentLoop(params);
-    expect(result.success).toBe(true);
-    expect(provider.calls).toHaveLength(4);
+      const result = await runAgentLoop(params);
+      expect(result.success).toBe(true);
+      expect(provider.calls).toHaveLength(4);
 
-    // This is exactly what the OLD (pre-DH-0002) code computed once, before the turn loop:
-    // `[...params.tools.values()].map((t) => ({ name, description, inputSchema }))` — with
-    // no `deferred` tools present, the new per-turn filter is a no-op, so every turn's
-    // `tools` array must be reference-shape-identical to this and to each other.
-    const expectedToolDefs = [...tools.values()].map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-    }));
+      // This is exactly what the OLD (pre-DH-0002) code computed once, before the turn loop:
+      // `[...params.tools.values()].map((t) => ({ name, description, inputSchema }))` — with
+      // no `deferred` tools present, the new per-turn filter is a no-op, so every turn's
+      // `tools` array must be reference-shape-identical to this and to each other.
+      const expectedToolDefs = [...tools.values()].map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      }));
 
-    for (const call of provider.calls) {
-      expect(call.tools).toEqual(expectedToolDefs);
-    }
-    // Bit-for-bit identical across turns, not just each individually equal to expected.
-    expect(provider.calls[0]?.tools).toEqual(provider.calls[1]?.tools);
-    expect(provider.calls[1]?.tools).toEqual(provider.calls[2]?.tools);
-  });
+      for (const call of provider.calls) {
+        expect(call.tools).toEqual(expectedToolDefs);
+      }
+      // Bit-for-bit identical across turns, not just each individually equal to expected.
+      expect(provider.calls[0]?.tools).toEqual(provider.calls[1]?.tools);
+      expect(provider.calls[1]?.tools).toEqual(provider.calls[2]?.tools);
+    },
+  );
 
   test("a deferred tool not yet activated is filtered out of every turn's tools array", async () => {
     const provider = scriptedProvider([
@@ -1163,59 +1281,64 @@ describe("runAgentLoop — DH-0002: per-turn toolDefs, no-mcpServers behavioral 
     expect(sentNames).not.toContain("mcp__github__create_issue");
   });
 
-  test("a deferred tool activated mid-loop (by a ToolSearch-style call) appears starting " +
-    "the very next turn, not the one where it was activated", async () => {
-    const provider = scriptedProvider([
-      {
-        stopReason: "tool_use",
-        content: [{ type: "tool_use", id: "call-1", name: "ActivatingSearch", input: {} }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "turn 2: done" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      // DH-0050: one nudge-ack turn.
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "turn 2: done" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-    ]);
-    const tools = buildToolMap();
-    tools.set("mcp__github__create_issue", {
-      name: "mcp__github__create_issue",
-      description: "Create a GitHub issue.",
-      inputSchema: { type: "object", properties: {} },
-      deferred: true,
-      async execute() {
-        return { output: "unused", isError: false };
-      },
-    });
-    // Stands in for ToolSearch's real activation side effect (runtime.ts's
-    // searchDeferredTools closure adds to ctx.activatedTools when a result is selected) —
-    // this tool mutates the SAME ToolContext the loop passes to every tool call.
-    const toolContext = makeToolContext();
-    tools.set("ActivatingSearch", {
-      name: "ActivatingSearch",
-      description: "test-only stand-in for ToolSearch's activation side effect",
-      inputSchema: { type: "object", properties: {} },
-      async execute(_input, ctx) {
-        ctx.activatedTools.add("mcp__github__create_issue");
-        return { output: "activated", isError: false };
-      },
-    });
-    const { params } = baseParams({ provider, tools, toolContext });
+  test(
+    "a deferred tool activated mid-loop (by a ToolSearch-style call) appears starting " +
+      "the very next turn, not the one where it was activated",
+    async () => {
+      const provider = scriptedProvider([
+        {
+          stopReason: "tool_use",
+          content: [{ type: "tool_use", id: "call-1", name: "ActivatingSearch", input: {} }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "turn 2: done" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        // DH-0050: one nudge-ack turn.
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "turn 2: done" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]);
+      const tools = buildToolMap();
+      tools.set("mcp__github__create_issue", {
+        name: "mcp__github__create_issue",
+        description: "Create a GitHub issue.",
+        inputSchema: { type: "object", properties: {} },
+        deferred: true,
+        async execute() {
+          return { output: "unused", isError: false };
+        },
+      });
+      // Stands in for ToolSearch's real activation side effect (runtime.ts's
+      // searchDeferredTools closure adds to ctx.activatedTools when a result is selected) —
+      // this tool mutates the SAME ToolContext the loop passes to every tool call.
+      const toolContext = makeToolContext();
+      tools.set("ActivatingSearch", {
+        name: "ActivatingSearch",
+        description: "test-only stand-in for ToolSearch's activation side effect",
+        inputSchema: { type: "object", properties: {} },
+        async execute(_input, ctx) {
+          ctx.activatedTools.add("mcp__github__create_issue");
+          return { output: "activated", isError: false };
+        },
+      });
+      const { params } = baseParams({ provider, tools, toolContext });
 
-    await runAgentLoop(params);
+      await runAgentLoop(params);
 
-    // Turn 1's request was built BEFORE ActivatingSearch ran, so the deferred tool is still
-    // hidden; only turn 2 (built fresh, after activation) includes it. Proves the per-turn
-    // recompute — not a one-time-before-the-loop computation — is what makes this possible.
-    expect(provider.calls[0]?.tools.map((t) => t.name)).not.toContain("mcp__github__create_issue");
-    expect(provider.calls[1]?.tools.map((t) => t.name)).toContain("mcp__github__create_issue");
-  });
+      // Turn 1's request was built BEFORE ActivatingSearch ran, so the deferred tool is still
+      // hidden; only turn 2 (built fresh, after activation) includes it. Proves the per-turn
+      // recompute — not a one-time-before-the-loop computation — is what makes this possible.
+      expect(provider.calls[0]?.tools.map((t) => t.name)).not.toContain(
+        "mcp__github__create_issue",
+      );
+      expect(provider.calls[1]?.tools.map((t) => t.name)).toContain("mcp__github__create_issue");
+    },
+  );
 });
 
 describe("runAgentLoop — DH-0044: streaming coalescing, fallback, and mid-turn partial output", () => {
@@ -1537,152 +1660,164 @@ describe("runAgentLoop — DH-0050 ReportOutcome self-report", () => {
     expect(result.reportedBy).toBe("tool");
   });
 
-  test("a non-tool-use turn with no ReportOutcome call gets exactly one nudge, then the model " +
-    "complies and the loop ends via the tool", async () => {
-    const provider = scriptedProvider([
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "I think I'm done." }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "tool_use",
-        content: [
-          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
-        ],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-    ]);
-    const { params, logLines } = baseParams({ provider });
-    const result = await runAgentLoop(params);
+  test(
+    "a non-tool-use turn with no ReportOutcome call gets exactly one nudge, then the model " +
+      "complies and the loop ends via the tool",
+    async () => {
+      const provider = scriptedProvider([
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "I think I'm done." }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "tool_use",
+          content: [
+            { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]);
+      const { params, logLines } = baseParams({ provider });
+      const result = await runAgentLoop(params);
 
-    expect(provider.calls).toHaveLength(2);
-    expect(result.success).toBe(true);
-    expect(result.reportedBy).toBe("tool");
-    // The nudge text reached the model as a user message on the second call.
-    const secondCallMessages = provider.calls[1]?.messages ?? [];
-    const lastMessage = secondCallMessages[secondCallMessages.length - 1];
-    expect(lastMessage?.role).toBe("user");
-    expect(lastMessage?.content).toEqual([{ type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE }]);
-    expect(
-      logLines.some(
-        (l) =>
-          l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
-      ),
-    ).toBe(true);
-  });
+      expect(provider.calls).toHaveLength(2);
+      expect(result.success).toBe(true);
+      expect(result.reportedBy).toBe("tool");
+      // The nudge text reached the model as a user message on the second call.
+      const secondCallMessages = provider.calls[1]?.messages ?? [];
+      const lastMessage = secondCallMessages[secondCallMessages.length - 1];
+      expect(lastMessage?.role).toBe("user");
+      expect(lastMessage?.content).toEqual([{ type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE }]);
+      expect(
+        logLines.some(
+          (l) =>
+            l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
+        ),
+      ).toBe(true);
+    },
+  );
 
-  test("a nudge is sent only once — a second consecutive non-tool-use turn falls back to the " +
-    "legacy marker scan instead of nudging again", async () => {
-    const provider = scriptedProvider([
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "still thinking" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "All done, no marker here." }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-    ]);
-    const { params } = baseParams({ provider });
-    const result = await runAgentLoop(params);
+  test(
+    "a nudge is sent only once — a second consecutive non-tool-use turn falls back to the " +
+      "legacy marker scan instead of nudging again",
+    async () => {
+      const provider = scriptedProvider([
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "still thinking" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "All done, no marker here." }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]);
+      const { params } = baseParams({ provider });
+      const result = await runAgentLoop(params);
 
-    expect(provider.calls).toHaveLength(2);
-    expect(result.success).toBe(true);
-    expect(result.reportedBy).toBe("clean-end");
-    expect(result.finalOutput).toBe("All done, no marker here.");
-  });
+      expect(provider.calls).toHaveLength(2);
+      expect(result.success).toBe(true);
+      expect(result.reportedBy).toBe("clean-end");
+      expect(result.finalOutput).toBe("All done, no marker here.");
+    },
+  );
 
   // DH-0140 User Story: an agent waiting on its own spawned children (sub-agents or
   // background Bash calls still `running`/`waiting`) shouldn't get end-out-from-under-it by
   // the missed-call nudge — it's deliberately polling, not forgetting to self-report.
-  test("DH-0140: the nudge is skipped (not just deferred) while hasPendingChildren() reports " +
-    "outstanding children — the loop just starts another turn", async () => {
-    const provider = scriptedProvider([
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "still waiting on my children" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "tool_use",
-        content: [
-          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
-        ],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-    ]);
-    const { params, logLines } = baseParams({
-      provider,
-      hasPendingChildren: () => true,
-    });
-    const result = await runAgentLoop(params);
+  test(
+    "DH-0140: the nudge is skipped (not just deferred) while hasPendingChildren() reports " +
+      "outstanding children — the loop just starts another turn",
+    async () => {
+      const provider = scriptedProvider([
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "still waiting on my children" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "tool_use",
+          content: [
+            { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]);
+      const { params, logLines } = baseParams({
+        provider,
+        hasPendingChildren: () => true,
+      });
+      const result = await runAgentLoop(params);
 
-    expect(provider.calls).toHaveLength(2);
-    expect(result.success).toBe(true);
-    expect(result.reportedBy).toBe("tool");
-    // No nudge text was ever injected — the second call's last message is NOT the nudge.
-    const secondCallMessages = provider.calls[1]?.messages ?? [];
-    const lastMessage = secondCallMessages[secondCallMessages.length - 1];
-    expect(lastMessage?.content).not.toEqual([
-      { type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE },
-    ]);
-    expect(
-      logLines.some(
-        (l) =>
-          l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
-      ),
-    ).toBe(false);
-  });
+      expect(provider.calls).toHaveLength(2);
+      expect(result.success).toBe(true);
+      expect(result.reportedBy).toBe("tool");
+      // No nudge text was ever injected — the second call's last message is NOT the nudge.
+      const secondCallMessages = provider.calls[1]?.messages ?? [];
+      const lastMessage = secondCallMessages[secondCallMessages.length - 1];
+      expect(lastMessage?.content).not.toEqual([
+        { type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE },
+      ]);
+      expect(
+        logLines.some(
+          (l) =>
+            l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
+        ),
+      ).toBe(false);
+    },
+  );
 
-  test("DH-0140: once hasPendingChildren() reports no more outstanding children, the nudge " +
-    "fires normally on the next non-tool-use turn", async () => {
-    let childrenPending = true;
-    const provider = scriptedProvider([
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "still waiting on my children" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "children finished, still thinking" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "tool_use",
-        content: [
-          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
-        ],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-    ]);
-    const { params, logLines } = baseParams({
-      provider,
-      hasPendingChildren: () => {
-        const pending = childrenPending;
-        childrenPending = false;
-        return pending;
-      },
-    });
-    const result = await runAgentLoop(params);
+  test(
+    "DH-0140: once hasPendingChildren() reports no more outstanding children, the nudge " +
+      "fires normally on the next non-tool-use turn",
+    async () => {
+      let childrenPending = true;
+      const provider = scriptedProvider([
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "still waiting on my children" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "children finished, still thinking" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "tool_use",
+          content: [
+            { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]);
+      const { params, logLines } = baseParams({
+        provider,
+        hasPendingChildren: () => {
+          const pending = childrenPending;
+          childrenPending = false;
+          return pending;
+        },
+      });
+      const result = await runAgentLoop(params);
 
-    expect(provider.calls).toHaveLength(3);
-    expect(result.success).toBe(true);
-    expect(result.reportedBy).toBe("tool");
-    // The nudge was injected exactly once, ahead of the third (ReportOutcome) call.
-    const thirdCallMessages = provider.calls[2]?.messages ?? [];
-    const lastMessage = thirdCallMessages[thirdCallMessages.length - 1];
-    expect(lastMessage?.content).toEqual([{ type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE }]);
-    expect(
-      logLines.filter(
-        (l) =>
-          l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
-      ),
-    ).toHaveLength(1);
-  });
+      expect(provider.calls).toHaveLength(3);
+      expect(result.success).toBe(true);
+      expect(result.reportedBy).toBe("tool");
+      // The nudge was injected exactly once, ahead of the third (ReportOutcome) call.
+      const thirdCallMessages = provider.calls[2]?.messages ?? [];
+      const lastMessage = thirdCallMessages[thirdCallMessages.length - 1];
+      expect(lastMessage?.content).toEqual([{ type: "text", text: REPORT_OUTCOME_NUDGE_MESSAGE }]);
+      expect(
+        logLines.filter(
+          (l) =>
+            l.type === "message" && l.role === "user" && l.content === REPORT_OUTCOME_NUDGE_MESSAGE,
+        ),
+      ).toHaveLength(1);
+    },
+  );
 
   test("legacy fallback: TASK_FAILED after the nudge is still reported as failure", async () => {
     const provider = scriptedProvider([
@@ -1740,44 +1875,49 @@ describe("runAgentLoop — DH-0050 ReportOutcome self-report", () => {
     expect(result.success).toBe(false);
   });
 
-  test("interactive mode never checks for ReportOutcome — an unregistered call just reports " +
-    "'Unknown tool' and the conversation keeps waiting, it doesn't end the session", async () => {
-    const provider = scriptedProvider([
-      {
-        stopReason: "tool_use",
-        content: [
-          { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
-        ],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-      {
-        stopReason: "end_turn",
-        content: [{ type: "text", text: "waiting for you" }],
-        usage: { inputTokens: 1, outputTokens: 1 },
-      },
-    ]);
-    const controller = new AbortController();
-    const { params, logLines } = baseParams({
-      provider,
-      interactive: true,
-      signal: controller.signal,
-      registerSendMessage: () => {},
-    });
-    // Abort right after the loop would otherwise pause in "waiting", so the test doesn't hang.
-    const originalOnEvent = params.onEvent;
-    params.onEvent = (e) => {
-      originalOnEvent?.(e);
-      if (e.type === "agent_status" && e.status === "waiting") controller.abort();
-    };
-    const result = await runAgentLoop(params);
+  test(
+    "interactive mode never checks for ReportOutcome — an unregistered call just reports " +
+      "'Unknown tool' and the conversation keeps waiting, it doesn't end the session",
+    async () => {
+      const provider = scriptedProvider([
+        {
+          stopReason: "tool_use",
+          content: [
+            { type: "tool_use", id: "tu_1", name: "ReportOutcome", input: { status: "success" } },
+          ],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+        {
+          stopReason: "end_turn",
+          content: [{ type: "text", text: "waiting for you" }],
+          usage: { inputTokens: 1, outputTokens: 1 },
+        },
+      ]);
+      const controller = new AbortController();
+      const { params, logLines } = baseParams({
+        provider,
+        interactive: true,
+        signal: controller.signal,
+        registerSendMessage: () => {},
+      });
+      // Abort right after the loop would otherwise pause in "waiting", so the test doesn't hang.
+      const originalOnEvent = params.onEvent;
+      params.onEvent = (e) => {
+        originalOnEvent?.(e);
+        if (e.type === "agent_status" && e.status === "waiting") controller.abort();
+      };
+      const result = await runAgentLoop(params);
 
-    // Never terminated via the tool — it fell through to the interactive "waiting" pause and
-    // was only ended by the test's own abort.
-    expect(result.reportedBy).toBeUndefined();
-    expect(
-      logLines.some((l) => l.type === "tool_result" && l.output === "Unknown tool: ReportOutcome"),
-    ).toBe(true);
-  });
+      // Never terminated via the tool — it fell through to the interactive "waiting" pause and
+      // was only ended by the test's own abort.
+      expect(result.reportedBy).toBeUndefined();
+      expect(
+        logLines.some(
+          (l) => l.type === "tool_result" && l.output === "Unknown tool: ReportOutcome",
+        ),
+      ).toBe(true);
+    },
+  );
 });
 
 describe("DH-0010 Part A: computeCostUsd cache-token pricing", () => {
@@ -2046,6 +2186,65 @@ describe("DH-0010 Part B: context-window compaction", () => {
     expect(postCompactionCall?.messages[0]?.role).toBe("user");
     const firstBlock = postCompactionCall?.messages[0]?.content[0];
     expect(firstBlock?.type).toBe("text");
+  });
+
+  test("the trigger check is skipped on the turn immediately after a compaction (one-shot guard)", async () => {
+    // Turn 1 ends non-tool-use, so the DH-0050 nudge fires and consumes it as "nudged" before
+    // compaction ever gets a chance to look at usage — this matters because the standard
+    // compaction test above relies on the *second* non-tool-use turn to finalize via the
+    // legacy marker scan, which never leaves a further turn for the post-compaction guard
+    // (loop.ts's `if (justCompacted) { justCompacted = false; }` branch) to run. Here, the
+    // post-compaction turn returns a tool_use instead, forcing a genuine next turn — which is
+    // exactly where that one-shot guard is exercised: it must reset `justCompacted` without
+    // re-triggering compaction, even though contextTokens is still nominally over threshold.
+    const provider = scriptedProvider([
+      // Turn 1: non-tool-use, nudged (compaction can't see usage yet: no lastUsage).
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "turn one done" }],
+        usage: { inputTokens: 80, outputTokens: 15 },
+      },
+      // Turn 2 top: lastUsage (95) is now >= 80% of the 100-token window -> compacts. The
+      // summarization call itself (no tools).
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "SUMMARY TEXT" }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // Turn 2's real (post-compaction) call: a tool_use, so turn 3 is unavoidable — this is
+      // what lets the one-shot guard on turn 3's trigger check actually run.
+      {
+        stopReason: "tool_use",
+        content: [
+          {
+            type: "tool_use",
+            id: "tu_1",
+            name: "Bash",
+            input: { command: "echo hi", run_in_background: false },
+          },
+        ],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+      // Turn 3: justCompacted is reset here without a second compaction attempt, then the
+      // agent finishes normally.
+      {
+        stopReason: "end_turn",
+        content: [{ type: "text", text: "done, task succeeded." }],
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+    const { params, logLines } = baseParams({
+      provider,
+      contextWindow: 100,
+      compaction: { enabled: true, thresholdPercent: 80 },
+    });
+    const result = await runAgentLoop(params);
+
+    expect(result.success).toBe(true);
+    // Exactly one compaction line — the one-shot guard must have prevented a second attempt
+    // on turn 3, even though nothing lowered contextTokens back below threshold in this test.
+    expect(logLines.filter((l) => l.type === "compaction")).toHaveLength(1);
+    expect(provider.calls).toHaveLength(4);
   });
 });
 

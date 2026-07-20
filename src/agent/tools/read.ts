@@ -15,7 +15,8 @@
 import { isAbsolute, resolve } from "node:path";
 import { getDocumentProxy } from "unpdf";
 import { recordRead } from "./read-guard.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const DEFAULT_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
@@ -29,7 +30,7 @@ const BINARY_SNIFF_BYTES = 8_000;
 // "just read this file" call. Named distinctly from `MAX_READABLE_BYTES` below: this cap can
 // be bypassed by supplying `offset`/`limit` (an explicit request for a bounded slice), the
 // absolute ceiling below cannot.
-const PRIMARY_WHOLE_FILE_BYTE_CAP = 256 * 1024;
+const PRIMARY_WHOLE_FILE_BYTE_CAP = Object.freeze(256 * 1024);
 // DH-0014: an absolute ceiling — checked from `Bun.file(...).size` (filesystem metadata only,
 // before any byte of the file is read) — that applies unconditionally, even to offset/limit
 // windowed reads, because `streamLines` below still has to walk the entire file byte-by-byte
@@ -38,7 +39,7 @@ const PRIMARY_WHOLE_FILE_BYTE_CAP = 256 * 1024;
 // *whole-file* cap (`PRIMARY_WHOLE_FILE_BYTE_CAP` above) to match real Claude Code, but left
 // this larger absolute ceiling in place for that reason — see this ticket's Notes for the
 // audit of DH-0014's original rationale before reusing this constant's old, larger value here.
-const MAX_READABLE_BYTES = 256 * 1024 * 1024;
+const MAX_READABLE_BYTES = Object.freeze(256 * 1024 * 1024);
 
 /** Human-readable size for error messages, matching real Claude Code's observed format
  * (`256KB`, `3.2MB` — no space between number and unit, one decimal place above 1KB). */
@@ -150,6 +151,7 @@ export function isNotebookPath(path: string): boolean {
 // three candidate PDF-parsing libraries (see the ticket's evaluation table) that survives
 // `bun build --compile` into a standalone binary; the other two pull in a native canvas
 // dependency that crashes with `DOMMatrix is not defined` once compiled.
+// biome-ignore lint/plugin: Object.freeze() on a TypedArray throws immediately at module load — its integer-indexed elements can't be made non-configurable per spec (DH-0162).
 const PDF_MAGIC = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]); // "%PDF-"
 const MAX_PDF_PAGE_SPAN = 20;
 const PDF_PAGES_REQUIRED_ABOVE = 10;
@@ -285,7 +287,7 @@ async function streamLines(
   return { lines, remaining };
 }
 
-export const readTool: Tool = {
+export const readTool: Tool = Object.freeze<Tool>({
   name: "Read",
   description:
     "Read a file from the local filesystem, returned with cat -n style line numbers. " +
@@ -316,10 +318,24 @@ export const readTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const filePath = input.file_path;
-    if (typeof filePath !== "string" || filePath.length === 0) {
-      return { output: "Read tool error: 'file_path' must be a non-empty string.", isError: true };
-    }
+    // 'offset'/'limit' keep their own local checks — both add a positivity constraint beyond
+    // plain typeof ("must be a 1-based positive number." / "must be a positive number.") that
+    // the shared helper's generic "must be a number." wording doesn't match, so only
+    // 'file_path' and 'pages' are scoped into the shared validator.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: {
+          file_path: readTool.inputSchema.properties.file_path,
+          pages: readTool.inputSchema.properties.pages,
+        },
+        required: ["file_path"],
+      },
+      "Read",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const filePath = input.file_path as string;
 
     const offset = input.offset;
     if (offset !== undefined && (typeof offset !== "number" || offset < 1)) {
@@ -332,10 +348,7 @@ export const readTool: Tool = {
     if (limit !== undefined && (typeof limit !== "number" || limit < 1)) {
       return { output: "Read tool error: 'limit' must be a positive number.", isError: true };
     }
-    const pages = input.pages;
-    if (pages !== undefined && typeof pages !== "string") {
-      return { output: "Read tool error: 'pages' must be a string.", isError: true };
-    }
+    const pages = input.pages as string | undefined;
 
     const absPath = resolvePath(filePath, ctx.cwd);
     const file = Bun.file(absPath);
@@ -514,4 +527,4 @@ export const readTool: Tool = {
 
     return { output: formatted, isError: false };
   },
-};
+});

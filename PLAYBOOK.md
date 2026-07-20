@@ -311,6 +311,45 @@ Escalation directions are fixed: **up to the owner** for authority/taste/irrever
 calls; **to the architect-on-call** for hard judgment; **stay with the coordinator** for
 routine routing and reconciliation.
 
+### 7.1 Wave execution (owner-preferred pattern, confirmed 2026-07-19)
+
+For a backlog of several ready-to-implement tickets, the coordinator runs them as a
+**wave**: dispatch every independently-implementable ticket in parallel (isolated
+worktrees per §6), then, as each reports back, merge/verify/push it immediately rather
+than waiting for the whole wave to finish. Tickets that are tightly coupled (same shared
+module, same high-churn file) get combined into one dispatch instead of two agents racing
+each other on the same files — see §6's directory-ownership principle, applied at dispatch
+time, not just merge time. A ticket whose worktree turns out to need a large, high-stakes
+merge (the file is central/risky, e.g. the core agent loop) gets its own dedicated merge
+agent rather than a coordinator hand-resolve, per §6's per-agent-worktree guidance.
+
+**Standing owner authorization:** once a wave is dispatched, the coordinator keeps
+executing it — dispatch, merge, verify gates, push, dispatch the next dependent ticket —
+**without stopping to ask for go-ahead at each step.** ("You have my permission to just do
+all these without stopping — if you do need me, hold only the one ticket and keep going.")
+If a specific ticket genuinely needs owner input (a real product decision, not an
+implementation detail an agent can reasonably decide), the coordinator holds *that ticket
+only* and keeps the rest of the wave moving — it does not stall the whole wave on one
+open question. This extends to the periodic refactoring-round mechanism (§9's
+process-doc equivalent, `docs/design/refactoring-round-prompt.md`): the coordinator closes
+a round's `Refactoring-Round: DH-XXXX` trailer commit on its own once it has reviewed
+what the architect filed, rather than asking first.
+
+The coordinator still reports back when a wave/round genuinely completes, or when
+something surprising or risky is found (a real bug, a design conflict, a stale-worktree
+mismatch) — this authorization removes routine "here's what landed, what next?"
+check-ins, not visibility into outcomes.
+
+**Ticket minting stays in the primary checkout.** `new_ticket.py` (spile-ops) allocates the
+next `DH-NNNN` ID from `tracking/README.md`'s `counter:` field, a tracked file with one
+physical copy per worktree. If a wave's isolated worktrees each mint tickets independently,
+they can mint the same ID from the same stale counter value, discovered only when the
+branches merge (this happened for real — `DH-0213` minted twice during refactoring round
+DH-0216, see `tracking/DH-0217-*.md`). The tool itself now refuses to mint from a linked
+worktree (`git rev-parse --git-common-dir` vs `--git-dir`); the underlying convention is
+still: any ticket-filing need discovered mid-dispatch is relayed back to the coordinator's
+own primary checkout to mint, never run in place inside the dispatched worktree.
+
 ---
 
 ## 8. Bootstrap — authoring the founding handoff

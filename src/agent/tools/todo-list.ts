@@ -2,7 +2,7 @@
 // (DH-0076). Zero parameters: rereading current ground truth costs a few dozen tokens.
 
 import type { TodoRecord } from "../todos.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 function formatLine(record: TodoRecord): string {
   const suffix =
@@ -10,7 +10,7 @@ function formatLine(record: TodoRecord): string {
   return `${record.id} [${record.status}] ${record.subject}${suffix}`;
 }
 
-export const todoListTool: Tool = {
+export const todoListTool: Tool = Object.freeze<Tool>({
   name: "TodoList",
   description:
     "List every item in your own todo list, compactly, with a count summary. Use this to " +
@@ -39,4 +39,4 @@ export const todoListTool: Tool = {
       isError: false,
     };
   },
-};
+});

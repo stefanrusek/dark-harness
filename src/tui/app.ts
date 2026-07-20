@@ -1,21 +1,26 @@
 // Thin I/O shell: wires the pure reducer/render/parse modules (state.ts, render.ts,
-// keys.ts) to real terminal + network I/O (sse-client.ts, http-client.ts). Every
+// keys.ts) to real terminal + network I/O (../client-core/sse-transport.ts, http-client.ts). Every
 // side-effecting dependency is injectable via `TuiIO` so this module's *wiring logic* is
 // unit-testable with fakes; only the real `process.stdin` raw-mode/PTY behavior itself
 // (setRawMode, real SIGWINCH delivery) requires an actual terminal — that's covered by the
 // E2E domain's PTY harness (ADR 0008), not here. See docs/handoffs/tui.md status log for
 // the exact list of lines left to E2E.
 
+import { runSseTransport } from "../client-core/sse-transport.ts";
 import { sendCommand } from "./http-client.ts";
 import type { InkMount } from "./ink/mount.ts";
 import { mountInk } from "./ink/mount.ts";
 import { createScrollBus } from "./ink/scroll-bus.ts";
 import { parseKeys } from "./keys.ts";
+import { MouseChunkAssembler } from "./mouse.ts";
 import { MouseLifecycle } from "./mouse-lifecycle.ts";
-import { parseSgrMouseChunk, stripSgrMouseSequences } from "./mouse.ts";
-import { runSseClient } from "./sse-client.ts";
 import { initialState, reducer } from "./state.ts";
-import type { Action, Effect, TuiState } from "./types.ts";
+import type { Action, Effect, TuiState } from "./types.type.ts";
+
+// Confirmed against the Server domain's actual route (src/server/server.ts,
+// GET /api/events) — see docs/handoffs/tui.md status log. DH-0185: relocated here from the
+// now-deleted sse-client.ts when the TUI moved onto the shared client-core transport.
+export const EVENTS_PATH = "/api/events";
 
 /** DH-0126: lines the transcript scrolls per wheel notch — no per-notch line-count is
  * reported by SGR 1006 (one event = one notch), so this is a fixed, editor-typical step. */
@@ -93,6 +98,23 @@ const FRAME_INTERVAL_MS = 33;
  * progress). A second Ctrl+C forces the same outcome sooner; this is only the backstop. */
 export const SHUTDOWN_FALLBACK_MS = 5000;
 
+/** DH-0166: how many consecutive failed SSE connection attempts the TUI tolerates before
+ * giving up and exiting with a fatal error instead of spinning on `reconnecting…` forever.
+ * The TUI's server is either this same process (local mode) or an operator-named `--connect`
+ * target — in both cases a failure that survives this many jittered-backoff attempts is
+ * non-transient, and an endless spinner with a one-line status is exactly the opaque failure
+ * mode DH-0166 escalated on. The Web client keeps its unbounded retry (a browser tab can
+ * legitimately outlive a long server restart). */
+export const SSE_MAX_CONSECUTIVE_FAILURES = 10;
+
+/** DH-0166: what `startTui` resolves with. `fatalError` is set when the TUI tore itself down
+ * because its SSE transport gave up (see `SSE_MAX_CONSECUTIVE_FAILURES`) — the caller
+ * (Core's run.ts) is responsible for printing it and exiting non-zero. Absent on a normal
+ * operator quit. */
+export interface StartTuiResult {
+  fatalError?: string;
+}
+
 export interface StartTuiOptions {
   /** DH-0059: true when this process also constructed the `DhServer` this TUI talks to
    * (local mode) — passed by `src/cli.ts`, which is the only place that knows. Defaults to
@@ -101,11 +123,17 @@ export interface StartTuiOptions {
   /** Lets tests inject fake stdin/stdout/fetch; production callers (Core's `src/cli.ts`)
    * can omit it to use the real terminal and network. */
   io?: Partial<TuiIO>;
+  /** DH-0166: override for `SSE_MAX_CONSECUTIVE_FAILURES` — test-only knob (a real give-up
+   * at the production cap sits behind minutes of jittered backoff). Production callers omit
+   * it. */
+  maxSseFailures?: number;
 }
 
 /**
  * Start the console TUI against the server at `baseUrl`. Resolves once the user quits
- * (Ctrl+C).
+ * (Ctrl+C), or — DH-0166 — once the SSE transport gives up after
+ * `SSE_MAX_CONSECUTIVE_FAILURES` consecutive failed attempts, in which case the result's
+ * `fatalError` carries the message the caller should surface (and exit non-zero on).
  *
  * `token`, when the target server has `security.token` configured (ADR 0004), is sent as a
  * real `Authorization: Bearer <token>` header on every HTTP/SSE request the client makes —
@@ -117,7 +145,15 @@ export async function startTui(
   baseUrl: string,
   token?: string,
   opts: StartTuiOptions = {},
-): Promise<void> {
+): Promise<StartTuiResult> {
+  // DH-0164: the real fix for Ink's CI-suppressed-rendering bug (`is-in-ci`, same mechanism
+  // as DH-0146) lives in `src/cli.ts`'s very first import
+  // (`./tui/ink/clear-ci-env-for-interactive-render.ts`), not here — `mountInk`/`ink` are
+  // already reachable via this file's own *static* `import { mountInk } from "./ink/mount.ts"`
+  // at the top of this module, so by the time this function body runs, `ink` (and therefore
+  // `is-in-ci`) has already been evaluated; a `delete process.env.CI` here is too late to have
+  // any effect. See that module's comment for the full explanation.
+
   // DH-0145: yoga-layout (an ink dependency) loads its WASM binary via a top-level await in
   // its own entry module, and ink's DOM layer calls `Yoga.Node.create()` synchronously inside
   // `mountInk()` below. Whether that WASM load has settled by the time `mountInk()` reaches it
@@ -148,8 +184,12 @@ export async function startTui(
   // tree calls Ink's `useInput`/`usePaste`, so mounting does not touch stdin raw-mode — that
   // stays owned by this file's own `stdin.on("data", ...)` wiring below, unchanged.
 
-  return new Promise<void>((resolve) => {
+  return new Promise<StartTuiResult>((resolve) => {
     const abortController = new AbortController();
+
+    // DH-0166: set by the SSE transport's `onGiveUp` right before it forces a `finish()` —
+    // read once, in `finish()`, to build the result the promise resolves with.
+    let fatalError: string | undefined;
 
     // Mounted just below, right after the alt-screen/cursor/bracketed-paste escape sequences
     // are written — so that write is always the first thing on the wire, matching this
@@ -160,7 +200,6 @@ export async function startTui(
     // Declared here (ahead of `draw`/`cleanup`, which close over it) and assigned later,
     // after the alt-screen write below — `const` can't express "declared now, initialized a
     // few lines down".
-    // biome-ignore lint/style/useConst: see comment above.
     let inkInstance: InkMount;
 
     // DH-0126: SGR mouse reporting (see mouse.ts) is enabled/disabled through the same
@@ -212,7 +251,7 @@ export async function startTui(
       finished = true;
       if (shutdownFallbackTimer !== undefined) clearTimeout(shutdownFallbackTimer);
       cleanup();
-      resolve();
+      resolve(fatalError !== undefined ? { fatalError } : {});
     }
 
     function dispatch(action: Action): void {
@@ -302,15 +341,22 @@ export async function startTui(
     // to `parseKeys`, which has no notion of the `[<...M` introducer and would otherwise fall
     // through its "unrecognized CSI" branch and leak the sequence's digits into the composer
     // as literal keystrokes — the exact bug this ticket reports.
+    //
+    // DH-0230: under rapid/aggressive scrolling the PTY can split one SGR sequence across two
+    // `data` events; a per-chunk-only strip left the continuation fragment (no `ESC[<`
+    // prefix) looking like ordinary text and it leaked through to parseKeys as garbage.
+    // MouseChunkAssembler carries an unresolved trailing partial forward across chunks so a
+    // sequence split at any boundary is reassembled before parsing.
+    const mouseAssembler = new MouseChunkAssembler();
     stdin.on("data", (chunk: string) => {
-      for (const event of parseSgrMouseChunk(chunk)) {
+      const { events, rest } = mouseAssembler.process(chunk);
+      for (const event of events) {
         if (event.type === "scrollUp") {
           scrollBus.emit(-SCROLL_LINES_PER_NOTCH);
         } else if (event.type === "scrollDown") {
           scrollBus.emit(SCROLL_LINES_PER_NOTCH);
         }
       }
-      const rest = stripSgrMouseSequences(chunk);
       for (const key of parseKeys(rest)) {
         dispatch({ type: "key", key });
       }
@@ -329,16 +375,28 @@ export async function startTui(
       }, RESIZE_DEBOUNCE_MS);
     });
 
-    // initialState() already reflects "connecting"; runSseClient reports its own
+    // initialState() already reflects "connecting"; runSseTransport reports its own
     // transitions (connecting -> open/error) as they happen.
-    void runSseClient({
-      baseUrl,
+    void runSseTransport({
+      url: `${baseUrl}${EVENTS_PATH}`,
       fetchImpl,
       ...(authHeaders ? { headers: authHeaders } : {}),
       signal: abortController.signal,
       onEvent: (event) => dispatch({ type: "sse_event", event }),
       onConnectionChange: (status) => dispatch({ type: "connection", status }),
       onReconnected: () => dispatch({ type: "reconnected" }),
+      // DH-0166: bounded retries — after this many consecutive failures the failure is
+      // non-transient; tear the TUI down and let the caller print a real error (the FR's
+      // "clear, actionable error, not an endless reconnecting… spinner").
+      maxConsecutiveFailures: opts.maxSseFailures ?? SSE_MAX_CONSECUTIVE_FAILURES,
+      onGiveUp: (err) => {
+        const detail = err instanceof Error ? err.message : String(err);
+        const attempts = opts.maxSseFailures ?? SSE_MAX_CONSECUTIVE_FAILURES;
+        fatalError =
+          `could not connect to ${baseUrl} after ${attempts} attempts ` +
+          `(${detail}). Check that the server is running and reachable at that address.`;
+        finish();
+      },
     });
 
     // Fire request_agent_tree on startup (not just on left-arrow) so rootAgentId gets

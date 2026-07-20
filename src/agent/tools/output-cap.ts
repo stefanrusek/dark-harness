@@ -35,7 +35,7 @@ export const TAIL_PREVIEW_CHARS = 2_000;
 // DH-0080: where saved full-output files live. Not session-scoped (ToolContext carries no
 // session/log directory today — see types.ts), so this uses its own stable temp subdirectory
 // instead, cleaned up by a simple file-count cap (below) rather than a session-end hook.
-const OUTPUT_SAVE_DIR = join(tmpdir(), "dh-bash-output");
+const OUTPUT_SAVE_DIR = Object.freeze(join(tmpdir(), "dh-bash-output"));
 // DH-0080: cleanup policy — rather than session-scoped deletion (no session lifecycle hook
 // reaches this layer) or time-based expiry (extra bookkeeping for little benefit here), cap the
 // directory at a fixed file count and evict the oldest files by mtime whenever it's exceeded.

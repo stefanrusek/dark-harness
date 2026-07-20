@@ -100,7 +100,11 @@ button {
   font-size: inherit;
 }
 
+/* `.hidden` is a utility class that must win over any same-specificity `display` rule
+ * regardless of source order (e.g. `.model-picker-overlay { display: flex; }`) — removing
+ * `!important` here caused hidden overlays to still intercept clicks (DH-0151 e2e regression). */
 .hidden {
+  /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
   display: none !important;
 }
 
@@ -153,11 +157,18 @@ button {
   font-weight: 700;
   letter-spacing: 0.02em;
   font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.brand::before {
-  content: "◆ ";
-  color: var(--accent);
+/* DH-0219/DH-0198: the actual "D H" monogram (docs/media/logo.svg via <LogoMark>), replacing
+   the bare "◆ " ::before pseudo-element that stood in for the brand mark. Sized to stay
+   legible next to the 15px wordmark without dominating the sidebar header row. */
+.brand-mark {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .main-pane {
@@ -179,7 +190,9 @@ button {
   width: fit-content;
   border: 1px solid var(--border-strong);
   color: var(--text-dim);
-  transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+  transition:
+    color 0.2s var(--ease),
+    border-color 0.2s var(--ease);
 }
 
 .connection-pill::before {
@@ -234,7 +247,9 @@ button {
   cursor: pointer;
   color: var(--text-dim);
   animation: fade-in-up 0.25s var(--ease);
-  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+  transition:
+    background 0.15s var(--ease),
+    color 0.15s var(--ease);
 }
 
 .agent-row:hover {
@@ -255,15 +270,15 @@ button {
   outline-offset: -2px;
 }
 
-.agent-row.root .agent-label {
-  font-weight: 600;
-}
-
 .agent-label {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-row.root .agent-label {
+  font-weight: 600;
 }
 
 .agent-tokens {
@@ -453,8 +468,10 @@ button {
   border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
-  transition: transform 0.1s var(--ease), background 0.15s var(--ease), border-color 0.15s
-    var(--ease);
+  transition:
+    transform 0.1s var(--ease),
+    background 0.15s var(--ease),
+    border-color 0.15s var(--ease);
 }
 
 .btn:hover {
@@ -584,11 +601,27 @@ button {
   font-size: 1.15em;
 }
 
-.turn-text h3,
-.turn-text h4,
-.turn-text h5,
-.turn-text h6 {
+.turn-text h3 {
+  font-size: 1.05em;
+}
+
+.turn-text h4 {
   font-size: 1em;
+}
+
+.turn-text h5 {
+  font-size: 0.925em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.turn-text h6 {
+  font-size: 0.85em;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .turn-text ul,
@@ -757,6 +790,47 @@ button {
   color: var(--text);
 }
 
+/* DH-0207: a "user" turn still sitting in the agent's not-yet-delivered queue — visually
+ * distinct (dashed border, muted fill, reduced opacity) from an already-sent/delivered turn,
+ * plus an inline "queued" badge and Cancel button. Once the entry is delivered (or
+ * cancelled), the turn silently reverts to ordinary `.turn-user` styling — see
+ * `Turn.queuedMessageId`'s doc comment in state.ts for why no extra state transition is
+ * needed here. */
+.turn-queued .turn-text {
+  background: var(--panel-raised);
+  border-style: dashed;
+  border-color: var(--text-faint);
+  opacity: 0.72;
+}
+
+.turn-queued-badge {
+  margin-left: var(--space-2);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--text-faint);
+  color: var(--panel);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.turn-queued-cancel {
+  align-self: flex-end;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.turn-queued-cancel:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
 /* DH-0093: local, never-sent `/help` entries — visually distinct from real conversation
  * turns (centered, dim, monospace) so an operator never mistakes canned help text for
  * something the agent actually said. */
@@ -794,6 +868,86 @@ button {
 
 .turn-tool-error .turn-text {
   color: var(--danger);
+}
+
+/* DH-0199: standalone/grouped tool-call rows become clickable (native `role="button"` div,
+   since the existing `.turn-tool` shell is a `<div>`, not a `<button>`), and each one can
+   expand its `.tool-call-detail` panel below the summary line. */
+.turn-tool {
+  cursor: pointer;
+}
+
+.tool-call-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface, transparent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.tool-call-detail-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.tool-call-detail-label {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.tool-call-detail-value {
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* DH-0199: the collapsible expando wrapping a run of 2+ consecutive tool calls (see
+   `groupTranscript` in Transcript.tsx). Mirrors `.turn-tool`'s dim, subordinate treatment —
+   grouping shouldn't make multi-tool sequences visually louder than the single-call marker
+   they replace. */
+.turn-tool-group {
+  align-self: center;
+  max-width: 100%;
+}
+
+.tool-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tool-group-toggle:hover {
+  border-color: var(--border);
+}
+
+.tool-group-caret {
+  color: var(--text-faint);
+}
+
+.tool-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--border);
 }
 
 /* DH-0066: was bottom-right, the same corner user bubbles anchor to (`.turn-user`'s
@@ -957,10 +1111,16 @@ button {
   }
 }
 
+/* The universal selector's specificity (0,0,1) loses to every class-selector transition rule
+ * elsewhere in this file — without `!important` this accessibility override is silently
+ * defeated for most elements. */
 @media (prefers-reduced-motion: reduce) {
   * {
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
     animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
     transition-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see comment above. */
     scroll-behavior: auto !important;
   }
 }

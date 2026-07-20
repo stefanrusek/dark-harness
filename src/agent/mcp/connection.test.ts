@@ -80,6 +80,48 @@ describe("McpConnection: stdio transport", () => {
   });
 });
 
+describe("McpConnection: DH-0057 auth accessors", () => {
+  test("authGrant/authRedirectPort/serverUrl are undefined without an auth block", () => {
+    const conn = new McpConnection("plain", { url: "http://127.0.0.1:1/mcp" });
+    expect(conn.serverUrl).toBe("http://127.0.0.1:1/mcp");
+    expect(conn.authGrant).toBeUndefined();
+    expect(conn.authRedirectPort).toBeUndefined();
+    expect(conn.oauthProvider).toBeUndefined();
+  });
+
+  test("authGrant defaults to authorization_code when an auth block omits grant", () => {
+    const conn = new McpConnection("acme", { url: "http://127.0.0.1:1/mcp", auth: {} });
+    expect(conn.authGrant).toBe("authorization_code");
+    expect(conn.authRedirectPort).toBeUndefined();
+    expect(conn.oauthProvider).toBeDefined();
+  });
+
+  test("authGrant reflects an explicit client_credentials grant, and authRedirectPort a configured port", () => {
+    const conn = new McpConnection("acme", {
+      url: "http://127.0.0.1:1/mcp",
+      auth: {
+        grant: "client_credentials",
+        clientId: "cid",
+        clientSecret: "sec",
+        redirectPort: 9999,
+      },
+    });
+    expect(conn.authGrant).toBe("client_credentials");
+    expect(conn.authRedirectPort).toBe(9999);
+  });
+
+  test("no oauthProvider is created for a command-transport server even with an auth block", () => {
+    // DhOAuthProvider requires a URL (loopback OAuth is HTTP-only) — a stdio server's `auth`
+    // block, if present, is inert.
+    const conn = new McpConnection("stdio-with-auth", {
+      command: process.execPath,
+      args: ["run", FIXTURE_PATH],
+      auth: {},
+    });
+    expect(conn.oauthProvider).toBeUndefined();
+  });
+});
+
 describe("McpConnection: HTTP transport", () => {
   test("an unreachable url fails to connect (Streamable HTTP then SSE fallback, both failing)", async () => {
     const conn = new McpConnection("http-broken", {

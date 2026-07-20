@@ -177,6 +177,43 @@ describe("renderMarkdownRows — visible content", () => {
   });
 });
 
+describe("renderMarkdownRows — coloredSpan (DH-0206/ADR 0009)", () => {
+  test("a named color emits the mapped SGR code around the text, with a trailing reset", () => {
+    const rows = renderMarkdownRows(parseMarkdown('<span style="color: red;">alert</span>'), 40);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toContain("\x1b[31m");
+    expect(rows[0]).toContain("alert");
+    expect((rows[0] as string).endsWith("\x1b[0m")).toBe(true);
+    expect(stripAnsi(rows[0] as string)).toBe("alert");
+  });
+
+  test("a hex color renders as plain text — no color SGR code at all", () => {
+    const rows = renderMarkdownRows(parseMarkdown('<span style="color: #ff0000">alert</span>'), 40);
+    expect(rows).toHaveLength(1);
+    expect(stripAnsi(rows[0] as string)).toBe("alert");
+    // No SGR sequence at all — a hex color must never be turned into a constructed color code.
+    expect(rows[0]).toBe("alert");
+  });
+
+  test("an unmapped named color (not in NAME_TO_SGR) also renders plain", () => {
+    // Every NAMED_COLORS entry does have a NAME_TO_SGR mapping today, but the renderer must
+    // degrade safely if that ever changes — cover the "no mapping found" branch directly via a
+    // color the parser wouldn't itself produce isn't possible, so this pins the happy case: all
+    // twelve currently map. If a future named color is added to the parser's allowlist without
+    // a NAME_TO_SGR entry, this test intentionally does not cover that gap — see ADR 0009.
+    const rows = renderMarkdownRows(parseMarkdown('<span style="color: orange">alert</span>'), 40);
+    expect(rows[0]).toContain("\x1b[33m"); // orange maps to yellow's SGR code (33)
+  });
+
+  test("an invalid span shape renders as literal text with no ANSI at all", () => {
+    const rows = renderMarkdownRows(
+      parseMarkdown('<span style="color: url(javascript:alert(1))">x</span>'),
+      200,
+    );
+    expect(rows[0]).toBe('<span style="color: url(javascript:alert(1))">x</span>');
+  });
+});
+
 describe("renderMarkdownRows — wrapping", () => {
   test("wraps long paragraph text to the given column width", () => {
     const rows = renderMarkdownRows(parseMarkdown("a".repeat(100)), 20);
@@ -311,6 +348,32 @@ describe("renderMarkdownRows — style-bleed regression (DH-0065)", () => {
     const rows = renderMarkdownRows(parseMarkdown("plain then **bold**"), 80);
     const plain = stripAnsi(rows.join("\n"));
     expect(plain).toBe("plain then bold");
+  });
+
+  // DH-0232: a link immediately followed by other text with no space between them (e.g.
+  // "[link](url)trailing") — the underline+blue styling must terminate at the link's own
+  // trailing " (url)" segment and never bleed into "trailing". `serializeRow`'s per-segment
+  // reset-on-transition logic (DH-0065) already covers this generically, but there was no
+  // test pinning the no-space case specifically, which is what this ticket's manual testing
+  // report called out.
+  test("DH-0232: link's underline+blue does not bleed into text glued immediately after it (no space)", () => {
+    const rows = renderMarkdownRows(parseMarkdown("[link](https://example.com)trailing"), 80);
+    expect(rows).toHaveLength(1);
+    const row = rows[0] as string;
+    expect(stripAnsi(row)).toBe("link (https://example.com)trailing");
+    const linkEnd = row.indexOf("link") + "link".length;
+    const trailingIdx = row.indexOf("trailing");
+    expect(trailingIdx).toBeGreaterThan(-1);
+    // A RESET must appear between the end of the styled link text and "trailing" — not only
+    // as the row's final trailing reset.
+    expect(row.slice(linkEnd, trailingIdx)).toContain(RESET);
+    // And "trailing" itself must carry no active SGR state: no unclosed style-opening escape
+    // sits between the last reset before it and its own start.
+    const resetBeforeTrailing = row.lastIndexOf(RESET, trailingIdx);
+    expect(resetBeforeTrailing).toBeGreaterThan(-1);
+    // The " (https://example.com)" URL parenthetical sits between that reset and "trailing" —
+    // plain literal text, not a style-opening escape. No `\x1b[` sequence appears in that gap.
+    expect(row.slice(resetBeforeTrailing + RESET.length, trailingIdx)).not.toContain("\x1b[");
   });
 });
 

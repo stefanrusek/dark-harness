@@ -20,7 +20,8 @@
 // (e.g. the process already exited, or already reaped its own children).
 
 import { capOutputWithSavedFile } from "./output-cap.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -47,7 +48,7 @@ async function pipeToBuffer(
  * leader for any reason). `detached: true` at spawn time (below) is what makes `proc.pid` the
  * leader of its own process group in the first place, so `-pid` addresses that whole group,
  * POSIX's convention for "negative pid" in `kill(2)`. */
-function killProcessGroup(proc: { pid: number; kill: () => void }): void {
+export function killProcessGroup(proc: { pid: number; kill: () => void }): void {
   try {
     process.kill(-proc.pid, "SIGTERM");
   } catch {
@@ -110,7 +111,7 @@ function resolveTimeout(input: Record<string, unknown>): number {
   return Math.min(raw, MAX_TIMEOUT_MS);
 }
 
-export const bashTool: Tool = {
+export const bashTool: Tool = Object.freeze<Tool>({
   name: "Bash",
   description:
     "Run a shell command via bash -c in the working directory. Supports run_in_background " +
@@ -140,10 +141,22 @@ export const bashTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const command = input.command;
-    if (typeof command !== "string" || command.length === 0) {
-      return { output: "Bash tool error: 'command' must be a non-empty string.", isError: true };
-    }
+    // Scoped to 'command' only (not the whole inputSchema) — 'timeout'/'timeout_ms' keep
+    // their own resolveTimeout() logic (positivity + alias precedence beyond plain typeof),
+    // and 'run_in_background' has no error path at all (it just falls back to the ctx
+    // default), so running the shared validator over the full schema here would risk
+    // pre-empting that tool-specific logic with a generically-worded error instead.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: { command: bashTool.inputSchema.properties.command },
+        required: ["command"],
+      },
+      "Bash",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const command = input.command as string;
 
     let timeoutMs: number;
     try {
@@ -196,4 +209,4 @@ export const bashTool: Tool = {
     }
     return { output: capped.text, isError: false };
   },
-};
+});

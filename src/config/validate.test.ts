@@ -62,6 +62,88 @@ describe("validateConfig — happy paths", () => {
     expect(config.mcpServers).toBeDefined();
   });
 
+  test("accepts a URL server with an authorization_code auth block", () => {
+    const config = validateConfig(
+      baseConfig({
+        mcpServers: {
+          acme: {
+            url: "https://mcp.acme.example/v1",
+            auth: { grant: "authorization_code", scopes: ["mcp:tools"], redirectPort: 49812 },
+          },
+        },
+      }),
+    );
+    expect(config.mcpServers?.acme?.auth?.grant).toBe("authorization_code");
+  });
+
+  test("accepts a URL server with a client_credentials auth block", () => {
+    const config = validateConfig(
+      baseConfig({
+        mcpServers: {
+          acme: {
+            url: "https://mcp.acme.example/v1",
+            auth: { grant: "client_credentials", clientId: "c", clientSecret: "s" },
+          },
+        },
+      }),
+    );
+    expect(config.mcpServers?.acme?.auth?.grant).toBe("client_credentials");
+  });
+
+  test("stdio server with auth is a config error", () => {
+    expect(() =>
+      validateConfig(baseConfig({ mcpServers: { local: { command: "mcp-server", auth: {} } } })),
+    ).toThrow(/has an "auth" block but is a stdio/);
+  });
+
+  test("rejects a non-object auth block", () => {
+    expect(() =>
+      validateConfig(baseConfig({ mcpServers: { acme: { url: "https://x", auth: "nope" } } })),
+    ).toThrow(/\.auth must be an object/);
+  });
+
+  test("rejects an unknown auth key", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { bogus: 1 } } } }),
+      ),
+    ).toThrow(/\.auth has unknown key "bogus"/);
+  });
+
+  test("rejects an invalid auth grant", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { grant: "device_code" } } } }),
+      ),
+    ).toThrow(/\.auth\.grant must be one of/);
+  });
+
+  test("client_credentials without clientId/clientSecret is a config error", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          mcpServers: { acme: { url: "https://x", auth: { grant: "client_credentials" } } },
+        }),
+      ),
+    ).toThrow(/requires both clientId and clientSecret/);
+  });
+
+  test("rejects non-string-array auth scopes", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { scopes: [1, 2] } } } }),
+      ),
+    ).toThrow(/\.auth\.scopes must be an array of strings/);
+  });
+
+  test("rejects a non-positive-integer redirectPort", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({ mcpServers: { acme: { url: "https://x", auth: { redirectPort: -1 } } } }),
+      ),
+    ).toThrow(/\.auth\.redirectPort must be a positive integer/);
+  });
+
   test("accepts a security block with a real token and tls", () => {
     const config = validateConfig(
       baseConfig({ security: { token: "abc123", tls: { cert: "/c.pem", key: "/k.pem" } } }),
@@ -108,7 +190,7 @@ describe("validateConfig — happy paths", () => {
     expect(config.models[0]?.outputPricePerMToken).toBeUndefined();
   });
 
-  // DH-0045: opt-in extended thinking — see src/contracts/config.ts's ThinkingConfig doc
+  // DH-0045: opt-in extended thinking — see src/contracts/config.type.ts's ThinkingConfig doc
   // comment for the adaptive/enabled distinction.
   test("accepts models[].thinking with type adaptive (no budgetTokens)", () => {
     const config = validateConfig(
@@ -496,6 +578,39 @@ describe("validateConfig — rejections", () => {
   test("DH-0022: security.hostname: null normalizes to omitted, same as token/tls", () => {
     const config = validateConfig(baseConfig({ security: { hostname: null } }));
     expect(config.security?.hostname).toBeUndefined();
+  });
+
+  test("DH-0168: rejects a non-number security.webPort", () => {
+    expect(() => validateConfig(baseConfig({ security: { webPort: "8080" } }))).toThrow(
+      /security.webPort must be a positive integer or null/,
+    );
+  });
+
+  test("DH-0168: rejects a non-integer security.webPort", () => {
+    expect(() => validateConfig(baseConfig({ security: { webPort: 8080.5 } }))).toThrow(
+      /security.webPort must be a positive integer or null/,
+    );
+  });
+
+  test("DH-0168: rejects a non-positive security.webPort", () => {
+    expect(() => validateConfig(baseConfig({ security: { webPort: 0 } }))).toThrow(
+      /security.webPort must be a positive integer or null/,
+    );
+  });
+
+  test("DH-0168: accepts and passes through a valid security.webPort", () => {
+    const config = validateConfig(baseConfig({ security: { webPort: 8080 } }));
+    expect(config.security?.webPort).toBe(8080);
+  });
+
+  test("DH-0168: security.webPort omitted (unset) means no webPort field in the result — default random-port behavior unchanged", () => {
+    const config = validateConfig(baseConfig({ security: { token: "t" } }));
+    expect(config.security?.webPort).toBeUndefined();
+  });
+
+  test("DH-0168: security.webPort: null normalizes to omitted, same as hostname/token/tls", () => {
+    const config = validateConfig(baseConfig({ security: { webPort: null } }));
+    expect(config.security?.webPort).toBeUndefined();
   });
 
   test("rejects a non-integer options.maxTurns", () => {
@@ -1087,6 +1202,19 @@ describe("DH-0010 Part B: compaction config + models[].contextWindow", () => {
         }),
       ),
     ).toThrow(/compaction.enabled must be a boolean/);
+  });
+
+  test("rejects a non-object compaction value", () => {
+    expect(() =>
+      validateConfig(
+        baseConfig({
+          models: [
+            { name: "sonnet", provider: "anthropic", model: "sonnet-5", contextWindow: 200000 },
+          ],
+          compaction: "enabled",
+        }),
+      ),
+    ).toThrow(/compaction must be an object/);
   });
 
   test("rejects an unknown compaction key", () => {

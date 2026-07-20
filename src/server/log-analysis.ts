@@ -9,9 +9,13 @@
 // explicitly sequenced after DH-0050's Core round (see the ticket's owner note) so it can
 // reuse that ticket's field shapes instead of inventing a parallel one.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentStatus, LogEvent, LogLine } from "../contracts/index.ts";
+// DH-0181: box-drawing connector glyphs are shared with the TUI's tree view
+// (src/tui/tree.ts's flattenTree) via this pure helper, instead of each computing them
+// independently.
+import { treeChildPrefix, treeConnector } from "../contracts/tree-connector.ts";
 // DH-0104 (docs/design/style-guide.md §4): elapsed formatting is shared with the TUI/Web via
 // `src/format.ts` — see `formatDuration` below for why `dh logs` doesn't keep its own
 // elapsed exception (only cost does).
@@ -194,13 +198,13 @@ function formatStatusLabel(status: AgentLogTreeNode["status"]): string {
 
 // DH-0100: canonical status color model (docs/design/style-guide.md §1/§2.3), matching
 // src/tui/render.ts's STATUS_COLOR exactly so `dh logs` and the TUI agree.
-const STATUS_COLOR: Record<AgentLogTreeNode["status"], string> = {
+const STATUS_COLOR: Record<AgentLogTreeNode["status"], string> = Object.freeze({
   running: "\x1b[34m",
   waiting: "\x1b[33m",
   done: "\x1b[32m",
   failed: "\x1b[31m",
   stopped: "\x1b[35m",
-};
+});
 const RESET = "\x1b[0m";
 
 function colorizeStatusLabel(status: AgentLogTreeNode["status"], color: boolean): string {
@@ -214,12 +218,13 @@ function formatNode(
   isLast: boolean,
   color: boolean,
 ): string[] {
-  const connector = prefix === "" ? "" : isLast ? "└─ " : "├─ ";
+  const isRoot = prefix === "";
+  const connector = treeConnector(isRoot, isLast);
   const label =
     `${node.agentId}${node.description ? ` (${node.description})` : ""} ` +
     `[${colorizeStatusLabel(node.status, color)}] cost=${formatCost(node.costUsd)} duration=${formatDuration(node.durationMs)} model=${node.model}`;
   const lines = [`${prefix}${connector}${label}`];
-  const childPrefix = prefix === "" ? "" : `${prefix}${isLast ? "   " : "│  "}`;
+  const childPrefix = treeChildPrefix(isRoot, prefix, isLast);
   node.children.forEach((child, i) => {
     lines.push(...formatNode(child, childPrefix, i === node.children.length - 1, color));
   });

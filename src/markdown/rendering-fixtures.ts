@@ -16,10 +16,12 @@
 
 import { expect } from "bun:test";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching a real ESC byte is the point
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
+
 /** Strips ANSI SGR sequences (`ESC [ ... m`), leaving only the plain visible text. */
 export function stripAnsi(text: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: matching a real ESC byte is the point
-  return text.replace(/\x1b\[[0-9;]*m/g, "");
+  return text.replace(ANSI_SGR_RE, "");
 }
 
 /** Minimal structural subset of `Element`/`HTMLElement` used by the `web` fixture assertions
@@ -51,8 +53,9 @@ const UNDERLINE = "4";
 const STRIKE = "9";
 const CYAN = "36";
 const BLUE = "34";
+const DIM = "2";
 
-export const renderingFixtures: RenderingFixture[] = [
+export const renderingFixtures: readonly RenderingFixture[] = Object.freeze([
   // --- Headings 1-6 -------------------------------------------------------------------
   ...([1, 2, 3, 4, 5, 6] as const).map((level) => ({
     name: `heading h${level}`,
@@ -61,7 +64,7 @@ export const renderingFixtures: RenderingFixture[] = [
       expect(rows).toHaveLength(1);
       const row = rows[0] as string;
       expect(stripAnsi(row)).toBe(`Heading ${level}`);
-      const codes = level === 1 ? [BOLD, UNDERLINE] : [BOLD, CYAN];
+      const codes = level === 1 ? [BOLD, UNDERLINE] : level <= 3 ? [BOLD, CYAN] : [BOLD, CYAN, DIM];
       expect(row.startsWith(`\x1b[${codes.join(";")}m`)).toBe(true);
       expect(row.endsWith(RESET)).toBe(true);
     },
@@ -247,6 +250,20 @@ export const renderingFixtures: RenderingFixture[] = [
     },
   },
   {
+    // DH-0204: a `"title"` after the URL is a tooltip, never part of the href.
+    name: "link with title",
+    markdown: '[link](https://x.example "a title")',
+    tui: (rows) => {
+      expect(rows).toEqual([`\x1b[${UNDERLINE};${BLUE}mlink\x1b[0m (https://x.example)\x1b[0m`]);
+    },
+    web: (root) => {
+      const anchor = root.querySelector("a");
+      expect(anchor?.textContent).toBe("link");
+      expect(anchor?.getAttribute("href")).toBe("https://x.example/");
+      expect(anchor?.getAttribute("title")).toBe("a title");
+    },
+  },
+  {
     name: "thematic break",
     markdown: "---",
     tui: (rows) => {
@@ -269,8 +286,7 @@ export const renderingFixtures: RenderingFixture[] = [
       expect(joined).toContain("b");
       expect(joined).toContain("1");
       expect(joined).toContain("2");
-      // Header/body separator uses box-drawing, not literal pipe-and-dash source syntax.
-      expect(joined).not.toContain("| - | - |");
+      expect(joined).not.toContain("| - | - |"); // box-drawing separator, not literal pipe-and-dash
     },
     web: (root) => {
       const table = root.querySelector("table");
@@ -337,6 +353,19 @@ export const renderingFixtures: RenderingFixture[] = [
     },
   },
 
+  // --- Backslash escapes (DH-0205) --------------------------------------------------------
+  {
+    name: "escaped asterisk stays literal, doesn't trigger emphasis",
+    markdown: "\\*not emphasis\\*",
+    tui: (rows) => {
+      expect(stripAnsi(rows.join("\n"))).toBe("*not emphasis*");
+    },
+    web: (root) => {
+      expect(root.querySelector("em")).toBeNull();
+      expect(root.textContent).toBe("*not emphasis*");
+    },
+  },
+
   // --- Documented exclusions: must degrade to literal text, never crash -------------------
   {
     name: "excluded: unresolved reference-style links degrade to literal text",
@@ -349,4 +378,4 @@ export const renderingFixtures: RenderingFixture[] = [
       expect(root.textContent).toBe("[text][missing]");
     },
   },
-];
+]);

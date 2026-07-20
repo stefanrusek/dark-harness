@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
 import { initialState, reducer } from "../state.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { AgentView } from "./AgentView.tsx";
 
 function spawned(agentId: string) {

@@ -570,6 +570,44 @@ describe("AppView commands", () => {
     ]);
   });
 
+  // DH-0207/DH-0208
+  test("cancel button on a queued turn sends a cancel_queued_message command for that entry", async () => {
+    const h = harness();
+    h.app.start();
+    await spawnRoot(h);
+
+    const textarea = h.root.querySelector("textarea") as HTMLTextAreaElement;
+    const form = h.root.querySelector("form") as HTMLFormElement;
+    textarea.value = "please hold";
+    h.dispatch(form, "submit", { cancelable: true });
+    await flush();
+
+    // Simulate the server reporting this send is sitting in the queue, not yet delivered —
+    // real production wiring for an agent that's mid-turn/asleep when the operator sends.
+    h.stream.push({
+      version: 1,
+      id: "e-queue-1",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "agent_queue",
+      agentId: "root-1",
+      queue: [{ id: "qm-1", message: "please hold", queuedAt: "2026-01-01T00:00:01Z" }],
+    });
+    await flush();
+
+    await flush();
+    const cancelBtn = h.root.querySelector(".turn-queued-cancel") as HTMLButtonElement | null;
+    expect(cancelBtn).not.toBeNull();
+    if (cancelBtn) h.dispatch(cancelBtn, "click");
+    await flush();
+
+    expect(h.commandBodies).toEqual([
+      { type: "request_agent_tree" },
+      { type: "list_skills" },
+      { type: "send_message", agentId: "root-1", message: "please hold" },
+      { type: "cancel_queued_message", agentId: "root-1", messageId: "qm-1" },
+    ]);
+  });
+
   test("a failed stop command shows the error banner too", async () => {
     const h = harness({
       commandResponse: () =>
@@ -734,6 +772,84 @@ describe("AppView connection status", () => {
     h.dispatch(dismissBtn, "click");
     await flush();
     expect(h.root.querySelector(".gap-banner")?.classList.contains("hidden")).toBe(true);
+  });
+
+  test("DH-0202: a reconnect re-fetches the agent tree and fills in a model name lost across it", async () => {
+    // The tree response is checked live (not snapshotted at harness-build time) so it can
+    // report an updated model on the *second* call, simulating "the server always knows the
+    // real model" while the client's own view of it was briefly blank.
+    let treeCalls = 0;
+    const h = harness({
+      treeResponse: () => {
+        treeCalls++;
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            tree: [
+              {
+                agentId: "root-1",
+                parentAgentId: null,
+                model: "sonnet",
+                status: "waiting",
+                children:
+                  treeCalls === 1
+                    ? []
+                    : [
+                        {
+                          agentId: "child-2",
+                          parentAgentId: "root-1",
+                          model: "haiku",
+                          status: "running",
+                          children: [],
+                        },
+                      ],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      },
+    });
+    h.app.start();
+    await flush(); // resolves the first request_agent_tree bootstrap (seeds root-1: "sonnet").
+    expect(treeCalls).toBe(1);
+    expect(h.app.getState().agents.get("root-1")?.model).toBe("sonnet");
+
+    // Simulate a reconnect whose replay skipped the original `agent_spawned` event: an
+    // `agent_output` event lands for a *new* agent id state has never seen, so `ensureAgent`
+    // creates it with `model: ""` instead of `applyEvent`'s `agent_spawned` branch ever
+    // setting it.
+    h.stream.push({
+      version: 1,
+      id: "e2",
+      timestamp: "2026-01-01T00:00:01Z",
+      type: "agent_output",
+      agentId: "child-2",
+      chunk: "partial output with no spawn event ever seen",
+    });
+    await flush();
+    expect(h.app.getState().agents.get("child-2")?.model).toBe("");
+
+    // Drop the stream and fire the reconnect.
+    h.stream.error();
+    await flush();
+    const reconnectTimer = h.timeoutCalls.at(-1);
+    reconnectTimer?.();
+    await flush();
+
+    // The reconnect re-ran the tree bootstrap (a second request_agent_tree call), whose
+    // response now reports child-2's real model -- filled in without disturbing root-1's
+    // already-known model or child-2's live status/transcript.
+    expect(treeCalls).toBe(2);
+    expect(h.app.getState().agents.get("root-1")?.model).toBe("sonnet");
+    expect(h.app.getState().agents.get("child-2")?.model).toBe("haiku");
+    expect(h.app.getState().agents.get("child-2")?.transcript).toEqual([
+      {
+        role: "assistant",
+        text: "partial output with no spawn event ever seen",
+        timestamp: expect.any(String),
+      },
+    ]);
   });
 });
 

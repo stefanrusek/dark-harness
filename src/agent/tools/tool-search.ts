@@ -6,7 +6,7 @@
 // (src/agent/runtime.ts's buildToolContext) and handed to the pure functions below, which
 // contain the entire grammar and are unit-testable without any MCP/runtime plumbing.
 
-import type { JsonSchema, Tool, ToolContext, ToolResult } from "./types.ts";
+import type { JsonSchema, Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 export const DEFAULT_MAX_RESULTS = 5;
 
@@ -108,7 +108,7 @@ function formatResult(d: ToolDescriptor): string {
   return `${d.name}${activationNote}: ${d.description}\ninputSchema: ${JSON.stringify(d.inputSchema)}`;
 }
 
-export const toolSearchTool: Tool = {
+export const toolSearchTool: Tool = Object.freeze<Tool>({
   name: "ToolSearch",
   description:
     "Search for deferred tools (from configured MCP servers) and built-in tools by keyword. " +
@@ -164,4 +164,4 @@ export const toolSearchTool: Tool = {
     }
     return { output: lines.join("\n\n"), isError: false };
   },
-};
+});

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   MOUSE_DISABLE,
   MOUSE_ENABLE,
+  MouseChunkAssembler,
   parseSgrMouse,
   parseSgrMouseChunk,
   stripSgrMouseSequences,
@@ -119,6 +120,106 @@ describe("stripSgrMouseSequences", () => {
     // keystrokes. Stripping the whole sequence here is what prevents that.
     const raw = `${ESC}[<0;60;24M`;
     expect(stripSgrMouseSequences(raw)).toBe("");
+  });
+});
+
+describe("MouseChunkAssembler (DH-0230)", () => {
+  test("reassembles a sequence split across two stdin chunks", () => {
+    const assembler = new MouseChunkAssembler();
+    // A rapid scroll notch's escape sequence, split mid-report — exactly what a PTY read
+    // buffer can do under aggressive/high-velocity scrolling.
+    const first = assembler.process(`${ESC}[<64;10;`);
+    expect(first.events).toEqual([]);
+    expect(first.rest).toBe("");
+
+    const second = assembler.process("5M");
+    expect(second.events.map((e) => e.type)).toEqual(["scrollUp"]);
+    expect(second.rest).toBe("");
+  });
+
+  test("does not leak the second chunk's continuation fragment as literal text", () => {
+    // Before the fix: `;20M` (missing its ESC[< prefix, now living in its own chunk) had no
+    // way to be recognized as a mouse continuation, and fell straight through to parseKeys as
+    // garbage keystrokes. This is DH-0230's actual reported symptom.
+    const assembler = new MouseChunkAssembler();
+    assembler.process(`${ESC}[<65;10;`);
+    const second = assembler.process("20M");
+    expect(second.rest).toBe("");
+    expect(second.events.map((e) => e.type)).toEqual(["scrollDown"]);
+  });
+
+  test("does not buffer a bare trailing ESC as a mouse partial (would delay a real Escape keypress)", () => {
+    // A standalone Escape key is a legitimate one-byte `data` chunk on a real PTY. Treating a
+    // trailing ESC as "might be a mouse sequence in progress" would delay dispatching it until
+    // whatever arrives next — a real regression caught by the e2e PTY suite. The assembler only
+    // buffers once the full `ESC[<` introducer is present.
+    const assembler = new MouseChunkAssembler();
+    const first = assembler.process(ESC);
+    expect(first.events).toEqual([]);
+    expect(first.rest).toBe(ESC);
+
+    // Confirms nothing was carried: the next chunk parses independently.
+    const second = assembler.process("q");
+    expect(second.events).toEqual([]);
+    expect(second.rest).toBe("q");
+  });
+
+  test("still buffers correctly when the split lands right after the introducer", () => {
+    const assembler = new MouseChunkAssembler();
+    const first = assembler.process(`${ESC}[<`);
+    expect(first.events).toEqual([]);
+    expect(first.rest).toBe("");
+    const second = assembler.process("64;1;1M");
+    expect(second.events.map((e) => e.type)).toEqual(["scrollUp"]);
+    expect(second.rest).toBe("");
+  });
+
+  test("a burst of many rapid, unsplit notches across separate chunks all parse cleanly", () => {
+    const assembler = new MouseChunkAssembler();
+    const notches: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const { events, rest } = assembler.process(`${ESC}[<64;10;${5 + i}M`);
+      expect(rest).toBe("");
+      notches.push(...events.map((e) => e.type));
+    }
+    expect(notches).toHaveLength(50);
+    expect(notches.every((t) => t === "scrollUp")).toBe(true);
+  });
+
+  test("surrounding non-mouse text on either side of a split sequence survives untouched", () => {
+    const assembler = new MouseChunkAssembler();
+    const first = assembler.process(`abc${ESC}[<64;10;`);
+    expect(first.rest).toBe("abc");
+    const second = assembler.process("5Mdef");
+    expect(second.rest).toBe("def");
+    expect(second.events.map((e) => e.type)).toEqual(["scrollUp"]);
+  });
+
+  test("abandons an implausibly long carry instead of buffering ordinary text forever", () => {
+    const assembler = new MouseChunkAssembler();
+    // Looks like the start of a mouse introducer but never resolves within a sane sequence
+    // length — must not be held onto indefinitely as a "partial".
+    const long = `${ESC}[<${"1".repeat(40)}`;
+    const first = assembler.process(long);
+    expect(first.events).toEqual([]);
+    expect(first.rest).toBe(long);
+
+    // Confirms the carry was cleared: the next chunk is parsed independently, not glued to
+    // the abandoned garbage.
+    const second = assembler.process(`${ESC}[<64;1;1M`);
+    expect(second.events.map((e) => e.type)).toEqual(["scrollUp"]);
+    expect(second.rest).toBe("");
+  });
+
+  test("multiple complete reports plus a trailing split report in one burst", () => {
+    const assembler = new MouseChunkAssembler();
+    const first = assembler.process(`${ESC}[<64;1;1M${ESC}[<65;2;2M${ESC}[<64;3;`);
+    expect(first.events.map((e) => e.type)).toEqual(["scrollUp", "scrollDown"]);
+    expect(first.rest).toBe("");
+
+    const second = assembler.process("3M");
+    expect(second.events.map((e) => e.type)).toEqual(["scrollUp"]);
+    expect(second.rest).toBe("");
   });
 });
 

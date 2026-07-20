@@ -6,5 +6,5 @@
 // send `stop_agent` before quitting (local mode) or just detach (`--connect` mode) — only
 // cli.ts knows which, since it's the one that did or didn't construct the `DhServer`.
 
+export type { StartTuiOptions, StartTuiResult } from "./app.ts";
 export { startTui } from "./app.ts";
-export type { StartTuiOptions } from "./app.ts";

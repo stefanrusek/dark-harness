@@ -9,9 +9,10 @@
 // file mutation.
 
 import { isAbsolute, resolve } from "node:path";
-import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
 import type { NotebookCell, NotebookJson } from "./read.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import { checkReadBeforeWrite, recordRead } from "./read-guard.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 function resolvePath(filePath: string, cwd: string): string {
   return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
@@ -40,7 +41,7 @@ function findCellIndex(
   return { error: "either 'cell_index' or 'cell_id' must be provided" };
 }
 
-export const notebookEditTool: Tool = {
+export const notebookEditTool: Tool = Object.freeze<Tool>({
   name: "NotebookEdit",
   description:
     "Replace a Jupyter notebook cell's source directly by cell index or id — a structured " +
@@ -68,27 +69,30 @@ export const notebookEditTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const filePath = input.file_path;
-    const newSource = input.new_source;
-    const cellIndexInput = input.cell_index;
-    const cellId = input.cell_id;
+    // 'cell_type' keeps its own local check (enum membership, not plain type-shape), so it's
+    // excluded from this scoped schema; the other four fields' checks match the shared
+    // helper's wording exactly.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: {
+          file_path: notebookEditTool.inputSchema.properties.file_path,
+          new_source: notebookEditTool.inputSchema.properties.new_source,
+          cell_index: notebookEditTool.inputSchema.properties.cell_index,
+          cell_id: notebookEditTool.inputSchema.properties.cell_id,
+        },
+        required: ["file_path", "new_source"],
+      },
+      "NotebookEdit",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const filePath = input.file_path as string;
+    const newSource = input.new_source as string;
+    const cellIndexInput = input.cell_index as number | undefined;
+    const cellId = input.cell_id as string | undefined;
     const cellType = input.cell_type;
 
-    if (typeof filePath !== "string" || filePath.length === 0) {
-      return {
-        output: "NotebookEdit tool error: 'file_path' must be a non-empty string.",
-        isError: true,
-      };
-    }
-    if (typeof newSource !== "string") {
-      return { output: "NotebookEdit tool error: 'new_source' must be a string.", isError: true };
-    }
-    if (cellIndexInput !== undefined && typeof cellIndexInput !== "number") {
-      return { output: "NotebookEdit tool error: 'cell_index' must be a number.", isError: true };
-    }
-    if (cellId !== undefined && typeof cellId !== "string") {
-      return { output: "NotebookEdit tool error: 'cell_id' must be a string.", isError: true };
-    }
     if (
       cellType !== undefined &&
       (typeof cellType !== "string" || !["code", "markdown", "raw"].includes(cellType))
@@ -157,4 +161,4 @@ export const notebookEditTool: Tool = {
       isError: false,
     };
   },
-};
+});

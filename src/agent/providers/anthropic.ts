@@ -5,12 +5,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ProviderConfig } from "../../contracts/index.ts";
 import { withRetry } from "./retry.ts";
+import {
+  type ErrorClassification,
+  isContextOverflowMessage,
+  mapStopReason,
+  withCacheMarkers,
+} from "./shared.ts";
 import type {
   ModelProvider,
   ProviderCompletionRequest,
   ProviderCompletionResult,
   ProviderContentBlock,
-  ProviderErrorKind,
   ProviderStopReason,
   ProviderStreamCallbacks,
 } from "./types.ts";
@@ -97,39 +102,17 @@ interface CacheableMessage {
 }
 
 function withAnthropicCacheMarkers(messages: CacheableMessage[]): CacheableMessage[] {
-  const result = messages.map((m) => ({ ...m, content: [...m.content] }));
-
-  const markLast = (msg: CacheableMessage | undefined): void => {
-    if (!msg || msg.content.length === 0) return;
-    const lastIndex = msg.content.length - 1;
-    const block = msg.content[lastIndex];
-    msg.content[lastIndex] = {
+  return withCacheMarkers(messages, (content) => {
+    if (content.length === 0) return content;
+    const lastIndex = content.length - 1;
+    const block = content[lastIndex];
+    const next = [...content];
+    next[lastIndex] = {
       ...block,
       cache_control: { type: "ephemeral" },
     } as Anthropic.ContentBlockParam;
-  };
-
-  markLast(result[result.length - 1]);
-
-  const userIndices = result.reduce<number[]>((acc, m, i) => {
-    if (m.role === "user") acc.push(i);
-    return acc;
-  }, []);
-  if (userIndices.length >= 2) {
-    const secondToLastUserIndex = userIndices[userIndices.length - 2];
-    if (secondToLastUserIndex !== undefined) {
-      markLast(result[secondToLastUserIndex]);
-    }
-  }
-
-  return result;
-}
-
-function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopReason {
-  if (reason === "tool_use") return "tool_use";
-  if (reason === "max_tokens") return "max_tokens";
-  if (reason === "end_turn") return "end_turn";
-  return "other";
+    return next;
+  });
 }
 
 /** DH-0009: classifies a raw thrown value from the Anthropic SDK. The SDK's own `APIError`
@@ -141,22 +124,23 @@ function mapStopReason(reason: Anthropic.Message["stop_reason"]): ProviderStopRe
  * `SyntaxError` from `JSON.parse` when the provider responds 200 with a garbled/non-JSON
  * body) got a response, just an unusable one — retrying the same malformed endpoint is
  * unlikely to help, so this is `other`/not retryable rather than optimistically `network`. */
-/** DH-0010 Part B: best-effort detection of "the request was rejected for being too long" —
- * string/shape-matching on the Anthropic 400 `invalid_request_error` message, since the SDK
- * has no dedicated error subclass for this. Accepted as a known-fragile heuristic (see
- * tracking/DH-0010's Risks section) — a miss here just falls through to the normal `other`
- * (non-retryable) classification, not a crash. */
-function isContextOverflowMessage(message: string): boolean {
-  return /prompt is too long/i.test(message);
-}
+// DH-0010 Part B: best-effort detection of "the request was rejected for being too long" —
+// string/shape-matching on the Anthropic 400 `invalid_request_error` message, since the SDK
+// has no dedicated error subclass for this. Accepted as a known-fragile heuristic (see
+// tracking/DH-0010's Risks section) — a miss here just falls through to the normal `other`
+// (non-retryable) classification, not a crash.
+const CONTEXT_OVERFLOW_MESSAGE_PATTERN = /prompt is too long/i;
 
-function classifyAnthropicError(err: unknown): { kind: ProviderErrorKind; retryable: boolean } {
+function classifyAnthropicError(err: unknown): ErrorClassification {
   const status = (err as { status?: unknown } | null)?.status;
   if (typeof status === "number") {
     if (status === 401 || status === 403) return { kind: "auth", retryable: false };
     if (status === 429) return { kind: "rate_limit", retryable: true };
     if (status >= 500) return { kind: "overloaded", retryable: true };
-    if (status === 400 && isContextOverflowMessage((err as Error).message ?? "")) {
+    if (
+      status === 400 &&
+      isContextOverflowMessage((err as Error).message ?? "", CONTEXT_OVERFLOW_MESSAGE_PATTERN)
+    ) {
       return { kind: "context_overflow", retryable: false };
     }
     return { kind: "other", retryable: false };

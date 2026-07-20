@@ -3,7 +3,7 @@
 // slot) — this is existing, already-shipped chrome, not new content.
 import { Text } from "ink";
 import { CONNECTION_TOKENS } from "../../design-tokens.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import {
   bold,
   dim,
@@ -16,7 +16,7 @@ import {
 const SGR_PREFIX = "\x1b[";
 const RESET = "\x1b[0m";
 
-export function titleBarText(state: TuiState, cols: number): string {
+export function titleBarText(state: TuiState, _cols: number): string {
   const sessionSuffix = state.sessionEnded
     ? `  session ended (exit ${state.sessionEnded.exitCode})`
     : "";

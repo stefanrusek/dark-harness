@@ -42,6 +42,25 @@ const SGR = {
   blue: "34",
 } as const;
 
+/** DH-0206/ADR 0009: fixed name→SGR map for the `coloredSpan` node, entirely within this
+ * module's documented 16-color foreground allowlist above — no new escape classes, no
+ * 256/truecolor, no free-form ANSI constructed from model input. A hex color or any name with
+ * no entry here renders plain (uncolored) text; see the `coloredSpan` case in `inlineToLines`. */
+const NAME_TO_SGR: Readonly<Record<string, string>> = Object.freeze({
+  black: "30",
+  red: "31",
+  green: "32",
+  yellow: "33",
+  blue: "34",
+  magenta: "35",
+  cyan: "36",
+  white: "37",
+  gray: "90",
+  grey: "90",
+  orange: "33",
+  purple: "35",
+});
+
 interface Segment {
   text: string;
   codes: readonly string[];
@@ -86,6 +105,15 @@ function inlineToLines(nodes: InlineNode[], codes: readonly string[]): Segment[]
         appendLines(lines, inlineToLines(node.children, [...codes, SGR.underline, SGR.blue]));
         emit(` (${node.url})`, codes);
         break;
+      case "coloredSpan": {
+        // DH-0206/ADR 0009: named colors within the fixed NAME_TO_SGR map get their allowlisted
+        // SGR code; hex values and any unmapped name render plain (codes unchanged) — this
+        // renderer is 16-color-foreground-only and never constructs free-form ANSI from a
+        // model-controlled value.
+        const sgr = NAME_TO_SGR[node.color];
+        appendLines(lines, inlineToLines(node.children, sgr ? [...codes, sgr] : codes));
+        break;
+      }
     }
   }
   return lines;
@@ -248,8 +276,19 @@ function renderBlock(block: BlockNode, cols: number): string[] {
       // styling to bold body text"). h1 keeps its existing bold+underline treatment; h2+ now
       // additionally carries cyan — already an allowlisted color (used for inline code) — so
       // any heading is visually distinguishable from bold prose at a glance.
-      const codes: readonly string[] =
-        block.level === 1 ? [SGR.bold, SGR.underline] : [SGR.bold, SGR.cyan];
+      //
+      // DH-0203: h3-h6 used to all share the exact same [SGR.bold, SGR.cyan] pair as h2,
+      // losing hierarchy for deeper heading levels. h3 keeps the plain bold+cyan look; h4-h6
+      // additionally dim to give the eye a decreasing-weight cue as level increases, without
+      // introducing new colors beyond the already-allowlisted set.
+      let codes: readonly string[];
+      if (block.level === 1) {
+        codes = [SGR.bold, SGR.underline];
+      } else if (block.level <= 3) {
+        codes = [SGR.bold, SGR.cyan];
+      } else {
+        codes = [SGR.bold, SGR.cyan, SGR.dim];
+      }
       return renderInlineBlock(block.children, codes, cols);
     }
     case "codeBlock": {

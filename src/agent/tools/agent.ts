@@ -6,16 +6,16 @@
 // SendMessage/TaskStop. When false, the tool blocks until the sub-agent finishes and returns
 // its final output directly.
 
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 function resolveModelName(
   input: Record<string, unknown>,
   ctx: ToolContext,
 ): string | { error: string } {
-  const requested = input.model;
-  if (requested !== undefined && typeof requested !== "string") {
-    return { error: "Agent tool error: 'model' must be a string when provided." };
-  }
+  // Validated as an optional string by validateInput() before this is called (see
+  // agentTool.execute()), so the cast here is safe.
+  const requested = input.model as string | undefined;
   const name = requested ?? ctx.config.options.defaultModel;
   const known = ctx.config.models.some((m) => m.name === name);
   if (!known) {
@@ -26,7 +26,7 @@ function resolveModelName(
   return name;
 }
 
-export const agentTool: Tool = {
+export const agentTool: Tool = Object.freeze<Tool>({
   name: "Agent",
   description:
     "Spawn an ad-hoc sub-agent with a model and a prompt. Runs concurrently by default " +
@@ -66,24 +66,17 @@ export const agentTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const prompt = input.prompt;
-    if (typeof prompt !== "string" || prompt.length === 0) {
-      return { output: "Agent tool error: 'prompt' must be a non-empty string.", isError: true };
-    }
-
     // DH-0069: 'description' is required at the schema level (matching real Claude Code's
     // own Agent tool, whose required "description" string is the exact label it displays for
     // a sub-agent — dh never derives a name from the prompt). Schema `required` is only
     // advisory to the model, so this runtime check makes a model that ignores it get a clear
     // tool error instead of silently spawning an unlabeled agent that renders as a raw
     // agentId/UUID in the TUI/Web tree.
-    const description = input.description;
-    if (typeof description !== "string" || description.length === 0) {
-      return {
-        output: "Agent tool error: 'description' is required and must be a non-empty string.",
-        isError: true,
-      };
-    }
+    const validation = validateInput(agentTool.inputSchema, "Agent", input);
+    if (!validation.ok) return validation.result;
+
+    const prompt = input.prompt as string;
+    const description = input.description as string;
 
     const modelResult = resolveModelName(input, ctx);
     if (typeof modelResult !== "string") {
@@ -146,4 +139,4 @@ export const agentTool: Tool = {
     }
     return { output: snapshot.output, isError: false };
   },
-};
+});

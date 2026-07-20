@@ -4,6 +4,7 @@
 
 import type {
   AgentTreeResponse,
+  CancelQueuedMessageCommand,
   ClientCommand,
   CommandAck,
   DownloadLogsCommand,
@@ -17,10 +18,17 @@ import type {
   StopAgentCommand,
   SwitchModelCommand,
 } from "../../contracts/index.ts";
-import { type ServerTarget, commandUrl } from "../protocol.ts";
+import { commandUrl, type ServerTarget } from "../protocol.ts";
 
 export function buildSendMessageCommand(agentId: string, message: string): SendMessageCommand {
   return { type: "send_message", agentId, message };
+}
+
+export function buildCancelQueuedMessageCommand(
+  agentId: string,
+  messageId: string,
+): CancelQueuedMessageCommand {
+  return { type: "cancel_queued_message", agentId, messageId };
 }
 
 export function buildRequestAgentTreeCommand(): RequestAgentTreeCommand {
@@ -144,6 +152,21 @@ export function sendMessage(
   options?: SendCommandOptions,
 ): Promise<CommandAck> {
   return sendCommand(target, buildSendMessageCommand(agentId, message), fetchImpl, options);
+}
+
+export function cancelQueuedMessage(
+  target: ServerTarget,
+  agentId: string,
+  messageId: string,
+  fetchImpl?: FetchLike,
+  options?: SendCommandOptions,
+): Promise<CommandAck> {
+  return sendCommand(
+    target,
+    buildCancelQueuedMessageCommand(agentId, messageId),
+    fetchImpl,
+    options,
+  );
 }
 
 export function requestAgentTree(

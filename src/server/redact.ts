@@ -42,11 +42,13 @@ function jsonEscapedForm(value: string): string {
  * patterns run first, so a more specific label wins where two patterns could otherwise
  * both match the same substring.
  */
-const PATTERNS: Array<{
+type RedactionPattern = {
   label: string;
   pattern: RegExp;
   replace: (match: string, ...groups: string[]) => string;
-}> = [
+};
+
+const PATTERNS: readonly RedactionPattern[] = Object.freeze<RedactionPattern[]>([
   {
     label: "anthropic-key",
     pattern: /sk-ant-[A-Za-z0-9_-]{16,}/g,
@@ -93,7 +95,7 @@ const PATTERNS: Array<{
     pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g,
     replace: () => "[REDACTED:google-key]",
   },
-];
+]);
 
 /**
  * Redacts secrets from an already-serialized JSON-line string. Known-value (exact) matches

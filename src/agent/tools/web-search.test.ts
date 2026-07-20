@@ -103,7 +103,8 @@ describe("WebSearch backend calls (Brave)", () => {
   test("sends the API key via X-Subscription-Token header, never in the URL", async () => {
     const seen: { header: string | null } = { header: null };
     globalThis.fetch = (async (_input: unknown, init: RequestInit | undefined) => {
-      seen.header = (init?.headers as Record<string, string>)["X-Subscription-Token"] ?? null;
+      const headers = init?.headers as Record<string, string> | undefined;
+      seen.header = headers?.["X-Subscription-Token"] ?? null;
       return Response.json({ web: { results: [] } });
     }) as unknown as typeof fetch;
     await webSearchTool.execute({ query: "bun test" }, ctxWithSearchConfig(BASE_SEARCH_CONFIG));

@@ -11,6 +11,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig } from "../../contracts/index.ts";
+import { DhOAuthProvider } from "./oauth-provider.ts";
+import { McpTokenStore } from "./token-store.ts";
 
 /** Default per-server connect timeout (§6/§3 of DH-0002) — overridable via
  * `McpServerConfig.timeoutMs`. */
@@ -50,10 +52,22 @@ export class McpConnection {
   private client: Client | undefined;
   private _state: McpConnectionState = "closed";
   private _lastError: string | undefined;
+  /** DH-0057: one OAuth provider instance for this connection's whole lifetime (so refresh
+   * persistence and an in-flight interactive flow's state stay coherent). Present only for a
+   * URL-transport server with an `auth` block. */
+  readonly oauthProvider: DhOAuthProvider | undefined;
 
   constructor(serverName: string, config: McpServerConfig) {
     this.serverName = serverName;
     this.config = config;
+    if (config.auth && config.url) {
+      this.oauthProvider = new DhOAuthProvider(
+        serverName,
+        config.url,
+        config.auth,
+        new McpTokenStore(serverName),
+      );
+    }
   }
 
   get state(): McpConnectionState {
@@ -62,6 +76,22 @@ export class McpConnection {
 
   get lastError(): string | undefined {
     return this._lastError;
+  }
+
+  /** DH-0057: the configured server URL (URL-transport only), for the OAuth `auth()` driver. */
+  get serverUrl(): string | undefined {
+    return this.config.url;
+  }
+
+  /** DH-0057: the resolved grant type, or undefined when no `auth` block is configured. */
+  get authGrant(): "authorization_code" | "client_credentials" | undefined {
+    if (!this.config.auth) return undefined;
+    return this.config.auth.grant ?? "authorization_code";
+  }
+
+  /** DH-0057: the configured fixed loopback redirect port, or undefined for an ephemeral one. */
+  get authRedirectPort(): number | undefined {
+    return this.config.auth?.redirectPort;
   }
 
   private get connectTimeoutMs(): number {
@@ -83,13 +113,25 @@ export class McpConnection {
     if (this.config.url) {
       const url = new URL(this.config.url);
       const requestInit = this.config.headers ? { headers: this.config.headers } : undefined;
+      // DH-0057: when an `auth` block is set, hand the transport the OAuth provider so the SDK
+      // attaches the stored access token, auto-refreshes it via the refresh token, and
+      // surfaces UnauthorizedError when interactive re-authorization is required.
+      const authProvider = this.oauthProvider;
+      const sseOpts = {
+        ...(requestInit ? { requestInit } : {}),
+        ...(authProvider ? { authProvider } : {}),
+      };
+      const httpOpts = {
+        ...(requestInit ? { requestInit } : {}),
+        ...(authProvider ? { authProvider } : {}),
+      };
       if (preferLegacySse) {
-        return requestInit
-          ? new SSEClientTransport(url, { requestInit })
+        return Object.keys(sseOpts).length > 0
+          ? new SSEClientTransport(url, sseOpts)
           : new SSEClientTransport(url);
       }
-      return requestInit
-        ? new StreamableHTTPClientTransport(url, { requestInit })
+      return Object.keys(httpOpts).length > 0
+        ? new StreamableHTTPClientTransport(url, httpOpts)
         : new StreamableHTTPClientTransport(url);
     }
     throw new Error(

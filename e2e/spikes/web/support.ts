@@ -17,17 +17,22 @@
 //   cache — possibly at a different revision than the pinned playwright package expects
 //   (observed live: package wants chromium-1228, cache has 1223/1232).
 
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Browser, Page } from "playwright";
+// DH-0177: promoted into e2e/support/ (the gated tree) since the real CI-gated
+// web/streaming/connect-web tests depend on it — re-exported here so existing spike scripts
+// importing it from this module keep working unchanged.
+import { resolveChromiumExecutable } from "../../support/chromium.ts";
 import { type DhProcess, spawnDh } from "../../support/dh-process.ts";
 import {
   type MockAnthropicProvider,
   type MockTurn,
   startMockAnthropicProvider,
 } from "../../support/mock-provider.ts";
-import { type TestWorkspace, baseConfig, createWorkspace } from "../../support/workspace.ts";
+import { baseConfig, createWorkspace, type TestWorkspace } from "../../support/workspace.ts";
+
+export { resolveChromiumExecutable };
 
 export const ARTIFACTS_DIR = resolve(import.meta.dir, "artifacts");
 
@@ -35,64 +40,6 @@ export const ARTIFACTS_DIR = resolve(import.meta.dir, "artifacts");
 export function artifactPath(name: string): string {
   mkdirSync(ARTIFACTS_DIR, { recursive: true });
   return join(ARTIFACTS_DIR, name);
-}
-
-/**
- * Finds a runnable Chromium, in priority order: the CI sandbox's pre-installed binary,
- * playwright's own version-matched download, then any revision present in the local
- * playwright browser cache (newest first — a revision-adjacent Chromium is fine for these
- * behavioral checks even when it isn't the exact pinned one).
- */
-export async function resolveChromiumExecutable(): Promise<string> {
-  const { chromium } = await import("playwright");
-  const candidates: string[] = ["/opt/pw-browsers/chromium"];
-  try {
-    candidates.push(chromium.executablePath());
-  } catch {
-    // no download registered for this playwright version — fall through to cache scan
-  }
-  for (const candidate of candidates) {
-    if (candidate && existsSync(candidate)) return candidate;
-  }
-
-  const cacheRoots = [
-    process.env.PLAYWRIGHT_BROWSERS_PATH,
-    join(homedir(), "Library", "Caches", "ms-playwright"),
-    join(homedir(), ".cache", "ms-playwright"),
-  ].filter((root): root is string => typeof root === "string" && root.length > 0);
-  const launchers = [
-    join(
-      "chrome-mac-arm64",
-      "Google Chrome for Testing.app",
-      "Contents",
-      "MacOS",
-      "Google Chrome for Testing",
-    ),
-    join(
-      "chrome-mac",
-      "Google Chrome for Testing.app",
-      "Contents",
-      "MacOS",
-      "Google Chrome for Testing",
-    ),
-    join("chrome-linux", "chrome"),
-  ];
-  for (const root of cacheRoots) {
-    if (!existsSync(root)) continue;
-    const revisions = readdirSync(root)
-      .filter((entry) => /^chromium-\d+$/.test(entry))
-      .sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1]));
-    for (const revision of revisions) {
-      for (const launcher of launchers) {
-        const path = join(root, revision, launcher);
-        if (existsSync(path)) return path;
-      }
-    }
-  }
-  throw new Error(
-    "No Chromium found. Install one with `bunx playwright install chromium`, or set " +
-      "PLAYWRIGHT_BROWSERS_PATH, or provide /opt/pw-browsers/chromium (CI sandbox convention).",
-  );
 }
 
 export interface SpikeCheck {
@@ -183,7 +130,14 @@ export async function launchWebUi(turns: MockTurn[]): Promise<WebUiSession> {
 
   const executablePath = await resolveChromiumExecutable();
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ executablePath, headless: true });
+  // DH-0165: see e2e/web.test.ts's identical chromium.launch call for why these args exist —
+  // GitHub Actions' runners have no D-Bus session bus, which some headless Chromium subsystems
+  // reach for on launch and hang/crash waiting on.
+  const browser = await chromium.launch({
+    executablePath,
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  });
   const page = await browser.newPage();
   await page.goto(webUrl);
   await page.waitForSelector(".dh-app");

@@ -8,7 +8,7 @@ import {
   formatHeaderLines,
   formatVersionString,
 } from "./header-info.ts";
-import { DH_ASCII_LOGO_COMPACT } from "./prompt/banner.ts";
+import { HEADER_A2_WORDMARK_PLAIN } from "./prompt/banner.constant.ts";
 
 function baseConfig(overrides: Partial<DhConfig> = {}): DhConfig {
   return {
@@ -161,7 +161,7 @@ describe("buildHeaderInfo / formatHeaderLines", () => {
   test("wires name/logo/build/config together", () => {
     const info = buildHeaderInfo(baseConfig(), "dh.json", build);
     expect(info.name).toBe("dh");
-    expect(info.logoCompact).toBe(DH_ASCII_LOGO_COMPACT);
+    expect(info.logoCompact).toBe(HEADER_A2_WORDMARK_PLAIN);
     expect(info.build).toEqual(build);
     expect(info.config.modelCount).toBe(2);
   });
@@ -189,11 +189,11 @@ describe("formatEmptyStateLines", () => {
 
   test("DH-0124: compact logo + version only, no config-status line", () => {
     const info = buildHeaderInfo(baseConfig(), "dh.json", build);
-    expect(formatEmptyStateLines(info)).toEqual([DH_ASCII_LOGO_COMPACT, "dh 0.1.0 (abc123)"]);
+    expect(formatEmptyStateLines(info)).toEqual([HEADER_A2_WORDMARK_PLAIN, "dh 0.1.0 (abc123)"]);
   });
 
   test("DH-0124: unaffected by config being absent (no dh.json known, e.g. --connect)", () => {
     const info = buildHeaderInfo(null, "dh.json", build);
-    expect(formatEmptyStateLines(info)).toEqual([DH_ASCII_LOGO_COMPACT, "dh 0.1.0 (abc123)"]);
+    expect(formatEmptyStateLines(info)).toEqual([HEADER_A2_WORDMARK_PLAIN, "dh 0.1.0 (abc123)"]);
   });
 });

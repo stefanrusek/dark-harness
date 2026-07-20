@@ -46,10 +46,20 @@ export interface WebUiHandle {
 // the headers belong here, not just on the API responses in src/server/server.ts.
 // `frame-ancestors 'none'` is the modern CSP directive; `X-Frame-Options: DENY` covers
 // browsers that only honor the legacy header.
-const CLICKJACKING_HEADERS: Record<string, string> = {
+const CLICKJACKING_HEADERS: Record<string, string> = Object.freeze({
   "x-frame-options": "DENY",
   "content-security-policy": "frame-ancestors 'none'",
-};
+});
+
+// bun-types quirk, independent of this file's DOM-vs-DOM-less split (see the longer note
+// above `InnerServerHandle`): `Response.prototype.clone()`'s declared signature is inherited
+// straight from `undici-types` and returns *its* `Response`, not bun-types' own augmented
+// one — so a real `Response.clone()` call result is never directly assignable back to the
+// `Response` type used everywhere else in this file, even though it's the same object at
+// runtime. This helper isolates that one cast so call sites stay clean.
+function cloneResponse(response: Response): Response {
+  return response.clone() as unknown as Response;
+}
 
 function withSecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
@@ -85,51 +95,58 @@ function withSecurityHeaders(response: Response): Response {
 // the first hit — same one-time-cost-per-process shape DH-0023 already established for `/`.
 // Skipped entirely in `development` mode (HMR should reflect live edits, so everything is
 // fetched fresh, uncached, every time).
-interface InnerServerHandle {
-  port: number;
-  stop(): void;
-}
+// DH-0179: previously `Bun.serve`'s return value had to be cast through `any` here because a
+// hand-rolled `InnerServerHandle` shape mismatched `Bun.serve()`'s actual return type. Using
+// `ReturnType<typeof Bun.serve>` instead of a hand-rolled interface sidesteps that with no
+// cast needed.
+//
+// This turned out to have nothing to do with the DOM-vs-DOM-less `tsconfig.json` split this
+// comment used to blame (src/web/tsconfig.json's own comment explains that split, and it's
+// still real and still needed — see there). Verified empirically (2026-07-18): running both
+// `tsc --noEmit` invocations after removing every cast in this file turned up zero
+// DOM-vs-DOM-less conflicts anywhere. The two casts that *do* remain necessary below (one in
+// `proxyToInner` for `fetch()`'s return, one in `cloneResponse()` for `Response.clone()`'s
+// return) are a narrower, unrelated bun-types quirk: both of those methods' declared return
+// types resolve to `undici-types`' `Response`, while the ambient `Response` class bun-types
+// exposes elsewhere is its own augmented `BunHeadersOverride`-backed one, and the two aren't
+// structurally assignable — reproduces identically under the root (DOM-less) program alone,
+// so it is not a symptom of running two programs.
+type InnerServerHandle = ReturnType<typeof Bun.serve>;
 
+// Genuine lazy-singleton state, not a constant -- starts undefined and is reassigned exactly
+// once by getInnerServer() below, on first use. Object.freeze() doesn't apply (nothing to
+// freeze until it's set, and freezing would defeat the lazy-init purpose); this is
+// module-scope mutable state by design, not an oversight.
+// biome-ignore lint/plugin/no-module-scope-side-effects: lazy-singleton, see comment above
 let innerServer: InnerServerHandle | undefined;
 
 function getInnerServer(): InnerServerHandle {
   if (!innerServer) {
-    // `Bun.serve`'s route-value typing differs across this file's two typecheck passes (see
-    // the comment inside proxyToInner() below for the full explanation of the split).
     innerServer = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       routes: { "/": indexHtml },
-      // biome-ignore lint/suspicious/noExplicitAny: see comment above
-    }) as any as InnerServerHandle;
+    });
   }
   return innerServer;
 }
 
-// A `Response` cached under one typecheck pass mismatches the other's ambient type — same
-// DOM-vs-DOM-less split as proxyToInner() below.
-// biome-ignore lint/suspicious/noExplicitAny: see comment above
-const assetCache = new Map<string, any>();
+const assetCache = Object.freeze(new Map<string, Response>());
 
 async function proxyToInner(path: string, development: boolean): Promise<Response> {
   if (!development) {
     const cached = assetCache.get(path);
-    if (cached) return cached.clone();
+    if (cached) return cloneResponse(cached);
   }
   const inner = getInnerServer();
-  // Cast away the ambient `fetch`/`Response`/`Headers` types here: this file is typechecked
-  // both under its own DOM-enabled program (src/web/tsconfig.json) *and*, transitively (via
-  // whatever root-owned file imports `serveWebUi`, e.g. `src/cli.ts`), under the root
-  // program's DOM-less one — see src/web/tsconfig.json's own comment on this exact split.
-  // `bun-types` itself resolves `Response`/`Headers` differently depending on whether
-  // `lib.dom` is present in that pass, so a value that's valid under one program's types is a
-  // mismatch under the other's; this loopback self-request's actual runtime shape
-  // (status/headers/arrayBuffer) doesn't depend on either program's opinion of it. `any` all
-  // the way through this function is the pragmatic way to satisfy both `tsc` invocations at
-  // once — the surrounding functions still narrow back to the real `Response` type at their
-  // boundaries.
-  // biome-ignore lint/suspicious/noExplicitAny: see comment above
-  const rendered: any = await fetch(`http://127.0.0.1:${inner.port}${path}`);
+  // bun-types quirk (see the comment above `InnerServerHandle`): `fetch()`'s declared return
+  // type is `undici-types`' `Response`, not bun-types' own augmented `Response` class, even
+  // though at runtime Bun's `fetch` returns the same kind of object used everywhere else in
+  // this file. The two types aren't structurally assignable (missing `toJSON`/`count`/
+  // `getAll` on `Headers`), so this one cast is the narrow, targeted fix — everything derived
+  // from `rendered` below only ever touches the runtime-universal surface (`.status`,
+  // `.headers.forEach`, `.arrayBuffer()`), which both types agree on.
+  const rendered = (await fetch(`http://127.0.0.1:${inner.port}${path}`)) as unknown as Response;
   const body = await rendered.arrayBuffer();
   const headers: Record<string, string> = {};
   rendered.headers.forEach((value: string, key: string) => {
@@ -137,7 +154,7 @@ async function proxyToInner(path: string, development: boolean): Promise<Respons
   });
   const response = withSecurityHeaders(new Response(body, { status: rendered.status, headers }));
   if (!development && rendered.status === 200) {
-    assetCache.set(path, response.clone());
+    assetCache.set(path, cloneResponse(response));
   }
   return response;
 }
@@ -206,7 +223,7 @@ export function serveWebUi(options: ServeWebUiOptions): WebUiHandle {
   const port = server.port ?? options.port;
   return {
     port,
-    url: `http://localhost:${port}`,
+    url: `http://${options.hostname ?? "localhost"}:${port}`,
     stop: () => server.stop(true),
   };
 }

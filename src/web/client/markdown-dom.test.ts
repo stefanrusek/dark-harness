@@ -242,6 +242,40 @@ describe("renderMarkdownInto — inline constructs", () => {
   });
 });
 
+describe("renderMarkdownInto — coloredSpan (DH-0206/ADR 0009)", () => {
+  test("a named-color span renders as a <span> with style.color set via property assignment", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: red;">alert</span>');
+    const span = root.querySelector("span");
+    expect(span).not.toBeNull();
+    expect(span?.style.color).toBe("red");
+    expect(span?.textContent).toBe("alert");
+    // Never a string-built style attribute or innerHTML sink.
+    expect(root.innerHTML).not.toContain("innerHTML");
+  });
+
+  test("a hex-color span sets style.color to the hex value", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: #ff0000">alert</span>');
+    const span = root.querySelector("span");
+    expect(span?.style.color).toBe("#ff0000");
+    expect(span?.textContent).toBe("alert");
+  });
+
+  test("children render inside the span, including nested inline formatting", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: blue">**bold**</span>');
+    const span = root.querySelector("span");
+    expect(span?.querySelector("strong")?.textContent).toBe("bold");
+  });
+
+  test("an invalid span shape renders no <span> at all (literal text)", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, '<span style="color: url(javascript:alert(1))">x</span>');
+    expect(root.querySelector("span")).toBeNull();
+  });
+});
+
 describe("renderMarkdownInto — link scheme filtering (security)", () => {
   test("http/https/mailto links become real anchors with rel/target set", () => {
     const { document, root } = createTestDom();
@@ -295,5 +329,24 @@ describe("renderMarkdownInto — link scheme filtering (security)", () => {
     renderMd(document, root, "[**bold link**](https://example.com)");
     const anchor = root.querySelector("a");
     expect(anchor?.querySelector("strong")?.textContent).toBe("bold link");
+  });
+
+  // DH-0232: a link immediately followed by other text with no space (e.g. "[x](url)text")
+  // must not have the underline styling bleed into that trailing text. The DOM naturally
+  // scopes an <a> element's own styling to its own subtree — a sibling text node right after
+  // the closing </a> is never inside it — so this confirms the Web renderer has no analogue
+  // of the TUI's ANSI SGR-state-persists-across-segments failure mode (already fixed for the
+  // TUI in DH-0065, see markdown-ansi.test.ts).
+  test("DH-0232: link immediately followed by text with no space — trailing text is not inside the anchor", () => {
+    const { document, root } = createTestDom();
+    renderMd(document, root, "[link](https://example.com)trailing");
+    const anchor = root.querySelector("a");
+    expect(anchor?.textContent).toBe("link");
+    const p = root.querySelector("p");
+    // The anchor's next sibling is a plain text node, not nested inside the <a> — so no CSS
+    // applied to the anchor (e.g. `a { text-decoration: underline }`) can cascade onto it.
+    expect(anchor?.nextSibling?.nodeType).toBe(3); // Node.TEXT_NODE
+    expect(anchor?.nextSibling?.textContent).toBe("trailing");
+    expect(p?.textContent).toBe("linktrailing");
   });
 });

@@ -4,11 +4,11 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  WorktreeError,
   createWorktree,
   hasChanges,
   isGitRepo,
   removeWorktree,
+  WorktreeError,
 } from "./worktree.ts";
 
 function makeGitRepo(): string {

@@ -18,7 +18,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnDh } from "../../support/dh-process.ts";
-import { startMockAnthropicProvider, successTurn } from "../../support/mock-provider.ts";
+import { startMockAnthropicProvider } from "../../support/mock-provider.ts";
 import { baseConfig, createWorkspace } from "../../support/workspace.ts";
 import { resolveChromiumExecutable } from "./support.ts";
 
@@ -48,6 +48,7 @@ const RICH_MARKDOWN = [
   "",
   "```typescript",
   "export async function verify(node: string): Promise<boolean> {",
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: literal example code text, not an interpolation bug.
   "  const res = await fetch(`https://${node}/healthz`);",
   '  return res.ok && (await res.json()).status === "green";',
   "}",

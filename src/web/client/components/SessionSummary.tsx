@@ -1,7 +1,7 @@
 // React migration of render.ts's renderSessionSummary (DH-0135).
 import type { ReactElement } from "react";
 import { formatCostUsd, formatExitCode, formatTokenCount } from "../format.ts";
-import { type WebState, sessionTotals } from "../state.ts";
+import { sessionTotals, type WebState } from "../state.ts";
 
 export interface SessionSummaryProps {
   state: WebState;

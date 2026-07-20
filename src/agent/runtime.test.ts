@@ -28,11 +28,11 @@ import {
   type ServerSentEvent,
 } from "../contracts/index.ts";
 import { SessionLogger } from "../server/index.ts";
+import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import {
   AgentRuntime,
   type AgentRuntimeOptions,
   ConfigModelError,
-  ROOT_AGENT_ID,
   RootNotListeningError,
   RootOnlyModelSwitchError,
   UnknownSkillError,
@@ -241,6 +241,23 @@ function startMockAnthropicServer(
                 id: "tu_search_unreachable",
                 name: "ToolSearch",
                 input: { query: "anything" },
+              },
+            ],
+            "tool_use",
+          );
+        }
+        // DH-0057 test support: drives the real `AgentRuntime.buildToolContext` ->
+        // `ctx.mcpAuth.complete` facade (runtime.ts, not the tool-level mock used by
+        // mcp-auth.test.ts) — calling `action: "complete"` for a server with no pending flow
+        // still reaches that closure; McpManager.completeAuth() is the one that rejects it.
+        if (text.includes("use-mcpauth-complete")) {
+          return message(
+            [
+              {
+                type: "tool_use",
+                id: "tu_mcpauth_complete",
+                name: "McpAuth",
+                input: { server: "ghost", action: "complete" },
               },
             ],
             "tool_use",
@@ -518,36 +535,157 @@ describe("AgentRuntime", () => {
   // DH-0094: self-awareness section (dh version/build, current model, sibling models) is
   // computed per-agent, not baked once into a shared systemPrompt string — a sub-agent may
   // run under a different ModelConfig than its parent/root, so it must see its *own* facts.
-  test("DH-0094: root and a sub-agent running a different model each get their own " +
-    "per-agent self-info section in the system prompt sent to the provider", async () => {
+  test(
+    "DH-0094: root and a sub-agent running a different model each get their own " +
+      "per-agent self-info section in the system prompt sent to the provider",
+    async () => {
+      receivedSystemPrompts = [];
+      const config = baseConfig({
+        models: [
+          { name: "test-model", provider: "mock", model: "mock-1" },
+          { name: "other-model", provider: "mock", model: "mock-2" },
+        ],
+      });
+      const runtime = newAgentRuntime({ config, systemPrompt: "you are a test agent" });
+
+      const rootResult = await runtime.runRoot("please just answer", "test-model");
+      expect(rootResult.success).toBe(true);
+
+      const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+        model: "other-model",
+        prompt: "child instruction",
+      });
+      await runtime.tasks.awaitDone(childTaskId);
+
+      const rootRequest = receivedSystemPrompts.find((r) => r.model === "mock-1");
+      const childRequest = receivedSystemPrompts.find((r) => r.model === "mock-2");
+      expect(rootRequest?.system).toContain("running as model config **test-model**");
+      expect(rootRequest?.system).toContain("- **other-model** -> provider model `mock-2`");
+      expect(childRequest?.system).toContain("running as model config **other-model**");
+      expect(childRequest?.system).toContain("- **test-model** -> provider model `mock-1`");
+      // Each agent's own config name must not appear in its own "other models" list.
+      expect(rootRequest?.system).not.toContain("- **test-model** ->");
+      expect(childRequest?.system).not.toContain("- **other-model** ->");
+    },
+  );
+
+  // DH-0194: the standalone --job/--instructions path never sets `interactive` (defaults
+  // false), so the agent must see the unattended-mode instructions in its system prompt.
+  test("DH-0194: a non-interactive runtime (the default, matching --job) includes the job-mode section in the system prompt", async () => {
     receivedSystemPrompts = [];
-    const config = baseConfig({
-      models: [
-        { name: "test-model", provider: "mock", model: "mock-1" },
-        { name: "other-model", provider: "mock", model: "mock-2" },
-      ],
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "you are a test agent" });
+    const result = await runtime.runRoot("please just answer");
+    expect(result.success).toBe(true);
+    expect(receivedSystemPrompts[0]?.system).toContain("You are running unattended (--job mode)");
+    expect(receivedSystemPrompts[0]?.system).toContain(
+      "Never ask a clarifying question and wait for a reply.",
+    );
+  });
+
+  // DH-0194: interactive sessions (server/TUI/Web, `interactive: true`) have a live operator,
+  // so the job-mode section must NOT be injected. Exercised via spawnAgent (not runRoot)
+  // because an interactive root pauses "waiting" instead of resolving on its first
+  // non-tool-use turn (Round 5 semantics, see AgentRuntimeOptions.interactive's doc comment)
+  // — a sub-agent always reaches "done" regardless of the runtime's interactive flag (Round
+  // 7 fix, see the test above), so it's the reliable way to await a system prompt here.
+  test("DH-0194: an interactive runtime does not include the job-mode section in the system prompt", async () => {
+    receivedSystemPrompts = [];
+    const runtime = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "you are a test agent",
+      interactive: true,
     });
-    const runtime = newAgentRuntime({ config, systemPrompt: "you are a test agent" });
-
-    const rootResult = await runtime.runRoot("please just answer", "test-model");
-    expect(rootResult.success).toBe(true);
-
-    const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
-      model: "other-model",
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
       prompt: "child instruction",
     });
-    await runtime.tasks.awaitDone(childTaskId);
-
-    const rootRequest = receivedSystemPrompts.find((r) => r.model === "mock-1");
-    const childRequest = receivedSystemPrompts.find((r) => r.model === "mock-2");
-    expect(rootRequest?.system).toContain("running as model config **test-model**");
-    expect(rootRequest?.system).toContain("- **other-model** -> provider model `mock-2`");
-    expect(childRequest?.system).toContain("running as model config **other-model**");
-    expect(childRequest?.system).toContain("- **test-model** -> provider model `mock-1`");
-    // Each agent's own config name must not appear in its own "other models" list.
-    expect(rootRequest?.system).not.toContain("- **test-model** ->");
-    expect(childRequest?.system).not.toContain("- **other-model** ->");
+    await runtime.tasks.awaitDone(taskId);
+    expect(runtime.tasks.snapshot(taskId).status).toBe("done");
+    expect(receivedSystemPrompts[0]?.system).not.toContain(
+      "You are running unattended (--job mode)",
+    );
   });
+
+  // DH-0215: the self-info section now also tells each agent its own sessionId, agentId,
+  // and the real on-disk path to its own JSONL log file — verified against an actual
+  // SessionLogger writing to a real tmp dir, so this proves the reported path is genuinely
+  // readable and genuinely contains that agent's own transcript (not just a plausible-looking
+  // string).
+  test(
+    "DH-0215: root and a sub-agent each see their own sessionId/agentId/log path in the " +
+      "system prompt, and the reported path is a real, readable file containing that agent's " +
+      "own transcript",
+    async () => {
+      receivedSystemPrompts = [];
+      const dh215LogsRoot = mkdtempSync(join(tmpdir(), "dh-logs-runtime-dh0215-"));
+      const sessionId = "session-dh-0215";
+      const logger = new SessionLogger(join(dh215LogsRoot, sessionId));
+      try {
+        const runtime = newAgentRuntime({
+          config: baseConfig(),
+          systemPrompt: "you are a test agent",
+          sessionId,
+          logsRoot: dh215LogsRoot,
+          onLogLine: (agentId, line) => logger.append(agentId, line),
+        });
+
+        const rootResult = await runtime.runRoot("please just answer", "test-model");
+        expect(rootResult.success).toBe(true);
+
+        const childTaskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+          model: "test-model",
+          prompt: "child instruction",
+        });
+        await runtime.tasks.awaitDone(childTaskId);
+
+        // Filter by this test's own sessionId rather than positional index — other tests'
+        // background sub-agents may still be settling concurrently and pushing into the same
+        // shared `receivedSystemPrompts` collector.
+        const ownPrompts = receivedSystemPrompts.filter((r) =>
+          r.system?.includes(`session id is \`${sessionId}\``),
+        );
+        const rootSystem = ownPrompts.find((r) =>
+          r.system?.includes(`your own agent id is \`${ROOT_AGENT_ID}\``),
+        )?.system;
+        const childSystem = ownPrompts.find((r) =>
+          r.system?.includes(`your own agent id is \`${childTaskId}\``),
+        )?.system;
+        expect(rootSystem).toContain(`session id is \`${sessionId}\``);
+        expect(rootSystem).toContain(`your own agent id is \`${ROOT_AGENT_ID}\``);
+        expect(childSystem).toContain(`session id is \`${sessionId}\``);
+        expect(childSystem).toContain(`your own agent id is \`${childTaskId}\``);
+        expect(rootSystem).not.toContain(`your own agent id is \`${childTaskId}\``);
+
+        const rootLogPathMatch = rootSystem?.match(/logged automatically to `([^`]+)`/);
+        const childLogPathMatch = childSystem?.match(/logged automatically to `([^`]+)`/);
+        expect(rootLogPathMatch?.[1]).toBe(logger.filePathFor(ROOT_AGENT_ID));
+        expect(childLogPathMatch?.[1]).toBe(logger.filePathFor(childTaskId));
+
+        // The reported path is a real file — read it back and confirm it's genuinely that
+        // agent's own transcript (header line naming its own agentId, plus event lines).
+        const rootLogPath = rootLogPathMatch?.[1] ?? "";
+        expect(existsSync(rootLogPath)).toBe(true);
+        const rootLogLines = readFileSync(rootLogPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l));
+        expect(rootLogLines[0].type).toBe("header");
+        expect(rootLogLines[0].agentId).toBe(ROOT_AGENT_ID);
+        expect(rootLogLines.some((l) => l.type === "message")).toBe(true);
+
+        const childLogPath = childLogPathMatch?.[1] ?? "";
+        expect(existsSync(childLogPath)).toBe(true);
+        const childLogLines = readFileSync(childLogPath, "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l));
+        expect(childLogLines[0].type).toBe("header");
+        expect(childLogLines[0].agentId).toBe(childTaskId);
+      } finally {
+        rmSync(dh215LogsRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("runRoot works without onEvent/onLogLine callbacks", async () => {
     const runtime = newAgentRuntime({
@@ -715,6 +853,23 @@ describe("AgentRuntime", () => {
     expect(result.success).toBe(true);
   });
 
+  test("buildToolContext wires ctx.mcpAuth.complete so the McpAuth tool can drive it", async () => {
+    const { logLines, onLogLine } = collectors();
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp", onLogLine });
+    const result = await runtime.runRoot("use-mcpauth-complete");
+    expect(result.success).toBe(true);
+    const toolResult = logLines.find(
+      (l) => l.type === "tool_result" && l.toolUseId === "tu_mcpauth_complete",
+    );
+    // No pending flow for "ghost" (not even a configured server) — McpManager.completeAuth()
+    // rejects with McpAuthConfigError, which the tool reports informationally, not as a
+    // harness failure. The point of this test is that ctx.mcpAuth.complete() was reached at
+    // all through the real runtime wiring, not the mocked facade mcp-auth.test.ts uses.
+    expect(toolResult && toolResult.type === "tool_result" ? toolResult.output : "").toContain(
+      'Unknown MCP server "ghost"',
+    );
+  });
+
   test("buildToolContext wires searchDeferredTools so the ToolSearch tool can query it", async () => {
     const runtime = newAgentRuntime({
       // Deliberately unreachable (nothing listens on 127.0.0.1:1) rather than a real
@@ -730,42 +885,45 @@ describe("AgentRuntime", () => {
     expect(result.success).toBe(true);
   });
 
-  test("DH-0002: select: activates a real MCP tool discovered from a configured stdio " +
-    "server, and the very next turn can call it and get real output back", async () => {
-    const { logLines, onLogLine } = collectors();
-    const fixturePath = fileURLToPath(
-      new URL("./mcp/__fixtures__/fake-stdio-server.ts", import.meta.url),
-    );
-    const runtime = newAgentRuntime({
-      config: baseConfig({
-        mcpServers: { fixture: { command: process.execPath, args: ["run", fixturePath] } },
-      }),
-      systemPrompt: "sp",
-      onLogLine,
-    });
-    // Give the runtime's eager, fire-and-forget connectAll() a beat to finish so the first
-    // ToolSearch call's own corpus-touching reconnect isn't racing it (DH-0002 §3/§6) —
-    // exercised deliberately unawaited elsewhere; this test cares about the steady state.
-    await new Promise((resolve) => setTimeout(resolve, 200));
+  test(
+    "DH-0002: select: activates a real MCP tool discovered from a configured stdio " +
+      "server, and the very next turn can call it and get real output back",
+    async () => {
+      const { logLines, onLogLine } = collectors();
+      const fixturePath = fileURLToPath(
+        new URL("./mcp/__fixtures__/fake-stdio-server.ts", import.meta.url),
+      );
+      const runtime = newAgentRuntime({
+        config: baseConfig({
+          mcpServers: { fixture: { command: process.execPath, args: ["run", fixturePath] } },
+        }),
+        systemPrompt: "sp",
+        onLogLine,
+      });
+      // Give the runtime's eager, fire-and-forget connectAll() a beat to finish so the first
+      // ToolSearch call's own corpus-touching reconnect isn't racing it (DH-0002 §3/§6) —
+      // exercised deliberately unawaited elsewhere; this test cares about the steady state.
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
-    const result = await runtime.runRoot("use-toolsearch-select-and-call");
-    expect(result.success).toBe(true);
+      const result = await runtime.runRoot("use-toolsearch-select-and-call");
+      expect(result.success).toBe(true);
 
-    const toolResults = logLines.filter((l) => l.type === "tool_result");
-    const searchResult = toolResults.find(
-      (l) => l.type === "tool_result" && l.toolUseId === "tu_search_select",
-    );
-    expect(
-      searchResult && searchResult.type === "tool_result" ? searchResult.output : "",
-    ).toContain("mcp__fixture__echo");
-    const echoResult = toolResults.find(
-      (l) => l.type === "tool_result" && l.toolUseId === "tu_call_fixture_echo",
-    );
-    expect(echoResult && echoResult.type === "tool_result" ? echoResult.output : "").toBe(
-      "echo: round-trip",
-    );
-    await runtime.close();
-  });
+      const toolResults = logLines.filter((l) => l.type === "tool_result");
+      const searchResult = toolResults.find(
+        (l) => l.type === "tool_result" && l.toolUseId === "tu_search_select",
+      );
+      expect(
+        searchResult && searchResult.type === "tool_result" ? searchResult.output : "",
+      ).toContain("mcp__fixture__echo");
+      const echoResult = toolResults.find(
+        (l) => l.type === "tool_result" && l.toolUseId === "tu_call_fixture_echo",
+      );
+      expect(echoResult && echoResult.type === "tool_result" ? echoResult.output : "").toBe(
+        "echo: round-trip",
+      );
+      await runtime.close();
+    },
+  );
 
   test("DH-0002: ToolSearch's footer lists a currently-unreachable configured MCP server", async () => {
     const { logLines, onLogLine } = collectors();
@@ -789,11 +947,14 @@ describe("AgentRuntime", () => {
     await runtime.close();
   });
 
-  test("DH-0002: AgentRuntime.close() closes the shared McpManager (terminates stdio " +
-    "children) without throwing, even with no mcpServers configured", async () => {
-    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
-    await expect(runtime.close()).resolves.toBeUndefined();
-  });
+  test(
+    "DH-0002: AgentRuntime.close() closes the shared McpManager (terminates stdio " +
+      "children) without throwing, even with no mcpServers configured",
+    async () => {
+      const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+      await expect(runtime.close()).resolves.toBeUndefined();
+    },
+  );
 
   describe("DH-0091: project .mcp.json auto-load", () => {
     const fixturePath = fileURLToPath(
@@ -920,55 +1081,67 @@ describe("AgentRuntime", () => {
     expect(typeof output === "string" ? output.trim() : "").toBe(realpathSync("/tmp"));
   });
 
-  test("DH-0070: each concurrently-spawned sub-agent sees its own agent's cwd, not " +
-    "another agent's or the process's — per-agent cwd is captured at spawn time, not read " +
-    "from one shared runtime-wide field", async () => {
-    const dirA = realpathSync("/tmp");
-    const dirB = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-b-")));
-    const { logLines: logLinesA, onLogLine: onLogLineA } = collectors();
-    const { logLines: logLinesB, onLogLine: onLogLineB } = collectors();
-    const runtimeA = newAgentRuntime({
-      config: baseConfig(),
-      systemPrompt: "sp",
-      cwd: dirA,
-      onLogLine: onLogLineA,
-    });
-    const runtimeB = newAgentRuntime({
-      config: baseConfig(),
-      systemPrompt: "sp",
-      cwd: dirB,
-      onLogLine: onLogLineB,
-    });
-    // Two sub-agents, each spawned from a *different* runtime instance (so their own root
-    // cwds genuinely diverge), run concurrently — proving neither the process's own cwd nor
-    // one runtime's cwd leaks into the other's sub-agent, and that a real process.cwd()
-    // change (below) doesn't silently become either agent's effective cwd.
-    const originalProcessCwd = process.cwd();
-    process.chdir(tmpdir());
-    try {
-      const [taskIdA, taskIdB] = [
-        runtimeA.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
-        runtimeB.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
-      ];
-      await Promise.all([runtimeA.tasks.awaitDone(taskIdA), runtimeB.tasks.awaitDone(taskIdB)]);
-    } finally {
-      process.chdir(originalProcessCwd);
-    }
+  test(
+    "DH-0070: each concurrently-spawned sub-agent sees its own agent's cwd, not " +
+      "another agent's or the process's — per-agent cwd is captured at spawn time, not read " +
+      "from one shared runtime-wide field",
+    async () => {
+      // Three genuinely-distinct real directories: one per runtime, plus one the *process*
+      // is chdir'd into below. They must never collide, or the assertions contradict each
+      // other. The old code used realpathSync("/tmp") for dirA, which is fine on macOS (where
+      // /tmp is a symlink to /private/tmp, so it differs from tmpdir()) but on Linux CI
+      // realpathSync("/tmp") === tmpdir() === "/tmp", making dirA === the process cwd — so
+      // "sees its own cwd" (== dirA) and "never sees the process cwd" (!= tmpdir) became
+      // mutually exclusive and the test failed only in CI. Using fresh mkdtemp dirs for all
+      // three removes that platform-dependent collision entirely.
+      const dirA = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-a-")));
+      const dirB = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-b-")));
+      const procDir = realpathSync(mkdtempSync(join(tmpdir(), "dh-cwd-proc-")));
+      const { logLines: logLinesA, onLogLine: onLogLineA } = collectors();
+      const { logLines: logLinesB, onLogLine: onLogLineB } = collectors();
+      const runtimeA = newAgentRuntime({
+        config: baseConfig(),
+        systemPrompt: "sp",
+        cwd: dirA,
+        onLogLine: onLogLineA,
+      });
+      const runtimeB = newAgentRuntime({
+        config: baseConfig(),
+        systemPrompt: "sp",
+        cwd: dirB,
+        onLogLine: onLogLineB,
+      });
+      // Two sub-agents, each spawned from a *different* runtime instance (so their own root
+      // cwds genuinely diverge), run concurrently — proving neither the process's own cwd nor
+      // one runtime's cwd leaks into the other's sub-agent, and that a real process.cwd()
+      // change (below) doesn't silently become either agent's effective cwd.
+      const originalProcessCwd = process.cwd();
+      process.chdir(procDir);
+      try {
+        const [taskIdA, taskIdB] = [
+          runtimeA.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
+          runtimeB.spawnAgent(ROOT_AGENT_ID, { model: "test-model", prompt: "use-bash-pwd" }),
+        ];
+        await Promise.all([runtimeA.tasks.awaitDone(taskIdA), runtimeB.tasks.awaitDone(taskIdB)]);
+      } finally {
+        process.chdir(originalProcessCwd);
+      }
 
-    const pwdOutput = (lines: LogLine[]) => {
-      const toolResult = lines.find((l) => l.type === "tool_result");
-      const output = toolResult && toolResult.type === "tool_result" ? toolResult.output : "";
-      return typeof output === "string" ? output.trim() : "";
-    };
-    expect(pwdOutput(logLinesA)).toBe(dirA);
-    expect(pwdOutput(logLinesB)).toBe(dirB);
-    // Neither sub-agent ever saw the process's own (temporarily-changed) cwd, nor the
-    // sibling runtime's cwd.
-    expect(pwdOutput(logLinesA)).not.toBe(dirB);
-    expect(pwdOutput(logLinesB)).not.toBe(dirA);
-    expect(pwdOutput(logLinesA)).not.toBe(tmpdir());
-    expect(pwdOutput(logLinesB)).not.toBe(tmpdir());
-  });
+      const pwdOutput = (lines: LogLine[]) => {
+        const toolResult = lines.find((l) => l.type === "tool_result");
+        const output = toolResult && toolResult.type === "tool_result" ? toolResult.output : "";
+        return typeof output === "string" ? output.trim() : "";
+      };
+      expect(pwdOutput(logLinesA)).toBe(dirA);
+      expect(pwdOutput(logLinesB)).toBe(dirB);
+      // Neither sub-agent ever saw the process's own (temporarily-changed) cwd, nor the
+      // sibling runtime's cwd.
+      expect(pwdOutput(logLinesA)).not.toBe(dirB);
+      expect(pwdOutput(logLinesB)).not.toBe(dirA);
+      expect(pwdOutput(logLinesA)).not.toBe(procDir);
+      expect(pwdOutput(logLinesB)).not.toBe(procDir);
+    },
+  );
 
   test("an explicit tools option restricts the tool map away from ALL_TOOLS", async () => {
     const runtime = newAgentRuntime({
@@ -1081,6 +1254,49 @@ describe("AgentRuntime.rootHasStarted / getAgentTree / sendMessageToRoot (Round 
   test("sendMessageToRoot throws RootNotListeningError before the root agent has started", () => {
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
     expect(() => runtime.sendMessageToRoot("hi")).toThrow(RootNotListeningError);
+  });
+
+  // DH-0207/DH-0208: cancelQueuedMessage() root-vs-sub-agent split.
+  test("cancelQueuedMessage(ROOT_AGENT_ID, ...) returns false before the root has started (nothing queued, nothing to cancel)", () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    expect(runtime.cancelQueuedMessage(ROOT_AGENT_ID, "whatever")).toBe(false);
+  });
+
+  test("cancelQueuedMessage(ROOT_AGENT_ID, ...) removes a still-queued entry from a live root, returning false for an unknown id", async () => {
+    let queuedId: string | undefined;
+    const runtime = newAgentRuntime({
+      config: baseConfig(),
+      systemPrompt: "sp",
+      onEvent: (event) => {
+        if (event.type === "agent_queue" && event.agentId === ROOT_AGENT_ID) {
+          queuedId = event.queue[0]?.id;
+        }
+      },
+    });
+    const rootPromise = runtime.runRoot("please just answer");
+    // sendMessageToRoot's own sibling test above already establishes this synchronous-window
+    // ordering is safe (the sink is registered before the first `await` inside runAgentLoop).
+    runtime.sendMessageToRoot("cancel target");
+    expect(queuedId).toBeDefined();
+    expect(runtime.cancelQueuedMessage(ROOT_AGENT_ID, "not-a-real-id")).toBe(false);
+    expect(queuedId !== undefined && runtime.cancelQueuedMessage(ROOT_AGENT_ID, queuedId)).toBe(
+      true,
+    );
+    const result = await rootPromise;
+    expect(result.success).toBe(true);
+  });
+
+  test("cancelQueuedMessage against a non-root agentId delegates to TaskRegistry", async () => {
+    const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
+    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+      model: "test-model",
+      prompt: "child instruction",
+    });
+    // registerCancelQueuedMessage is installed synchronously at the top of runAgentLoop,
+    // before its first await — safe to call immediately, mirroring sendMessage()'s own
+    // precedent (see the "SendMessage injection" test in loop.test.ts).
+    expect(runtime.cancelQueuedMessage(taskId, "not-a-real-id")).toBe(false);
+    await runtime.tasks.awaitDone(taskId);
   });
 
   test("sendMessageToRoot delivers into the running root agent's next turn", async () => {
@@ -1858,41 +2074,44 @@ describe("AgentRuntime — DH-0013: session-wide budgets", () => {
     ).toThrow(/maxConcurrentAgents/);
   });
 
-  test("DH-0077: isolation: 'worktree' points the sub-agent's cwd at a fresh worktree, " +
-    "auto-cleaned up when it has no changes", async () => {
-    const repo = mkdtempSync(join(tmpdir(), "dh-runtime-wt-"));
-    execFileSync("git", ["init", "-q"], { cwd: repo });
-    execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
-    execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
-    writeFileSync(join(repo, "README.md"), "hi\n");
-    execFileSync("git", ["add", "README.md"], { cwd: repo });
-    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repo });
+  test(
+    "DH-0077: isolation: 'worktree' points the sub-agent's cwd at a fresh worktree, " +
+      "auto-cleaned up when it has no changes",
+    async () => {
+      const repo = mkdtempSync(join(tmpdir(), "dh-runtime-wt-"));
+      execFileSync("git", ["init", "-q"], { cwd: repo });
+      execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+      execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
+      writeFileSync(join(repo, "README.md"), "hi\n");
+      execFileSync("git", ["add", "README.md"], { cwd: repo });
+      execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: repo });
 
-    const { logLines, onLogLine } = collectors();
-    const runtime = newAgentRuntime({
-      config: baseConfig(),
-      systemPrompt: "sp",
-      cwd: repo,
-      onLogLine,
-    });
-    const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
-      model: "test-model",
-      prompt: "use-bash-pwd",
-      isolation: "worktree",
-    });
-    await runtime.tasks.awaitDone(taskId);
-    const snapshot = runtime.tasks.snapshot(taskId);
-    expect(snapshot.status).toBe("done");
+      const { logLines, onLogLine } = collectors();
+      const runtime = newAgentRuntime({
+        config: baseConfig(),
+        systemPrompt: "sp",
+        cwd: repo,
+        onLogLine,
+      });
+      const taskId = runtime.spawnAgent(ROOT_AGENT_ID, {
+        model: "test-model",
+        prompt: "use-bash-pwd",
+        isolation: "worktree",
+      });
+      await runtime.tasks.awaitDone(taskId);
+      const snapshot = runtime.tasks.snapshot(taskId);
+      expect(snapshot.status).toBe("done");
 
-    const toolResult = logLines.find((l) => l.type === "tool_result");
-    const output = toolResult && toolResult.type === "tool_result" ? toolResult.output : "";
-    const pwd = typeof output === "string" ? output.trim() : "";
-    // The sub-agent's cwd was the worktree, not the repo itself.
-    expect(pwd).not.toBe(realpathSync(repo));
-    expect(pwd).toContain("dh-worktrees-");
-    // Worktree had no changes (just ran `pwd`) — cleaned up automatically.
-    expect(existsSync(pwd)).toBe(false);
-  });
+      const toolResult = logLines.find((l) => l.type === "tool_result");
+      const output = toolResult && toolResult.type === "tool_result" ? toolResult.output : "";
+      const pwd = typeof output === "string" ? output.trim() : "";
+      // The sub-agent's cwd was the worktree, not the repo itself.
+      expect(pwd).not.toBe(realpathSync(repo));
+      expect(pwd).toContain("dh-worktrees-");
+      // Worktree had no changes (just ran `pwd`) — cleaned up automatically.
+      expect(existsSync(pwd)).toBe(false);
+    },
+  );
 
   test("DH-0077: a worktree left with changes is retained and reported back, not deleted", async () => {
     const repo = mkdtempSync(join(tmpdir(), "dh-runtime-wt-changes-"));
@@ -2283,52 +2502,55 @@ describe("AgentRuntime — DH-0074 web tool wiring", () => {
     );
   });
 
-  test("web.fetch configured -> WebFetch actually runs end-to-end, and its extraction-model " +
-    "call (completeWithModel) feeds the same token_usage/session-accounting path as a normal turn", async () => {
-    const pageServer = Bun.serve({
-      port: 0,
-      fetch() {
-        return new Response("This page is about bun test fixtures.", {
-          headers: { "content-type": "text/plain" },
-        });
-      },
-    });
-    try {
-      const { events, onEvent } = collectors();
-      const runtime = newAgentRuntime({
-        config: baseConfig({
-          web: {
-            fetch: {
-              // The fixture server binds to 127.0.0.1 — a private address — so the SSRF
-              // check must be deliberately bypassed for this test, exactly as a real
-              // operator pointing WebFetch at an internal docs server would configure it.
-              allowPrivateNetwork: true,
-              extractionModel: "test-model",
-            },
-          },
-        }),
-        systemPrompt: "sp",
-        onEvent,
+  test(
+    "web.fetch configured -> WebFetch actually runs end-to-end, and its extraction-model " +
+      "call (completeWithModel) feeds the same token_usage/session-accounting path as a normal turn",
+    async () => {
+      const pageServer = Bun.serve({
+        port: 0,
+        fetch() {
+          return new Response("This page is about bun test fixtures.", {
+            headers: { "content-type": "text/plain" },
+          });
+        },
       });
+      try {
+        const { events, onEvent } = collectors();
+        const runtime = newAgentRuntime({
+          config: baseConfig({
+            web: {
+              fetch: {
+                // The fixture server binds to 127.0.0.1 — a private address — so the SSRF
+                // check must be deliberately bypassed for this test, exactly as a real
+                // operator pointing WebFetch at an internal docs server would configure it.
+                allowPrivateNetwork: true,
+                extractionModel: "test-model",
+              },
+            },
+          }),
+          systemPrompt: "sp",
+          onEvent,
+        });
 
-      const webfetchUrl = pageServer.url.toString();
-      const result = await runtime.runRoot(`use-webfetch ${webfetchUrl}`);
-      expect(result.success).toBe(true);
+        const webfetchUrl = pageServer.url.toString();
+        const result = await runtime.runRoot(`use-webfetch ${webfetchUrl}`);
+        expect(result.success).toBe(true);
 
-      // The extraction call is a second, independent completion call against the same mock
-      // provider — the mock server's default (non-tool-result, non-matching-trigger) branch
-      // replies with "root done", so the WebFetch tool_result content should be exactly that.
-      const tokenUsageEvents = events.filter((e) => e.type === "token_usage");
-      // At least one token_usage event beyond the root turn's own — proves completeWithModel
-      // reported its usage through the runtime's normal onEvent path, not silently.
-      expect(tokenUsageEvents.length).toBeGreaterThanOrEqual(2);
-      expect(
-        tokenUsageEvents.every((e) => e.type === "token_usage" && e.agentId === ROOT_AGENT_ID),
-      ).toBe(true);
-    } finally {
-      pageServer.stop(true);
-    }
-  });
+        // The extraction call is a second, independent completion call against the same mock
+        // provider — the mock server's default (non-tool-result, non-matching-trigger) branch
+        // replies with "root done", so the WebFetch tool_result content should be exactly that.
+        const tokenUsageEvents = events.filter((e) => e.type === "token_usage");
+        // At least one token_usage event beyond the root turn's own — proves completeWithModel
+        // reported its usage through the runtime's normal onEvent path, not silently.
+        expect(tokenUsageEvents.length).toBeGreaterThanOrEqual(2);
+        expect(
+          tokenUsageEvents.every((e) => e.type === "token_usage" && e.agentId === ROOT_AGENT_ID),
+        ).toBe(true);
+      } finally {
+        pageServer.stop(true);
+      }
+    },
+  );
 
   test("web.search configured with no web.fetch -> WebSearch is registered, WebFetch is not", async () => {
     const runtime = newAgentRuntime({
@@ -2477,13 +2699,13 @@ describe("AgentRuntime.listModels/switchModel (DH-0093)", () => {
 });
 
 describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
-  test("listSkills() includes the builtin cli-tools entry even with no skillPaths configured", () => {
+  test("listSkills() includes the builtin cli-tools entry even with no skillPaths configured", async () => {
     const runtime = newAgentRuntime({ config: baseConfig(), systemPrompt: "sp" });
-    const skills = runtime.listSkills();
+    const skills = await runtime.listSkills();
     expect(skills.some((s) => s.name === "cli-tools" && s.description.length > 0)).toBe(true);
   });
 
-  test("listSkills() eventually includes an on-disk skillPaths skill alongside the builtin", async () => {
+  test("listSkills() includes an on-disk skillPaths skill alongside the builtin", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dh-runtime-skills-"));
     const { mkdirSync, writeFileSync: writeFile } = await import("node:fs");
     mkdirSync(join(dir, "reviewer"));
@@ -2495,9 +2717,11 @@ describe("AgentRuntime.listSkills/invokeSkill (DH-0093)", () => {
       config: baseConfig({ skillPaths: [dir] }),
       systemPrompt: "sp",
     });
-    // The eager discoverSkills() scan is fire-and-forget at construction — give it a beat.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const skills = runtime.listSkills();
+    // DH-0165: listSkills() itself now awaits the eager discoverSkills() scan's completion
+    // (see runtime.ts's `skillsReady` field) — no more fixed-delay poll needed here, and this
+    // is exactly the real-world race that fix closes: a caller that asks before the scan
+    // resolves used to see only the builtin entry.
+    const skills = await runtime.listSkills();
     expect(skills.some((s) => s.name === "cli-tools")).toBe(true);
     expect(skills.some((s) => s.name === "reviewer" && s.description === "Reviews things.")).toBe(
       true,

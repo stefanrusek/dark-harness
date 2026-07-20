@@ -1,16 +1,20 @@
-// Shared test scaffolding for tool unit tests. Kept branch-free so it doesn't dilute the
-// 100%-coverage gate: every call site exercises the same lines.
+// Shared test scaffolding for tool unit tests. `makeToolContext`'s `overrides` parameter
+// (with the `tasks ?? new TaskRegistry()` fallback below) is real, load-bearing behavior:
+// most call sites want a fresh, isolated `TaskRegistry` per test, but a test that needs to
+// share one `TaskRegistry` across two contexts (e.g. a parent and a resumed sub-agent) can
+// pass `tasks` explicitly — see the "overrides.tasks is used when provided" case in
+// test-helpers.test.ts.
 
 import type { DhConfig } from "../../contracts/index.ts";
 import { TaskRegistry } from "../tasks.ts";
 import { TodoStore } from "../todos.ts";
-import type { ToolContext } from "./types.ts";
+import type { ToolContext } from "./types.type.ts";
 
-export const TEST_CONFIG: DhConfig = {
+export const TEST_CONFIG: DhConfig = Object.freeze<DhConfig>({
   options: { defaultModel: "sonnet" },
   models: [{ name: "sonnet", provider: "anthropic", model: "sonnet-5" }],
   provider: [{ name: "anthropic", type: "anthropic" }],
-};
+});
 
 export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolContext {
   const tasks = overrides.tasks ?? new TaskRegistry();
@@ -32,6 +36,15 @@ export function makeToolContext(overrides: Partial<ToolContext> = {}): ToolConte
     readRegistry: new Map(),
     activatedTools: new Set(),
     todos: new TodoStore(),
+    mcpAuth: {
+      status: () => ({ server: "test", state: "not-configured" }),
+      begin: async () => {
+        throw new Error("mcpAuth.begin not wired in this test context");
+      },
+      complete: async () => {
+        throw new Error("mcpAuth.complete not wired in this test context");
+      },
+    },
     completeWithModel: async () => {
       throw new Error("completeWithModel not wired in this test context");
     },

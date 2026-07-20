@@ -1,6 +1,16 @@
 // Test-only helper: a headless DOM via happy-dom, cast to the standard lib.dom types so it
 // can be passed anywhere production code expects a real `Document`/`HTMLElement`. Kept out
 // of the render/app modules themselves so production code never depends on happy-dom.
+//
+// biome-ignore-all lint/plugin/no-module-scope-side-effects: DH-0155 sub-wave 1I — this file
+// is deliberate test-support infrastructure, not product code the DH-0154 rule targets. The
+// module-scope `window`/`document`/`navigator` installation below is intentional and load-
+// bearing (see the DH-0135 comment on the block itself for why it must run once at import
+// time rather than behind an explicit call or an `import.meta.main` guard): well over a
+// dozen `*.test.ts(x)` files across src/web/client rely on `import "./test-dom.ts"` alone,
+// with no call site to gate. Restructuring to an explicit `installTestDomGlobals()` export
+// would mean touching every one of those importers for no behavioral gain — deferred rather
+// than risked in this leaf-file wave; see the ticket report for the full reasoning.
 
 import { Window } from "happy-dom";
 

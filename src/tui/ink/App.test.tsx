@@ -4,7 +4,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { initialState, reducer } from "../state.ts";
 import { flattenTree } from "../tree.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { App } from "./App.tsx";
 
 function rootState(): TuiState {
@@ -40,6 +40,43 @@ describe("App", () => {
     }).state;
     state = { ...state, view: { kind: "tree", selectedIndex: 0 } };
     expect(flattenTree(state.tree ?? []).length).toBe(1);
+    const { lastFrame } = render(React.createElement(App, { state }));
+    const rows = (lastFrame() ?? "").split("\n");
+    expect(rows.length).toBe(state.size.rows);
+  });
+
+  test("agent view: <AgentView> renders in place of <RootView>/<AgentTree>, layout still fits the frame exactly", () => {
+    let state = rootState();
+    state = reducer(state, {
+      type: "tree_response",
+      tree: [
+        { agentId: "root", parentAgentId: null, model: "sonnet", status: "running", children: [] },
+      ],
+    }).state;
+    state = { ...state, view: { kind: "agent", agentId: "root" } };
+    const { lastFrame } = render(React.createElement(App, { state }));
+    const rows = (lastFrame() ?? "").split("\n");
+    expect(rows.length).toBe(state.size.rows);
+  });
+
+  test("picker view: <PickerView> renders in place of <RootView>, layout still fits the frame exactly", () => {
+    let state = rootState();
+    state = {
+      ...state,
+      view: {
+        kind: "picker",
+        options: [
+          {
+            name: "sonnet",
+            provider: "anthropic",
+            model: "claude-sonnet",
+            isDefault: true,
+            isActive: true,
+          },
+        ],
+        selectedIndex: 0,
+      },
+    };
     const { lastFrame } = render(React.createElement(App, { state }));
     const rows = (lastFrame() ?? "").split("\n");
     expect(rows.length).toBe(state.size.rows);

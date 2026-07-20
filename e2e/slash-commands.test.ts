@@ -73,7 +73,18 @@ describe("DH-0093 slash commands under a real PTY + mock provider", () => {
 
     session.sendKeys("Down");
     session.sendKeys("Enter");
-    await session.waitFor((screen) => screen.includes("switching model to model-b"));
+    // DH-0185: the TUI's SSE client now runs through the shared client-core transport, whose
+    // permissive payload validator (DH-0184) no longer drops `model_switched` events behind
+    // the old `KNOWN_TYPES` allowlist bug. The server confirms the switch near-instantly (no
+    // real provider round-trip involved), so the transient local "switching model to
+    // model-b…" status can be fully superseded by the server's "model switched to model-b"
+    // status before the next tmux screen capture — wait for either, since both are valid
+    // proof the switch was accepted.
+    await session.waitFor(
+      (screen) =>
+        screen.includes("switching model to model-b") ||
+        screen.includes("model switched to model-b"),
+    );
     // Back on the root view, ready for the next chat turn.
     await session.waitFor((screen) => screen.includes("Root Agent"));
 
@@ -149,7 +160,19 @@ describe("DH-0093 slash commands under a real PTY + mock provider", () => {
     session.sendKeys("Enter");
     // Local echo of the raw command, then the real completion.
     await session.waitFor((screen) => screen.includes("/greet hello world"));
-    await session.waitFor((screen) => screen.includes("Greeted!"), 15_000);
+    // DH-0165: give our own wait a shorter budget than the surrounding `test(...)` timeout
+    // below, and log the last screen + provider call count on failure — otherwise bun's own
+    // test-level timeout (which used to be set to the exact same 30_000ms as this wait) fires
+    // first and swallows tmux-pty's own "timed out ... Last screen:" diagnostic before it ever
+    // gets thrown, so a CI failure here rendered no useful information at all about what was
+    // actually on screen or whether the mock provider was ever called.
+    try {
+      await session.waitFor((screen) => screen.includes("Greeted!"), 45_000);
+    } catch (err) {
+      console.error(`/skillname wait failed; provider.callCount=${provider.callCount}`);
+      console.error(`last screen:\n${session.capture()}`);
+      throw err;
+    }
 
     expect(provider.callCount).toBe(1);
     const lastRequest = provider.requests[0] as { messages?: { content: unknown }[] };
@@ -158,5 +181,5 @@ describe("DH-0093 slash commands under a real PTY + mock provider", () => {
     expect(serialized).toContain("<command-name>/greet</command-name>");
     expect(serialized).toContain("<command-args>hello world</command-args>");
     expect(serialized).toContain("Always greet the operator warmly before doing anything else.");
-  }, 30_000);
+  }, 60_000);
 });

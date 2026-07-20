@@ -13,10 +13,16 @@
 // therefore render as literal text — that's the "graceful degradation" functional
 // requirement, not a bug.
 //
-// Raw HTML is always literal text: there is no HTML AST node type at all. That absence is
+// Raw HTML is always literal text: there is no general HTML AST node type. That absence is
 // the core security property this ticket exists for — a `<script>` tag in model output can
 // never become markup in either client, because the AST has nothing that could render it as
-// one.
+// one. The sole exception, added by DH-0206/ADR 0009, is `coloredSpan` below — it is a
+// semantic color node, not an HTML node: it carries no tag name, no attribute string, and no
+// raw markup, only already-parsed children and a color that has passed a strict allowlist
+// (`validateColor`) before the node is ever constructed. Recognition of the one exact
+// `<span style="color: …">…</span>` surface syntax that produces it is fail-closed — any
+// other tag, any malformed span, or any span whose color fails validation stays literal text.
+// See docs/adr/0009-markdown-colored-span-subset.md for the full spec and rationale.
 
 export type InlineNode =
   | { kind: "text"; text: string }
@@ -24,7 +30,8 @@ export type InlineNode =
   | { kind: "emphasis"; children: InlineNode[] }
   | { kind: "strike"; children: InlineNode[] }
   | { kind: "code"; text: string }
-  | { kind: "link"; children: InlineNode[]; url: string };
+  | { kind: "link"; children: InlineNode[]; url: string; title?: string }
+  | { kind: "coloredSpan"; children: InlineNode[]; color: string };
 
 export type TableAlign = "left" | "center" | "right" | null;
 
@@ -163,7 +170,7 @@ function consumeStTerminated(s: string, start: number, allowC1St = false): numbe
 
 // --- Block-level parsing -----------------------------------------------------------------
 
-const ATX_RE = /^(#{1,6})(?:\s+(.*))?$/;
+const ATX_RE = Object.freeze(/^(#{1,6})(?:\s+(.*))?$/);
 
 function isBlank(line: string): boolean {
   return line.trim() === "";
@@ -471,22 +478,37 @@ function findMatchingBracket(text: string, start: number): number {
 interface ParsedLink {
   label: string;
   url: string;
+  title?: string;
   end: number;
 }
 
-/** `text[at]` must be `"["`. Parses `[label](url)`, returning null if the syntax doesn't
- * fully resolve (falls back to literal text at the call site). */
+/** Matches an optional trailing `"title"`/`'title'` on a link destination (DH-0204):
+ * `url "title"` or `url 'title'`, the title in quotes separated from the URL by whitespace.
+ * Returns the URL and title split apart, or the whole trimmed string as the URL with no title
+ * when the trailing-quoted-string shape isn't present — so `(url)` and malformed/unquoted
+ * trailing text both fall back to treating the entire parenthesized content as the URL,
+ * matching CommonMark's link-title grammar rather than folding the title text into `href`. */
+function splitLinkDestination(raw: string): { url: string; title?: string } {
+  const trimmed = raw.trim();
+  const m = /^(\S+)\s+(?:"([^"]*)"|'([^']*)')\s*$/.exec(trimmed);
+  if (!m) return { url: trimmed };
+  const title = m[2] !== undefined ? m[2] : m[3];
+  return title === undefined ? { url: m[1] as string } : { url: m[1] as string, title };
+}
+
+/** `text[at]` must be `"["`. Parses `[label](url)` or `[label](url "title")`, returning null
+ * if the syntax doesn't fully resolve (falls back to literal text at the call site). */
 function parseLinkLike(text: string, at: number): ParsedLink | null {
   const closeBracket = findMatchingBracket(text, at);
   if (closeBracket === -1) return null;
   if (text[closeBracket + 1] !== "(") return null;
   const closeParen = text.indexOf(")", closeBracket + 2);
   if (closeParen === -1) return null;
-  return {
-    label: text.slice(at + 1, closeBracket),
-    url: text.slice(closeBracket + 2, closeParen).trim(),
-    end: closeParen + 1,
-  };
+  const { url, title } = splitLinkDestination(text.slice(closeBracket + 2, closeParen));
+  const label = text.slice(at + 1, closeBracket);
+  return title === undefined
+    ? { label, url, end: closeParen + 1 }
+    : { label, url, title, end: closeParen + 1 };
 }
 
 /** `text[at]` must be `"["`. Parses a reference-style link/image `[label][ref]` or the
@@ -516,6 +538,60 @@ function parseReferenceLink(
   return { label, url, end };
 }
 
+/** ASCII punctuation eligible for backslash-escaping (DH-0205), matching CommonMark's
+ * escapable-character set. */
+const ESCAPABLE_RE = /[!"#$%&'()*+,\-./:;<=>?@[\]^_`{|}~\\]/;
+
+/** DH-0206/ADR 0009: the exact anchored, case-insensitive opening-tag grammar for the one
+ * allowlisted colored-span construct. Flexible whitespace, single- or double-quote (matched by
+ * backreference `\1`), optional trailing semicolon before the close quote. The captured value's
+ * char class deliberately excludes `; " ' ( ) < > { }` so `url(...)`, `expression(...)`, quote-
+ * breakouts, and nested-tag breakouts can never appear in the captured value at all — this is
+ * the first of two gates; `validateColor` below is the second, authoritative one. */
+const COLORED_SPAN_OPEN =
+  /^<span\s+style\s*=\s*(["'])\s*color\s*:\s*([^;"'(){}<>]+?)\s*;?\s*\1\s*>/i;
+
+/** Curated, letters-only named-color allowlist (DH-0206/ADR 0009) — every name here has a
+ * sensible ANSI-16 mapping for the TUI; hex covers arbitrary colors on the Web side. Frozen so
+ * it can't be mutated at runtime. */
+const NAMED_COLORS = Object.freeze(
+  new Set([
+    "black",
+    "red",
+    "green",
+    "yellow",
+    "blue",
+    "magenta",
+    "cyan",
+    "white",
+    "gray",
+    "grey",
+    "orange",
+    "purple",
+  ]),
+);
+
+const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/;
+
+/** DH-0206/ADR 0009: the authoritative color allowlist gate, independent of the grammar's char-
+ * class exclusion above. Accepts only hex `#rgb`/`#rrggbb` or membership in `NAMED_COLORS`,
+ * returning the trimmed/lowercased normalized form; everything else returns `null` (fail
+ * closed), including `url(...)`, `expression(...)`, `javascript:`, and any non-color token. */
+export function validateColor(raw: string): string | null {
+  const value = raw.trim().toLowerCase();
+  if (HEX_COLOR_RE.test(value)) return value;
+  if (NAMED_COLORS.has(value)) return value;
+  return null;
+}
+
+/** Builds a `link` InlineNode, omitting `title` entirely (rather than setting it to
+ * `undefined`) when there is none — required under `exactOptionalPropertyTypes`. */
+function makeLinkNode(children: InlineNode[], url: string, title: string | undefined): InlineNode {
+  return title === undefined
+    ? { kind: "link", children, url }
+    : { kind: "link", children, url, title };
+}
+
 export function parseInline(
   text: string,
   refs: Readonly<Record<string, string>> = {},
@@ -533,12 +609,23 @@ export function parseInline(
   while (i < text.length) {
     const rest = text.slice(i);
 
+    // Backslash escapes (DH-0205): a backslash followed by ASCII punctuation renders the
+    // punctuation character literally, dropping the backslash, per standard Markdown escaping
+    // — otherwise `\*` etc. would either trigger emphasis parsing or render the literal
+    // two-character `\*` instead of an escaped `*`. A backslash not followed by punctuation
+    // (e.g. at end of string, or before a letter/digit) is left as a literal backslash.
+    if (text[i] === "\\" && ESCAPABLE_RE.test(text[i + 1] ?? "")) {
+      buf += text[i + 1];
+      i += 2;
+      continue;
+    }
+
     if (text[i] === "!" && text[i + 1] === "[") {
       const link = parseLinkLike(text, i + 1) ?? parseReferenceLink(text, i + 1, refs);
       if (link) {
         flush();
         // Images degrade to links: alt text becomes the visible link text (D1).
-        nodes.push({ kind: "link", children: [{ kind: "text", text: link.label }], url: link.url });
+        nodes.push(makeLinkNode([{ kind: "text", text: link.label }], link.url, link.title));
         i = link.end;
         continue;
       }
@@ -548,9 +635,33 @@ export function parseInline(
       const link = parseLinkLike(text, i) ?? parseReferenceLink(text, i, refs);
       if (link) {
         flush();
-        nodes.push({ kind: "link", children: parseInline(link.label, refs), url: link.url });
+        nodes.push(makeLinkNode(parseInline(link.label, refs), link.url, link.title));
         i = link.end;
         continue;
+      }
+    }
+
+    // Colored span (DH-0206/ADR 0009): the one allowlisted HTML-shaped construct. Fails closed
+    // (falls through to literal `<` handling below) on any mismatch of the exact opening-tag
+    // shape, any color that fails `validateColor`, or any missing `</span>` close. Closing at
+    // the *first* `</span>` after the opening tag means a nested `<span…>` inside never gets
+    // paired with its own close, so it degrades to literal text within the outer span's
+    // children — deterministic, injection-free, not required to be pretty (ADR 0009).
+    if (text[i] === "<") {
+      const openMatch = COLORED_SPAN_OPEN.exec(rest);
+      if (openMatch) {
+        const color = validateColor(openMatch[2] as string);
+        if (color !== null) {
+          const openLen = (openMatch[0] as string).length;
+          const closeIdx = text.indexOf("</span>", i + openLen);
+          if (closeIdx !== -1) {
+            flush();
+            const inner = text.slice(i + openLen, closeIdx);
+            nodes.push({ kind: "coloredSpan", children: parseInline(inner, refs), color });
+            i = closeIdx + "</span>".length;
+            continue;
+          }
+        }
       }
     }
 
@@ -628,7 +739,7 @@ export function parseInline(
   return nodes;
 }
 
-const REF_DEFINITION_RE = /^ {0,3}\[([^\]]+)\]:\s*(\S+)\s*$/;
+const REF_DEFINITION_RE = Object.freeze(/^ {0,3}\[([^\]]+)\]:\s*(\S+)\s*$/);
 
 /** Scans for GFM reference definitions (`[ref]: url`, one per line, at most 3 leading spaces)
  * and pulls them out of the line stream — they're metadata, not their own paragraph — into a

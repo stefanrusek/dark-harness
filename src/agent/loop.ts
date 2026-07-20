@@ -54,6 +54,7 @@ import { BUILD_INFO } from "../config/build-info.ts";
 import {
   type LogLine,
   type OutcomeReportedBy,
+  type QueuedMessage,
   REPORT_OUTCOME_TOOL_NAME,
   type ReportedOutcome,
   type ServerSentEvent,
@@ -70,7 +71,7 @@ import {
 } from "./providers/types.ts";
 import { summarizeToolInput } from "./tool-summary.ts";
 import { parseReportedOutcome } from "./tools/report-outcome.ts";
-import type { Tool, ToolContext } from "./tools/types.ts";
+import type { Tool, ToolContext } from "./tools/types.type.ts";
 
 export const TASK_FAILED_MARKER = "TASK_FAILED";
 const DEFAULT_MAX_TURNS = 100;
@@ -87,9 +88,10 @@ export const STREAM_FLUSH_INTERVAL_MS = 50;
  * no tool call and no `ReportOutcome` was ever recorded — the "missed-call nudge" that makes
  * a forgotten self-report a detectable, recoverable state instead of silently scoring as
  * success. Exported so e2e fixtures/tests can assert against the exact text. */
-export const REPORT_OUTCOME_NUDGE_MESSAGE =
+export const REPORT_OUTCOME_NUDGE_MESSAGE = Object.freeze(
   "You ended your turn without calling the ReportOutcome tool. Call ReportOutcome now with " +
-  'status "success" or "failure" (plus optional summary/filesChanged/artifacts). Do nothing else.';
+    'status "success" or "failure" (plus optional summary/filesChanged/artifacts). Do nothing else.',
+);
 
 // Round 3 (docs/handoffs/core.md status log): the two distinct points `signal` is checked,
 // each with its own log reason so a "why did this stop" reader can tell which one fired.
@@ -129,6 +131,19 @@ export interface AgentLoopParams {
   maxTurns?: number;
   /** Injected by the runtime so SendMessage can steer a running agent between turns. */
   registerSendMessage?: (fn: (message: string) => void) => void;
+  /** DH-0207/DH-0208: installs a sink the runtime can call to cancel one not-yet-delivered
+   * entry out of `pendingMessages` (identified by its `QueuedMessage.id`, see
+   * `onQueueChange`) before it's injected into this loop's next turn. Returns `true` if an
+   * entry with that id was found and removed, `false` otherwise (already delivered/drained,
+   * or never existed — the caller can't distinguish those two, same as `registerSendMessage`
+   * has no way to report "delivered" vs "queued" today). */
+  registerCancelQueuedMessage?: (fn: (messageId: string) => boolean) => void;
+  /** DH-0207/DH-0208: fires with a full snapshot of `pendingMessages` every time it changes
+   * (a message queued, cancelled, or the whole queue drained into the next turn) — the
+   * runtime uses this to emit the `agent_queue` SSE event. See that event's own doc comment
+   * (`src/contracts/events.type.ts`) for why a full snapshot rather than a delta, and for how
+   * this doubles as DH-0208's completion/EOF signal for scripted callers. */
+  onQueueChange?: (queue: QueuedMessage[]) => void;
   onEvent?: (event: ServerSentEvent) => void;
   onLogLine?: (line: LogLine) => void;
   /** Round 3 addition: cooperative cancellation, driven by TaskStop/stopAgent
@@ -188,7 +203,7 @@ export interface AgentLoopParams {
    * check below never runs — today's unbounded-growth behavior, unchanged. */
   compaction?: { enabled: boolean; thresholdPercent?: number };
   /** Round 8 (ADR 0005 amendment): how the process that owns this session was invoked — see
-   * SessionClientKind's own doc comment in src/contracts/log.ts. Required (not defaulted) so
+   * SessionClientKind's own doc comment in src/contracts/log.type.ts. Required (not defaulted) so
    * no call site can silently record a wrong value; threaded from AgentRuntimeOptions.client
    * via runtime.ts into every runAgentLoop() call (root and every sub-agent alike — a
    * session's client kind doesn't vary per agent within it). */
@@ -341,10 +356,11 @@ function textOf(content: ProviderContentBlock[]): string {
  * exchanges) — an implementer constant per the ticket's Design section. */
 const COMPACTION_TAIL_SIZE = 4;
 
-export const COMPACTION_SUMMARY_REQUEST =
+export const COMPACTION_SUMMARY_REQUEST = Object.freeze(
   "Summarize this conversation for context compaction: the original task, decisions made " +
-  "and why, current state, files touched, and work remaining. Respond with the summary " +
-  "text only, no preamble.";
+    "and why, current state, files touched, and work remaining. Respond with the summary " +
+    "text only, no preamble.",
+);
 
 /** DH-0010 Part B: finds the first index at or after `messages.length - COMPACTION_TAIL_SIZE`
  * whose message is an `assistant` turn — the tail must start at an assistant-message
@@ -510,7 +526,13 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
   } else {
     messages.push({ role: "user", content: [{ type: "text", text: params.instruction }] });
   }
-  const pendingMessages: string[] = [];
+  // DH-0207/DH-0208: entries, not bare strings, so a still-queued message can be individually
+  // addressed (cancel_queued_message) and reported to clients (agent_queue) before it's
+  // delivered — see registerCancelQueuedMessage/onQueueChange below.
+  const pendingMessages: QueuedMessage[] = [];
+  const emitQueueChange = (): void => {
+    params.onQueueChange?.(pendingMessages.map((entry) => ({ ...entry })));
+  };
   // Round 5: when the loop is paused in "waiting" (interactive mode only — see below), a
   // newly-arrived message wakes it up immediately instead of sitting unread until some other
   // trigger polls for it. `waitingResolve` is only ever non-null while the loop is actually
@@ -519,12 +541,24 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
   // behavior, unchanged.
   let waitingResolve: (() => void) | null = null;
   params.registerSendMessage?.((message: string) => {
-    pendingMessages.push(message);
+    pendingMessages.push({ id: randomUUID(), message, queuedAt: nowIso() });
+    emitQueueChange();
     if (waitingResolve) {
       const resolve = waitingResolve;
       waitingResolve = null;
       resolve();
     }
+  });
+  // DH-0207/DH-0208: lets the runtime pull one specific entry back out of the queue before
+  // it's delivered (the Web UI's per-message cancel/delete button). Deliberately does NOT
+  // wake `waitingResolve` — cancelling the only queued message shouldn't spuriously resume a
+  // waiting agent that has nothing left to process.
+  params.registerCancelQueuedMessage?.((messageId: string) => {
+    const index = pendingMessages.findIndex((entry) => entry.id === messageId);
+    if (index === -1) return false;
+    pendingMessages.splice(index, 1);
+    emitQueueChange();
+    return true;
   });
 
   // DH-0093: mutable binding a live model switch replaces — every provider.complete() call
@@ -686,7 +720,11 @@ export async function runAgentLoop(params: AgentLoopParams): Promise<AgentLoopRe
       }));
 
     if (pendingMessages.length > 0) {
-      const injected = pendingMessages.splice(0, pendingMessages.length).join("\n");
+      const injected = pendingMessages
+        .splice(0, pendingMessages.length)
+        .map((entry) => entry.message)
+        .join("\n");
+      emitQueueChange();
       messages.push({ role: "user", content: [{ type: "text", text: injected }] });
       emitLog(params, {
         version: 1,

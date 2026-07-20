@@ -3,7 +3,7 @@
 // `buildShell` + per-section imperative render functions.
 import type { ReactElement } from "react";
 import type { HeaderInfo } from "../../../header-info.ts";
-import { type WebState, selectedAgent } from "../state.ts";
+import { selectedAgent, type WebState } from "../state.ts";
 import { AgentHeaderPanel } from "./AgentHeaderPanel.tsx";
 import { AppHeader } from "./AppHeader.tsx";
 import { Composer } from "./Composer.tsx";
@@ -11,6 +11,7 @@ import { ConnectionPill } from "./ConnectionPill.tsx";
 import { ErrorBanner } from "./ErrorBanner.tsx";
 import { ErrorLogPanel } from "./ErrorLogPanel.tsx";
 import { GapBanner } from "./GapBanner.tsx";
+import { LogoMark } from "./LogoMark.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { SessionSummary } from "./SessionSummary.tsx";
 import { Sidebar } from "./Sidebar.tsx";
@@ -26,6 +27,7 @@ export interface AppProps {
   onDownloadAgentLog: (agentId: string) => void;
   onDownloadSessionBundle: () => void;
   onStopAgent: (agentId: string) => void;
+  onCancelQueuedMessage: (agentId: string, messageId: string) => void;
   onSelectModel: (name: string) => void;
   onCloseModelPicker: () => void;
   onDismissGapBanner: () => void;
@@ -41,6 +43,7 @@ export function App({
   onDownloadAgentLog,
   onDownloadSessionBundle,
   onStopAgent,
+  onCancelQueuedMessage,
   onSelectModel,
   onCloseModelPicker,
   onDismissGapBanner,
@@ -53,7 +56,10 @@ export function App({
         <AppHeader {...(headerInfo ? { headerInfo } : {})} />
       </div>
       <nav className="sidebar">
-        <div className="brand">Dark Harness</div>
+        <div className="brand">
+          <LogoMark className="brand-mark" />
+          Dark Harness
+        </div>
         <ConnectionPill status={state.connectionStatus} />
         <Sidebar state={state} onSelect={onSelectAgent} now={now} />
         <SessionSummary state={state} />
@@ -68,7 +74,12 @@ export function App({
             now={now}
           />
         </div>
-        <Transcript agent={agent} sessionEnded={state.sessionEnded} exitCode={state.exitCode} />
+        <Transcript
+          agent={agent}
+          sessionEnded={state.sessionEnded}
+          exitCode={state.exitCode}
+          onCancelQueuedMessage={onCancelQueuedMessage}
+        />
         <div className="composer-region">
           <Composer state={state} onSend={onSendMessage} />
         </div>

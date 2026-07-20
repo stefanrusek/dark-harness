@@ -18,7 +18,15 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from common import README_PATH, TRACKING_DIR, die, get_field, slugify, split_front_matter
+from common import (
+    README_PATH,
+    TRACKING_DIR,
+    die,
+    die_if_linked_worktree,
+    get_field,
+    slugify,
+    split_front_matter,
+)
 
 VALID_TYPES = {"feature", "bug"}
 VALID_INITIAL_STATUSES = {"draft", "refining", "ready"}
@@ -110,6 +118,8 @@ def main():
     ap.add_argument("--no-regen", action="store_true",
                      help="skip regenerating the view doc (mainly for tests)")
     args = ap.parse_args()
+
+    die_if_linked_worktree("mint a new ticket ID")
 
     fm_lines, body, prefix, counter = read_counter()
     new_num = counter + 1

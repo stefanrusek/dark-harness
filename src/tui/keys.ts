@@ -22,24 +22,24 @@ export type KeyEvent =
   | { kind: "paste"; text: string }
   | { kind: "unknown"; raw: string };
 
-const ARROW_BY_LETTER: Record<string, KeyEvent> = {
+const ARROW_BY_LETTER: Record<string, KeyEvent> = Object.freeze({
   A: { kind: "up" },
   B: { kind: "down" },
   C: { kind: "right" },
   D: { kind: "left" },
   H: { kind: "home" },
   F: { kind: "end" },
-};
+});
 
 /** `CSI <params> ~` terminated sequences keyed by their numeric parameter — the other common
  * encoding (alongside bare `CSI <letter>`) real terminals use for Home/End/Delete. */
-const TILDE_CSI_BY_PARAMS: Record<string, KeyEvent> = {
+const TILDE_CSI_BY_PARAMS: Record<string, KeyEvent> = Object.freeze({
   "1": { kind: "home" },
   "7": { kind: "home" },
   "3": { kind: "delete" },
   "4": { kind: "end" },
   "8": { kind: "end" },
-};
+});
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";

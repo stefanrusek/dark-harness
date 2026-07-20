@@ -1,6 +1,9 @@
 // Pure helper for flattening the agent tree into a navigable, indented list.
 
 import type { AgentTreeNode } from "../contracts/index.ts";
+// DH-0181: box-drawing connector glyphs are shared with `dh logs`'s offline dump
+// (src/server/log-analysis.ts's formatNode) via this pure helper.
+import { treeChildPrefix, treeConnector } from "../contracts/tree-connector.ts";
 
 export interface FlatTreeEntry {
   node: AgentTreeNode;
@@ -21,9 +24,10 @@ export function flattenTree(nodes: AgentTreeNode[], depth = 0, prefix = ""): Fla
   const out: FlatTreeEntry[] = [];
   nodes.forEach((node, i) => {
     const isLast = i === nodes.length - 1;
-    const connector = depth === 0 ? "" : isLast ? "└─ " : "├─ ";
+    const isRoot = depth === 0;
+    const connector = treeConnector(isRoot, isLast);
     out.push({ node, depth, prefix: `${prefix}${connector}` });
-    const childPrefix = depth === 0 ? prefix : `${prefix}${isLast ? "   " : "│  "}`;
+    const childPrefix = treeChildPrefix(isRoot, prefix, isLast);
     out.push(...flattenTree(node.children, depth + 1, childPrefix));
   });
   return out;

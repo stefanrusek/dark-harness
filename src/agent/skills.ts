@@ -32,8 +32,8 @@
 
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { type Skill, parseSkillFrontmatter } from "../prompt/skills.ts";
 import CLI_TOOLS_SKILL_MD from "../prompt/skills/cli-tools/SKILL.md" with { type: "text" };
+import { parseSkillFrontmatter, type Skill } from "../prompt/skills.ts";
 
 export interface LoadedSkill {
   name: string;
@@ -51,11 +51,11 @@ const BUILTIN_CLI_TOOLS_NAME = "cli-tools";
  * with the SKILL.md content actually loaded/invoked. Malformed builtin frontmatter (should
  * never happen — it ships with the binary) falls back to an empty description rather than
  * throwing at import time. */
-export const BUILTIN_CLI_TOOLS_SKILL: Skill = {
+export const BUILTIN_CLI_TOOLS_SKILL: Skill = Object.freeze({
   name: BUILTIN_CLI_TOOLS_NAME,
   description: parseSkillFrontmatter(CLI_TOOLS_SKILL_MD)?.description ?? "",
   source: "builtin",
-};
+});
 
 /** True if `name` contains anything that could escape a simple `join(base, name, ...)` join —
  * a path separator or a `..` traversal segment. `Skill`'s documented scope is "the skill's

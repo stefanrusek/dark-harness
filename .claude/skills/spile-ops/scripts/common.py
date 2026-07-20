@@ -3,6 +3,7 @@ so these run under any python3 without a venv."""
 import glob
 import os
 import re
+import subprocess
 import sys
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -77,6 +78,49 @@ def list_tickets():
 def slugify(title):
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
     return re.sub(r"-+", "-", slug)
+
+
+def die_if_linked_worktree(action):
+    """Refuse to run a counter-mutating action (currently: minting a new
+    ticket ID) from inside a linked git worktree — see DH-0217.
+
+    tracking/README.md's `counter:` field is a tracked file with one
+    physical copy per worktree. Two isolated worktrees (the project's
+    standard parallel-domain-lead isolation pattern) each read the same
+    counter value, each mint the same DH-NNNN ID, and nothing collides
+    until the branches are merged back onto the shared branch — at which
+    point two tickets claim the same ID. This is not a same-filesystem
+    race a lock would fix (the writers are on physically separate
+    checkouts), so the fix is a guard at the point of mint: refuse unless
+    this is the repo's primary checkout.
+
+    Detection: `git rev-parse --git-common-dir` and `--git-dir` are equal
+    for the primary checkout and differ for any linked worktree (the
+    standard, documented way to detect this — see `git worktree` docs).
+    """
+    try:
+        common_dir = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        git_dir = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Not a git repo / git unavailable — nothing to guard against,
+        # let the caller proceed rather than failing mechanics that don't
+        # depend on git.
+        return
+    if os.path.abspath(os.path.join(REPO_ROOT, common_dir)) != os.path.abspath(os.path.join(REPO_ROOT, git_dir)):
+        die(
+            f"refusing to {action} from a linked git worktree (this checkout's "
+            "--git-dir differs from its --git-common-dir). tracking/README.md's "
+            "counter is per-worktree, so minting here risks a DH-NNNN ID "
+            "collision with another isolated worktree once branches merge "
+            "(see tracking/DH-0217-*.md). Run this from the coordinator's "
+            "primary checkout instead."
+        )
 
 
 def resolve_ticket_path(ticket_id):

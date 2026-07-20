@@ -32,8 +32,10 @@ export function computeBuildInfo(raw: {
 /** Process-wide build identity constant — every agent's log header (loop.ts) imports this
  * directly rather than having it threaded through as a parameter, since build identity is
  * fixed for the lifetime of the process, not per-call. */
-export const BUILD_INFO: BuildInfo = computeBuildInfo({
-  gitSha: process.env.DH_BUILD_GIT_SHA,
-  dirty: process.env.DH_BUILD_DIRTY,
-  releaseTag: process.env.DH_BUILD_RELEASE_TAG,
-});
+export const BUILD_INFO: BuildInfo = Object.freeze(
+  computeBuildInfo({
+    gitSha: process.env.DH_BUILD_GIT_SHA,
+    dirty: process.env.DH_BUILD_DIRTY,
+    releaseTag: process.env.DH_BUILD_RELEASE_TAG,
+  }),
+);

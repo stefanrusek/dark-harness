@@ -8,7 +8,7 @@ import type {
   SessionEndedEvent,
   ToolCallEvent,
 } from "../contracts/index.ts";
-import { FakeAgentLoop } from "./fake-agent-loop.ts";
+import { FakeAgentLoop } from "./__fixtures__/fake-agent-loop.ts";
 import { DhServer } from "./server.ts";
 
 const CERT_PATH = join(import.meta.dir, "testdata", "test-cert.pem");

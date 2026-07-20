@@ -1,7 +1,7 @@
 // DH-0136: agent tree/sidebar view, ported from render.ts's `renderTree`.
 import { Box, Text } from "ink";
 import { flattenTree } from "../tree.ts";
-import type { TuiState } from "../types.ts";
+import type { TuiState } from "../types.type.ts";
 import { wrapText } from "../width.ts";
 import { colorizeStatus, dim, formatElapsed, formatTokenCost } from "./tokens.ts";
 

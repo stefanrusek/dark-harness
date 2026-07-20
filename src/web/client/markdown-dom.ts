@@ -12,7 +12,7 @@
 
 import type { BlockNode, InlineNode } from "../../markdown/index.ts";
 
-const ALLOWED_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+const ALLOWED_LINK_SCHEMES = Object.freeze(new Set(["http:", "https:", "mailto:"]));
 
 /** Filters a fenced code block's info string to a safe `language-<info>` class token —
  * `[a-z0-9-]` only, matching the "class-attribute hygiene" rule in the ticket. Returns null
@@ -95,10 +95,22 @@ function renderInlineNode(doc: Document, node: InlineNode, parent: Node): void {
       }
       const anchor = el(doc, "a");
       anchor.href = href;
+      if (node.title) anchor.title = node.title;
       anchor.rel = "noopener noreferrer";
       anchor.target = "_blank";
       renderInlineNodes(doc, node.children, anchor);
       parent.appendChild(anchor);
+      return;
+    }
+    case "coloredSpan": {
+      // DH-0206/ADR 0009: color applied only via the `style.color` DOM property assignment —
+      // never a string-built `style="…"` attribute, never `innerHTML`. `node.color` is already
+      // allowlist-validated by the parser; the CSSOM property setter is a second line of
+      // defence that silently ignores anything it considers invalid.
+      const span = el(doc, "span");
+      span.style.color = node.color;
+      renderInlineNodes(doc, node.children, span);
+      parent.appendChild(span);
       return;
     }
   }

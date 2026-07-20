@@ -708,3 +708,85 @@ concurrent background rounds, confirmed via `git stash` — not from this change
 `bun test src/markdown src/tui src/web --coverage`: 757 pass, 0 fail;
 `rendering-fixtures.ts`/`markdown-ansi.ts` 100%/100%, `markdown-dom.ts` 100% line (pre-existing
 99.21% branch, untouched by this ticket). Closed DH-0108 via spile-ops.
+
+### 2026-07-19 — DH-0231: input box wraps long lines
+
+Small, self-contained fix (concurrent DH-0230/DH-0232 rounds were touching `src/tui/mouse.ts`
+and markdown rendering in this same shared worktree — stayed strictly out of both). Root cause
+was exactly what the ticket assumed: `src/tui/ink/Composer.tsx`'s input row was a
+`<Box height={1}><Text>...</Text></Box>` with no `width` and no `wrap` — Ink/Yoga sizes an
+unconstrained `Box` to fit its content, not the terminal, so a long line just grew wider than
+the pane instead of wrapping. Fix: `Composer` takes an optional `cols` prop (default 80, so
+untouched callers keep working), the input row became `<Box width={cols}><Text
+wrap="wrap">...</Text></Box>` with the fixed `height={1}` dropped so the box grows to fit
+however many wrapped rows are needed; `RootView.tsx` now passes its already-computed
+`innerCols` through. Confirmed `state.input`/`inputCursor` is a plain string with no
+wrap-inserted breaks (only real newlines from bracketed paste) before touching anything, per
+the task brief's instruction to verify rather than assume — so history nav/submission needed
+zero changes, exactly the "wrapping is purely visual" default the ticket's Open Questions
+pointed at.
+
+Worth remembering for a future round: this session's `git stash pop` (used twice, to isolate
+my own changes for a clean e2e-regression comparison) once popped a *stale, unrelated* stash
+containing pre-DH-0147/0148 versions of `src/cli.ts` — clearly an orphaned stash from a much
+earlier session, not live concurrent work (confirmed by reading the conflicting hunk: the
+"stashed" side referenced a `--job --json`-only code shape that predates the `--instructions`
+interactive-launch branch already merged upstream). Resolved by keeping the upstream side for
+all three conflicted files (`src/cli.ts`, `src/contracts/index.ts`,
+`src/prompt/readme-config-sync.test.ts` — none of them mine) and `git add`ing them unstaged
+again before committing only my own ticket's files. If a future round hits an unexpected
+`git pull --rebase` "unmerged files" error in a shared worktree like this one, check whether
+it's a leftover stash conflict before assuming `pull` itself is broken — `git stash list` and
+reading the conflicting hunks' content (which side matches current `HEAD` behavior) settles it
+fast.
+
+Gates: `bun run typecheck`/`lint` clean; `bun run test:coverage` 145/147 (the 2 failures are
+DH-0230's own in-progress `src/tui/mouse.test.ts`/`src/web/client/app.test.ts` work, confirmed
+unrelated via `git status`), 100% overall line coverage; `src/tui/ink/Composer.tsx` and its
+test file both fully covered. `bun run e2e`: `e2e/tui.test.ts`'s PTY boot test times out;
+confirmed via `git stash` (targeted, this-ticket-only stash) that it fails identically without
+this change — pre-existing sandbox/tmux-PTY gap, not a regression. Transitioned DH-0231 to
+`verifying` via spile-ops. Commit `dfb861a`, pushed clean (no upstream commits to reconcile at
+push time).
+
+### 2026-07-19 — DH-0230 (rapid-scroll garbage escape sequences), root cause found
+
+Actual root cause (not the ticket's own guess of a render-pipeline/Ink-scheduling race): a raw
+stdin-parsing gap in `app.ts`'s `stdin.on("data", ...)` handler. DH-0126's
+`parseSgrMouseChunk`/`stripSgrMouseSequences` handled a mouse sequence split at the *end* of a
+chunk (trailing partial correctly dropped), but not a continuation fragment arriving as the
+*start* of the *next* chunk (e.g. `;20M` with no `ESC[<` prefix) — that fragment has nothing to
+identify it as a mouse-sequence remnant, so it fell through `parseKeys` into the composer as
+literal garbage, same symptom as DH-0126, just needing a straddled read boundary to trigger.
+Rapid scrolling floods the PTY with back-to-back reports, making that far more likely than at
+normal speed. Fix: `MouseChunkAssembler` (new class, `src/tui/mouse.ts`) carries an unresolved
+trailing partial forward across `data` events and reassembles before parsing; `app.ts` now owns
+one instance per session.
+
+Judgment call worth recording: my first draft widened the "trailing partial" regex to also
+match a bare trailing `ESC` (reasoning: a split could land even earlier than mid-digits). This
+passed every unit test (synthetic, non-PTY stdin) but broke `e2e/tui.test.ts`'s real-PTY boot
+test — a standalone Escape keypress is a legitimate one-byte `data` chunk on a real PTY, and
+buffering it as "might be a mouse sequence" delayed it into the next `data` event. Caught only
+because I ran the real e2e suite before finishing, not just unit coverage — this is a concrete
+instance of why CLAUDE.md's e2e gate (real binary, real PTY) exists as a separate tier from
+`bun test src`: a synthetic-stdin unit test cannot see PTY chunking behavior. Reverted to the
+narrower regex (only buffer once the full `ESC[<` introducer has arrived); documented the
+tradeoff in both the code comment and the ticket's Notes.
+
+Also hit real chaos from working in a *shared* (non-worktree-isolated) checkout: a stray
+`git stash`/`git stash pop` I ran to A/B-test my change against HEAD picked up *other* running
+agents' in-flight uncommitted work and popped it against a version of `src/cli.ts`/
+`src/contracts/index.ts`/`src/prompt/readme-config-sync.test.ts` that had moved on underneath
+it, producing real `<<<<<<< Updated upstream` / `>>>>>>> Stashed changes` conflict markers in
+files I never touched. Resolved by taking the "Updated upstream" (current HEAD) side in all
+three cases — the stashed side was visibly stale (referenced code/behavior superseded by
+already-committed later tickets). Lesson for next time: prefer `git stash push -- <specific
+files>` over a bare `git stash` in this repo's shared-worktree setup, so an A/B comparison
+can't accidentally scoop up unrelated concurrent agents' WIP.
+
+Verified: `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100% overall; one
+unrelated flaky `src/web/client/app.test.ts` failure under full-suite parallel load, passes
+standalone, outside TUI scope), `bun run e2e` (41/41, including the real-PTY boot test that
+caught the Escape-keypress regression). Transitioned DH-0230 to `verifying` via spile-ops with
+a full Notes writeup. Commit `f8594ab`.

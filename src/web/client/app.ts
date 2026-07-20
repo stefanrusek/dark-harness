@@ -5,32 +5,32 @@
 // fetch/streams — no `EventSource`, see sse.ts).
 
 import { createElement } from "react";
-import { type Root, createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
+import { parseSlashCommand } from "../../client-core/slash-command-parser.ts";
 import type { ServerSentEvent } from "../../contracts/index.ts";
 import type { HeaderInfo } from "../../header-info.ts";
 import type { ServerTarget } from "../protocol.ts";
 import {
   CommandError,
+  cancelQueuedMessage,
   type FetchLike,
-  type SendCommandOptions,
   invokeSkill,
   listModels,
   listSkills,
   requestAgentTree,
+  type SendCommandOptions,
   sendMessage,
   stopAgent,
   switchModel,
 } from "./commands.ts";
 import { App } from "./components/App.tsx";
 import { type DownloadEnv, downloadLogs } from "./download.ts";
-import { parseSlashCommand } from "./slash-commands.ts";
-import { type SseConnection, connectEvents } from "./sse.ts";
+import { connectEvents, type SseConnection } from "./sse.ts";
 import {
-  type ConnectionStatus,
-  type WebState,
   addSystemTurn,
   addUserTurn,
   applyEvent,
+  type ConnectionStatus,
   clearAllTranscripts,
   closeModelPicker,
   createInitialState,
@@ -44,6 +44,7 @@ import {
   setConnectionStatus,
   setModelsAndOpenPicker,
   setSkills,
+  type WebState,
 } from "./state.ts";
 
 const ERROR_BANNER_DURATION_MS = 5000;
@@ -114,14 +115,27 @@ export class AppView {
   private renderRafHandle: number | undefined;
 
   constructor(
-    private readonly container: HTMLElement,
+    readonly container: HTMLElement,
     private readonly deps: AppDeps,
   ) {
     this.root = createRoot(container);
     deps.doc.addEventListener("keydown", (evt: KeyboardEvent) => {
-      if (evt.key === "Escape" && this.state.modelPickerOpen) {
+      if (evt.key !== "Escape") return;
+      if (this.state.modelPickerOpen) {
         this.closeModelPicker();
+        return;
       }
+      // DH-0211: Escape stops the currently-selected/focused agent, mirroring the TUI's
+      // Ctrl+C convention (DH-0059) — a stop is recoverable, not destructive to data, so no
+      // confirmation prompt is required (same call the TUI makes; see state.ts's handleCtrlC
+      // doc comment). Only fires when nothing higher-priority already consumed the key (the
+      // model picker check above) and there's actually something running/waiting to stop.
+      const agent = selectedAgent(this.state);
+      if (!agent) return;
+      if (agent.status !== "running" && agent.status !== "waiting") return;
+      stopAgent(this.deps.target, agent.agentId, this.deps.fetchImpl, this.commandOptions()).catch(
+        (err) => this.reportError(err),
+      );
     });
     this.renderAll();
   }
@@ -309,7 +323,7 @@ export class AppView {
     // DH-0093 design §1: a recognized slash command never becomes a chat message —
     // intercepted here, the one place a `send_message` call is built from the composer's
     // submitted text. A leading space before the slash, or a bare "/" alone, deliberately
-    // fails to match and falls through to ordinary chat (see slash-commands.ts).
+    // fails to match and falls through to ordinary chat (see client-core/slash-command-parser.ts).
     const parsed = parseSlashCommand(message);
     if (parsed) {
       this.handleSlashCommand(parsed.name, parsed.args);
@@ -383,10 +397,18 @@ export class AppView {
 
   /** DH-0024: fires on every SSE reconnect (not the initial connect) — see sse.ts's
    *  `onReconnected` for why this is treated as a possible gap. Shows the dismissible
-   *  banner; the operator dismisses it once they've seen it (`dismissGapBanner`). */
+   *  banner; the operator dismisses it once they've seen it (`dismissGapBanner`).
+   *
+   *  DH-0202: also re-fetches the agent tree, the same bootstrap call used on initial
+   *  connect. A reconnect's `Last-Event-ID` resume only redelivers events *after* the
+   *  resume point — if that skips an agent's original `agent_spawned` event (the only place
+   *  its model name is ever sent), the agent's model would otherwise stay unknown forever.
+   *  `seedFromTree`'s merge (state.ts) patches in a missing `model` on an already-known
+   *  agent without disturbing any other live field, so this is safe to call repeatedly. */
   private handleReconnected(): void {
     this.state = markPossibleGap(this.state);
     this.renderAll();
+    this.bootstrapAgentTree();
   }
 
   private dismissGapBanner = (): void => {
@@ -445,6 +467,15 @@ export class AppView {
             stopAgent(this.deps.target, agentId, this.deps.fetchImpl, this.commandOptions()).catch(
               (err) => this.reportError(err),
             );
+          },
+          onCancelQueuedMessage: (agentId, messageId) => {
+            cancelQueuedMessage(
+              this.deps.target,
+              agentId,
+              messageId,
+              this.deps.fetchImpl,
+              this.commandOptions(),
+            ).catch((err) => this.reportError(err));
           },
           onSelectModel: (name) => this.selectModel(name),
           onCloseModelPicker: () => this.closeModelPicker(),

@@ -1,3 +1,7 @@
+// DH-0146: MUST be the first import — clears CI env vars before Ink is loaded so Ink renders
+// interactively (and actually writes frames to the fake stdout) in CI, exactly as it does
+// locally. See the module's own header for the full mechanism. Import ordering is load-bearing.
+import "./ink/render-interactive-in-tests.ts";
 import { describe, expect, test } from "bun:test";
 import type {
   AgentTreeResponse,
@@ -7,10 +11,9 @@ import type {
   ListSkillsResponse,
   ServerSentEvent,
 } from "../contracts/index.ts";
-import { startTui } from "./app.ts";
 import type { StdinLike, StdoutLike } from "./app.ts";
+import { EVENTS_PATH, startTui } from "./app.ts";
 import { COMMAND_PATH } from "./http-client.ts";
-import { EVENTS_PATH } from "./sse-client.ts";
 
 function sseFrame(event: ServerSentEvent): string {
   return `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;
@@ -199,12 +202,34 @@ async function flush(times = 5, stdout?: FakeStdout): Promise<void> {
   // provided, poll until writes stop growing (render has caught up and stabilized) instead
   // of trusting a single fixed sleep, up to a generous ceiling so a genuinely broken render
   // still fails fast rather than hanging.
+  //
+  // The subtle bug this loop had (the actual root cause of the recurring CI failure, found
+  // 2026-07-18): the previous version captured `lastLength` at loop entry and broke on the
+  // FIRST interval showing no growth. On a constrained runner, `lastLength` at entry is still
+  // just the SYNCHRONOUS startup preamble (alt-screen + SGR mouse-enable escape sequences) —
+  // Ink's first real render write has not landed yet. "No growth this interval" is then
+  // indistinguishable from "Ink hasn't started rendering yet", so the loop broke immediately
+  // and the assertion fired against preamble-only output. This never reproduced locally
+  // because a fast machine always flushed Ink's initial render inside the fixed 100ms sleep
+  // above, before this loop ever ran. Fix: `startTui` always mounts Ink and paints at least
+  // one frame, so a healthy render MUST grow writes past the entry baseline — keep polling
+  // until that first growth is observed, and only then treat a stable interval as "settled".
   if (stdout) {
-    let lastLength = stdout.writes.length;
-    for (let i = 0; i < 20; i++) {
+    const baseline = stdout.writes.length;
+    let lastLength = baseline;
+    let grewPastBaseline = false;
+    for (let i = 0; i < 40; i++) {
       await new Promise((resolve) => setTimeout(resolve, 100));
-      if (stdout.writes.length === lastLength) break;
-      lastLength = stdout.writes.length;
+      const len = stdout.writes.length;
+      if (len > lastLength) {
+        grewPastBaseline = grewPastBaseline || len > baseline;
+        lastLength = len;
+        continue;
+      }
+      // No growth this interval. Only accept it as "render settled" once a real render has
+      // actually landed (writes grew past the synchronous-preamble baseline); otherwise Ink
+      // simply hasn't started yet on this (slow) runner — keep waiting up to the ceiling.
+      if (grewPastBaseline) break;
     }
   }
 }
@@ -461,47 +486,50 @@ describe("startTui", () => {
     await done;
   });
 
-  test("Round 3: a fresh session can send its first message through the UI, seeded purely by " +
-    "the startup tree fetch — no agent_spawned event ever arrives", async () => {
-    const stdin = new FakeStdin();
-    const stdout = new FakeStdout();
-    const server = makeFakeServer();
-    server.commandResponses.push({
-      ok: true,
-      tree: [
-        {
-          agentId: "agent-root",
-          parentAgentId: null,
-          model: "sonnet",
-          status: "waiting",
-          children: [],
-        },
-      ],
-    });
+  test(
+    "Round 3: a fresh session can send its first message through the UI, seeded purely by " +
+      "the startup tree fetch — no agent_spawned event ever arrives",
+    async () => {
+      const stdin = new FakeStdin();
+      const stdout = new FakeStdout();
+      const server = makeFakeServer();
+      server.commandResponses.push({
+        ok: true,
+        tree: [
+          {
+            agentId: "agent-root",
+            parentAgentId: null,
+            model: "sonnet",
+            status: "waiting",
+            children: [],
+          },
+        ],
+      });
 
-    const done = startTui("http://x", undefined, {
-      io: { stdin, stdout, fetchImpl: server.fetchImpl },
-    });
-    await flush(5, stdout);
+      const done = startTui("http://x", undefined, {
+        io: { stdin, stdout, fetchImpl: server.fetchImpl },
+      });
+      await flush(5, stdout);
 
-    // Deliberately no enqueueSse(...) call here — this is the whole point of the
-    // regression test. Before Round 3's fix, this would sit forever on
-    // "No root agent yet — please wait." since agent_spawned never fires until a first
-    // message is sent, and a first message could never be sent.
-    stdin.type("hello");
-    stdin.type("\r");
-    await flush(5, stdout);
+      // Deliberately no enqueueSse(...) call here — this is the whole point of the
+      // regression test. Before Round 3's fix, this would sit forever on
+      // "No root agent yet — please wait." since agent_spawned never fires until a first
+      // message is sent, and a first message could never be sent.
+      stdin.type("hello");
+      stdin.type("\r");
+      await flush(5, stdout);
 
-    expect(server.commands).toContainEqual({
-      type: "send_message",
-      agentId: "agent-root",
-      message: "hello",
-    });
-    expect(stdout.allWrites()).not.toContain("please wait");
+      expect(server.commands).toContainEqual({
+        type: "send_message",
+        agentId: "agent-root",
+        message: "hello",
+      });
+      expect(stdout.allWrites()).not.toContain("please wait");
 
-    stdin.type("\x03");
-    await done;
-  });
+      stdin.type("\x03");
+      await done;
+    },
+  );
 
   test("a command_error response updates the on-screen status message", async () => {
     const stdin = new FakeStdin();
@@ -573,7 +601,7 @@ describe("startTui", () => {
     await done;
   });
 
-  test.skip("resize events trigger a re-render at the new size — DH-0146: flaky in real CI, root cause unconfirmed", async () => {
+  test("resize events trigger a re-render at the new size — DH-0146: root cause fixed, confirmed passing reliably (DH-0163)", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
     const server = makeFakeServer();
@@ -747,7 +775,7 @@ describe("DH-0059: startTui ownsServer Ctrl+C shutdown handshake", () => {
     expect(server.commands).not.toContainEqual({ type: "stop_agent", agentId: "agent-root" });
   });
 
-  test.skip("ownsServer: true with an active root sends stop_agent, shows a stopping hint, then quits on session_ended — DH-0146: flaky in real CI, root cause unconfirmed", async () => {
+  test("ownsServer: true with an active root sends stop_agent, shows a stopping hint, then quits on session_ended — DH-0146: root cause fixed, confirmed passing reliably (DH-0163)", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
     const server = makeFakeServer();
@@ -835,6 +863,28 @@ describe("startTui: DH-0093 slash-command wiring", () => {
     await done;
   });
 
+  test("a successful list_skills response is dispatched as skills_response, not surfaced as a command error", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    server.commandResponses.push({ ok: true, tree: [] });
+    server.commandResponses.push({
+      ok: true,
+      skills: [{ name: "test-skill", description: "a skill" }],
+    });
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush(5, stdout);
+
+    expect(server.commands).toContainEqual({ type: "list_skills" });
+    expect(stdout.allWrites()).not.toContain("command failed");
+
+    stdin.type("\x03");
+    await done;
+  });
+
   test("/model opens the picker once list_models responds", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
@@ -880,5 +930,48 @@ describe("startTui: DH-0093 slash-command wiring", () => {
 
     stdin.type("\x03");
     await done;
+  });
+
+  test("DH-0166: resolves with a fatalError and exits the alt screen once the SSE transport gives up", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+    // Command traffic works normally; only the SSE endpoint hard-fails — the shape of a
+    // server the TUI can never establish an event stream against.
+    const innerFetch = server.fetchImpl;
+    const failingSse = (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).endsWith(EVENTS_PATH)) return new Response(null, { status: 503 });
+      return (innerFetch as unknown as (u: typeof url, i?: RequestInit) => Promise<Response>)(
+        url,
+        init,
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: failingSse },
+      // Cap of 1: the very first failed attempt gives up immediately — no real jittered
+      // backoff waits in the test. The cap/streak arithmetic itself is covered by
+      // sse-transport.test.ts.
+      maxSseFailures: 1,
+    });
+
+    expect(result.fatalError).toContain("could not connect to http://x after 1 attempts");
+    expect(result.fatalError).toContain("HTTP 503");
+    // The TUI tore itself down (left the alt screen) rather than spinning on reconnecting…
+    expect(stdout.allWrites()).toContain(ALT_SCREEN_EXIT);
+  });
+
+  test("DH-0166: a normal operator quit resolves with no fatalError", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush();
+    stdin.type("\x03");
+    const result = await done;
+    expect(result.fatalError).toBeUndefined();
   });
 });

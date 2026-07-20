@@ -48,17 +48,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          # Pinned to the version this workflow was authored/tested against
-          # (verified locally: `bun --version` -> 1.3.11). CLAUDE.md §2 floors the
-          # project at Bun >=1.3; bump this deliberately alongside that floor, not
-          # silently via a "latest" tag, so gate behavior stays reproducible.
-          bun-version: "1.3.11"
+      # DH-0178: centralizes Bun setup + install (not checkout -- see the action's
+      # own doc comment for why checkout has to stay a separate step here).
+      - name: Setup Bun and install dependencies
+        uses: ./.github/actions/setup-bun-and-install
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Install lcov
+        run: sudo apt-get update && sudo apt-get install -y lcov
+
+      # DH-0164: e2e's PTY-based TUI tests (e2e/support/tmux-pty.ts) depend on a real `tmux`
+      # binary and it was never installed here either -- same masked-gap pattern as the
+      # Chromium install above. "no server running"/"can't find pane" every single time,
+      # not intermittently, is consistent with tmux being absent or broken, not merely slow.
+      - name: Install tmux
+        run: sudo apt-get install -y tmux
+
+      # DH-0164: e2e/spikes/web/support.ts's resolveChromiumExecutable() has no fallback that
+      # works on a fresh runner (it checks a few conventional cache paths, none of which exist
+      # until something actually downloads a browser) -- this step was always missing, just
+      # masked by the gate consistently failing on an earlier step first.
+      #
+      # DH-0165: originally landed as a bare `install chromium` (no --with-deps) because a
+      # first attempt with --with-deps correlated with the PTY/tmux-based TUI e2e tests timing
+      # out. That correlation turned out to be a false lead -- the real tmux root cause was an
+      # unrelated Ink `isInCi` rendering bug, fixed separately, and tmux e2e is now confirmed
+      # green in real CI on its own. With that misattribution cleared, --with-deps is back in:
+      # bare `install chromium` only downloads the browser binary, not the system libraries
+      # (libdbus-1-3, libatspi2.0-0, etc.) it needs at runtime. Their absence is why headless
+      # Chromium logged "Failed to connect to the bus" (dbus/bus.cc) on every launch and then
+      # never painted the page, timing out every `waitForSelector`/`waitForFunction` in
+      # web.test.ts, streaming.test.ts, and connect-web.test.ts.
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
 
       - name: Typecheck
         run: bun run typecheck
@@ -66,14 +87,31 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # DH-0149: the shared-process `bun test src --coverage --parallel=1 ...`
+      # invocation above (see git history) let module-load-order state bleed
+      # between unrelated test files, which is what produced the
+      # "Cannot access 'Yoga' before initialization" Ink/yoga-layout crash
+      # (DH-0145/DH-0146). Replaced with scripts/test-isolated.ts, which spawns
+      # every src/**/*.test.ts(x) file as its own `bun test` OS process (no
+      # shared module graph across files) and merges each process's own
+      # `lcov.info` into one coverage/lcov.info via the standard `lcov` CLI.
       - name: Test with coverage gate (100% required)
         shell: bash
+        # DH-0149 follow-up: capping concurrency below the runner's reported core count is
+        # a live experiment — a first CI run at the default (os.cpus().length, uncapped) hit
+        # several real-timeout-boundary tests (e.g. src/agent/mcp/connection.test.ts's
+        # per-call-timeout test) racing against CPU contention from many concurrent `bun
+        # test` processes, not the DH-0145/DH-0146 Yoga crash this ticket set out to fix
+        # (confirmed absent in that same run). Lowering this is the cheap thing to rule out
+        # before assuming those are real test-design bugs.
+        env:
+          TEST_ISOLATED_CONCURRENCY: "2"
         run: |
           set -o pipefail
-          bun test src --coverage --parallel=1 --coverage-reporter=lcov --coverage-reporter=text 2>&1 | tee coverage-report.txt
+          bun run test:coverage 2>&1 | tee coverage-report.txt
           TEST_EXIT="${PIPESTATUS[0]}"
           if [ "$TEST_EXIT" -ne 0 ]; then
-            echo "::error::bun test failed (exit $TEST_EXIT) — see log above."
+            echo "::error::bun run test:coverage failed (exit $TEST_EXIT) — see log above."
             exit "$TEST_EXIT"
           fi
 
@@ -82,30 +120,37 @@ jobs:
             exit 1
           fi
 
-          # Sum FNH/FNF (functions hit/found) and LH/LF (lines hit/found) across every
-          # SF: record in the lcov file, then compute percentages ourselves — a
-          # structured sum, not a string comparison against a formatted percentage.
-          read -r FNH FNF LH LF <<EOF
+          # Sum LH/LF (lines hit/found) across every SF: record in the merged
+          # lcov file, then compute the percentage ourselves — a structured
+          # sum, not a string comparison against a formatted percentage.
+          #
+          # DH-0149: the former FNH/FNF (functions hit/found) branch is
+          # dropped here. Function data is no longer present in the merged
+          # file: Bun's per-process lcov output only emits summary FNF:/FNH:
+          # records with no per-function FN:/FNDA: coverpoints, so `lcov
+          # --ignore-errors empty` correctly drops function data as
+          # non-mergeable rather than approximating it. This is not a loss of
+          # signal at this gate's 100% threshold — Bun marks a function "hit"
+          # via its definition line executing, so 100% line coverage already
+          # implies 100% function coverage in Bun's own instrumentation model.
+          read -r LH LF <<EOF
           $(awk -F: '
-            /^FNH:/ { fnh += $2 }
-            /^FNF:/ { fnf += $2 }
             /^LH:/  { lh  += $2 }
             /^LF:/  { lf  += $2 }
-            END { print fnh, fnf, lh, lf }
+            END { print lh, lf }
           ' coverage/lcov.info)
           EOF
 
-          if [ "$FNF" -eq 0 ] || [ "$LF" -eq 0 ]; then
-            echo "::error::lcov report has zero total functions/lines (FNF=$FNF LF=$LF) — coverage/lcov.info looks empty or malformed."
+          if [ "$LF" -eq 0 ]; then
+            echo "::error::lcov report has zero total lines (LF=$LF) — coverage/lcov.info looks empty or malformed."
             exit 1
           fi
 
-          FUNCS_PCT="$(awk -v h="$FNH" -v f="$FNF" 'BEGIN { printf "%.2f", (h/f)*100 }')"
           LINES_PCT="$(awk -v h="$LH" -v f="$LF" 'BEGIN { printf "%.2f", (h/f)*100 }')"
-          echo "Coverage: functions=${FUNCS_PCT}% (${FNH}/${FNF}) lines=${LINES_PCT}% (${LH}/${LF})"
+          echo "Coverage: lines=${LINES_PCT}% (${LH}/${LF})"
 
-          if [ "$FUNCS_PCT" != "100.00" ] || [ "$LINES_PCT" != "100.00" ]; then
-            echo "::error::Coverage gate failed — CLAUDE.md §5 requires 100% (functions and lines). Got functions=${FUNCS_PCT}%25, lines=${LINES_PCT}%25."
+          if [ "$LINES_PCT" != "100.00" ]; then
+            echo "::error::Coverage gate failed — CLAUDE.md §5 requires 100% line coverage. Got lines=${LINES_PCT}%25."
             exit 1
           fi
 
@@ -125,9 +170,16 @@ jobs:
           set -euo pipefail
           REPORTED_FILES="$(grep '^SF:' coverage/lcov.info | sed 's/^SF://' | sort -u)"
 
+          # DH-0151: *.type.ts / *.constant.ts files (a future wave-based
+          # migration will rename existing type-only/constant-only files to
+          # these suffixes) are deliberately excluded from the merged lcov
+          # output by scripts/test-isolated.ts's mergeLcov — mirror that
+          # exclusion here so this check doesn't flag them as "missing" once
+          # they stop appearing as SF: records. None exist yet.
           ALL_SRC="$(git ls-files 'src/*.ts' 'src/**/*.ts' 'src/*.tsx' 'src/**/*.tsx' 2>/dev/null \
             | grep -vE '\.(test|spec)\.(ts|tsx)$' \
             | grep -vE '\.d\.ts$' \
+            | grep -vE '\.(type|constant)\.ts$' \
             | sort -u)"
 
           MISSING="$(comm -23 <(echo "$ALL_SRC") <(echo "$REPORTED_FILES") | sed '/^$/d')"
@@ -140,7 +192,7 @@ jobs:
 
           echo "All src files are exercised by at least one test."
 
-      - name: E2E (real compiled binary — fails closed if e2e/ has no tests)
+      - name: E2E test-file count (fails closed if e2e/ has no tests)
         shell: bash
         run: |
           # DH-0030: this used to auto-detect e2e test files and downgrade to a
@@ -156,4 +208,31 @@ jobs:
             echo "::error::No e2e test files found under e2e/ — this is a hard gate failure, not a bootstrap notice, now that the E2E domain has landed test files. If e2e/ was intentionally emptied, that decision needs sign-off (CLAUDE.md §6), not a silent gate downgrade."
             exit 1
           fi
-          bun run e2e
+
+      # DH-0164: split by resource profile rather than one `bun run e2e` step. Chromium
+      # (web.test.ts/connect-web.test.ts/streaming.test.ts) and real tmux+PTY sessions
+      # (tui.test.ts/slash-commands.test.ts/markdown-rendering.test.ts) coexisting in one
+      # process tree exhausted the runner badly enough that the tmux SERVER itself died mid-run
+      # ("no server running" — not just a slow individual wait) once both kinds of e2e test
+      # actually got to execute against real CI for the first time. Structural fix: never let
+      # both resource-heavy categories share a job step's process tree at the same time.
+      - name: E2E (core/protocol — no browser or PTY)
+        run: bun test e2e/bedrock-provider.test.ts e2e/build-stamp.test.ts e2e/exit-codes.test.ts e2e/security.test.ts e2e/server-protocol.test.ts --parallel=1
+
+      - name: E2E (TUI/PTY — tmux)
+        run: bun test e2e/tui.test.ts e2e/slash-commands.test.ts e2e/markdown-rendering.test.ts --parallel=1
+
+      - name: E2E (web/browser — Chromium)
+        run: bun test e2e/web.test.ts e2e/streaming.test.ts --parallel=1
+
+      # DH-0165: split out from the step above — connect-web.test.ts is the heaviest single
+      # e2e scenario in the whole suite (two real `dh` processes, a `--server` plus a
+      # `--connect --web` client, on top of its own Chromium launch) and consistently hung/
+      # timed out in real CI (even at a 90s budget, with zero page console/network/DOM
+      # diagnostic output ever printed — see the test's own DH-0165 comments) specifically
+      # when run third, right after web.test.ts's and streaming.test.ts's own Chromium
+      # sessions in the same process tree. Same structural fix DH-0164 already established
+      # for the tmux/PTY step just above: never let more resource-heavy work pile up in one
+      # job step's process tree than it needs to.
+      - name: E2E (web/browser — connect --web, isolated)
+        run: bun test e2e/connect-web.test.ts

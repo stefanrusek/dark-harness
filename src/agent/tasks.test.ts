@@ -59,7 +59,7 @@ describe("TaskRegistry", () => {
     expect(registry.snapshot(id).status).toBe("done");
   });
 
-  // Round 13: distinct terminal status from "failed" (contracts/log.ts's AgentStatus).
+  // Round 13: distinct terminal status from "failed" (contracts/log.type.ts's AgentStatus).
   test("stop() on a running task marks it 'stopped', not 'failed'", async () => {
     const registry = new TaskRegistry();
     const id = registry.start({
@@ -82,6 +82,39 @@ describe("TaskRegistry", () => {
     });
     await registry.awaitDone(id);
     expect(() => registry.sendMessage(id, "hi")).toThrow(TaskFinishedError);
+  });
+
+  describe("cancelQueuedMessage (DH-0207/DH-0208)", () => {
+    test("delegates to the registered sink and returns its result", () => {
+      const registry = new TaskRegistry();
+      const calls: string[] = [];
+      const id = registry.start({
+        kind: "agent",
+        parentAgentId: "root",
+        run: async (handle) => {
+          handle.registerCancelQueuedMessage((messageId) => {
+            calls.push(messageId);
+            return messageId === "known";
+          });
+          await new Promise(() => {});
+        },
+      });
+      expect(registry.cancelQueuedMessage(id, "known")).toBe(true);
+      expect(registry.cancelQueuedMessage(id, "unknown")).toBe(false);
+      expect(calls).toEqual(["known", "unknown"]);
+    });
+
+    test("returns false (not an error) for a task that never registered a sink", async () => {
+      const registry = new TaskRegistry();
+      const id = registry.start({ kind: "bash", parentAgentId: "root", run: async () => {} });
+      expect(registry.cancelQueuedMessage(id, "anything")).toBe(false);
+      await registry.awaitDone(id);
+    });
+
+    test("throws TaskNotFoundError for a genuinely unknown task id", () => {
+      const registry = new TaskRegistry();
+      expect(() => registry.cancelQueuedMessage("agent-999", "x")).toThrow(TaskNotFoundError);
+    });
   });
 
   describe("outputSince (Round 13: incremental TaskOutput)", () => {

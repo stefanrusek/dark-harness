@@ -4,7 +4,6 @@
 import {
   type ContentBlock as BedrockContentBlock,
   BedrockRuntimeClient,
-  type StopReason as BedrockStopReason,
   type Tool as BedrockTool,
   ConverseStreamCommand,
   type ConverseStreamOutput,
@@ -12,12 +11,17 @@ import {
 import type { DocumentType } from "@smithy/types";
 import type { ProviderConfig } from "../../contracts/index.ts";
 import { withRetry } from "./retry.ts";
+import {
+  type ErrorClassification,
+  isContextOverflowMessage,
+  mapStopReason,
+  withCacheMarkers,
+} from "./shared.ts";
 import type {
   ModelProvider,
   ProviderCompletionRequest,
   ProviderCompletionResult,
   ProviderContentBlock,
-  ProviderErrorKind,
   ProviderStopReason,
   ProviderStreamCallbacks,
 } from "./types.ts";
@@ -44,8 +48,17 @@ function toBedrockContent(block: ProviderContentBlock): BedrockContentBlock {
       return { text: block.text };
     case "tool_use":
       return {
-        toolUse: { toolUseId: block.id, name: block.name, input: block.input },
-      } as unknown as BedrockContentBlock;
+        toolUse: {
+          toolUseId: block.id,
+          name: block.name,
+          // `input` is an opaque tool-call payload (deserialized from provider-supplied JSON
+          // upstream) — genuinely `unknown` on our side, and `DocumentType` (any JSON-shaped
+          // value) is exactly what the Bedrock SDK expects there, so this single-field cast
+          // isn't masking a shape mismatch the way the old whole-block `as unknown as
+          // BedrockContentBlock` casts did.
+          input: block.input as DocumentType,
+        },
+      };
     case "tool_result":
       return {
         toolResult: {
@@ -64,13 +77,13 @@ function toBedrockContent(block: ProviderContentBlock): BedrockContentBlock {
             ...(block.signature.length > 0 ? { signature: block.signature } : {}),
           },
         },
-      } as unknown as BedrockContentBlock;
+      };
     case "redacted_thinking":
       return {
         reasoningContent: {
           redactedContent: Buffer.from(block.data, "base64"),
         },
-      } as unknown as BedrockContentBlock;
+      };
   }
 }
 
@@ -101,72 +114,46 @@ function toBedrockThinkingField(
 function withBedrockCacheMarkers(
   messages: { role: "user" | "assistant"; content: BedrockContentBlock[] }[],
 ): { role: "user" | "assistant"; content: BedrockContentBlock[] }[] {
-  const result = messages.map((m) => ({ ...m, content: [...m.content] }));
-  const cachePoint = { cachePoint: { type: "default" } } as unknown as BedrockContentBlock;
-
-  const appendMark = (
-    msg: { role: "user" | "assistant"; content: BedrockContentBlock[] } | undefined,
-  ): void => {
-    if (!msg) return;
-    msg.content.push(cachePoint);
-  };
-
-  appendMark(result[result.length - 1]);
-
-  const userIndices = result.reduce<number[]>((acc, m, i) => {
-    if (m.role === "user") acc.push(i);
-    return acc;
-  }, []);
-  if (userIndices.length >= 2) {
-    const secondToLastUserIndex = userIndices[userIndices.length - 2];
-    if (secondToLastUserIndex !== undefined) {
-      appendMark(result[secondToLastUserIndex]);
-    }
-  }
-
-  return result;
-}
-
-function mapStopReason(reason: BedrockStopReason | undefined): ProviderStopReason {
-  if (reason === "tool_use") return "tool_use";
-  if (reason === "max_tokens") return "max_tokens";
-  if (reason === "end_turn") return "end_turn";
-  return "other";
+  const cachePoint: BedrockContentBlock = { cachePoint: { type: "default" } };
+  return withCacheMarkers(messages, (content) => [...content, cachePoint]);
 }
 
 // DH-0009: AWS SDK errors carry a `.name` (the exception shape name) rather than an HTTP
 // status directly on the error object — these are the Bedrock Converse API's own documented
 // exception names for the relevant categories.
-const RATE_LIMIT_ERROR_NAMES = new Set(["ThrottlingException", "TooManyRequestsException"]);
-const OVERLOADED_ERROR_NAMES = new Set([
-  "ServiceUnavailableException",
-  "InternalServerException",
-  "ModelTimeoutException",
-  "ModelNotReadyException",
-]);
-const AUTH_ERROR_NAMES = new Set([
-  "AccessDeniedException",
-  "UnrecognizedClientException",
-  "ExpiredTokenException",
-]);
+const RATE_LIMIT_ERROR_NAMES = Object.freeze(
+  new Set(["ThrottlingException", "TooManyRequestsException"]),
+);
+const OVERLOADED_ERROR_NAMES = Object.freeze(
+  new Set([
+    "ServiceUnavailableException",
+    "InternalServerException",
+    "ModelTimeoutException",
+    "ModelNotReadyException",
+  ]),
+);
+const AUTH_ERROR_NAMES = Object.freeze(
+  new Set(["AccessDeniedException", "UnrecognizedClientException", "ExpiredTokenException"]),
+);
 
-/** DH-0009: classifies a raw thrown value from the Bedrock SDK by its exception name; a
- * plain error with no recognizable AWS exception name (e.g. a network-level failure that
- * never reached AWS at all) is treated as `network` (retryable), matching the same
- * "no status/name at all means it never reached the service" logic anthropic.ts uses. */
-/** DH-0010 Part B: best-effort detection of Bedrock's "the request was too long" — mirrors
- * anthropic.ts's `isContextOverflowMessage`, same fragile-but-graceful-degradation rationale. */
-function isContextOverflowMessage(message: string): boolean {
-  return /input is too long/i.test(message);
-}
+// DH-0009: classifies a raw thrown value from the Bedrock SDK by its exception name; a
+// plain error with no recognizable AWS exception name (e.g. a network-level failure that
+// never reached AWS at all) is treated as `network` (retryable), matching the same
+// "no status/name at all means it never reached the service" logic anthropic.ts uses.
+// DH-0010 Part B: best-effort detection of Bedrock's "the request was too long" — mirrors
+// anthropic.ts's `isContextOverflowMessage`, same fragile-but-graceful-degradation rationale.
+const CONTEXT_OVERFLOW_MESSAGE_PATTERN = /input is too long/i;
 
-function classifyBedrockError(err: unknown): { kind: ProviderErrorKind; retryable: boolean } {
+function classifyBedrockError(err: unknown): ErrorClassification {
   const name = (err as { name?: unknown } | null)?.name;
   if (typeof name === "string") {
     if (RATE_LIMIT_ERROR_NAMES.has(name)) return { kind: "rate_limit", retryable: true };
     if (OVERLOADED_ERROR_NAMES.has(name)) return { kind: "overloaded", retryable: true };
     if (AUTH_ERROR_NAMES.has(name)) return { kind: "auth", retryable: false };
-    if (name === "ValidationException" && isContextOverflowMessage((err as Error).message ?? "")) {
+    if (
+      name === "ValidationException" &&
+      isContextOverflowMessage((err as Error).message ?? "", CONTEXT_OVERFLOW_MESSAGE_PATTERN)
+    ) {
       return { kind: "context_overflow", retryable: false };
     }
     if (name !== "Error" && name !== "TypeError") return { kind: "other", retryable: false };
@@ -198,16 +185,17 @@ export class BedrockProvider implements ModelProvider {
     signal?: AbortSignal,
     callbacks?: ProviderStreamCallbacks,
   ): Promise<ProviderCompletionResult> {
-    const tools: BedrockTool[] = request.tools.map(
-      (t) =>
-        ({
-          toolSpec: {
-            name: t.name,
-            description: t.description,
-            inputSchema: { json: t.inputSchema },
-          },
-        }) as unknown as BedrockTool,
-    );
+    const tools: BedrockTool[] = request.tools.map((t) => ({
+      toolSpec: {
+        name: t.name,
+        description: t.description,
+        // `JsonSchema` (src/agent/tools/types.ts) has no index signature, so it doesn't
+        // structurally overlap with `DocumentType`'s `{ [prop: string]: DocumentType }` even
+        // though every JsonSchema value is itself valid JSON — genuinely two different shapes
+        // for the same runtime data, hence the through-`unknown` cast rather than a direct one.
+        inputSchema: { json: t.inputSchema as unknown as DocumentType },
+      },
+    }));
 
     // DH-0044 D6: retry only until the first text delta actually reaches the caller — see
     // anthropic.ts's identical `emittedAny` closure for the full rationale.
@@ -235,7 +223,7 @@ export class BedrockProvider implements ModelProvider {
                 ? {
                     additionalModelRequestFields: {
                       thinking: toBedrockThinkingField(request.thinking),
-                    } as unknown as DocumentType,
+                    } as DocumentType,
                   }
                 : {}),
             }),

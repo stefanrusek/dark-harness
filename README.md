@@ -1,15 +1,26 @@
-# ◆ Dark Harness
+<p align="center">
+  <img src="docs/media/logo.svg" width="88" height="88" alt="Dark Harness logo: a green-to-cyan gradient uppercase D H monogram">
+</p>
 
+# Dark Harness
+
+<p align="center"><em>Point <code>dh</code> at a repo and an instructions file, and it works the job unattended.</em></p>
+
+[![CI](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/stefanrusek/dark-harness/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/dark-harness)](https://www.npmjs.com/package/dark-harness)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-*(A CI status badge belongs here too, once the repo's public URL is confirmed — see
-[Status / deferred this round](#status--deferred-this-round).)*
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-web-light.png">
+    <img src="docs/media/hero-web-dark.png" width="820" alt="Dark Harness web UI observing a multi-agent session: a 5-agent tree with running, waiting, done, and failed statuses, a rich-Markdown deploy report in the transcript, and real token/cost totals.">
+  </picture>
+</p>
 
-**Point `dh` at a repo and an instructions file, and it works the job unattended** — a
-single compiled binary running an LLM agent, sub-agents, a real tool set, skills, and MCP
-support, until the job is done or it self-reports why not. Watch it live in a console TUI
-or a web UI, or let it run headless as a dark factory.
+*A real session, captured through the actual web UI against a scripted mock provider — see
+[`e2e/spikes/web/hero-screenshot.ts`](e2e/spikes/web/hero-screenshot.ts) to reproduce it after
+any visual change.*
 
 No daemons to install, no runtime to configure — `dh` is one compiled binary that is the
 server, the console client, and the web client, composed by flags. Under the hood it's a
@@ -17,6 +28,10 @@ full harness: three provider integrations (Anthropic, AWS Bedrock, OpenAI-compat
 behind one interface, arbitrarily nested sub-agent orchestration, resumable JSONL-per-agent
 session logging, and an exit-code contract designed to be scripted against — not just a
 wrapper around a single API call.
+
+It's a single compiled binary running an LLM agent, sub-agents, a real tool set, skills, and
+MCP support, until the job is done or it self-reports why not. Watch it live in a console TUI
+or a web UI, or let it run headless as a dark factory.
 
 ### Why this exists, and what it's meant to demonstrate
 
@@ -43,18 +58,6 @@ sizing up how I work:
 - **Fixes driven by real incidents, not speculative hardening.** e.g. a flaky test's fixed
   sleep replaced with poll-until-stable after it was observed failing intermittently in real
   CI, not because a general "tests should be more robust" pass suggested it.
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-web-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/media/hero-web-light.png">
-    <img src="docs/media/hero-web-dark.png" width="820" alt="Dark Harness web UI observing a multi-agent session: a 5-agent tree with running, waiting, done, and failed statuses, a rich-Markdown deploy report in the transcript, and real token/cost totals.">
-  </picture>
-</p>
-
-*A real session, captured through the actual web UI against a scripted mock provider — see
-[`e2e/spikes/web/hero-screenshot.ts`](e2e/spikes/web/hero-screenshot.ts) to reproduce it after
-any visual change.*
 
 ## Security posture, up front
 
@@ -148,9 +151,26 @@ current directory (see below). Point it at a task and let it run unattended:
 dh --instructions ./TASK.md --job
 ```
 
-`--job` makes the process exit when the root agent finishes: `0` on self-reported success,
-`1` on self-reported task failure, `2+` on a harness-level error (bad config, provider
-failure, crash) — safe to branch on from CI or a scheduler without parsing logs.
+`--job` is **headless mode**: no TUI/Web session ever attaches, and the process exits when the
+root agent finishes: `0` on self-reported success, `1` on self-reported task failure, `2+` on
+a harness-level error (bad config, provider failure, crash) — safe to branch on from CI or a
+scheduler without parsing logs.
+
+By default, `--job` streams a full markdown-rendered transcript of the run (turns, tool
+calls, sub-agent activity) to stdout live, turn-by-turn, as it happens — readable directly in
+a terminal, or piped to a file for later review. `--result-only` and `--json` narrow that
+down along two independent axes — breadth (the whole run vs. just the final result) and
+format (markdown vs. NDJSON) — see the table below.
+
+| | markdown (default format) | `--json` |
+| --- | --- | --- |
+| **default** (full stream) | Full transcript, live, turn-by-turn. | Full NDJSON event stream, closed by a terminal `job_result` line. |
+| **`--result-only`** | Just the final result, plain text. | Just the final result, as a single `job_result` JSON object. |
+
+Without `--job`, `--instructions <file>` launches the interactive session (TUI, or `--web`)
+immediately and auto-sends the instructions file's content as the first message once the root
+agent connects — you watch it run live in the same session, indistinguishable from having
+typed it yourself.
 
 ## Run modes
 
@@ -192,14 +212,19 @@ Flags:
 | `--quiet` | Suppress `--server`'s per-agent-lifecycle activity feed and SSE connect/disconnect lines. The one-time startup block still prints regardless. |
 | `--connect <host>` | Connect to a remote `dh --server` instead of starting a local one. |
 | `--port <n>` | Listen port for `--server`, or target port for `--connect`. Default `4000`. |
-| `--instructions <file>` | Path to an instructions file. The root agent starts on it immediately, autonomously. |
-| `--job` | Exit when the root agent finishes; see the exit-code table above. Without it, the process stays alive for inspection. |
-| `--json` | With `--job`: stream NDJSON progress events to stdout as the run happens, closed by a final `job_result` line. Requires `--job`. |
+| `--web-port <n>` | Pinned listen port for the web UI's static server. Requires `--web`. Default: a random ephemeral port, unless `dh.json`'s `security.webPort` sets one (this flag overrides that). |
+| `--host <name>` | Overrides `dh.json`'s `security.hostname` for this invocation only. |
+| `--instructions <file>` | Path to an instructions file. Without `--job`, launches the interactive session immediately and auto-sends the file's content as the first message once the root agent connects. With `--job`, the root agent starts on it immediately, headlessly. |
+| `--job` | Headless mode: no TUI/Web session attaches; exit when the root agent finishes (see the exit-code table above). Defaults to a full, live, turn-by-turn markdown transcript on stdout — see `--result-only`/`--json` and the output-mode table above. |
+| `--json` | With `--job`: a pure format selector (markdown vs. JSON), orthogonal to breadth. Default breadth: stream NDJSON progress events to stdout as the run happens, closed by a final `job_result` line. With `--result-only`: print a single `job_result` JSON object at the end. Requires `--job`. |
+| `--result-only` | With `--job`: print only the final result at the end (plain text, or a single JSON object with `--json`) instead of the default full transcript stream. Requires `--job`. |
 | `--config <path>` | Path to `dh.json`. Default: `dh.json` in the working directory. |
 | `--env <file>` | Load a dotenv-style file into the environment before `dh.json` is loaded/interpolated (see below). |
 | `--check` | For each configured model, make one cheap no-op provider call and report pass/fail, then exit. Never enters the agent loop. Same as `dh doctor`. |
 | `--dry-run` | Validate config parsing, instructions-file readability, and provider client construction, then exit `0`. Never calls a model. |
 | `--resume <sessionId>` | Reconstruct the root agent's conversation from a prior `.dh-logs/<sessionId>` directory and continue it as a new session. Not supported together with `--connect`. |
+| `--import <path>` | Translate a real Claude Code session (a backup-archive directory or a live `<id>.jsonl` file) into a new resumable `.dh-logs/<sessionId>` session, then resume it via the same path as `--resume`. Not supported together with `--connect`, `--resume`, `--check`, or `--dry-run`. |
+| `--model <alias>` | Companion flag to `--import`: selects the `dh.json` model alias the imported session resumes under. Must name a model in `dh.json`'s `models[]`. Requires `--import`; without it, import falls back to `dh.json`'s `options.defaultModel`. |
 | `--help`, `-h` | Show usage and exit. |
 | `--version` | Show build identity (version, git sha, dirty flag) and exit. |
 
@@ -350,6 +375,13 @@ plain-text output as Markdown, and both the console TUI and the web UI render it
 (headings, bold/italic, inline code, fenced code blocks, lists, blockquotes, links) rather
 than showing raw Markdown syntax or passing through raw escape sequences.
 
+Both the console TUI and the web UI support local slash commands typed into the message
+box — `/model [name]` (show/switch the active model; no arg opens a picker), `/help` (list
+built-ins plus every cached skill command), and `/clear` (clear the local transcript view
+only — it does not reset the agent's own context) — plus `/<skillname>` to invoke a cached
+skill directly. Typing `/` opens an autocomplete dropdown listing the matching built-ins and
+skill commands as you type, navigable with the arrow keys and Enter/Tab to accept.
+
 ## Known gaps
 
 `dh` is under active development; one thing worth knowing about before you rely on it:
@@ -386,10 +418,9 @@ should read both before their first change.
 
 ## Status / deferred this round
 
-- The CI badge above is a placeholder — wiring it to a real status requires the repo's public
-  URL, which needs the owner's sign-off before it's published; see `tracking/DH-0068-*.md`.
-- A full logo/wordmark design is still out of scope — the ◆ brand mark above (borrowed from
-  the web UI's own `.brand::before`) is the extent of the visual identity for now.
+- The logo (above, `docs/media/logo.svg`) is a literal uppercase "D H" monogram — DH-0219
+  replaced the earlier brackets+wordmark badge and the web UI's bare `◆` glyph with it; the
+  web sidebar header now renders the same mark (`LogoMark`, `src/web/client/components/`).
 - The repo has no GitHub social preview image set yet. A ready-to-follow generation prompt
   for one (dimensions, brand elements, and the mechanical steps to set it) lives at
   [docs/design/social-preview-prompt.md](docs/design/social-preview-prompt.md) for whichever

@@ -1,6 +1,6 @@
 // DH-0037 (tracking/DH-0037-no-log-rotation-or-run-summary-or-log-analysis-tool.md), piece
 // 1 of 2: `.dh-logs/` rotation/prune. Config-gated, off by default — matches this project's
-// established pattern for new knobs (LimitsConfig's doc comment in src/contracts/config.ts
+// established pattern for new knobs (LimitsConfig's doc comment in src/contracts/config.type.ts
 // makes the same call for its own caps). Deliberately does NOT touch `summary.json` — that
 // piece of DH-0037 is sequenced after DH-0050's Core round (see the ticket's owner note).
 

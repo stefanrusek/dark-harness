@@ -83,6 +83,14 @@ export function startTmuxSession(command: string[], options: TmuxSessionOptions 
     throw new Error(`tmux new-session failed: ${started.stderr || started.stdout}`);
   }
 
+  // DH-0164: without this, tmux's default behavior tears the pane (and, since it's the only
+  // pane, the whole session) down the moment the wrapped process exits for ANY reason —
+  // including a crash — so a real CI-only startup failure surfaces only as a much later,
+  // opaque "can't find pane"/"no server running" from a subsequent capture-pane call, with
+  // no way to see what the process actually printed before dying. Keeping the pane around
+  // turns that into an observable dead-pane capture instead of a silent session disappearance.
+  run(["tmux", "set-option", "-t", sessionName, "remain-on-exit", "on"]);
+
   return {
     sessionName,
     capture() {
@@ -111,7 +119,12 @@ export function startTmuxSession(command: string[], options: TmuxSessionOptions 
         throw new Error(`tmux send-keys -l failed: ${result.stderr}`);
       }
     },
-    async waitFor(predicate, timeoutMs = 10_000) {
+    // DH-0164: 10s was fine on a dev machine but real GitHub Actions runners are meaningfully
+    // slower/more resource-constrained for real tmux+PTY+process interaction -- this only
+    // surfaced once e2e's PTY-based tests actually got to run against real CI for the first
+    // time (every earlier gate run failed on an upstream step first). Same class of CI-only
+    // timing gap as DH-0145/DH-0146; bumped generously rather than chasing an exact number.
+    async waitFor(predicate, timeoutMs = 30_000) {
       const start = Date.now();
       for (;;) {
         const screen = this.capture();
@@ -135,7 +148,7 @@ export function startTmuxSession(command: string[], options: TmuxSessionOptions 
       }
       return result.stdout.trim() === "1";
     },
-    async waitForExit(timeoutMs = 10_000) {
+    async waitForExit(timeoutMs = 30_000) {
       const start = Date.now();
       while (!this.isProcessExited()) {
         if (Date.now() - start > timeoutMs) {

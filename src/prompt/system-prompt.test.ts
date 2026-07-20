@@ -6,12 +6,13 @@ import { BUILD_INFO } from "../config/build-info.ts";
 import type { DhConfig, ModelConfig } from "../contracts/index.ts";
 import type { Skill } from "./skills.ts";
 import {
+  buildDefaultSystemPrompt,
   CLAUDE_MD_MAX_BYTES,
   CLI_TOOLS_SKILL,
-  REQUIRED_CONTRACT,
-  buildDefaultSystemPrompt,
   loadSystemPrompt,
+  REQUIRED_CONTRACT,
   readProjectClaudeMd,
+  renderJobModeSection,
   renderSelfInfoSection,
   renderSkillsSection,
 } from "./system-prompt.ts";
@@ -57,6 +58,15 @@ describe("renderSkillsSection", () => {
   });
 });
 
+describe("renderJobModeSection", () => {
+  test("names --job mode explicitly and instructs the agent not to wait on a reply", () => {
+    const section = renderJobModeSection();
+    expect(section).toContain("You are running unattended (--job mode)");
+    expect(section).toContain("Never ask a clarifying question and wait for a reply.");
+    expect(section).toContain("TASK_FAILED");
+  });
+});
+
 describe("renderSelfInfoSection", () => {
   const sonnet: ModelConfig = { name: "sonnet", provider: "anthropic", model: "claude-sonnet-5" };
   const haiku: ModelConfig = { name: "haiku", provider: "anthropic", model: "claude-haiku-5" };
@@ -93,10 +103,12 @@ describe("renderSelfInfoSection", () => {
   test("includes git sha (clean) when BUILD_INFO reports one", () => {
     const config = baseConfig({ models: [sonnet] });
     const section = renderSelfInfoSection(config, sonnet, {
-      version: "1.2.3",
-      gitSha: "abc1234",
-      dirty: false,
-      releaseTag: null,
+      buildInfo: {
+        version: "1.2.3",
+        gitSha: "abc1234",
+        dirty: false,
+        releaseTag: null,
+      },
     });
     expect(section).toContain("git sha abc1234");
     expect(section).not.toContain("dirty working tree");
@@ -105,10 +117,12 @@ describe("renderSelfInfoSection", () => {
   test("flags a dirty working tree when BUILD_INFO reports one", () => {
     const config = baseConfig({ models: [sonnet] });
     const section = renderSelfInfoSection(config, sonnet, {
-      version: "1.2.3",
-      gitSha: "abc1234",
-      dirty: true,
-      releaseTag: null,
+      buildInfo: {
+        version: "1.2.3",
+        gitSha: "abc1234",
+        dirty: true,
+        releaseTag: null,
+      },
     });
     expect(section).toContain("git sha abc1234 (dirty working tree)");
   });
@@ -116,10 +130,12 @@ describe("renderSelfInfoSection", () => {
   test("includes the release tag when BUILD_INFO reports one", () => {
     const config = baseConfig({ models: [sonnet] });
     const section = renderSelfInfoSection(config, sonnet, {
-      version: "1.2.3",
-      gitSha: null,
-      dirty: false,
-      releaseTag: "v1.2.3",
+      buildInfo: {
+        version: "1.2.3",
+        gitSha: null,
+        dirty: false,
+        releaseTag: "v1.2.3",
+      },
     });
     expect(section).toContain("release v1.2.3");
   });

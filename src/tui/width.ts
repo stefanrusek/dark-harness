@@ -21,7 +21,7 @@ export function codePoints(text: string): string[] {
   return Array.from(text);
 }
 
-const COMBINING_RANGES: Array<[number, number]> = [
+const COMBINING_RANGES: ReadonlyArray<[number, number]> = Object.freeze([
   [0x0300, 0x036f], // Combining Diacritical Marks
   [0x0483, 0x0489],
   [0x0591, 0x05bd],
@@ -42,9 +42,9 @@ const COMBINING_RANGES: Array<[number, number]> = [
   [0xfe00, 0xfe0f], // variation selectors
   [0xfe20, 0xfe2f],
   [0xfeff, 0xfeff], // BOM / zero width no-break space
-];
+]);
 
-const WIDE_RANGES: Array<[number, number]> = [
+const WIDE_RANGES: ReadonlyArray<[number, number]> = Object.freeze([
   [0x1100, 0x115f], // Hangul Jamo
   [0x2329, 0x232a],
   [0x2e80, 0x303e], // CJK Radicals Supplement .. CJK Symbols and Punctuation
@@ -59,9 +59,9 @@ const WIDE_RANGES: Array<[number, number]> = [
   [0xffe0, 0xffe6],
   [0x1f300, 0x1faff], // emoji blocks (misc symbols/pictographs, transport, supplemental, etc.)
   [0x20000, 0x3fffd], // CJK Unified Ideographs Extension B and beyond / supplementary plane
-];
+]);
 
-function inRanges(code: number, ranges: Array<[number, number]>): boolean {
+function inRanges(code: number, ranges: ReadonlyArray<[number, number]>): boolean {
   for (const [lo, hi] of ranges) {
     if (code >= lo && code <= hi) return true;
   }
@@ -212,4 +212,32 @@ export function sliceCodePoints(text: string, count: number, fromEnd: boolean): 
  * that needs "how many characters", not "how many display columns". */
 export function codePointLength(text: string): number {
   return codePoints(text).length;
+}
+
+/** Strip codepoints this module treats as zero display width (combining marks, zero-width
+ * joiners/spaces, variation selectors, BOM) before text is handed to Ink for rendering
+ * (DH-0214). Ink's own internal grid-placement layer (`Output.get()` in
+ * `node_modules/ink/build/output.js`) tokenizes text via `@alcalzone/ansi-tokenize`, which —
+ * unlike this module's `charWidth` — gives every codepoint, including combining marks, its own
+ * one-column grid cell. That one-column-per-mark placement silently drifts every subsequent
+ * character in the row one column to the right per zero-width codepoint, and once the drift
+ * pushes trailing characters past the row's declared width they're dropped from the frame
+ * entirely (confirmed via `@alcalzone/ansi-tokenize`'s `tokenize`/`styledCharsFromTokens`
+ * directly: a string like "café" + a trailing U+0301 combining acute accent — two accents
+ * effectively stacked on the same "e" — tokenizes into one entry *per codepoint*, not one per
+ * visual grapheme). Ink is a third-party dependency we can't patch, so rather than render a
+ * silently corrupted frame, the TUI strips what it can't place: codepoints this module already
+ * models as contributing 0 columns are exactly the ones Ink cannot place without drifting.
+ * Deliberately blunt (matches this file's "not a full grapheme segmenter" scope, see the file
+ * header) — a double-accented character loses its second accent rather than corrupting
+ * everything after it. TUI-only: the shared `src/markdown/` module (also used by the Web
+ * client, which renders through the browser's own text shaping and has no such bug) must not
+ * gain this dependency — this stays local to `src/tui/`. */
+export function stripInkUnsafeCombining(text: string): string {
+  let out = "";
+  for (const cp of codePoints(text)) {
+    if (charWidth(cp) === 0) continue;
+    out += cp;
+  }
+  return out;
 }

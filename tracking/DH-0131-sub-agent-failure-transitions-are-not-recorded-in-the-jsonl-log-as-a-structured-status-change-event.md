@@ -84,3 +84,11 @@ changed lines in `src/cli.ts` and `src/agent/runtime.ts` fully covered); `bun ru
 pre-existing failures reproduced identically on unmodified `main` — tmux-pane-not-found
 sandbox issue plus 2 provider-callCount-off-by-one flakes — confirmed via `git stash`,
 unrelated to this change).
+
+- 2026-07-19: Manual testing pass (`temp-manual-testing.md`) re-tested live: sub-agent
+  failures do visibly appear in the Web tree with a status indicator, confirming the
+  user-facing symptom this ticket describes is at least partially addressed. But the tester
+  could not confirm from the outside whether the underlying JSONL actually gets a structured
+  `status_change` event as this ticket's Functional Requirements specify (that requires
+  reading the raw log file, not just observing the UI) — flagged as still needing a direct
+  JSONL inspection before this closes, not just a UI spot-check.

@@ -1,8 +1,9 @@
 // Skill tool — loads a skill by name from configured skillPaths (HANDOFF.md §4, §5).
 
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
-export const skillTool: Tool = {
+export const skillTool: Tool = Object.freeze<Tool>({
   name: "Skill",
   description:
     "Load a skill by name from the configured skillPaths (each a directory containing SKILL.md). " +
@@ -21,10 +22,19 @@ export const skillTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const skill = input.skill;
-    if (typeof skill !== "string" || skill.length === 0) {
-      return { output: "Skill tool error: 'skill' must be a non-empty string.", isError: true };
-    }
+    // 'args' keeps its own local check — its "must be a string when provided." wording
+    // differs from the shared helper's "must be a string.", so only 'skill' is scoped in.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: { skill: skillTool.inputSchema.properties.skill },
+        required: ["skill"],
+      },
+      "Skill",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const skill = input.skill as string;
 
     const args = input.args;
     if (args !== undefined && typeof args !== "string") {
@@ -49,4 +59,4 @@ export const skillTool: Tool = {
 
     return { output, isError: false };
   },
-};
+});

@@ -9,9 +9,10 @@
 
 import { TaskFinishedError, TaskNotFoundError } from "../tasks.ts";
 import { resolveTaskId } from "./resolve-task.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
-export const sendMessageTool: Tool = {
+export const sendMessageTool: Tool = Object.freeze<Tool>({
   name: "SendMessage",
   description:
     "Send a message into a running sub-agent's conversation, addressed by task id or by " +
@@ -34,13 +35,19 @@ export const sendMessageTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const message = input.message;
-    if (typeof message !== "string" || message.length === 0) {
-      return {
-        output: "SendMessage tool error: 'message' must be a non-empty string.",
-        isError: true,
-      };
-    }
+    // 'task_id'/'name' aren't scoped in — their type-mismatch checks and mutual-exclusivity
+    // logic live inside resolveTaskId() with their own error wording.
+    const validation = validateInput(
+      {
+        type: "object",
+        properties: { message: sendMessageTool.inputSchema.properties.message },
+        required: ["message"],
+      },
+      "SendMessage",
+      input,
+    );
+    if (!validation.ok) return validation.result;
+    const message = input.message as string;
     const resolution = resolveTaskId(ctx, "SendMessage", input.task_id, input.name);
     if ("error" in resolution) {
       return { output: resolution.error, isError: true };
@@ -76,4 +83,4 @@ export const sendMessageTool: Tool = {
 
     return { output: `Message delivered to ${taskId}.`, isError: false };
   },
-};
+});

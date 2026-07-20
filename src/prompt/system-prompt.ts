@@ -13,26 +13,27 @@
 
 import { BUILD_INFO } from "../config/build-info.ts";
 import type { BuildInfo, DhConfig, ModelConfig } from "../contracts/index.ts";
-import { type Skill, discoverSkills, parseSkillFrontmatter } from "./skills.ts";
 import CLI_TOOLS_SKILL_MD from "./skills/cli-tools/SKILL.md" with { type: "text" };
+import { discoverSkills, parseSkillFrontmatter, type Skill } from "./skills.ts";
 
 // Fallback used only if the bundled SKILL.md's own frontmatter were ever malformed — kept
 // so a single typo in that file can't take down prompt loading. The real file is well-formed
 // (asserted by a test that parses it directly), so this path is a safety net, not the
 // intended source of truth.
-const CLI_TOOLS_SKILL_FALLBACK = {
+const CLI_TOOLS_SKILL_FALLBACK = Object.freeze({
   name: "cli-tools",
   description:
     "Reference for domain-specific CLI tools (git, gh, pnpm, tilt, kubectl, jq, doppler, npx/playwright, curl).",
-};
+});
 
 /** The bundled CLI-tools skill, baked into the binary and always enumerated. */
-export const CLI_TOOLS_SKILL: Skill = {
+export const CLI_TOOLS_SKILL: Skill = Object.freeze({
   ...(parseSkillFrontmatter(CLI_TOOLS_SKILL_MD) ?? CLI_TOOLS_SKILL_FALLBACK),
   source: "builtin",
-};
+});
 
-const DISCIPLINE_PROMPT = `You are dh, an autonomous coding agent running inside Dark Harness. You are handed an
+const DISCIPLINE_PROMPT =
+  Object.freeze(`You are dh, an autonomous coding agent running inside Dark Harness. You are handed an
 instructions file (or a message from whoever spawned you) and you work it to completion
 without waiting for a human in the loop, unless you hit something only a human can resolve.
 
@@ -86,7 +87,7 @@ yourself to the same discipline:
   immediate tight loop waiting for it to finish. Either go do other independent work and
   check back once you have something to show for it, or wait a reasonable interval before
   polling again. Spin-polling wastes turns; never checking back (see above) fails the task
-  — the discipline is checking back at a sensible cadence, not as fast as possible.`;
+  — the discipline is checking back at a sensible cadence, not as fast as possible.`);
 
 /**
  * The part of the prompt that is structurally load-bearing for the harness itself — the
@@ -95,7 +96,8 @@ yourself to the same discipline:
  * above came from `DISCIPLINE_PROMPT` or a `config.systemPrompt` override, so a custom prompt
  * can never silently drop the contract the rest of the harness depends on. See DH-0018.
  */
-export const REQUIRED_CONTRACT = `- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
+export const REQUIRED_CONTRACT =
+  Object.freeze(`- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
   If you cannot complete the instructions you were given, explaining that in your own words
   is NOT enough on its own. You MUST ALSO include the exact literal text \`TASK_FAILED\`
   (that precise spelling and casing) somewhere in your final response. Nothing reads or
@@ -119,11 +121,62 @@ export const REQUIRED_CONTRACT = `- **Report failure with the exact literal text
 
 All plain-text output you produce is rendered as Markdown by every Dark Harness client.
 Write normal Markdown: headings, **bold**, *italic*, \`inline code\`, fenced code blocks,
-lists, blockquotes, and [links](https://example.com) get real formatting. Anything else
-is shown literally: raw HTML is never interpreted, and ANSI/VT escape sequences and other
-control characters are stripped before rendering — never emit them for visual effect,
-they cannot work. Put anything that must be reproduced byte-for-byte (code, diffs, logs)
-inside a fenced code block.
+lists, blockquotes, and [links](https://example.com) get real formatting. ANSI/VT escape
+sequences and other control characters are stripped before rendering — never emit them for
+visual effect, they cannot work. Put anything that must be reproduced byte-for-byte (code,
+diffs, logs) inside a fenced code block.
+
+**Raw HTML is never interpreted, with exactly one narrow exception:**
+\`<span style="color: NAME">...</span>\` (or \`color: #rgb\`/\`color: #rrggbb\`) is recognized
+and rendered as real inline color — everything else you write in angle brackets (any other
+tag, any other attribute, any HTML your fenced-code-block guard doesn't cover) is shown back
+to you completely literally, as plain text characters, never as markup. This is a deliberate
+security boundary (ADR 0009, implementing DH-0206): the renderer has no general HTML node
+type at all, so nothing else you write in angle brackets can ever become live markup, no
+matter how it's phrased. Concretely:
+
+- The exact shape \`<span style="color: <value>">...</span>\` is recognized (single or double
+  quotes both work; a trailing \`;\` before the closing quote is fine).
+- \`<value>\` must be one of the allowlisted named colors — \`black\`, \`red\`, \`green\`,
+  \`yellow\`, \`blue\`, \`magenta\`, \`cyan\`, \`white\`, \`gray\`/\`grey\`, \`orange\`, \`purple\`
+  — or a hex color, \`#rgb\` or \`#rrggbb\` (e.g. \`#f0a\`, \`#ff00aa\`). Anything else fails
+  closed: the tag is shown as literal text instead of being colored.
+- Named colors render everywhere. **Hex colors only render in the Web client** — the TUI is
+  16-color ANSI only, so a hex-colored span degrades to plain, uncolored text there. If a
+  color must show correctly in both clients, use a named color.
+- Any other tag (\`<div>\`, \`<pre>\`, \`<b>\`, \`<img>\`, ...), any other attribute on a
+  \`<span>\`, or a malformed/unclosed color span is never rendered as markup — it appears
+  verbatim as the literal characters you wrote, in both clients. Do not rely on any HTML tag
+  other than the one exact colored-span shape above; it will not do anything.
+
+Use colored spans for semantic highlighting in your prose — e.g. a red span for a critical
+finding, a green span for something confirmed working — not just for ASCII art.
+
+This rendering is in real color, not just monochrome structure: both the TUI and Web clients
+apply the same brand palette this build uses for its own startup header and status output to
+your rendered Markdown — headings, emphasis, inline code, and code blocks all get real color,
+not a flat single-tone terminal font. Write full, expressive Markdown rather than a
+conservative plain-text-leaning style; the formatting you use is not wasted on a monochrome
+display.
+
+**ASCII art with colors:** Colored spans can wrap multi-line text — a newline inside a span
+(or between spans in the same paragraph) is preserved as a real line break in both clients, so
+you can build ASCII art (banners, diagrams, glyphs) out of colored spans directly, without any
+other wrapper tag. For example:
+
+\`\`\`
+<span style="color: cyan">  /\\_/\\
+</span><span style="color: cyan"> ( o.o )
+</span><span style="color: cyan">  > ^ <</span>
+\`\`\`
+
+Do **not** try to wrap art in a \`<pre>\` tag for monospace alignment — \`<pre>\` is not one of
+the recognized constructs above, so it would render as literal \`<pre...>\` text rather than
+as a monospace block. If exact column alignment matters more than color, put the art in a
+plain fenced code block instead (fenced code blocks always render in a monospace font, but
+their contents are shown byte-for-byte and colored spans do not apply inside them — no
+coloring). Choose one or the other per block: color with approximate alignment (spans in a
+paragraph), or exact alignment without color (a fenced code block).
 
 ## Logging
 
@@ -131,9 +184,9 @@ Everything you and your sub-agents do — every message, tool call, and result �
 automatically to this session's JSONL log files as a side effect of the harness. You never
 need to call a logging tool or ask anyone to record what you did: your plain-text output
 *is* how you record your reasoning and status, and it is preserved whether or not anyone is
-watching in real time.`;
+watching in real time.`);
 
-const BASE_PROMPT = `${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`;
+const BASE_PROMPT = Object.freeze(`${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`);
 
 /**
  * DH-0094 (tracking/DH-0094-*.md): the "self-awareness" section — concrete facts about this
@@ -157,11 +210,25 @@ const BASE_PROMPT = `${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`;
  * branches deterministically rather than depending on how the test runner itself happened to
  * be invoked.
  */
+/** DH-0218: bundles `renderSelfInfoSection`'s optional inputs into one typed object instead
+ * of a defaulted positional parameter, so related-but-optional fields (DH-0215's session/
+ * agent/log-file identity) can be added as more keys here without reopening the
+ * positional-parameter-order question. */
+export interface SelfInfoOptions {
+  buildInfo?: BuildInfo;
+  /** DH-0215: this agent's own session id, agent id, and JSONL log file path — all three or
+   * none, since the self-info paragraph they drive only renders when all three are known. */
+  sessionId?: string;
+  agentId?: string;
+  logFilePath?: string;
+}
+
 export function renderSelfInfoSection(
   config: DhConfig,
   model: ModelConfig,
-  buildInfo: BuildInfo = BUILD_INFO,
+  options: SelfInfoOptions = {},
 ): string {
+  const { buildInfo = BUILD_INFO, sessionId, agentId, logFilePath } = options;
   const buildBits = [`version ${buildInfo.version}`];
   if (buildInfo.gitSha) {
     buildBits.push(`git sha ${buildInfo.gitSha}${buildInfo.dirty ? " (dirty working tree)" : ""}`);
@@ -174,7 +241,7 @@ export function renderSelfInfoSection(
     otherModels.length > 0
       ? otherModels.map((m) => `- **${m.name}** -> provider model \`${m.model}\``).join("\n")
       : "(no other models are configured in this session's dh.json)";
-  return [
+  const lines = [
     "## About this dh instance",
     "",
     `You are running dh (Dark Harness), ${buildBits.join(", ")}.`,
@@ -184,7 +251,54 @@ export function renderSelfInfoSection(
     "Other model configs available in this session's `dh.json` (a sub-agent you spawn via the " +
       "`Agent` tool may run under any of these, including this one):",
     otherModelsText,
-  ].join("\n");
+  ];
+  if (sessionId !== undefined && agentId !== undefined && logFilePath !== undefined) {
+    lines.push(
+      "",
+      `Your session id is \`${sessionId}\` and your own agent id is \`${agentId}\`. Every message, tool call, and result you (and any sub-agents you spawn) produce is logged automatically to \`${logFilePath}\` — your own JSONL transcript, which you can \`Read\` at any time to review your prior turns. The file is one JSON object per line: the first line is a header (session/agent/parent metadata), and every line after that is a typed event — \`message\`, \`tool_call\`, \`tool_result\`, \`token_usage\`, \`status_change\`, or \`completed\` (and a few rarer types), each carrying a \`type\` field and a timestamp. Sub-agents you spawn get their own sibling log files under the same session directory, named by their own agent id.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * DH-0194 (tracking/DH-0194-*.md): tells the agent explicitly when it is running unattended —
+ * the standalone `--instructions`/`--job` path, where `interactive` is `false` on
+ * `AgentRuntime` (see that class's `AgentRuntimeOptions.interactive` doc comment) — as opposed
+ * to an interactive TUI/Web/server session with a live operator watching. Scoping finding: the
+ * signal this needed already existed end-to-end (`src/cli.ts` sets `interactive: true` only for
+ * the four interactive run modes; the standalone job path never sets it, defaulting to
+ * `false`), so no new plumbing was required — this function is called from
+ * `AgentRuntime.buildAgentSystemPrompt()` (`src/agent/runtime.ts`), gated on
+ * `!this.interactive`, reusing that existing per-runtime field rather than adding a parallel
+ * one.
+ *
+ * Deliberately separate from `DISCIPLINE_PROMPT`/`REQUIRED_CONTRACT` above (which are computed
+ * once per config load and are identical for every agent in a runtime) because whether an agent
+ * is unattended is a property of the whole runtime, not something baked into the base prompt at
+ * config-load time — mirrors `renderSelfInfoSection`'s reasoning for being appended per-agent
+ * rather than folded into `BASE_PROMPT`.
+ */
+export function renderJobModeSection(): string {
+  return `## You are running unattended (--job mode)
+
+There is no human operator watching this session in real time. No one will see a clarifying
+question and no one will reply to one — a tool call or final response that asks a question and
+waits for an answer will simply hang forever, since nothing is polling for your output.
+Behave as an unattended batch process, not an interactive assistant:
+
+- **Never ask a clarifying question and wait for a reply.** If you would normally pause to ask
+  an operator something, don't. Make the single most reasonable, defensible judgment call
+  instead and proceed.
+- **State assumptions instead of asking permission.** If you had to guess at scope, intent, or
+  a missing detail, say so plainly in your final output — what you assumed and why — so
+  whoever reads the log afterward can correct it if needed. This is the same "no silent
+  truncation" discipline as elsewhere in this prompt, applied to judgment calls instead of
+  coverage.
+- **Only stop short of finishing if no reasonable path forward exists at all.** Exhaust the
+  reasonable interpretations before giving up; if you truly cannot proceed, report
+  \`TASK_FAILED\` (see above) rather than leaving a turn open waiting on input that will never
+  come.`;
 }
 
 /**
@@ -199,14 +313,105 @@ export function renderSkillsSection(skills: readonly Skill[]): string {
 }
 
 /**
+ * DH-0234 (tracking/DH-0234-*.md): a fixed, hand-maintained "Available tools" section —
+ * distinct from "Available skills" above (loaded skill packages), this documents the
+ * built-in tool set itself: what each tool does and when to reach for it, grouped by
+ * category so the whole thing stays scannable rather than one long flat list. Workflow gets
+ * fuller treatment (a minimal usage example) since it's the newest tool and the one an agent
+ * is least likely to already know about from training data.
+ *
+ * Deliberately hand-maintained prose, not reflection over tool metadata (`inputSchema`/
+ * `description` on each `Tool` in `src/agent/tools/`) — the ticket's own Notes flag
+ * auto-generation as a real follow-on idea (so tool docs can never drift from this list by
+ * accident), but building that is out of scope here; this static section is the minimum that
+ * closes the discoverability gap DH-0234 exists for. Kept as its own constant (not folded
+ * into `BASE_PROMPT`) purely for readability of this file — it is not per-agent state and is
+ * always appended, so it could move into `BASE_PROMPT` later with no behavior change.
+ */
+const AVAILABLE_TOOLS_SECTION = Object.freeze(`## Available tools
+
+Every tool below is always available — there are no approval prompts and no permission modes
+(CLAUDE.md invariant 7 of this project's own governance, if this session is working inside
+Dark Harness's own repo). Skills (above) are separate: they are optional, loaded reference
+material, not tools you invoke directly.
+
+**File I/O**
+- **Read** — read a file (text, image, PDF, Jupyter notebook) from disk, optionally a line
+  range.
+- **Write** — create a file or overwrite one wholesale. Read a file before you Write over it.
+- **Edit** — make a targeted find-and-replace change to an existing file without rewriting it.
+- **NotebookEdit** — edit a single cell of a \`.ipynb\` Jupyter notebook by index or cell id.
+- **Glob** — find files by name/path pattern (e.g. \`**/*.ts\`) when you know roughly what
+  you're looking for by shape, not content.
+- **Grep** — search file contents by regular expression across a path; use this to find where
+  a symbol, string, or pattern is defined or used.
+
+**Shell**
+- **Bash** — run a shell command (build, test, git, any CLI). The general-purpose escape
+  hatch when no more specific tool fits.
+
+**Task tracking**
+- **TodoCreate / TodoGet / TodoList / TodoUpdate** — maintain your own private todo list for a
+  task with several discrete steps, so you (and anyone reading your log) can see what's done,
+  in progress, or still pending. Not shared automatically with other agents — use
+  \`SendMessage\` for that.
+
+**Sub-agent orchestration**
+- **Agent** — spawn an ad-hoc sub-agent (a model name plus a self-contained prompt) to work a
+  piece of the task independently; runs in the background by default. Use this for turn-by-
+  turn delegation where you want to react to each sub-agent's result before deciding the next
+  step.
+- **Monitor** — check a running background task's or sub-agent's progress without ending it.
+- **TaskOutput** — retrieve a sub-agent's or background task's accumulated (or newest) output.
+- **SendMessage** — send a follow-up message to a sub-agent you already spawned, redirecting
+  or correcting it in place rather than stopping and respawning.
+- **TaskStop** — end a running background task or sub-agent by its task id, e.g. one that has
+  visibly drifted or is looping.
+- **Workflow** — run a checked-in, trusted orchestration *script* that coordinates several
+  ad-hoc sub-agents with real control flow (\`agent()\`, \`parallel()\`), instead of you making
+  turn-by-turn Agent-tool calls and deciding what happens next after each one. Reach for this
+  when the coordination logic itself is fixed and known ahead of time — e.g. "run these three
+  analyses in parallel, then feed their combined output to a fourth agent" — rather than
+  something that depends on reading each result as it comes back. See DH-0226
+  (tracking/DH-0226-*.md) for the full design; MVP scope is \`agent()\` + \`parallel()\` only.
+
+  The \`script\` input is a path (relative to your cwd) to a \`.ts\`/\`.js\` file whose default
+  export has the shape \`async (wf, input) => any\`. Minimal example:
+
+  \`\`\`ts
+  // workflow.ts
+  export default async (wf, input) => {
+    // wf.agent(prompt, opts?) spawns one sub-agent and awaits its output.
+    const plan = await wf.agent("Draft a 3-step plan for: " + input.topic);
+
+    // wf.parallel([...]) starts every thunk before awaiting any of them; a failing thunk
+    // resolves to null at its slot instead of aborting the rest.
+    const [reviewA, reviewB] = await wf.parallel([
+      () => wf.agent(\`Review this plan for correctness: \${plan}\`),
+      () => wf.agent(\`Review this plan for feasibility: \${plan}\`),
+    ]);
+
+    wf.log("both reviews collected");
+    return { plan, reviewA, reviewB };
+  };
+  \`\`\`
+
+  Then call the \`Workflow\` tool with \`{ "script": "workflow.ts", "input": { "topic": "..." } }\`.
+  Whatever the default export returns becomes the tool's output.
+
+**MCP**
+- **McpAuth** — check or complete an OAuth-style authentication flow for a configured MCP
+  server, when one requires login before its tools become usable.`);
+
+/**
  * Builds the default (non-overridden) system prompt: the base working-discipline text plus
- * the enumerated skills — the bundled cli-tools skill and anything discovered under the
- * config's `skillPaths`.
+ * the "Available tools" section, plus the enumerated skills — the bundled cli-tools skill and
+ * anything discovered under the config's `skillPaths`.
  */
 export async function buildDefaultSystemPrompt(config: DhConfig): Promise<string> {
   const configured = await discoverSkills(config.skillPaths);
   const skillsSection = renderSkillsSection([CLI_TOOLS_SKILL, ...configured]);
-  return `${BASE_PROMPT}\n\n${skillsSection}\n`;
+  return `${BASE_PROMPT}\n\n${AVAILABLE_TOOLS_SECTION}\n\n${skillsSection}\n`;
 }
 
 /**
@@ -234,7 +439,7 @@ const CLAUDE_MD_FILENAME = "CLAUDE.md";
  * `--dry-run`) can tell at a glance that the file was cut rather than assuming full content
  * made it in.
  */
-export const CLAUDE_MD_MAX_BYTES = 32 * 1024;
+export const CLAUDE_MD_MAX_BYTES = Object.freeze(32 * 1024);
 
 /**
  * Reads `CLAUDE.md` from `cwd` if present. Returns `null` (not an error) when the file is

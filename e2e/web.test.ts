@@ -25,7 +25,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
-import { resolveChromiumExecutable } from "./spikes/web/support.ts";
+import { resolveChromiumExecutable } from "./support/chromium.ts";
 import { createCleanupRegistry } from "./support/cleanup.ts";
 import { spawnDh } from "./support/dh-process.ts";
 import { startMockAnthropicProvider, successTurn } from "./support/mock-provider.ts";
@@ -49,7 +49,20 @@ describe("web UI (dh --web) in a real headless browser", () => {
     if (!webUrl) throw new Error(`could not parse web UI URL from stdout: ${stdout}`);
 
     const executablePath = await resolveChromiumExecutable();
-    const browser = await chromium.launch({ executablePath, headless: true });
+    const browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      // DH-0165: GitHub Actions' runners have no D-Bus session bus, which some headless
+      // Chromium subsystems (network proxy resolution, etc) try to reach on launch and hang
+      // or crash waiting for; --no-sandbox/--disable-dev-shm-usage/--disable-gpu are the
+      // standard trio for running headless Chromium inside an unprivileged CI container.
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ],
+    });
     cleanups.addProcess(() => browser.close());
     const context = await browser.newContext({ acceptDownloads: true });
     const page = await context.newPage();

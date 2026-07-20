@@ -8,7 +8,7 @@
 // to terminate the run.
 
 import { REPORT_OUTCOME_TOOL_NAME, type ReportedOutcome } from "../../contracts/index.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
 
 /** Leniently parses a `ReportOutcome` tool_use's raw `input` into a `ReportedOutcome`, or
  * `null` if `status` isn't a valid value. Optional fields are carried through only when
@@ -35,7 +35,7 @@ export function parseReportedOutcome(input: unknown): ReportedOutcome | null {
   return outcome;
 }
 
-export const reportOutcomeTool: Tool = {
+export const reportOutcomeTool: Tool = Object.freeze<Tool>({
   name: REPORT_OUTCOME_TOOL_NAME,
   description:
     "Call this tool exactly once, as the very last action of your run, to report whether " +
@@ -67,4 +67,4 @@ export const reportOutcomeTool: Tool = {
       isError: false,
     };
   },
-};
+});

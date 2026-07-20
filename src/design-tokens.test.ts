@@ -1,7 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { CONNECTION_TOKENS, STATUS_TOKENS } from "./design-tokens.ts";
+import {
+  BRAND,
+  CONNECTION_TOKENS,
+  fgCode,
+  hexToRgb,
+  lerpHex,
+  nearestAnsi256,
+  paint,
+  SGR_RESET,
+  STATUS_TOKENS,
+  wrapSgr,
+} from "./design-tokens.ts";
 
 const ALL_STATUSES = ["running", "waiting", "done", "failed", "stopped"] as const;
 const ALL_CONNECTION_STATES = ["connecting", "live", "reconnecting", "disconnected"] as const;
@@ -64,6 +75,126 @@ describe("CONNECTION_TOKENS", () => {
     expect(CONNECTION_TOKENS.reconnecting.pending).toBe(true);
     expect(CONNECTION_TOKENS.live.pending).toBe(false);
     expect(CONNECTION_TOKENS.disconnected.pending).toBe(false);
+  });
+});
+
+describe("BRAND", () => {
+  test("has the five documented hex entries, frozen", () => {
+    expect(BRAND).toEqual({
+      harnessGreen: "#9ECE6A",
+      leadOrange: "#E0AF68",
+      wireGray: "#565F89",
+      signalCyan: "#7DCFFF",
+      boneWhite: "#C0CAF5",
+    });
+    expect(Object.isFrozen(BRAND)).toBe(true);
+  });
+});
+
+describe("hexToRgb", () => {
+  test("parses a hex color into [r,g,b]", () => {
+    expect(hexToRgb("#9ECE6A")).toEqual([0x9e, 0xce, 0x6a]);
+    expect(hexToRgb("#000000")).toEqual([0, 0, 0]);
+    expect(hexToRgb("#FFFFFF")).toEqual([255, 255, 255]);
+  });
+
+  test("throws on malformed input rather than silently returning black", () => {
+    expect(() => hexToRgb("not-a-color")).toThrow();
+    expect(() => hexToRgb("#fff")).toThrow();
+    expect(() => hexToRgb("#gggggg")).toThrow();
+  });
+});
+
+describe("lerpHex", () => {
+  test("t=0 returns the first color, t=1 returns the second", () => {
+    expect(lerpHex("#000000", "#FFFFFF", 0)).toBe("#000000");
+    expect(lerpHex("#000000", "#FFFFFF", 1)).toBe("#FFFFFF");
+  });
+
+  test("interpolates linearly per channel at the midpoint", () => {
+    expect(lerpHex("#000000", "#FFFFFF", 0.5)).toBe("#808080");
+  });
+
+  test("clamps t outside [0,1]", () => {
+    expect(lerpHex("#000000", "#FFFFFF", -1)).toBe("#000000");
+    expect(lerpHex("#000000", "#FFFFFF", 2)).toBe("#FFFFFF");
+  });
+});
+
+describe("nearestAnsi256", () => {
+  // Brute-force-verified nearest xterm-256 index (minimum squared RGB distance across the
+  // full 6x6x6 cube + 24-step grayscale ramp) for each BRAND hex. Four of the five match the
+  // ticket's documented precomputed table (DH-0221) exactly; boneWhite's documented value
+  // (189, i.e. cube color #D7D7FF) is farther from #C0CAF5 (squared distance 798) than the
+  // true nearest cube index 153 (#AFD7FF, squared distance 558) — verified by an exhaustive
+  // brute-force search over all 256 palette entries, not just a formula guess. Asserting the
+  // brute-force-correct value here rather than the ticket's figure, since the algorithm this
+  // function implements is specified as "minimizes squared RGB distance" and 153 is what does
+  // that for this hex.
+  test("matches the documented/verified index for each BRAND entry", () => {
+    expect(nearestAnsi256(BRAND.harnessGreen)).toBe(149);
+    expect(nearestAnsi256(BRAND.leadOrange)).toBe(179);
+    expect(nearestAnsi256(BRAND.wireGray)).toBe(60);
+    expect(nearestAnsi256(BRAND.signalCyan)).toBe(117);
+    expect(nearestAnsi256(BRAND.boneWhite)).toBe(153);
+  });
+
+  test("exact cube colors round-trip to their own index", () => {
+    // Index 16 is cube corner (0,0,0); index 231 is cube corner (255,255,255).
+    expect(nearestAnsi256("#000000")).toBe(16);
+    expect(nearestAnsi256("#FFFFFF")).toBe(231);
+  });
+
+  test("pure gray falls onto the grayscale ramp branch, not the cube", () => {
+    // #080808 (8,8,8) is the exact first grayscale ramp step (index 232); the nearest cube
+    // color is (0,0,0) at distance 3*64=192, while the grayscale step is an exact match
+    // (distance 0), so the ramp branch must win.
+    expect(nearestAnsi256("#080808")).toBe(232);
+    // #EEEEEE (238,238,238) is the exact last grayscale ramp step (index 255).
+    expect(nearestAnsi256("#EEEEEE")).toBe(255);
+  });
+
+  test("a cube/grayscale tie resolves to the cube branch", () => {
+    // Cube index 16 is (0,0,0); the nearest grayscale step is level 8 (index 232), so pure
+    // black is strictly closer to the cube. To construct a genuine tie, pick a gray value
+    // equidistant between a cube step and a ramp step: gray value 4 is equidistant (distance
+    // 16) from cube step 0 and ramp step 8. Since the implementation only overrides the cube
+    // pick when grayDist is strictly less than cubeDist, a tie must resolve to the cube.
+    expect(nearestAnsi256("#040404")).toBe(16);
+  });
+});
+
+describe("fgCode", () => {
+  test("truecolor level produces a 38;2;r;g;b code", () => {
+    expect(fgCode(BRAND.harnessGreen, "truecolor")).toBe("38;2;158;206;106");
+  });
+
+  test("ansi256 level produces a 38;5;<index> code using nearestAnsi256", () => {
+    expect(fgCode(BRAND.harnessGreen, "ansi256")).toBe("38;5;149");
+  });
+
+  test("none level returns an empty string", () => {
+    expect(fgCode(BRAND.harnessGreen, "none")).toBe("");
+  });
+});
+
+describe("paint", () => {
+  test("truecolor wraps text via wrapSgr with the 38;2 code (DH-0191 primitive reused)", () => {
+    expect(paint(BRAND.harnessGreen, "✓", "truecolor")).toBe(wrapSgr("38;2;158;206;106", "✓"));
+    expect(paint(BRAND.harnessGreen, "✓", "truecolor")).toBe("\x1b[38;2;158;206;106m✓\x1b[0m");
+  });
+
+  test("ansi256 wraps text via wrapSgr with the 38;5 code", () => {
+    expect(paint(BRAND.harnessGreen, "✓", "ansi256")).toBe("\x1b[38;5;149m✓\x1b[0m");
+  });
+
+  test("none returns text verbatim with no escape bytes", () => {
+    expect(paint(BRAND.harnessGreen, "✓", "none")).toBe("✓");
+  });
+
+  test("every non-none paint ends with the shared SGR_RESET", () => {
+    expect(paint(BRAND.boneWhite, "x", "truecolor").endsWith(SGR_RESET)).toBe(true);
+    expect(paint(BRAND.boneWhite, "x", "ansi256").endsWith(SGR_RESET)).toBe(true);
   });
 });
 

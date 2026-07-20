@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConfigError } from "../../config/errors.ts";
-import { PROJECT_MCP_CONFIG_FILENAME, loadProjectMcpServers } from "./project-config.ts";
+import { loadProjectMcpServers, PROJECT_MCP_CONFIG_FILENAME } from "./project-config.ts";
 
 describe("loadProjectMcpServers (DH-0091)", () => {
   const dirs: string[] = [];

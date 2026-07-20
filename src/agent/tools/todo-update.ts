@@ -2,15 +2,16 @@
 // (DH-0076; mirrors real Claude Code, where TaskUpdate is the one mutation surface).
 
 import { TodoNotFoundError } from "../todos.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
-const VALID_STATUSES = new Set(["pending", "in_progress", "completed", "deleted"]);
+const VALID_STATUSES = Object.freeze(new Set(["pending", "in_progress", "completed", "deleted"]));
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === "string");
 }
 
-export const todoUpdateTool: Tool = {
+export const todoUpdateTool: Tool = Object.freeze<Tool>({
   name: "TodoUpdate",
   description:
     "Update, or delete (status: 'deleted'), one item in your own todo list. The sole " +
@@ -36,13 +37,9 @@ export const todoUpdateTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const todoId = input.todo_id;
-    if (typeof todoId !== "string" || todoId.length === 0) {
-      return {
-        output: "TodoUpdate tool error: 'todo_id' must be a non-empty string.",
-        isError: true,
-      };
-    }
+    const validation = validateInput(todoUpdateTool.inputSchema, "TodoUpdate", input);
+    if (!validation.ok) return validation.result;
+    const todoId = input.todo_id as string;
 
     const mutationFields = [
       "status",
@@ -71,25 +68,6 @@ export const todoUpdateTool: Tool = {
         isError: true,
       };
     }
-    for (const field of ["subject", "description", "active_form"] as const) {
-      if (input[field] !== undefined && typeof input[field] !== "string") {
-        return { output: `TodoUpdate tool error: '${field}' must be a string.`, isError: true };
-      }
-    }
-    for (const field of [
-      "add_blocked_by",
-      "remove_blocked_by",
-      "add_blocks",
-      "remove_blocks",
-    ] as const) {
-      if (input[field] !== undefined && !isStringArray(input[field])) {
-        return {
-          output: `TodoUpdate tool error: '${field}' must be an array of strings.`,
-          isError: true,
-        };
-      }
-    }
-
     try {
       const result = ctx.todos.update(todoId, {
         ...(typeof input.status === "string" ? { status: input.status as never } : {}),
@@ -117,4 +95,4 @@ export const todoUpdateTool: Tool = {
       return { output: `TodoUpdate tool error: ${err.message}`, isError: true };
     }
   },
-};
+});

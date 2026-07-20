@@ -2,7 +2,8 @@
 
 import type { TodoRecord } from "../todos.ts";
 import { TodoNotFoundError } from "../todos.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 function formatRecord(record: TodoRecord): string {
   const lines = [
@@ -19,7 +20,7 @@ function formatRecord(record: TodoRecord): string {
   return lines.join("\n");
 }
 
-export const todoGetTool: Tool = {
+export const todoGetTool: Tool = Object.freeze<Tool>({
   name: "TodoGet",
   description: "Retrieve the full record for one item in your own todo list, by its todo id.",
   inputSchema: {
@@ -32,13 +33,9 @@ export const todoGetTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const todoId = input.todo_id;
-    if (typeof todoId !== "string" || todoId.length === 0) {
-      return {
-        output: "TodoGet tool error: 'todo_id' must be a non-empty string.",
-        isError: true,
-      };
-    }
+    const validation = validateInput(todoGetTool.inputSchema, "TodoGet", input);
+    if (!validation.ok) return validation.result;
+    const todoId = input.todo_id as string;
 
     try {
       const record = ctx.todos.get(todoId);
@@ -48,4 +45,4 @@ export const todoGetTool: Tool = {
       return { output: `TodoGet tool error: ${err.message}`, isError: true };
     }
   },
-};
+});

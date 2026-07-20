@@ -4,7 +4,7 @@
 // this so src/agent/loop.ts is provider-agnostic.
 
 import type { ThinkingConfig } from "../../contracts/index.ts";
-import type { JsonSchema } from "../tools/types.ts";
+import type { JsonSchema } from "../tools/types.type.ts";
 
 export type ProviderRole = "user" | "assistant";
 

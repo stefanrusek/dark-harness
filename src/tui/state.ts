@@ -2,11 +2,16 @@
 // here — side effects (HTTP commands, process exit) are described as data and executed by
 // app.ts. This is what makes the TUI's core logic fully unit-testable without a terminal.
 
-import type { AgentStatus, ModelInfo, ServerSentEvent, SkillInfo } from "../contracts/index.ts";
-import { parseSlashCommand } from "./commands.ts";
+import {
+  autocompleteMatches,
+  buildCommandList,
+  type CommandEntry,
+} from "../client-core/command-list.ts";
+import { parseSlashCommand } from "../client-core/slash-command-parser.ts";
+import type { AgentStatus, ModelInfo, ServerSentEvent } from "../contracts/index.ts";
 import type { KeyEvent } from "./keys.ts";
 import { flattenTree } from "./tree.ts";
-import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.ts";
+import type { Action, AgentInfo, ReducerResult, TuiState, Turn } from "./types.type.ts";
 import { codePointLength, sliceCodePoints } from "./width.ts";
 
 /** Bound per-agent transcript buffer (total chars across all turns) so a very long session
@@ -24,7 +29,7 @@ export const MAX_OUTPUT_CHARS = 200_000;
  * value is threaded through the same way `token` was (see docs/roster/mary.md Round 2). */
 export const DEFAULT_COMPLETED_RETENTION = 50;
 
-const TERMINAL_STATUSES = new Set(["done", "failed", "stopped"]);
+const TERMINAL_STATUSES = Object.freeze(new Set(["done", "failed", "stopped"]));
 
 /** Evict the oldest terminal (done/failed/stopped) agents from `state.agents`/`agentOrder`
  * beyond `retention` most-recent terminal entries. Active agents (running/waiting) are never
@@ -97,7 +102,19 @@ export function initialState(
     shutdownRequested: false,
     rootActive: false,
     skills: null,
+    dropdownIndex: 0,
+    dropdownDismissed: false,
   };
+}
+
+/** DH-0142: the autocomplete dropdown's current contents, or `null` when it shouldn't
+ * render — either the input isn't an in-progress command (see `commandQueryFromInput`), the
+ * query matches nothing, or the operator dismissed it (Escape) for this input. Exported for
+ * `Composer.tsx` to render from directly, so the Ink component never re-derives the matching
+ * logic itself. */
+export function visibleAutocomplete(state: TuiState): CommandEntry[] | null {
+  if (state.dropdownDismissed) return null;
+  return autocompleteMatches(buildCommandList(state.skills ?? []), state.input);
 }
 
 /** Parse an SSE event's ISO `timestamp` into epoch ms, falling back to "now" if the string
@@ -396,21 +413,31 @@ function handleSseEvent(state: TuiState, event: ServerSentEvent): ReducerResult 
     // they weren't the one who triggered it (e.g. a future non-interactive trigger).
     case "model_switched": {
       const next = withAgent(state, event.agentId, at, { model: event.to });
-      return noEffects(
+      const withStatus =
         event.agentId === state.rootAgentId
           ? { ...next, statusMessage: `model switched to ${event.to}` }
-          : next,
-      );
+          : next;
+      return noEffects(withStatus);
     }
     case "tool_call":
       return noEffects(handleToolCall(state, event, at));
     case "tool_result":
       return noEffects(handleToolResult(state, event, at));
-    // DH-0045: `agent_thinking` is a new additive SSE event type (Core's piece of DH-0045),
-    // not yet in sse-parser.ts's KNOWN_TYPES, so it never actually reaches this reducer at
-    // runtime; this case exists purely to keep this switch's exhaustiveness check compiling.
-    // Full TUI display is deferred to a later round (mirrors Web's state.ts treatment).
+    // DH-0045: `agent_thinking` is an additive SSE event type (Core's piece of DH-0045).
+    // DH-0185: now reaches this reducer at runtime — the shared client-core transport's
+    // permissive `parseServerSentEventPayload` (DH-0184) fixed the old `sse-parser.ts`
+    // `KNOWN_TYPES` allowlist bug that silently dropped it before it ever got here. Full TUI
+    // display is still deferred to a later round (mirrors Web's state.ts treatment); this
+    // case exists to keep this switch's exhaustiveness check compiling until then.
     case "agent_thinking":
+      return noEffects(state);
+    // DH-0207/DH-0208: `agent_queue` (a full not-yet-delivered-queue snapshot for one agent —
+    // see its doc comment in src/contracts/events.type.ts) has no TUI display yet; this ticket's
+    // scope is the Web UI (queued-state styling + cancel button) and the completion/EOF
+    // signal for scripted callers, neither of which needs a TUI-rendered queue view. No-op
+    // here for the same reason as agent_thinking above: keeps this switch's exhaustiveness
+    // check compiling without pretending the TUI does something with it yet.
+    case "agent_queue":
       return noEffects(state);
   }
 }
@@ -507,6 +534,43 @@ function insertAt(input: string, cursor: number, text: string): { input: string;
 }
 
 function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
+  // DH-0142: the autocomplete dropdown intercepts navigation/selection/dismissal keys ahead
+  // of every other root-key handling below, whenever it's currently showing. Computed fresh
+  // from `state` (before this key is applied), matching what the operator actually sees on
+  // screen right now.
+  const dropdown = visibleAutocomplete(state);
+  if (dropdown && dropdown.length > 0) {
+    if (key.kind === "up" || key.kind === "down") {
+      const delta = key.kind === "up" ? -1 : 1;
+      const nextIndex = (state.dropdownIndex + delta + dropdown.length) % dropdown.length;
+      return noEffects({ ...state, dropdownIndex: nextIndex });
+    }
+    if (key.kind === "enter" || key.kind === "tab") {
+      const chosen = dropdown[Math.min(state.dropdownIndex, dropdown.length - 1)];
+      // `key.kind === "enter"` on an already-fully-typed command name (e.g. "/model") is the
+      // pre-existing DH-0093 "execute now" behavior, not a completion — the dropdown showing
+      // a single exact match is incidental, not something to intercept. `Tab` never executes
+      // a command (only Enter does, per DH-0093), so it always completes/selects instead.
+      const alreadyComplete =
+        key.kind === "enter" && chosen !== undefined && state.input === `/${chosen.name}`;
+      if (chosen && !alreadyComplete) {
+        // Trailing space: `commandQueryFromInput` treats any whitespace after the name as
+        // "args have started," so this naturally closes the dropdown on the next render
+        // without needing a separate dismissal flag here.
+        return noEffects({
+          ...state,
+          input: `/${chosen.name} `,
+          inputCursor: chosen.name.length + 2,
+          dropdownIndex: 0,
+          dropdownDismissed: false,
+        });
+      }
+    }
+    if (key.kind === "escape") {
+      return noEffects({ ...state, dropdownDismissed: true });
+    }
+  }
+
   // Left-arrow is only reserved for "open the agent tree" when the input box is empty —
   // otherwise it repositions the cursor within typed text like every other editor (DH-0026).
   if (key.kind === "left" && state.input === "") {
@@ -532,25 +596,43 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
   }
   if (key.kind === "char") {
     const { input, cursor } = insertAt(state.input, state.inputCursor, key.value);
-    return noEffects({ ...state, input, inputCursor: cursor });
+    return noEffects({
+      ...state,
+      input,
+      inputCursor: cursor,
+      dropdownIndex: 0,
+      dropdownDismissed: false,
+    });
   }
   if (key.kind === "paste") {
     // Literal insert, including any embedded newlines — never re-parsed as `enter`
     // keystrokes, which is exactly the fragmentation bug DH-0026 exists to fix.
     const { input, cursor } = insertAt(state.input, state.inputCursor, key.text);
-    return noEffects({ ...state, input, inputCursor: cursor });
+    return noEffects({
+      ...state,
+      input,
+      inputCursor: cursor,
+      dropdownIndex: 0,
+      dropdownDismissed: false,
+    });
   }
   if (key.kind === "backspace") {
     if (state.inputCursor === 0) return noEffects(state);
     const input =
       state.input.slice(0, state.inputCursor - 1) + state.input.slice(state.inputCursor);
-    return noEffects({ ...state, input, inputCursor: state.inputCursor - 1 });
+    return noEffects({
+      ...state,
+      input,
+      inputCursor: state.inputCursor - 1,
+      dropdownIndex: 0,
+      dropdownDismissed: false,
+    });
   }
   if (key.kind === "delete") {
     if (state.inputCursor >= state.input.length) return noEffects(state);
     const input =
       state.input.slice(0, state.inputCursor) + state.input.slice(state.inputCursor + 1);
-    return noEffects({ ...state, input });
+    return noEffects({ ...state, input, dropdownIndex: 0, dropdownDismissed: false });
   }
   if (key.kind === "enter") {
     if (state.input.trim() === "") return noEffects(state);
@@ -558,7 +640,7 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
     // the one place a `send_message` effect is built from `state.input` (design §1). The raw
     // (untrimmed) input is tested: a leading space before the slash, or a bare "/" alone,
     // deliberately fails to match and falls through to ordinary chat, per the grammar's own
-    // rules (see commands.ts).
+    // rules (see client-core/slash-command-parser.ts).
     const parsed = parseSlashCommand(state.input);
     if (parsed) {
       return handleSlashCommand(state, parsed.name, parsed.args);
@@ -585,11 +667,43 @@ function handleRootKey(state: TuiState, key: KeyEvent): ReducerResult {
     };
   }
   if (key.kind === "escape") {
-    return noEffects({ ...state, statusMessage: null, reconnectNotice: null });
+    return handleEscape(state);
   }
   // "tab" is intentionally a no-op here — reserved for a possible future completion feature,
   // not a dead/unhandled key (DH-0026 flagged it as unclear; this makes the intent explicit).
   return noEffects(state);
+}
+
+/** DH-0211: Escape in the root view stops the root agent, mirroring many interactive
+ * coding-agent UIs' convention and the TUI's own Ctrl+C behavior (DH-0059) — but, unlike
+ * Ctrl+C, it never quits the process; it only sends `stop_agent`, matching the Web client's
+ * equivalent (app.ts's global `keydown` listener). Reuses `rootActive` — the same "has the
+ * root actually started" guard `handleCtrlC` uses — so an Escape before any activity, or
+ * after the root already reached a terminal status and a fresh `stop_agent` would be a
+ * meaningless no-op, falls back to the pre-existing behavior of just clearing transient
+ * status/reconnect messages instead of sending a wasted command.
+ *
+ * No confirmation prompt: stopping a run is recoverable (the operator can just send another
+ * message afterward) and not destructive to any data, the same reasoning DH-0059 already
+ * established for Ctrl+C — adding a confirmation dialog here but not there would be an
+ * inconsistent UX for what is, from the operator's perspective, the same "stop it" action. */
+function handleEscape(state: TuiState): ReducerResult {
+  if (!state.rootActive || state.rootAgentId === null || state.sessionEnded !== null) {
+    return noEffects({ ...state, statusMessage: null, reconnectNotice: null });
+  }
+  const agent = state.agents.get(state.rootAgentId);
+  if (agent && agent.status !== "running" && agent.status !== "waiting") {
+    return noEffects({ ...state, statusMessage: null, reconnectNotice: null });
+  }
+  return {
+    state: { ...state, statusMessage: "stopping…", reconnectNotice: null },
+    effects: [
+      {
+        type: "send_command",
+        command: { type: "stop_agent", agentId: state.rootAgentId },
+      },
+    ],
+  };
 }
 
 /** Local, never-sent transcript entry text for `/help` (DH-0093 design §3) — lists the

@@ -5,7 +5,7 @@ type: feature
 status: closed
 owner: stefan
 resolution: done
-blocked_by: ["blocked on DH-0133a (Core toolchain) landing first"]
+blocked_by: []
 created: 2026-07-17
 relations:
   depends_on: []

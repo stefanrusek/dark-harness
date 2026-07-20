@@ -1,27 +1,29 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readdirSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ROOT_AGENT_ID } from "./agent/agent-id.constant.ts";
 import type { ModelProvider } from "./agent/providers/types.ts";
-import { ROOT_AGENT_ID } from "./agent/runtime.ts";
+import { detectColorLevel } from "./cli/color-context.ts";
 import {
   ActivityFeed,
   AgentRuntimeLoopAdapter,
+  buildStartupPostureNote,
   type CliDeps,
   type CliIo,
   CliUsageError,
+  composeMode,
   DEFAULT_PORT,
   type DhServerLike,
-  SAMPLE_DH_JSON,
-  type WebUiHandleLike,
-  buildStartupPostureNote,
-  composeMode,
   formatDoctorReport,
   main,
   parseArgs,
   parseEnvFile,
   renderHelpText,
+  resolveImportSource,
+  SAMPLE_DH_JSON,
+  type WebUiHandleLike,
 } from "./cli.ts";
 import { BUILD_INFO } from "./config/build-info.ts";
 import type {
@@ -31,10 +33,11 @@ import type {
   ServerSentEvent,
 } from "./contracts/index.ts";
 import { ExitCode } from "./contracts/index.ts";
+import { BRAND, paint } from "./design-tokens.ts";
 import { buildHeaderInfo, formatHeaderLines, formatVersionString } from "./header-info.ts";
-import { REQUIRED_CONTRACT, buildDefaultSystemPrompt } from "./prompt/system-prompt.ts";
-import { DhServer, waitForExitCode } from "./server/index.ts";
+import { buildDefaultSystemPrompt, REQUIRED_CONTRACT } from "./prompt/system-prompt.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
+import { DhServer, waitForExitCode } from "./server/index.ts";
 
 const TEST_CONFIG: DhConfig = {
   options: { defaultModel: "sonnet" },
@@ -162,11 +165,12 @@ function fakeAgentLoop(
     onEvent: () => () => {},
     onLog: () => () => {},
     sendMessage: () => {},
+    cancelQueuedMessage: () => false,
     stopAgent: () => {},
     getAgentTree: () => [],
     listModels: () => [],
     switchModel: () => {},
-    listSkills: () => [],
+    listSkills: async () => [],
     invokeSkill: () => {},
     ...overrides,
   };
@@ -188,7 +192,7 @@ function interactiveOverrides(io: CliIo): Partial<CliDeps> {
     loadConfig: async () => TEST_CONFIG,
     createAgentLoop: () => fakeAgentLoop(),
     createServer: () => fakeServer(),
-    startTui: async () => {},
+    startTui: async () => ({}),
     serveWebUi: () => fakeWebUi(),
     io,
     installSignalHandlers: fakeInstallSignalHandlers(),
@@ -206,12 +210,18 @@ describe("parseArgs", () => {
       instructions: null,
       job: false,
       json: false,
+      resultOnly: false,
       config: "dh.json",
       env: null,
       check: false,
       dryRun: false,
       resume: null,
       quiet: false,
+      webPort: null,
+      host: null,
+      importPath: null,
+      model: null,
+      plain: false,
     });
   });
 
@@ -220,10 +230,15 @@ describe("parseArgs", () => {
       "--web",
       "--server",
       "--job",
+      "--result-only",
       "--connect",
       "example.com",
       "--port",
       "5050",
+      "--web-port",
+      "8080",
+      "--host",
+      "127.0.0.1",
       "--instructions",
       "plan.md",
       "--config",
@@ -235,6 +250,7 @@ describe("parseArgs", () => {
       "--resume",
       "abc123",
       "--quiet",
+      "--plain",
     ]);
     expect(options).toEqual({
       web: true,
@@ -244,12 +260,18 @@ describe("parseArgs", () => {
       instructions: "plan.md",
       job: true,
       json: false,
+      resultOnly: true,
       config: "custom.json",
       env: "secrets.env",
       check: true,
       dryRun: true,
       resume: "abc123",
       quiet: true,
+      webPort: 8080,
+      host: "127.0.0.1",
+      importPath: null,
+      model: null,
+      plain: true,
     });
   });
 
@@ -593,7 +615,6 @@ describe("main — --version", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     }
@@ -657,11 +678,14 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       startTui: async (baseUrl) => {
         calls.push("startTui");
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
     expect(calls).toEqual(["createServer", "start", "startTui", "stop"]);
-    expect(receivedBaseUrl).toBe("http://localhost:55123");
+    // DH-0166: local TUI-only mode dials the same loopback address it binds — derived from
+    // one shared constant, not an independently-hardcoded `localhost`.
+    expect(receivedBaseUrl).toBe("http://127.0.0.1:55123");
   });
 
   test("--web starts local web mode: server + web UI on ephemeral ports, prints the URL, never calls startTui", async () => {
@@ -678,6 +702,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
       startTui: async () => {
         startTuiCalled = true;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
@@ -698,6 +723,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
       startTui: async () => {
         startTuiCalled = true;
+        return {};
       },
       serveWebUi: () => {
         serveWebUiCalled = true;
@@ -762,28 +788,31 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(io.exitCodes).toContain(ExitCode.Success);
   });
 
-  test("DH-0002: SIGTERM on a --server process also closes the agent loop's MCP manager " +
-    "via the handle's optional close()", async () => {
-    const io = fakeIo();
-    let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
-    let closeCalled = false;
-    await main(["--server"], {
-      ...interactiveOverrides(io),
-      installSignalHandlers: (onSignal) => {
-        capturedOnSignal = onSignal;
-        return () => {};
-      },
-      createAgentLoop: () =>
-        fakeAgentLoop({
-          close: async () => {
-            closeCalled = true;
-          },
-        }),
-    });
-    capturedOnSignal?.("SIGTERM");
-    await Promise.resolve();
-    expect(closeCalled).toBe(true);
-  });
+  test(
+    "DH-0002: SIGTERM on a --server process also closes the agent loop's MCP manager " +
+      "via the handle's optional close()",
+    async () => {
+      const io = fakeIo();
+      let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
+      let closeCalled = false;
+      await main(["--server"], {
+        ...interactiveOverrides(io),
+        installSignalHandlers: (onSignal) => {
+          capturedOnSignal = onSignal;
+          return () => {};
+        },
+        createAgentLoop: () =>
+          fakeAgentLoop({
+            close: async () => {
+              closeCalled = true;
+            },
+          }),
+      });
+      capturedOnSignal?.("SIGTERM");
+      await Promise.resolve();
+      expect(closeCalled).toBe(true);
+    },
+  );
 
   test("DH-0002: shutdown never throws when the agent loop handle has no close() at all", async () => {
     const io = fakeIo();
@@ -816,6 +845,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
       startTui: async (baseUrl) => {
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
@@ -835,7 +865,10 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(receivedTargetBaseUrl).toBe("http://example.com:9000");
-    const readyLine = io.stdoutLines.find((l) => l.includes("http://localhost:60002"));
+    // DH-0220: Header B's own "web ui" row also contains the bare URL — search specifically
+    // for the "ready at ... (connected to ...)" transition line, not just any line mentioning
+    // the URL.
+    const readyLine = io.stdoutLines.find((l) => l.includes("connected to"));
     expect(readyLine).toContain("http://localhost:60002");
     expect(readyLine).toContain("http://example.com:9000");
   });
@@ -847,6 +880,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       ...interactiveOverrides(io),
       startTui: async (baseUrl) => {
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(code).toBe(ExitCode.Success);
@@ -877,6 +911,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       }),
       startTui: async (baseUrl) => {
         receivedBaseUrl = baseUrl;
+        return {};
       },
     });
     expect(receivedBaseUrl).toBe(`https://example.com:${DEFAULT_PORT}`);
@@ -906,7 +941,7 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
     expect(sawTokenKey).toBe(false);
   });
 
-  test("config.security is passed through to createServer when set, omitted when unset", async () => {
+  test("config.security is passed through to createServer; DH-0166: local TUI-only mode forces loopback", async () => {
     const io = fakeIo();
     let receivedSecurity: unknown = "unset-sentinel";
     await main([], {
@@ -917,10 +952,64 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
         return fakeServer();
       },
     });
-    expect(receivedSecurity).toEqual({ token: "shh" });
+    // DH-0166: token passes through untouched, but plain `dh` (local TUI-only) always pins
+    // the bind interface to loopback — even with no `security.hostname` configured, since
+    // Bun's default would otherwise be every interface.
+    expect(receivedSecurity).toEqual({ token: "shh", hostname: "127.0.0.1" });
 
-    let sawSecurityKey = true;
+    // DH-0166: a configured `security.hostname` (remote reachability for --server/--web) is
+    // overridden — not honored — on the local TUI-only path; this is the exact misbind that
+    // made plain `dh` hang in an infinite reconnect loop.
     await main([], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "192.168.1.50" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "127.0.0.1" });
+
+    // DH-0166: with no security config at all, local TUI-only mode still forces loopback.
+    await main([], {
+      ...interactiveOverrides(io),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "127.0.0.1" });
+  });
+
+  test("DH-0166: --server and local --web keep honoring security.hostname on createServer (no loopback forcing)", async () => {
+    const io = fakeIo();
+    let receivedSecurity: unknown = "unset-sentinel";
+    await main(["--server"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "192.168.1.50" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "192.168.1.50" });
+
+    // Local --web: the browser dials the DhServer directly (src/web/server.ts resolveConfig),
+    // so remote reachability there is the operator's actual intent — hostname passes through.
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "192.168.1.50" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+    });
+    expect(receivedSecurity).toEqual({ hostname: "192.168.1.50" });
+
+    // --server with no security config: unchanged pre-DH-0166 behavior — no security key
+    // forwarded at all (Bun's own default bind).
+    let sawSecurityKey = true;
+    await main(["--server"], {
       ...interactiveOverrides(io),
       createServer: (options) => {
         sawSecurityKey = "security" in options;
@@ -928,6 +1017,30 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(sawSecurityKey).toBe(false);
+  });
+
+  test("DH-0166: a TUI fatalError (SSE transport gave up) exits HarnessError with the message on stderr — local and --connect", async () => {
+    const io = fakeIo();
+    const localCode = await main([], {
+      ...interactiveOverrides(io),
+      startTui: async () => ({
+        fatalError: "could not connect to http://127.0.0.1:1 after 10 attempts",
+      }),
+    });
+    expect(localCode).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines.join("\n")).toContain(
+      "dh: error: could not connect to http://127.0.0.1:1 after 10 attempts",
+    );
+
+    const io2 = fakeIo();
+    const connectCode = await main(["--connect", "example.com"], {
+      ...interactiveOverrides(io2),
+      startTui: async () => ({ fatalError: "could not connect to http://example.com:4000" }),
+    });
+    expect(connectCode).toBe(ExitCode.HarnessError);
+    expect(io2.stderrLines.join("\n")).toContain(
+      "dh: error: could not connect to http://example.com:4000",
+    );
   });
 
   test("DH-0022: security.hostname is passed through to serveWebUi (local --web) when set, omitted when unset", async () => {
@@ -980,6 +1093,160 @@ describe("main — interactive modes (real Server/TUI/Web wiring, driven via fak
       },
     });
     expect(receivedSecurity).toEqual({ hostname: "127.0.0.1" });
+  });
+
+  test("DH-0168: --web-port is passed through to serveWebUi (local --web); unset keeps port 0 (random)", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--web", "--web-port", "8080"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(8080);
+
+    let receivedPortUnset: unknown;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedPortUnset = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPortUnset).toBe(0);
+  });
+
+  test("DH-0168: --web-port is passed through to serveWebUi (--connect --web)", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--connect", "example.com", "--web", "--web-port", "9090"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(9090);
+  });
+
+  test("DH-0168: --web-port overrides dh.json's security.webPort when both are set", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--web", "--web-port", "8080"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { webPort: 1234 } }),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(8080);
+  });
+
+  test("DH-0168: dh.json's security.webPort is used when --web-port is not passed", async () => {
+    const io = fakeIo();
+    let receivedPort: unknown;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { webPort: 1234 } }),
+      serveWebUi: (options) => {
+        receivedPort = options.port;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedPort).toBe(1234);
+  });
+
+  test("DH-0168: --web-port without --web is a CliUsageError", async () => {
+    const io = fakeIo();
+    const code = await main(["--web-port", "8080"], interactiveOverrides(io));
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines.join("\n")).toMatch(/--web-port requires --web/);
+  });
+
+  test("DH-0168: --web-port with --server (and no --web/--connect) is a CliUsageError", async () => {
+    const io = fakeIo();
+    const code = await main(["--server", "--web-port", "8080"], interactiveOverrides(io));
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines.join("\n")).toMatch(/--web-port requires --web/);
+  });
+
+  test("DH-0168: --web-port 0 is rejected (unset uses the internal 0 sentinel, not an explicit flag value)", () => {
+    expect(() => parseArgs(["--web", "--web-port", "0"])).toThrow(CliUsageError);
+    expect(() => parseArgs(["--web", "--web-port", "0"])).toThrow(
+      /--web-port must be a positive integer/,
+    );
+  });
+
+  test("DH-0168: --web-port -5 and --web-port abc are rejected", () => {
+    expect(() => parseArgs(["--web", "--web-port", "-5"])).toThrow(
+      /--web-port must be a positive integer/,
+    );
+    expect(() => parseArgs(["--web", "--web-port", "abc"])).toThrow(
+      /--web-port must be a positive integer/,
+    );
+  });
+
+  test("DH-0182: --host overrides dh.json's security.hostname for serveWebUi (local --web) and createServer", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown;
+    let receivedSecurity: unknown;
+    await main(["--web", "--host", "0.0.0.0"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      createServer: (options) => {
+        receivedSecurity = options.security;
+        return fakeServer();
+      },
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("0.0.0.0");
+    expect(receivedSecurity).toEqual({ hostname: "0.0.0.0" });
+  });
+
+  test("DH-0182: --host overrides dh.json's security.hostname for serveWebUi (--connect --web)", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown;
+    await main(["--connect", "example.com", "--web", "--host", "0.0.0.0"], {
+      ...interactiveOverrides(io),
+      loadConfig: async () => ({ ...TEST_CONFIG, security: { hostname: "127.0.0.1" } }),
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("0.0.0.0");
+  });
+
+  test("DH-0182: --host is used even when dh.json sets no security.hostname at all", async () => {
+    const io = fakeIo();
+    let receivedHostname: unknown;
+    await main(["--web", "--host", "0.0.0.0"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        receivedHostname = options.hostname;
+        return fakeWebUi();
+      },
+    });
+    expect(receivedHostname).toBe("0.0.0.0");
+  });
+
+  test("DH-0182: without --host, dh.json's security.hostname (or its absence) behaves exactly as before", async () => {
+    const io = fakeIo();
+    let sawHostnameKey = true;
+    await main(["--web"], {
+      ...interactiveOverrides(io),
+      serveWebUi: (options) => {
+        sawHostnameKey = "hostname" in options;
+        return fakeWebUi();
+      },
+    });
+    expect(sawHostnameKey).toBe(false);
   });
 
   test("a startup failure (e.g. the requested port is already in use) maps to HarnessError, local mode", async () => {
@@ -1094,7 +1361,10 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
 
   test("a root-agent crash returns HarnessError with a clear prefix", async () => {
     const io = fakeIo();
-    const code = await main(["--instructions", "plan.md"], {
+    // DH-0148: without --job, --instructions now launches the interactive session instead of
+    // running the standalone runtime directly — this test exercises the standalone
+    // runtime.runRoot() crash path, which only exists under --job now.
+    const code = await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
@@ -1109,28 +1379,33 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(io.stderrLines[0]).toContain("boom");
   });
 
-  test("DH-0002: a successful standalone --job run closes the runtime's MCP manager via " +
-    "the optional close()", async () => {
-    const io = fakeIo();
-    let closeCalled = false;
-    await main(["--instructions", "plan.md", "--job"], {
-      ...baseOverrides(io),
-      readInstructions: async () => "do the thing",
-      createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
-        stopRoot: () => {},
-        close: async () => {
-          closeCalled = true;
-        },
-      }),
-    });
-    expect(closeCalled).toBe(true);
-  });
+  test(
+    "DH-0002: a successful standalone --job run closes the runtime's MCP manager via " +
+      "the optional close()",
+    async () => {
+      const io = fakeIo();
+      let closeCalled = false;
+      await main(["--instructions", "plan.md", "--job"], {
+        ...baseOverrides(io),
+        readInstructions: async () => "do the thing",
+        createRuntime: () => ({
+          runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
+          stopRoot: () => {},
+          close: async () => {
+            closeCalled = true;
+          },
+        }),
+      });
+      expect(closeCalled).toBe(true);
+    },
+  );
 
   test("DH-0002: a crashed standalone run still closes the runtime's MCP manager", async () => {
     const io = fakeIo();
     let closeCalled = false;
-    await main(["--instructions", "plan.md"], {
+    // DH-0148: this test exercises the standalone (headless) runtime crash path, which only
+    // exists under --job now — see the identical note on "a root-agent crash..." above.
+    await main(["--instructions", "plan.md", "--job"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
@@ -1159,9 +1434,12 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(code).toBe(ExitCode.Success);
   });
 
-  test("--job exits 0 and prints the final output when the root agent succeeds", async () => {
+  // DH-0147: --job's new default breadth streams a live markdown transcript instead of
+  // printing bare finalOutput — --result-only opts back into the old default this test
+  // documents.
+  test("--job --result-only exits 0 and prints the final output when the root agent succeeds", async () => {
     const io = fakeIo();
-    const code = await main(["--instructions", "plan.md", "--job"], {
+    const code = await main(["--instructions", "plan.md", "--job", "--result-only"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       createRuntime: () => ({
@@ -1196,60 +1474,63 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     );
   });
 
-  test("--job --json streams every ServerSentEvent as NDJSON then a terminal job_result line, " +
-    "and suppresses the plain-text finalOutput line", async () => {
-    const io = fakeIo();
-    let receivedOnEvent: ((event: ServerSentEvent) => void) | undefined;
-    const code = await main(["--instructions", "plan.md", "--job", "--json"], {
-      ...baseOverrides(io),
-      readInstructions: async () => "do the thing",
-      createRuntime: (_config, _systemPrompt, _client, _resume, onEvent) => {
-        receivedOnEvent = onEvent;
-        return {
-          runRoot: async () => {
-            // Simulate the runtime emitting a couple of real events mid-run, exactly as
-            // AgentRuntime.runRoot() does via its own onEvent callback.
-            receivedOnEvent?.({
-              version: 1,
-              id: "evt-1",
-              timestamp: "2026-07-16T00:00:00.000Z",
-              type: "agent_status",
-              agentId: "agent-root",
-              status: "running",
-            });
-            return {
-              success: true,
-              finalOutput: "the real answer",
-              turns: 3,
-              outcome: { status: "success", summary: "did the thing" },
-              reportedBy: "tool",
-            };
-          },
-          stopRoot: () => {},
-        };
-      },
-    });
-    expect(code).toBe(ExitCode.Success);
-    // The plain-text finalOutput line is suppressed in --json mode.
-    expect(io.stdoutLines.some((l) => l === "the real answer")).toBe(false);
-    const parsed = io.stdoutLines.map((l) => JSON.parse(l) as Record<string, unknown>);
-    expect(parsed[0]).toEqual({
-      version: 1,
-      id: "evt-1",
-      timestamp: "2026-07-16T00:00:00.000Z",
-      type: "agent_status",
-      agentId: "agent-root",
-      status: "running",
-    });
-    const jobResult = parsed[parsed.length - 1] as unknown as JobResultLine;
-    expect(jobResult.type).toBe("job_result");
-    expect(jobResult.success).toBe(true);
-    expect(jobResult.exitCode).toBe(ExitCode.Success);
-    expect(jobResult.reportedBy).toBe("tool");
-    expect(jobResult.turns).toBe(3);
-    expect(jobResult.finalOutput).toBe("the real answer");
-    expect(jobResult.outcome).toEqual({ status: "success", summary: "did the thing" });
-  });
+  test(
+    "--job --json streams every ServerSentEvent as NDJSON then a terminal job_result line, " +
+      "and suppresses the plain-text finalOutput line",
+    async () => {
+      const io = fakeIo();
+      let receivedOnEvent: ((event: ServerSentEvent) => void) | undefined;
+      const code = await main(["--instructions", "plan.md", "--job", "--json"], {
+        ...baseOverrides(io),
+        readInstructions: async () => "do the thing",
+        createRuntime: (_config, _systemPrompt, _client, _resume, onEvent) => {
+          receivedOnEvent = onEvent;
+          return {
+            runRoot: async () => {
+              // Simulate the runtime emitting a couple of real events mid-run, exactly as
+              // AgentRuntime.runRoot() does via its own onEvent callback.
+              receivedOnEvent?.({
+                version: 1,
+                id: "evt-1",
+                timestamp: "2026-07-16T00:00:00.000Z",
+                type: "agent_status",
+                agentId: "agent-root",
+                status: "running",
+              });
+              return {
+                success: true,
+                finalOutput: "the real answer",
+                turns: 3,
+                outcome: { status: "success", summary: "did the thing" },
+                reportedBy: "tool",
+              };
+            },
+            stopRoot: () => {},
+          };
+        },
+      });
+      expect(code).toBe(ExitCode.Success);
+      // The plain-text finalOutput line is suppressed in --json mode.
+      expect(io.stdoutLines.some((l) => l === "the real answer")).toBe(false);
+      const parsed = io.stdoutLines.map((l) => JSON.parse(l) as Record<string, unknown>);
+      expect(parsed[0]).toEqual({
+        version: 1,
+        id: "evt-1",
+        timestamp: "2026-07-16T00:00:00.000Z",
+        type: "agent_status",
+        agentId: "agent-root",
+        status: "running",
+      });
+      const jobResult = parsed[parsed.length - 1] as unknown as JobResultLine;
+      expect(jobResult.type).toBe("job_result");
+      expect(jobResult.success).toBe(true);
+      expect(jobResult.exitCode).toBe(ExitCode.Success);
+      expect(jobResult.reportedBy).toBe("tool");
+      expect(jobResult.turns).toBe(3);
+      expect(jobResult.finalOutput).toBe("the real answer");
+      expect(jobResult.outcome).toEqual({ status: "success", summary: "did the thing" });
+    },
+  );
 
   test("--job --json on a self-reported failure emits a job_result line with exitCode 1", async () => {
     const io = fakeIo();
@@ -1274,26 +1555,90 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     expect(jobResult.reportedBy).toBe("text-marker");
   });
 
-  test("without --job the process doesn't exit and falls through to a real (faked) interactive mode", async () => {
+  // DH-0148: without --job, --instructions no longer runs a separate, invisible headless
+  // AgentRuntime first — it launches the interactive session immediately and auto-sends the
+  // instructions file's content as the session's first message once the root agent connects,
+  // via the exact same sendMessage() lazy-start path a real operator's first message takes.
+  test(
+    "without --job, --instructions launches interactive mode immediately and auto-sends the " +
+      "instructions file's content as the first message (no separate standalone run)",
+    async () => {
+      const io = fakeIo();
+      let receivedFirstMessage: string | undefined;
+      let createRuntimeCalled = false;
+      const code = await main(["--instructions", "plan.md"], {
+        ...interactiveOverrides(io),
+        readInstructions: async () => "do the thing",
+        createRuntime: () => {
+          createRuntimeCalled = true;
+          return {
+            runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
+            stopRoot: () => {},
+          };
+        },
+        createAgentLoop: () =>
+          fakeAgentLoop({
+            sendMessage: (agentId, message) => {
+              if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+            },
+          }),
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(io.exitCodes).toEqual([]);
+      // No standalone headless run happens at all for this flag combination anymore.
+      expect(createRuntimeCalled).toBe(false);
+      expect(receivedFirstMessage).toBe("do the thing");
+      expect(io.stdoutLines.some((l) => l.includes("starting a new interactive session"))).toBe(
+        false,
+      );
+    },
+  );
+
+  test(
+    "without --job, --instructions combined with --resume auto-sends the resume notice " +
+      "plus the instructions content as one first message",
+    async () => {
+      const io = fakeIo();
+      let receivedFirstMessage: string | undefined;
+      const code = await main(["--instructions", "plan.md", "--resume", "s1"], {
+        ...interactiveOverrides(io),
+        readInstructions: async () => "keep going",
+        loadResumeSession: () => ({
+          messages: [],
+          model: "sonnet",
+          resumedFromSessionId: "s1",
+          lostAgents: [],
+        }),
+        createAgentLoop: () =>
+          fakeAgentLoop({
+            sendMessage: (agentId, message) => {
+              if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+            },
+          }),
+      });
+      expect(code).toBe(ExitCode.Success);
+      expect(receivedFirstMessage).toContain('resumed after a restart from session "s1"');
+      expect(receivedFirstMessage).toContain("keep going");
+    },
+  );
+
+  // DH-0148: --instructions without --job combined with --web is allowed, not rejected — same
+  // auto-send behavior as the local TUI case, just launched via the web client instead.
+  test("without --job, --instructions combined with --web is allowed and still auto-sends", async () => {
     const io = fakeIo();
-    const code = await main(["--instructions", "plan.md"], {
+    let receivedFirstMessage: string | undefined;
+    const code = await main(["--instructions", "plan.md", "--web"], {
       ...interactiveOverrides(io),
       readInstructions: async () => "do the thing",
-      createRuntime: () => ({
-        runRoot: async () => ({ success: true, finalOutput: "yay", turns: 1 }),
-        stopRoot: () => {},
-      }),
+      createAgentLoop: () =>
+        fakeAgentLoop({
+          sendMessage: (agentId, message) => {
+            if (agentId === ROOT_AGENT_ID) receivedFirstMessage = message;
+          },
+        }),
     });
     expect(code).toBe(ExitCode.Success);
-    expect(io.exitCodes).toEqual([]);
-    expect(io.stdoutLines[0]).toBe("yay");
-    // DH-0038: the operator gets an explicit message that this is a fresh session, not a
-    // continuation of the job that just ran.
-    expect(
-      io.stdoutLines.some((l) =>
-        l.includes("starting a new interactive session (prior context is not preserved)"),
-      ),
-    ).toBe(true);
+    expect(receivedFirstMessage).toBe("do the thing");
   });
 
   test("createRuntime is invoked with the loaded config and resolved system prompt", async () => {
@@ -1341,7 +1686,7 @@ describe("main — standalone --instructions path (bypasses Server/TUI/Web entir
     const io = fakeIo();
     let stopRootCalled = false;
     let capturedOnSignal: ((signal: "SIGTERM" | "SIGINT") => void) | undefined;
-    const code = await main(["--instructions", "plan.md", "--job"], {
+    const code = await main(["--instructions", "plan.md", "--job", "--result-only"], {
       ...baseOverrides(io),
       readInstructions: async () => "do the thing",
       installSignalHandlers: (onSignal) => {
@@ -1509,6 +1854,284 @@ describe("main — --resume <sessionId> (DH-0038)", () => {
       }),
     });
     expect(code).toBe(ExitCode.Success);
+  });
+});
+
+describe("resolveImportSource (DH-0189)", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "dh-import-src-"));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("throws when the path does not exist", () => {
+    expect(() => resolveImportSource(join(dir, "missing"))).toThrow(/not found/);
+  });
+
+  test("archive mode: manifest.json names the id, sidecar picked up when present", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: "sess-1" }));
+    await writeFile(join(dir, "sess-1.jsonl"), "{}\n");
+    await mkdir(join(dir, "sess-1"));
+    const source = resolveImportSource(dir);
+    expect(source.transcriptPath).toBe(join(dir, "sess-1.jsonl"));
+    expect(source.sidecarDir).toBe(join(dir, "sess-1"));
+  });
+
+  test("archive mode: manifest.json present but no sidecar directory", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: "sess-1" }));
+    await writeFile(join(dir, "sess-1.jsonl"), "{}\n");
+    const source = resolveImportSource(dir);
+    expect(source.transcriptPath).toBe(join(dir, "sess-1.jsonl"));
+    expect(source.sidecarDir).toBeUndefined();
+  });
+
+  test("archive mode: manifest.json with a non-string id is rejected", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: 42 }));
+    expect(() => resolveImportSource(dir)).toThrow(/no string "id" field/);
+  });
+
+  test("archive mode: unparseable manifest.json is rejected", async () => {
+    await writeFile(join(dir, "manifest.json"), "not json");
+    expect(() => resolveImportSource(dir)).toThrow(/could not parse/);
+  });
+
+  test("archive mode: manifest.json names an id whose transcript doesn't exist", async () => {
+    await writeFile(join(dir, "manifest.json"), JSON.stringify({ id: "ghost" }));
+    expect(() => resolveImportSource(dir)).toThrow(/expected transcript not found/);
+  });
+
+  test("archive mode: no manifest.json, exactly one *.jsonl file is accepted", async () => {
+    await writeFile(join(dir, "sess-2.jsonl"), "{}\n");
+    const source = resolveImportSource(dir);
+    expect(source.transcriptPath).toBe(join(dir, "sess-2.jsonl"));
+    expect(source.sidecarDir).toBeUndefined();
+  });
+
+  test("archive mode: no manifest.json and no *.jsonl file is rejected", async () => {
+    expect(() => resolveImportSource(dir)).toThrow(/no manifest.json and no/);
+  });
+
+  test("archive mode: no manifest.json and multiple *.jsonl files is ambiguous and rejected", async () => {
+    await writeFile(join(dir, "a.jsonl"), "{}\n");
+    await writeFile(join(dir, "b.jsonl"), "{}\n");
+    expect(() => resolveImportSource(dir)).toThrow(/ambiguous/);
+  });
+
+  test("live mode: a lone .jsonl file, with sibling sidecar directory", async () => {
+    const filePath = join(dir, "live-sess.jsonl");
+    await writeFile(filePath, "{}\n");
+    await mkdir(join(dir, "live-sess"));
+    const source = resolveImportSource(filePath);
+    expect(source.transcriptPath).toBe(filePath);
+    expect(source.sidecarDir).toBe(join(dir, "live-sess"));
+  });
+
+  test("live mode: a lone .jsonl file, no sidecar directory", async () => {
+    const filePath = join(dir, "live-sess-2.jsonl");
+    await writeFile(filePath, "{}\n");
+    const source = resolveImportSource(filePath);
+    expect(source.transcriptPath).toBe(filePath);
+    expect(source.sidecarDir).toBeUndefined();
+  });
+
+  test("a bare project-slug directory (many sessions, no manifest) is rejected", async () => {
+    await writeFile(join(dir, "readme.txt"), "not a session");
+    expect(() => resolveImportSource(dir)).toThrow(/no manifest.json and no/);
+  });
+
+  test("a file that is neither a directory nor a .jsonl file is rejected", async () => {
+    const filePath = join(dir, "notes.txt");
+    await writeFile(filePath, "hello");
+    expect(() => resolveImportSource(filePath)).toThrow(/neither a directory nor/);
+  });
+});
+
+describe("parseArgs — --import/--model (DH-0189)", () => {
+  test("--model without --import is a usage error", () => {
+    expect(() => parseArgs(["--model", "sonnet"])).toThrow(/--model requires --import/);
+  });
+
+  test("--import combined with --resume is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--resume", "s1"])).toThrow(
+      /cannot be combined with --resume/,
+    );
+  });
+
+  test("--import combined with --check is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--check"])).toThrow(/not supported with --check/);
+  });
+
+  test("--import combined with --dry-run is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--dry-run"])).toThrow(
+      /not supported with --dry-run/,
+    );
+  });
+
+  test("--import combined with --connect is a usage error", () => {
+    expect(() => parseArgs(["--import", "path", "--connect", "host1"])).toThrow(
+      /not supported with --connect/,
+    );
+  });
+
+  test("--import with --model parses cleanly", () => {
+    const options = parseArgs(["--import", "/tmp/session", "--model", "sonnet"]);
+    expect(options.importPath).toBe("/tmp/session");
+    expect(options.model).toBe("sonnet");
+  });
+});
+
+describe("main — --import <path> (DH-0189)", () => {
+  let dir: string;
+  let liveJsonlPath: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "dh-import-main-"));
+    liveJsonlPath = join(dir, "cc-session.jsonl");
+    await writeFile(liveJsonlPath, "{}\n");
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("an unresolvable --model alias fails cleanly before any write", async () => {
+    const io = fakeIo();
+    let called = false;
+    const code = await main(["--import", liveJsonlPath, "--model", "ghost"], {
+      ...baseOverrides(io),
+      importClaudeSession: () => {
+        called = true;
+        return { sessionId: "new-session", logsRoot: "/tmp/.dh-logs" };
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain('model alias "ghost"');
+    expect(io.stderrLines[0]).toContain("sonnet"); // names the known models
+    expect(called).toBe(false);
+  });
+
+  test("omitting --model defaults to dh.json's options.defaultModel", async () => {
+    const io = fakeIo();
+    let receivedModel: string | undefined;
+    const code = await main(["--import", liveJsonlPath, "--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "keep going",
+      importClaudeSession: (_source, opts) => {
+        receivedModel = opts.model;
+        return { sessionId: "new-session", logsRoot: "/tmp/.dh-logs" };
+      },
+      loadResumeSession: () => ({
+        messages: [],
+        model: "sonnet",
+        resumedFromSessionId: "new-session",
+        lostAgents: [],
+      }),
+      createRuntime: () => ({
+        runRoot: async () => ({ success: true, finalOutput: "done", turns: 1 }),
+        stopRoot: () => {},
+      }),
+    });
+    expect(receivedModel).toBe("sonnet");
+    expect(code).toBe(ExitCode.Success);
+  });
+
+  test("a resolveImportSource failure (bad path) is reported via the standard fail() path", async () => {
+    const io = fakeIo();
+    const code = await main(["--import", "/definitely/does/not/exist"], baseOverrides(io));
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("not found");
+  });
+
+  test("an importClaudeSession failure is reported via the standard fail() path", async () => {
+    const io = fakeIo();
+    const code = await main(["--import", liveJsonlPath], {
+      ...baseOverrides(io),
+      importClaudeSession: () => {
+        throw new Error("could not translate transcript");
+      },
+    });
+    expect(code).toBe(ExitCode.HarnessError);
+    expect(io.stderrLines[0]).toContain("--import failed");
+    expect(io.stderrLines[0]).toContain("could not translate transcript");
+  });
+
+  test("success: the produced sessionId is handed to the existing --resume launch path", async () => {
+    const io = fakeIo();
+    let receivedSource: unknown;
+    let receivedResumeSessionId: string | undefined;
+    let receivedResume: unknown;
+    const code = await main(["--import", liveJsonlPath, "--instructions", "plan.md", "--job"], {
+      ...baseOverrides(io),
+      readInstructions: async () => "keep going",
+      importClaudeSession: (source) => {
+        receivedSource = source;
+        return { sessionId: "imported-session", logsRoot: "/tmp/.dh-logs" };
+      },
+      loadResumeSession: (_logsRoot, sessionId) => {
+        receivedResumeSessionId = sessionId;
+        return {
+          messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+          model: "sonnet",
+          resumedFromSessionId: sessionId,
+          lostAgents: [],
+        };
+      },
+      createRuntime: (_config, _systemPrompt, _client, resume) => {
+        receivedResume = resume;
+        return {
+          runRoot: async () => ({ success: true, finalOutput: "done", turns: 1 }),
+          stopRoot: () => {},
+        };
+      },
+    });
+    expect(code).toBe(ExitCode.Success);
+    expect(receivedSource).toEqual({ transcriptPath: liveJsonlPath });
+    expect(receivedResumeSessionId).toBe("imported-session");
+    expect(receivedResume).toMatchObject({ fromSessionId: "imported-session", model: "sonnet" });
+  });
+
+  // DH-0189: exercises the REAL defaultDeps().importClaudeSession wiring (Server's actual
+  // DH-0188 translator), not a test fake — same "cover the real wiring, not just the seam"
+  // pattern the "dh logs" real-filesystem tests above already use for loadResumeSession.
+  // A live cwd (temp dir, restored after) stands in for `.dh-logs`'s usual "./" root.
+  test("real defaultDeps().importClaudeSession writes a resumable session (real end-to-end wiring)", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "dh-import-real-"));
+    const originalCwd = process.cwd();
+    process.chdir(cwd);
+    try {
+      const sourcePath = join(cwd, "cc-session.jsonl");
+      await writeFile(
+        sourcePath,
+        `${JSON.stringify({
+          parentUuid: null,
+          isSidechain: false,
+          type: "user",
+          timestamp: "2026-07-18T00:00:00.000Z",
+          message: { role: "user", content: "hello from claude code" },
+        })}\n`,
+      );
+      const io = fakeIo();
+      const code = await main(["--import", sourcePath, "--instructions", "plan.md", "--job"], {
+        io,
+        loadConfig: async () => TEST_CONFIG,
+        readInstructions: async () => "keep going",
+        installSignalHandlers: fakeInstallSignalHandlers(),
+        createRuntime: () => ({
+          runRoot: async () => ({ success: true, finalOutput: "done", turns: 1 }),
+          stopRoot: () => {},
+        }),
+      });
+      expect(code).toBe(ExitCode.Success);
+      const sessions = readdirSync(join(cwd, ".dh-logs"));
+      expect(sessions.length).toBe(1);
+    } finally {
+      process.chdir(originalCwd);
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1742,7 +2365,7 @@ describe("main — real filesystem-backed default deps", () => {
     const io = fakeIo();
     const instructionsPath = join(dir, "plan.md");
     await Bun.write(instructionsPath, "go");
-    const code = await main(["--instructions", instructionsPath], {
+    const code = await main(["--instructions", instructionsPath, "--job"], {
       loadConfig: async () => ({
         options: { defaultModel: "sonnet" },
         models: [{ name: "sonnet", provider: "unreachable", model: "sonnet-5" }],
@@ -1882,7 +2505,7 @@ describe("main — real filesystem-backed default deps", () => {
     const io = fakeIo();
     const code = await main([], {
       loadConfig: async () => TEST_CONFIG,
-      startTui: async () => {},
+      startTui: async () => ({}),
       io,
       installSignalHandlers: fakeInstallSignalHandlers(),
     });
@@ -2065,6 +2688,52 @@ describe("AgentRuntimeLoopAdapter", () => {
           children: [],
         },
       ]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("listModels()/switchModel()/listSkills()/invokeSkill() delegate to the wrapped AgentRuntime", async () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+        client: "tui",
+      });
+      expect(adapter.listModels().map((m) => m.name)).toEqual(["test-model"]);
+
+      // Round-trips through AgentRuntime.switchModel() — root hasn't started yet, so this
+      // exercises the pending-switch path rather than a live binding swap.
+      expect(() => adapter.switchModel(ROOT_AGENT_ID, "test-model")).not.toThrow();
+
+      // Builtin cli-tools skill is always present (runtime.ts's skillsCache seed).
+      expect((await adapter.listSkills()).some((s) => s.name === "cli-tools")).toBe(true);
+
+      // An unknown skill name throws UnknownSkillError before any message delivery is
+      // attempted, so this delegation is provable without spinning up the root agent.
+      await expect(
+        adapter.invokeSkill(ROOT_AGENT_ID, "no-such-skill", undefined),
+      ).rejects.toThrow();
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  // DH-0207/DH-0208
+  test("cancelQueuedMessage() delegates straight to the wrapped AgentRuntime", () => {
+    const server = startMockAnthropicServer();
+    try {
+      const adapter = new AgentRuntimeLoopAdapter({
+        config: adapterConfig(server),
+        systemPrompt: "sp",
+        client: "tui",
+      });
+      // Root hasn't started yet — AgentRuntime.cancelQueuedMessage() reports "nothing to
+      // cancel" rather than throwing (see its own doc comment); this exercises the adapter's
+      // one-line delegation, not AgentRuntime's own root-vs-sub-agent split (already covered
+      // directly in runtime.test.ts).
+      expect(adapter.cancelQueuedMessage(ROOT_AGENT_ID, "not-a-real-id")).toBe(false);
     } finally {
       server.stop(true);
     }
@@ -2575,7 +3244,11 @@ describe("main — dh init", () => {
     expect(io.exitCodes).toEqual([ExitCode.Success]);
     const written = await Bun.file(target).text();
     expect(written).toBe(SAMPLE_DH_JSON);
-    expect(io.stdoutLines[0]).toContain(target);
+    // DH-0123: init now prints the same app header doctor does before its own output —
+    // version line, then config-status line (no config exists yet, so "not found").
+    expect(io.stdoutLines[0]).toContain("dh ");
+    expect(io.stdoutLines[1]).toBe(`config: not found (${target})`);
+    expect(io.stdoutLines[2]).toContain(target);
   });
 
   // DH-0090: dh init used to scaffold anthropic/bedrock provider entries with no
@@ -2693,16 +3366,12 @@ describe("main — dh init", () => {
       const config = await loadConfig(target);
       expect(config.options.defaultModel).toBe("haiku-bedrock");
     } finally {
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = prevApiKey;
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevRegion === undefined) delete process.env.AWS_REGION;
       else process.env.AWS_REGION = prevRegion;
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevLocalProvider === undefined) delete process.env.LOCAL_AI_PROVIDER;
       else process.env.LOCAL_AI_PROVIDER = prevLocalProvider;
-      // biome-ignore lint/performance/noDelete: env var must be truly absent, not "undefined"
       if (prevMantleKey === undefined) delete process.env.BEDROCK_MANTLE_API_KEY;
       else process.env.BEDROCK_MANTLE_API_KEY = prevMantleKey;
     }
@@ -2761,7 +3430,6 @@ describe("main — dh init", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     });
@@ -2771,14 +3439,24 @@ describe("main — dh init", () => {
       const target = join(dir, "dh.json");
       const code = await main(["init", "--config", target], { io });
       expect(code).toBe(ExitCode.Success);
-      expect(io.stdoutLines[0]).toBe(`dh: \x1b[32m✓\x1b[0m wrote a starter config to ${target}.`);
-      expect(io.stdoutLines[1]).toStartWith("\x1b[2mdh:");
-      expect(io.stdoutLines[2]).toStartWith("\x1b[2mdh:");
-      expect(io.stdoutLines[2]).toEndWith("\x1b[0m");
-      expect(io.stdoutLines[3]).toStartWith("\x1b[2mdh:");
-      expect(io.stdoutLines[3]).toContain("gemma4");
-      expect(io.stdoutLines[3]).toEndWith("\x1b[0m");
-      expect(io.stdoutLines[4]).toBe(
+      // DH-0123: on a TTY, the same bolded-version-line + full-logo header `dh doctor` prints
+      // via `printAppHeader` now leads init's output too — logo lines, then a bolded version
+      // line, then the (not-found, pre-write) config-status line, before init's own output.
+      const headerLineCount = io.stdoutLines.length - 5;
+      expect(headerLineCount).toBeGreaterThan(0);
+      const version = io.stdoutLines[headerLineCount - 2] as string;
+      expect(version).toStartWith("\x1b[1mdh ");
+      expect(io.stdoutLines[headerLineCount - 1]).toBe(`config: not found (${target})`);
+      expect(io.stdoutLines[headerLineCount]).toBe(
+        `dh: \x1b[32m✓\x1b[0m wrote a starter config to ${target}.`,
+      );
+      expect(io.stdoutLines[headerLineCount + 1]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[headerLineCount + 2]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[headerLineCount + 2]).toEndWith("\x1b[0m");
+      expect(io.stdoutLines[headerLineCount + 3]).toStartWith("\x1b[2mdh:");
+      expect(io.stdoutLines[headerLineCount + 3]).toContain("gemma4");
+      expect(io.stdoutLines[headerLineCount + 3]).toEndWith("\x1b[0m");
+      expect(io.stdoutLines[headerLineCount + 4]).toBe(
         'dh: Next: run "dh doctor" to probe credentials, then "dh" to start.',
       );
     });
@@ -3004,7 +3682,6 @@ describe("main — dh doctor / --check", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     });
@@ -3144,7 +3821,6 @@ describe("main — --dry-run", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     }
@@ -3503,13 +4179,17 @@ describe("main — --server startup block (DH-0067)", () => {
       ...interactiveOverrides(io),
     });
     expect(code).toBe(ExitCode.Success);
-    const h = expectedHeaderLines(TEST_CONFIG).length;
-    expect(io.stdoutLines[h]).toMatch(/^dh: headless server listening on port \d+/);
-    expect(io.stdoutLines[h + 1]).toMatch(
+    // DH-0220: the startup header (Header B, an instrument panel) now prints ahead of these
+    // byte-stable lines, at a length that varies with config-status content — so these
+    // assertions search by content rather than a fixed index derived from the old
+    // printAppHeader block.
+    const i = io.stdoutLines.findIndex((l) => /^dh: headless server listening on port \d+/.test(l));
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(io.stdoutLines[i + 1]).toMatch(
       /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 0\.0\.0\.0:\d+ — logs: .*\.dh-logs/,
     );
-    expect(io.stdoutLines[h + 2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
-    expect(io.stdoutLines[h + 3]).toBe(
+    expect(io.stdoutLines[i + 2]).toMatch(/^dh: connect with: dh --connect <host> --port \d+$/);
+    expect(io.stdoutLines[i + 3]).toBe(
       "dh: plaintext HTTP, no auth — see README security posture.",
     );
   });
@@ -3522,10 +4202,11 @@ describe("main — --server startup block (DH-0067)", () => {
       loadConfig: async () => hostConfig,
     });
     expect(code).toBe(ExitCode.Success);
-    const h = expectedHeaderLines(hostConfig).length;
-    expect(io.stdoutLines[h + 1]).toMatch(
-      /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 127\.0\.0\.1:\d+ — logs: .*\.dh-logs/,
-    );
+    expect(
+      io.stdoutLines.some((l) =>
+        /^dh: dh \d+\.\d+\.\d+ \(.*\) — bound to 127\.0\.0\.1:\d+ — logs: .*\.dh-logs/.test(l),
+      ),
+    ).toBe(true);
   });
 
   test("a configured bearer token suppresses the posture note", async () => {
@@ -3544,9 +4225,11 @@ describe("main — --server startup block (DH-0067)", () => {
       ...interactiveOverrides(io),
     });
     expect(code).toBe(ExitCode.Success);
-    const h = expectedHeaderLines(TEST_CONFIG).length;
-    expect(io.stdoutLines[h]).toMatch(/^dh: web UI ready at http:\/\/localhost:\d+\.$/);
-    expect(io.stdoutLines[h + 1]).toMatch(/^dh: logs: .*\.dh-logs/);
+    const i = io.stdoutLines.findIndex((l) =>
+      /^dh: web UI ready at http:\/\/localhost:\d+\.$/.test(l),
+    );
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(io.stdoutLines[i + 1]).toMatch(/^dh: logs: .*\.dh-logs/);
   });
 
   // DH-0101: on a TTY, styling wraps around the two e2e-grepped substrings without breaking
@@ -3564,10 +4247,19 @@ describe("main — --server startup block (DH-0067)", () => {
       if (isTTYDescriptor) {
         Object.defineProperty(process.stdout, "isTTY", isTTYDescriptor);
       } else {
-        // biome-ignore lint/performance/noDelete: restoring a property that didn't exist before
         delete (process.stdout as { isTTY?: boolean }).isTTY;
       }
     });
+
+    // DH-0220: on a TTY, `dh: ` itself now also carries color (styleDhPrefix — the "extend
+    // Header B's ✓ ready styling to subsequent dh: log lines" owner decision), on top of the
+    // pre-existing DH-0101 glyph styling — so these assertions match on the harnessGreen-
+    // painted "dh:" prefix rather than a bare literal "dh: ", while still proving the grepped
+    // substrings themselves (e2e's actual concern) survive byte-stable. The exact color depth
+    // (truecolor vs ansi256) depends on this test process's own COLORTERM env, same as
+    // production's `detectColorLevel` — computed the same way here rather than hardcoded, so
+    // this doesn't hard-couple to one CI environment's COLORTERM setting.
+    const DH_PREFIX = `${paint(BRAND.harnessGreen, "dh:", detectColorLevel({ isTTY: true, env: process.env, plain: false }))} `;
 
     test("--server: headless line keeps its exact substring; version bolded; posture caution-marked", async () => {
       const io = fakeIo();
@@ -3575,14 +4267,16 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
-      expect(io.stdoutLines[h]).toContain("headless server listening on port");
-      expect(io.stdoutLines[h]).toStartWith(
-        "dh: \x1b[32m✓\x1b[0m headless server listening on port ",
+      const i = io.stdoutLines.findIndex((l) => l.includes("headless server listening on port"));
+      expect(i).toBeGreaterThanOrEqual(0);
+      expect(io.stdoutLines[i]).toStartWith(
+        `${DH_PREFIX}\x1b[32m✓\x1b[0m headless server listening on port `,
       );
-      expect(io.stdoutLines[h + 1]).toStartWith("dh: \x1b[1mdh ");
-      expect(io.stdoutLines[h + 1]).toContain("\x1b[0m — bound to");
-      expect(io.stdoutLines[h + 3]).toStartWith("dh: \x1b[33m⚠\x1b[0m plaintext HTTP, no auth");
+      expect(io.stdoutLines[i + 1]).toStartWith(`${DH_PREFIX}\x1b[1mdh `);
+      expect(io.stdoutLines[i + 1]).toContain("\x1b[0m — bound to");
+      expect(io.stdoutLines[i + 3]).toStartWith(
+        `${DH_PREFIX}\x1b[33m⚠\x1b[0m plaintext HTTP, no auth`,
+      );
     });
 
     test("--web: 'web UI ready at <url>' substring survives styling intact, URL uncolored", async () => {
@@ -3591,9 +4285,8 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
-      const line = io.stdoutLines[h] ?? "";
-      expect(line).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
+      const line = io.stdoutLines.find((l) => l.includes("web UI ready at")) ?? "";
+      expect(line).toStartWith(`${DH_PREFIX}\x1b[32m✓\x1b[0m web UI ready at `);
       expect(line).toEndWith(".");
       // Everything between "ready at " and the trailing "." is the captured URL e2e's own
       // regex feeds straight into `fetch()` — it must be free of embedded ANSI.
@@ -3608,9 +4301,9 @@ describe("main — --server startup block (DH-0067)", () => {
         ...interactiveOverrides(io),
       });
       expect(code).toBe(ExitCode.Success);
-      const h = expectedHeaderLinesTty(TEST_CONFIG).length;
-      expect(io.stdoutLines[h]).toStartWith("dh: \x1b[32m✓\x1b[0m web UI ready at ");
-      expect(io.stdoutLines[h]).toContain(" (connected to ");
+      const line = io.stdoutLines.find((l) => l.includes("web UI ready at")) ?? "";
+      expect(line).toStartWith(`${DH_PREFIX}\x1b[32m✓\x1b[0m web UI ready at `);
+      expect(line).toContain(" (connected to ");
     });
   });
 });

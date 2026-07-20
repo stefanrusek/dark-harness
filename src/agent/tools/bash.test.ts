@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bashTool } from "./bash.ts";
+import { bashTool, killProcessGroup } from "./bash.ts";
 import { makeToolContext } from "./test-helpers.ts";
 
 let dir: string;
@@ -82,6 +82,20 @@ describe("Bash tool", () => {
     const ctx = makeToolContext({ cwd: dir });
     const result = await bashTool.execute({ command: "" }, ctx);
     expect(result.isError).toBe(true);
+  });
+
+  test("killProcessGroup falls back to killing just the process when the group kill throws", () => {
+    // A pid that (almost certainly) doesn't correspond to any live process group makes
+    // process.kill(-pid, "SIGTERM") throw ESRCH — exercises the fallback branch that a
+    // successful group kill (covered by the timeout tests below) never reaches.
+    let fallbackCalled = false;
+    killProcessGroup({
+      pid: 999_999_999,
+      kill: () => {
+        fallbackCalled = true;
+      },
+    });
+    expect(fallbackCalled).toBe(true);
   });
 
   test("rejects a non-positive timeout_ms", async () => {

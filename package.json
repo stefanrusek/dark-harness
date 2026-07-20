@@ -7,21 +7,24 @@
   "bin": {
     "dh": "./npm/bin/dh.js"
   },
-  "files": ["npm/bin/dh.js", "npm/resolve-platform.mjs"],
+  "files": [
+    "npm/bin/dh.js",
+    "npm/resolve-platform.mjs"
+  ],
   "scripts": {
     "dev": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/web && tsc --noEmit -p src/tui",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "test": "bun test src --parallel=1",
-    "test:coverage": "bun test src --coverage --parallel=1",
-    "e2e": "bun test e2e",
+    "test": "bun scripts/test-isolated.ts",
+    "test:coverage": "bun scripts/test-isolated.ts --coverage",
+    "e2e": "bun test e2e --parallel=1",
     "build": "bun scripts/build.ts",
     "generate:npm-platform-packages": "bun scripts/generate-npm-platform-packages.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.2.5",
     "@testing-library/react": "^16",
     "@types/bun": "latest",
     "@types/react": "^18.3.18",

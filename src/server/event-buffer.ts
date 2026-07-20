@@ -27,7 +27,7 @@ import type { ServerSentEvent } from "../contracts/index.ts";
  * `DhServerOptions.eventBufferMaxEvents`/`eventBufferMaxBytes` at that call site is a Core
  * follow-through (same shape as DH-0020's D4 cli.ts wiring), not a Server edit of `cli.ts`.
  */
-const DEFAULT_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+const DEFAULT_MAX_BYTES = Object.freeze(10 * 1024 * 1024); // 10MB
 
 function byteSizeOf(event: ServerSentEvent): number {
   return Buffer.byteLength(JSON.stringify(event), "utf8");

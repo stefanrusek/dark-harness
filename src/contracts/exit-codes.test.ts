@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ExitCode } from "./exit-codes.ts";
+import { ExitCode } from "./exit-codes.constant.ts";
 
 describe("ExitCode", () => {
   test("matches the ADR 0006 contract", () => {

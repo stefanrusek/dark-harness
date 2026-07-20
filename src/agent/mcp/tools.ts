@@ -2,9 +2,8 @@
 // interface (src/agent/tools/types.ts) so `loop.ts`'s dispatch (`params.tools.get(name)` ->
 // `tool.execute()`) never needs to special-case MCP tools at all.
 
-import type { JsonSchema, Tool, ToolContext, ToolResult } from "../tools/types.ts";
-import type { McpToolDescriptor } from "./manager.ts";
-import type { McpManager } from "./manager.ts";
+import type { JsonSchema, Tool, ToolContext, ToolResult } from "../tools/types.type.ts";
+import type { McpManager, McpToolDescriptor } from "./manager.ts";
 
 /** The naming convention the original stub already established (and the same shape real
  * Claude Code uses for MCP-derived tools). */

@@ -23,8 +23,8 @@ import {
   readAgentLogLines,
   readSessionLogSummaries,
 } from "../server/index.ts";
+import { ROOT_AGENT_ID } from "./agent-id.constant.ts";
 import type { ProviderContentBlock, ProviderMessage } from "./providers/types.ts";
-import { ROOT_AGENT_ID } from "./runtime.ts";
 
 /** A chain of more than this many resumed-from hops is treated as corrupt (D6) — real usage
  * is expected to be a handful of hops at most; this is a sanity backstop against a cycle that
@@ -181,6 +181,17 @@ function foldEventsToMessages(events: LogEvent[]): ProviderMessage[] {
         if (!openAssistant) {
           // D1: an assistant turn with tool calls but zero text emits no `message` event —
           // tool_call must be able to open the assistant message itself.
+          //
+          // DH-0210: this is also the *first* event of a brand-new turn whenever the prior
+          // turn's tool_use had zero leading/trailing text (e.g. back-to-back tool-only
+          // turns, common in imported Claude Code sessions). The `message` case flushes
+          // `pendingResults` before opening a new assistant turn; this branch must do the
+          // same, or the previous turn's still-unflushed tool_results get folded together
+          // with this turn's own results into a single user message once something finally
+          // triggers flushResults() — producing more tool_result blocks in that message than
+          // the immediately preceding assistant turn had tool_use blocks (a real Bedrock/
+          // Anthropic API rejection: "toolResult blocks ... exceeds ... toolUse blocks").
+          flushResults();
           openAssistant = { role: "assistant", content: [] };
         }
         openAssistant.content.push({

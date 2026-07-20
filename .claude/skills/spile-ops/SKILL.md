@@ -54,6 +54,18 @@ python3 .claude/skills/spile-ops/scripts/new_ticket.py \
   script only handles mechanics; the actual Summary/User Stories/Acceptance Criteria content
   is a judgment call for whoever requested the ticket (or a `spile-authoring`-style pass).
 
+**Mint only from the coordinator's primary checkout, never from an isolated implementer
+worktree.** `tracking/README.md`'s `counter:` field is a tracked file with one physical
+copy per worktree — two isolated worktrees each read the same counter, each mint the same
+`DH-NNNN` ID, and nothing collides until the branches are merged (this happened for real:
+`DH-0213` was independently minted twice during refactoring round DH-0216, see
+`tracking/DH-0217-*.md`). This is not a same-filesystem race a lock would fix, since the
+writers are on physically separate checkouts. `new_ticket.py` enforces this itself — it
+refuses to run (via `common.die_if_linked_worktree`) when `git rev-parse --git-common-dir`
+differs from `--git-dir`, i.e. whenever it's invoked from a linked worktree rather than the
+main working tree — so a ticket-filing request that lands in a dispatched worktree should
+be relayed back to the coordinator's own checkout rather than run in place.
+
 ## Transitioning a ticket's status
 
 Run:

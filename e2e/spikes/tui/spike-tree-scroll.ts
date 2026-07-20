@@ -93,7 +93,11 @@ try {
     // wait is needed, but give the renderer a beat under load.
     await Bun.sleep(60);
     const screen = session.capture();
-    if (!screen.split("\n").some((line) => line.startsWith("> "))) {
+    // DH-0095's 1-char frame margin means every row is prefixed with a leading space, so the
+    // selection marker actually renders as " > ..." — `startsWith("> ")` never matched and
+    // broke this loop after the very first Down press, masking the remaining 14 presses this
+    // spike is supposed to send (DH-0212). Match the marker anywhere on the line instead.
+    if (!screen.split("\n").some((line) => line.includes("> "))) {
       markerAlwaysVisible = false;
       break;
     }

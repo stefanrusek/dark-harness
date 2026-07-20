@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { Box, Text } from "ink";
 import { STATUS_TOKENS } from "../../design-tokens.ts";
-import type { AgentInfo } from "../types.ts";
+import type { AgentInfo } from "../types.type.ts";
 import { colorizeStatus, dim, formatElapsed, spinnerFrame } from "./tokens.ts";
 
 export interface GitInfo {
@@ -46,7 +46,7 @@ export function detectGitInfo(runGitBranch: () => string = runGitBranchCommand):
   return { branch, cwd: process.cwd() };
 }
 
-const DEFAULT_GIT_INFO = detectGitInfo();
+const DEFAULT_GIT_INFO = Object.freeze(detectGitInfo());
 
 function progressText(agentState: AgentInfo | null | undefined, now: number): string {
   if (!agentState) return dim("—");

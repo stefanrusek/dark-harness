@@ -19,10 +19,11 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import type { WebFetchConfig } from "../../contracts/index.ts";
 import { hostMatchesSuffix, isPrivateAddress } from "./net-guard.ts";
-import type { Tool, ToolContext, ToolResult } from "./types.ts";
+import type { Tool, ToolContext, ToolResult } from "./types.type.ts";
+import { validateInput } from "./validate-input.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = Object.freeze(4 * 1024 * 1024);
 const DEFAULT_MAX_OUTPUT_CHARS = 50_000;
 
 /** Renders HTML to plain text via Bun's built-in `HTMLRewriter` — no new dependency. Drops
@@ -48,10 +49,16 @@ function htmlToText(html: string): string {
         currentHref = el.getAttribute("href") ?? undefined;
         currentLinkText = "";
         el.onEndTag(() => {
+          // No separate "text but no usable href" fallback here: currentLinkText only ever
+          // accumulates below when currentHref !== undefined (see the "*" text handler), and
+          // Bun's HTMLRewriter normalizes an absent/empty href attribute to null (verified
+          // directly — `getAttribute("href")` returns null for `href`, `href=""`, and
+          // `href=''`, never `""`), which `?? undefined` turns into undefined. So whenever
+          // currentLinkText is non-empty here, currentHref is guaranteed to be a truthy,
+          // non-empty string; a text-only anchor's content is instead pushed straight to
+          // textParts by the plain-text branch below, bypassing currentLinkText entirely.
           if (currentHref && currentLinkText.trim().length > 0) {
             textParts.push(`${currentLinkText.trim()} (${currentHref})`);
-          } else if (currentLinkText.trim().length > 0) {
-            textParts.push(currentLinkText.trim());
           }
           currentHref = undefined;
           currentLinkText = "";
@@ -138,7 +145,7 @@ async function readBodyCapped(
   return { text: new TextDecoder().decode(combined), truncated };
 }
 
-export const webFetchTool: Tool = {
+export const webFetchTool: Tool = Object.freeze<Tool>({
   name: "WebFetch",
   description:
     "Fetches content from a http/https URL. Optionally pass 'prompt' describing what to " +
@@ -162,14 +169,10 @@ export const webFetchTool: Tool = {
   },
 
   async execute(input, ctx: ToolContext): Promise<ToolResult> {
-    const url = input.url;
-    if (typeof url !== "string" || url.length === 0) {
-      return { output: "WebFetch tool error: 'url' must be a non-empty string.", isError: true };
-    }
-    const prompt = input.prompt;
-    if (prompt !== undefined && typeof prompt !== "string") {
-      return { output: "WebFetch tool error: 'prompt' must be a string.", isError: true };
-    }
+    const validation = validateInput(webFetchTool.inputSchema, "WebFetch", input);
+    if (!validation.ok) return validation.result;
+    const url = input.url as string;
+    const prompt = input.prompt as string | undefined;
 
     const fetchConfig: WebFetchConfig = ctx.config.web?.fetch ?? {};
     const timeoutMs = fetchConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -312,4 +315,4 @@ export const webFetchTool: Tool = {
 
     return { output: truncate(processed, maxOutputChars), isError: false };
   },
-};
+});

@@ -49,8 +49,14 @@ function ctxWithFetchConfig(fetchConfig: WebFetchConfig = {}) {
 }
 
 describe("WebFetch input validation", () => {
-  test("rejects a missing/empty url", async () => {
+  test("rejects a missing url", async () => {
     const result = await webFetchTool.execute({}, ctxWithFetchConfig());
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain("'url' is required.");
+  });
+
+  test("rejects an empty url", async () => {
+    const result = await webFetchTool.execute({ url: "" }, ctxWithFetchConfig());
     expect(result.isError).toBe(true);
     expect(result.output).toContain("'url' must be a non-empty string");
   });

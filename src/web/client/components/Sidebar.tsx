@@ -3,7 +3,7 @@
 import type { CSSProperties, ReactElement } from "react";
 import { STATUS_TOKENS } from "../../../design-tokens.ts";
 import { formatElapsed, formatTokenLabel, shortAgentId } from "../format.ts";
-import { type WebState, agentDepth, isRoot, orderedAgents } from "../state.ts";
+import { agentDepth, isRoot, orderedAgents, type WebState } from "../state.ts";
 
 const SIDEBAR_INDENT_PX = 16;
 
