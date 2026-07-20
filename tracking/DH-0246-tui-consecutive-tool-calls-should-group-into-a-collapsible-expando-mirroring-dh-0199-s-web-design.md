@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0246
 type: feature
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -102,3 +102,69 @@ None blocking.
 Filed by the coordinator directly from a live owner bug report (2026-07-20) — DH-0199 built
 this for Web on 2026-07-19 and explicitly scoped itself to "Web domain (Susan)"; the TUI
 equivalent was never filed as a follow-up at the time.
+
+### 2026-07-20 — Mary, implementation complete, moving to verifying
+
+**Shared algorithm**: lifted `groupTranscript`/`isGroupableToolTurn`/`RenderItem` verbatim out
+of `src/web/client/components/Transcript.tsx` into a new framework-agnostic
+`src/transcript-grouping.ts` (generic over a structural `GroupableTurn` shape so it needs no
+adapter for either client's own `Turn` type — same non-`src/contracts/` shared-module
+precedent as `src/design-tokens.ts`). `Transcript.tsx` now imports it; `TranscriptPane.tsx`
+imports the same module for its own grouping. No duplicated partitioning logic.
+
+**TUI interaction pattern**: `AgentTree.tsx`/`PickerView.tsx` navigate via up/down + Enter
+routed through the reducer's `selectedIndex`. `TranscriptPane` has no reducer-level notion of
+grouping/expansion (deliberately — see below), so up/down/enter are instead carried by a new
+`ToolFocusBus` (`src/tui/ink/tool-focus-bus.ts`), the same event-bus pattern `scrollBus`
+already uses for wheel-scroll. `app.ts`'s stdin handler reclaims up/down/enter for this bus
+exactly when their normal reducer meaning is otherwise a no-op: always in the "agent" view
+(unhandled today), and in "root" only when the composer is empty (mirrors the existing
+left-arrow-opens-tree convention) — verified this changes nothing for non-empty-input root
+behavior. Focused row uses AgentTree/PickerView's own literal `"> "` gutter marker.
+
+**Local vs. reducer state**: focus index, which groups are expanded, and which rows have
+their detail open all live in `TranscriptPane`'s own `useState` (never `TuiState`), per the
+ticket's explicit requirement — mirrors DH-0199 Web's `ToolCallRow`/`ToolCallGroup` local
+state.
+
+**User Story -> test mapping**:
+- "run of 2+ collapses to one row" -> `src/tui/ink/TranscriptPane.test.tsx` ("a run of 2+ tool
+  calls renders as one collapsed 'N tool calls' row, not N lines") and
+  `buildFocusRows`/`groupTranscript` tests in the same file.
+- "focused group row expands/re-collapses on Enter/Space" -> `TranscriptPane.test.tsx`
+  ("activate on a focused group header expands it into member rows, and again re-collapses
+  it"); real-PTY: `e2e/spikes/tui/spike-tool-call-grouping.ts`.
+- "a single tool call renders standalone, not wrapped" -> `TranscriptPane.test.tsx`
+  ("a lone tool call is its own focusable row, not wrapped in a group") and
+  `src/tui/app.test.ts` ("a lone tool call (not part of a run of 2+) is individually
+  focusable...").
+- "a terminal-status marker breaks a run into two groups" -> `TranscriptPane.test.tsx`
+  ("a terminal-status marker breaks a run into two separate groups").
+- "activating a tool-call row shows input + result (success/error/duration, or pending…)" ->
+  `TranscriptPane.test.tsx` ("detail expansion shows input summary and 'pending…'...",
+  "...success + duration...", "...error + duration...") and `src/tui/app.test.ts`'s lone-call
+  test (`Result: ✓ ok · 7ms`).
+- "activating again collapses the detail" -> `TranscriptPane.test.tsx` ("activate toggles a
+  standalone tool call's detail open and closed").
+- `Turn.durationMs` assumption -> confirmed missing, added to `src/tui/types.type.ts`; wired
+  in `src/tui/state.ts`'s `handleToolResult` from `ToolResultEvent.durationMs`
+  (`src/contracts/events.type.ts`, always present on the event). Covered by
+  `src/tui/state.test.ts`'s existing `tool_call`/`tool_result` reducer tests (updated for the
+  new field) plus the detail-rendering tests above.
+
+**Real-PTY verification**: `bun e2e/spikes/tui/spike-tool-call-grouping.ts` — boots the real
+compiled binary under a real tmux PTY against a scripted mock provider (two consecutive Bash
+calls), drives it with real keystrokes (Down/Enter), and checks the captured pane text. All 7
+checks passed: collapses to "2 tool calls" by default (individual inputs hidden), Down+Enter
+expands the group into both members' rows, Down+Enter on a member shows
+"Input: Bash: echo one" / "Result: ✓ ok · <n>ms", and Enter again collapses that detail back
+down. Also fixed a real bug this surfaced: `TranscriptPane`'s focus-index clamp got
+permanently stuck at -1 if the transcript started empty (`Math.min(-1, len-1)` never
+recovers) — fixed with a `Math.max(focusIndex, 0)` floor before the clamp; covered by a
+regression test ("focus recovers to the first tool row once one appears...").
+
+**Gates**: `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100% lines, 2668+
+tests), `bun run e2e` (41/41) all green. Coordinating with Susan (concurrent DH-0129 work on
+`src/web/client/components/Transcript.tsx`/`Transcript.test.tsx` in the same shared
+worktree) — her commit `86c1e87` picked up my `transcript-grouping.ts` lift + `Transcript.tsx`
+import-swap cleanly; no conflict.

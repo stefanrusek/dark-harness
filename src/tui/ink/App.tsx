@@ -14,12 +14,16 @@ import { RootView } from "./RootView.tsx";
 import { StatusRow } from "./StatusRow.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
 import { TitleBar } from "./TitleBar.tsx";
+import type { ToolFocusBus } from "./tool-focus-bus.ts";
 
 export interface AppProps {
   state: TuiState;
   /** DH-0126: wired through to whichever `<TranscriptPane>` is currently mounted. Optional —
    * omitted by existing tests that render `<App>` standalone with no scroll behavior needed. */
   scrollBus?: ScrollBus;
+  /** DH-0246: wired through to whichever `<TranscriptPane>` is currently mounted (root or
+   * agent), same as `scrollBus` above. Optional — omitted by existing tests. */
+  toolFocusBus?: ToolFocusBus;
   /** DH-0245: the real Header A2 facts/colorLevel, threaded from `startTui`'s caller
    * (`run.ts`) through `mountInk` — forwarded to `<RootView>` only (the interactive
    * root/chat view is the only place the ticket's in-session banner applies). Optional —
@@ -37,7 +41,7 @@ const MARGIN = 1;
 // frame's total row count matching the terminal exactly (App.test.tsx's frame-height checks).
 const STATUS_ROW_ROWS = 1;
 
-export function App({ state, scrollBus, header }: AppProps) {
+export function App({ state, scrollBus, toolFocusBus, header }: AppProps) {
   const { rows, cols } = state.size;
   const innerCols = Math.max(1, cols - 2 * MARGIN);
   const footerRows = state.view.kind === "root" ? 2 : 1;
@@ -53,6 +57,7 @@ export function App({ state, scrollBus, header }: AppProps) {
           contentRows={contentRows}
           cols={innerCols}
           {...(scrollBus ? { scrollBus } : {})}
+          {...(toolFocusBus ? { toolFocusBus } : {})}
           {...(header ? { header } : {})}
         />
       )}
@@ -65,6 +70,7 @@ export function App({ state, scrollBus, header }: AppProps) {
           contentRows={contentRows}
           cols={innerCols}
           {...(scrollBus ? { scrollBus } : {})}
+          {...(toolFocusBus ? { toolFocusBus } : {})}
         />
       )}
       {state.view.kind === "picker" && (

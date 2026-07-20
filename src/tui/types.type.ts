@@ -52,6 +52,12 @@ export interface Turn {
    * DH-0137's status tokens (glyph/color/word) instead of the generic dim "⚙" tool-call
    * styling, so a sub-agent's failure is visible in its own transcript, not just the sidebar. */
   terminalStatus?: AgentStatus;
+  /** DH-0246: wall-clock duration (ms) of the matching `tool_result`, set once it resolves a
+   * `"tool"` marker turn's `pendingToolCall` — mirrors `src/web/client/state.ts`'s identical
+   * field (DH-0199). `ToolResultEvent` deliberately carries no output content (see its doc
+   * comment in `src/contracts/events.type.ts`), so duration + success/failure (`toolError`) is
+   * the full "result" `TranscriptPane`'s tool-call detail expansion can ever show. */
+  durationMs?: number;
 }
 
 export interface AgentInfo {

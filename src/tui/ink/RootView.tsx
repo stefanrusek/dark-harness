@@ -9,6 +9,7 @@ import { Composer } from "./Composer.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
 import { TranscriptPane } from "./TranscriptPane.tsx";
 import { rootAgent } from "./tokens.ts";
+import type { ToolFocusBus } from "./tool-focus-bus.ts";
 
 /** DH-0245: the real in-session Header A2 content — sourced from `header`'s
  * facts/colorLevel (threaded down from `run.ts`'s own `detectColorLevel`/`HeaderStatusFacts`
@@ -28,6 +29,8 @@ export interface RootViewProps {
   cols: number;
   scrollBus?: ScrollBus;
   header?: RootViewHeader;
+  /** DH-0246: threaded straight through to `<TranscriptPane>` — see its own prop doc comment. */
+  toolFocusBus?: ToolFocusBus;
 }
 
 /** DH-0124/DH-0245: pre-first-message empty-state hint. The app-identity banner itself
@@ -39,7 +42,14 @@ export function buildRootEmptyText(): string {
   return "Type a message below to get started.";
 }
 
-export function RootView({ state, contentRows, cols, scrollBus, header }: RootViewProps) {
+export function RootView({
+  state,
+  contentRows,
+  cols,
+  scrollBus,
+  header,
+  toolFocusBus,
+}: RootViewProps) {
   const agent = rootAgent(state);
   const headerLines = header
     ? renderHeaderA2(header.facts, header.level, {
@@ -56,6 +66,7 @@ export function RootView({ state, contentRows, cols, scrollBus, header }: RootVi
         emptyText={buildRootEmptyText()}
         {...(headerLines ? { headerLines } : {})}
         {...(scrollBus ? { scrollBus } : {})}
+        {...(toolFocusBus ? { toolFocusBus } : {})}
       />
       <Box paddingLeft={1}>
         <Composer state={state} cols={Math.max(1, cols - 1)} />

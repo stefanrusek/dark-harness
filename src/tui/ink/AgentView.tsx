@@ -4,15 +4,18 @@ import type { TuiState } from "../types.type.ts";
 import type { ScrollBus } from "./scroll-bus.ts";
 import { TranscriptPane } from "./TranscriptPane.tsx";
 import { colorizeStatus, dim, formatElapsed, formatTokenCost } from "./tokens.ts";
+import type { ToolFocusBus } from "./tool-focus-bus.ts";
 
 export interface AgentViewProps {
   state: TuiState;
   contentRows: number;
   cols: number;
   scrollBus?: ScrollBus;
+  /** DH-0246: threaded straight through to `<TranscriptPane>` — see its own prop doc comment. */
+  toolFocusBus?: ToolFocusBus;
 }
 
-export function AgentView({ state, contentRows, cols, scrollBus }: AgentViewProps) {
+export function AgentView({ state, contentRows, cols, scrollBus, toolFocusBus }: AgentViewProps) {
   if (state.view.kind !== "agent") return null;
   const agent = state.agents.get(state.view.agentId) ?? null;
   const meta = agent
@@ -30,6 +33,7 @@ export function AgentView({ state, contentRows, cols, scrollBus }: AgentViewProp
         height={contentRows}
         emptyText="(no output yet)"
         {...(scrollBus ? { scrollBus } : {})}
+        {...(toolFocusBus ? { toolFocusBus } : {})}
       />
       <Text>{hint}</Text>
     </Box>

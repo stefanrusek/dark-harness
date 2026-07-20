@@ -14,6 +14,7 @@ import type { TuiState } from "../types.type.ts";
 import { App } from "./App.tsx";
 import type { RootViewHeader } from "./RootView.tsx";
 import type { ScrollBus } from "./scroll-bus.ts";
+import type { ToolFocusBus } from "./tool-focus-bus.ts";
 
 export interface InkMount {
   rerender(state: TuiState): void;
@@ -34,6 +35,7 @@ export function mountInk(
   stdin: unknown,
   scrollBus?: ScrollBus,
   header?: RootViewHeader,
+  toolFocusBus?: ToolFocusBus,
 ): InkMount {
   // Ink's `render()` wants a real Node `WriteStream`/`ReadStream`; callers (app.ts) pass its
   // own minimal test-fakeable `StdoutLike`/`StdinLike` instead.
@@ -45,6 +47,7 @@ export function mountInk(
     state: s,
     ...(scrollBus ? { scrollBus } : {}),
     ...(header ? { header } : {}),
+    ...(toolFocusBus ? { toolFocusBus } : {}),
   });
   const instance = inkRender(React.createElement(App, props(state)), {
     stdout: inkStdout,

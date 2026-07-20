@@ -3,7 +3,8 @@ import { render } from "ink-testing-library";
 import React from "react";
 import type { Turn } from "../types.type.ts";
 import { createScrollBus } from "./scroll-bus.ts";
-import { renderTranscript, TranscriptPane } from "./TranscriptPane.tsx";
+import { buildFocusRows, renderTranscript, TranscriptPane } from "./TranscriptPane.tsx";
+import { createToolFocusBus } from "./tool-focus-bus.ts";
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 10));
@@ -276,5 +277,255 @@ describe("TranscriptPane", () => {
       React.createElement(TranscriptPane, { transcript, cols: 40, height: 3, emptyText: "" }),
     );
     expect(lastFrame() ?? "").toContain("msg 9");
+  });
+});
+
+describe("DH-0246: consecutive tool-call grouping", () => {
+  describe("buildFocusRows", () => {
+    test("a run of 2+ consecutive tool turns is one focusable group row", () => {
+      const transcript = [
+        turn({ role: "tool", text: "Bash: a" }),
+        turn({ role: "tool", text: "Bash: b" }),
+      ];
+      const rows = buildFocusRows(transcript, new Set());
+      expect(rows).toEqual([{ kind: "group", startIndex: 0, turns: transcript }]);
+    });
+
+    test("a lone tool call is its own focusable row, not wrapped in a group", () => {
+      const transcript = [
+        turn({ role: "user", text: "hi" }),
+        turn({ role: "tool", text: "Bash: a" }),
+        turn({ role: "assistant", text: "ok" }),
+      ];
+      const rows = buildFocusRows(transcript, new Set());
+      expect(rows).toEqual([{ kind: "tool", index: 1, turn: transcript[1] as Turn }]);
+    });
+
+    test("a terminal-status marker breaks a run into two separate groups", () => {
+      const transcript = [
+        turn({ role: "tool", text: "Bash: a" }),
+        turn({ role: "tool", text: "Bash: b" }),
+        turn({ role: "tool", text: "Agent done", terminalStatus: "done" }),
+        turn({ role: "tool", text: "Bash: c" }),
+        turn({ role: "tool", text: "Bash: d" }),
+      ];
+      const rows = buildFocusRows(transcript, new Set());
+      expect(rows).toEqual([
+        { kind: "group", startIndex: 0, turns: transcript.slice(0, 2) },
+        { kind: "group", startIndex: 3, turns: transcript.slice(3, 5) },
+      ]);
+    });
+
+    test("an expanded group additionally contributes one focusable row per member, right after its header", () => {
+      const transcript = [
+        turn({ role: "tool", text: "Bash: a" }),
+        turn({ role: "tool", text: "Bash: b" }),
+      ];
+      const rows = buildFocusRows(transcript, new Set([0]));
+      expect(rows).toEqual([
+        { kind: "group", startIndex: 0, turns: transcript },
+        { kind: "tool", index: 0, turn: transcript[0] as Turn },
+        { kind: "tool", index: 1, turn: transcript[1] as Turn },
+      ]);
+    });
+  });
+
+  describe("renderTranscript grouping/detail", () => {
+    test("a run of 2+ tool calls renders as one collapsed 'N tool calls' row, not N lines", () => {
+      const rows = renderTranscript(
+        [turn({ role: "tool", text: "Bash: a" }), turn({ role: "tool", text: "Bash: b" })],
+        40,
+      );
+      expect(rows.join("\n")).toContain("2 tool calls");
+      expect(rows.join("\n")).not.toContain("Bash: a");
+    });
+
+    test("a failed call inside a group is reflected in the collapsed summary's failed count", () => {
+      const rows = renderTranscript(
+        [
+          turn({ role: "tool", text: "Bash: a", toolError: true }),
+          turn({ role: "tool", text: "Bash: b" }),
+        ],
+        40,
+      );
+      expect(rows.join("\n")).toContain("2 tool calls (1 failed)");
+    });
+
+    test("expanding a group (via focus state) reveals each member's own row", () => {
+      const rows = renderTranscript(
+        [turn({ role: "tool", text: "Bash: a" }), turn({ role: "tool", text: "Bash: b" })],
+        40,
+        { focusIndex: -1, expandedGroups: new Set([0]), expandedTools: new Set() },
+      );
+      const text = rows.join("\n");
+      expect(text).toContain("Bash: a");
+      expect(text).toContain("Bash: b");
+    });
+
+    test("the focused row (by index into the flattened focus-row list) gets the '> ' marker", () => {
+      const rows = renderTranscript([turn({ role: "tool", text: "Bash: a" })], 40, {
+        focusIndex: 0,
+        expandedGroups: new Set(),
+        expandedTools: new Set(),
+      });
+      expect(rows.join("\n")).toContain("> Bash: a");
+    });
+
+    test("detail expansion shows input summary and 'pending…' before the tool_result resolves", () => {
+      const rows = renderTranscript([turn({ role: "tool", text: "Bash: a" })], 40, {
+        focusIndex: -1,
+        expandedGroups: new Set(),
+        expandedTools: new Set([0]),
+      });
+      const text = rows.join("\n");
+      expect(text).toContain("Input: Bash: a");
+      expect(text).toContain("Result: pending…");
+    });
+
+    test("detail expansion shows success + duration once the tool_result resolves", () => {
+      const rows = renderTranscript([turn({ role: "tool", text: "Bash: a", durationMs: 42 })], 40, {
+        focusIndex: -1,
+        expandedGroups: new Set(),
+        expandedTools: new Set([0]),
+      });
+      expect(rows.join("\n")).toContain("Result: ✓ ok · 42ms");
+    });
+
+    test("detail expansion shows error + duration when the tool_result failed", () => {
+      const rows = renderTranscript(
+        [turn({ role: "tool", text: "Bash: a", toolError: true, durationMs: 9 })],
+        40,
+        { focusIndex: -1, expandedGroups: new Set(), expandedTools: new Set([0]) },
+      );
+      expect(rows.join("\n")).toContain("Result: ✗ error · 9ms");
+    });
+  });
+
+  describe("TranscriptPane + toolFocusBus interaction", () => {
+    test("activate toggles a standalone tool call's detail open and closed", async () => {
+      const bus = createToolFocusBus();
+      const transcript = [turn({ role: "tool", text: "Bash: a", durationMs: 5 })];
+      const { lastFrame } = render(
+        React.createElement(TranscriptPane, {
+          transcript,
+          cols: 40,
+          height: 6,
+          emptyText: "",
+          toolFocusBus: bus,
+        }),
+      );
+      await flush();
+      expect(lastFrame() ?? "").not.toContain("Result:");
+
+      bus.emit("activate");
+      await flush();
+      expect(lastFrame() ?? "").toContain("Result: ✓ ok · 5ms");
+
+      bus.emit("activate");
+      await flush();
+      expect(lastFrame() ?? "").not.toContain("Result:");
+    });
+
+    test("activate on a focused group header expands it into member rows, and again re-collapses it", async () => {
+      const bus = createToolFocusBus();
+      const transcript = [
+        turn({ role: "tool", text: "Bash: a" }),
+        turn({ role: "tool", text: "Bash: b" }),
+      ];
+      const { lastFrame } = render(
+        React.createElement(TranscriptPane, {
+          transcript,
+          cols: 40,
+          height: 6,
+          emptyText: "",
+          toolFocusBus: bus,
+        }),
+      );
+      await flush();
+      expect(lastFrame() ?? "").toContain("2 tool calls");
+      expect(lastFrame() ?? "").not.toContain("Bash: a");
+
+      bus.emit("activate");
+      await flush();
+      expect(lastFrame() ?? "").toContain("Bash: a");
+      expect(lastFrame() ?? "").toContain("Bash: b");
+
+      bus.emit("activate");
+      await flush();
+      expect(lastFrame() ?? "").not.toContain("Bash: a");
+    });
+
+    test("down/up move focus between two standalone tool calls separated by a user turn", async () => {
+      const bus = createToolFocusBus();
+      const transcript = [
+        turn({ role: "tool", text: "Bash: a", durationMs: 1 }),
+        turn({ role: "user", text: "hi" }),
+        turn({ role: "tool", text: "Bash: b", durationMs: 2 }),
+      ];
+      const { lastFrame } = render(
+        React.createElement(TranscriptPane, {
+          transcript,
+          cols: 40,
+          height: 8,
+          emptyText: "",
+          toolFocusBus: bus,
+        }),
+      );
+      await flush();
+      expect(lastFrame() ?? "").toContain("> Bash: a");
+
+      bus.emit("down");
+      await flush();
+      expect(lastFrame() ?? "").toContain("> Bash: b");
+
+      bus.emit("up");
+      await flush();
+      expect(lastFrame() ?? "").toContain("> Bash: a");
+    });
+
+    test("focus recovers to the first tool row once one appears, after starting on an empty transcript", async () => {
+      // Regression: an empty transcript has no focusable rows, so focus starts clamped to -1;
+      // once a tool call actually appears, focus must snap back to row 0, not stay stuck at -1.
+      const bus = createToolFocusBus();
+      let transcript: Turn[] = [];
+      const { lastFrame, rerender } = render(
+        React.createElement(TranscriptPane, {
+          transcript,
+          cols: 40,
+          height: 6,
+          emptyText: "(empty)",
+          toolFocusBus: bus,
+        }),
+      );
+      await flush();
+      transcript = [turn({ role: "tool", text: "Bash: a", durationMs: 3 })];
+      rerender(
+        React.createElement(TranscriptPane, {
+          transcript,
+          cols: 40,
+          height: 6,
+          emptyText: "(empty)",
+          toolFocusBus: bus,
+        }),
+      );
+      await flush();
+      expect(lastFrame() ?? "").toContain("> Bash: a");
+
+      bus.emit("activate");
+      await flush();
+      expect(lastFrame() ?? "").toContain("Result: ✓ ok · 3ms");
+    });
+
+    test("without a toolFocusBus prop, emitting on an unrelated bus has no effect (no crash)", async () => {
+      const transcript = [
+        turn({ role: "tool", text: "Bash: a" }),
+        turn({ role: "tool", text: "Bash: b" }),
+      ];
+      const { lastFrame } = render(
+        React.createElement(TranscriptPane, { transcript, cols: 40, height: 6, emptyText: "" }),
+      );
+      await flush();
+      expect(lastFrame() ?? "").toContain("2 tool calls");
+    });
   });
 });

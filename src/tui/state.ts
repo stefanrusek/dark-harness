@@ -292,7 +292,9 @@ function handleToolResult(
     const turn = agent.transcript[pending.turnIndex];
     const transcript = turn
       ? agent.transcript.map((t, i) =>
-          i === pending.turnIndex && event.isError ? { ...t, toolError: true } : t,
+          i === pending.turnIndex
+            ? { ...t, durationMs: event.durationMs, ...(event.isError ? { toolError: true } : {}) }
+            : t,
         )
       : agent.transcript;
     agents.set(event.agentId, { ...agent, transcript, pendingToolCall: null, lastEventAt: at });

@@ -865,3 +865,71 @@ should flip it to the plain fallback), that already works for free — `RootView
 `headerLines` from `state.size` on every render, so a `resize` action naturally re-evaluates
 `sizeGateOk` — worth a quick note if anyone doubts it, but I didn't add a dedicated live-resize
 test this round (out of the ticket's four User Stories as written).
+
+### 2026-07-20 — DH-0246: tool-call grouping/expando (port of DH-0199 to the TUI)
+
+Ported Web's collapsed-by-default tool-call grouping to `TranscriptPane.tsx`. Full Story→test
+mapping is in the ticket's Notes; durable judgment calls worth keeping here:
+
+- **Lifted the shared algorithm cleanly** — `groupTranscript`/`isGroupableToolTurn` moved
+  verbatim into a new `src/transcript-grouping.ts`, generic over a structural `GroupableTurn`
+  shape (`{role, terminalStatus?}`) so neither client's own `Turn` type needs an adapter.
+  `Transcript.tsx` was not disruptively coupled to DOM/React for this specific function — it
+  was already a pure function operating on plain arrays, just defined in the wrong file. This
+  is a useful signal for a future "should I lift this" call: if the function you're eyeing
+  takes/returns plain data with no JSX/DOM/hook inside it, even if it lives inside a `.tsx`
+  file, it's probably liftable without touching its callers' behavior.
+
+- **New event-bus, not a `TuiState` field, for tool-row focus/navigation** — this was the
+  hard design call. `AgentTree`/`PickerView`'s convention (up/down/enter routed through the
+  reducer's `selectedIndex`) doesn't fit here because the ticket requires expand/collapse
+  state to stay local to `TranscriptPane` (matching DH-0199's Web `useState`), and the
+  reducer has no way to know how many focusable rows currently exist without also knowing
+  about local expand state it isn't supposed to own. Resolved by adding `ToolFocusBus`
+  (`src/tui/ink/tool-focus-bus.ts`) — the exact same pattern `scrollBus` already uses for
+  wheel-scroll (DH-0126): `app.ts`'s stdin handler decides *when* a keystroke means "move
+  transcript focus" (based on `state.view.kind`/`state.input`, both already reducer-visible),
+  emits a raw up/down/activate intent, and `TranscriptPane` resolves it against its own local
+  state. No reducer or `TuiState` change was needed for interaction at all — only the
+  `Turn.durationMs` field (data, not interaction) touched `state.ts`.
+
+- **Real bug the real-PTY spike caught that no unit test had**: the "clamp focusIndex during
+  render" pattern (mirrors the existing scroll-offset clamp) had a permanent-stuck-at--1 bug
+  — an empty transcript clamps focus to -1 (nothing to focus), and without a `Math.max(idx,
+  0)` floor before the `Math.min`, `Math.min(-1, laterLength-1)` never recovers once real
+  tool rows appear later. My own component-level unit tests (which all seeded a non-empty
+  transcript from the start) never exercised the empty→non-empty transition, so they all
+  passed while the bug was live. Only caught it because `e2e/spikes/tui/
+  spike-tool-call-grouping.ts` drives the real flow from a genuinely empty session (spawn
+  event arrives before any tool call), same "trust the real render, not just unit coverage"
+  lesson as DH-0065/DH-0230/DH-0245 before it. Added a dedicated regression test
+  ("focus recovers to the first tool row once one appears, after starting on an empty
+  transcript") once I understood the mechanism, rather than leaving the fix to the spike
+  alone.
+
+- **Reused AgentTree/PickerView's literal `"> "` marker for focus**, applied by replacing the
+  row's normal gutter glyph (e.g. `"⚙ "` → `"> "`) rather than adding a prefix column — keeps
+  the existing `TRANSCRIPT_GUTTER_COLS`/wrap-width math untouched, so no frame-height/wrapping
+  side effects from this ticket (the Risks section's frame-height concern turned out to be a
+  non-issue: an expanded group/detail is just more rows in the same flat `lines: string[]`
+  array `scroll-viewport.ts` already windows — same structural pattern DH-0245's header-lines
+  addition used, confirmed by inspection before writing any code).
+
+- **Coordinating on a shared worktree**: Susan was concurrently fixing DH-0129 in
+  `src/web/client/components/Transcript.tsx` (the same file I needed to edit for the
+  shared-module import swap). Her commit `86c1e87` landed while I was mid-round and picked up
+  my uncommitted `transcript-grouping.ts` + `Transcript.tsx` edits cleanly (same working
+  tree) — confirmed after the fact via `git show 86c1e87 --stat` and re-reading the merged
+  file rather than assuming it survived intact.
+
+Gates: typecheck/lint/test:coverage (100% overall line coverage, 2668+ tests)/e2e (41/41) all
+green. Real-PTY verification via `e2e/spikes/tui/spike-tool-call-grouping.ts` (real compiled
+binary, real tmux PTY, scripted mock provider): 7/7 checks passed — collapse-by-default,
+Down+Enter expand, member-row detail (input+result+duration), re-collapse. Transitioned
+DH-0246 to `verifying` via spile-ops with a full Story→test mapping in its Notes.
+
+Open thread for a future round: none blocking. The spike's final captured pane shows the
+closing assistant reply text tripled ("Both commands ran." x3) — looked like a benign tmux
+capture/redraw artifact unrelated to this ticket's scope (assistant-turn rendering, not
+tool-call grouping), didn't chase further under this ticket's budget; worth a glance if a
+future round touches assistant-turn redraw/dedup logic.
