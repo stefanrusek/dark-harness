@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0243
 type: bug
-status: refining
+status: verifying
 owner: Core
 resolution:
 blocked_by: []
@@ -55,3 +55,11 @@ unreferenced. Found during refactoring round 3 (DH-0241).
 ## Notes
 
 Filed by Fable during refactoring round 3 (DH-0241).
+
+### 2026-07-20
+
+Confirmed `CLI_RESET` had zero consumers outside its own declaration (`grep -rn CLI_RESET
+src/ test/` matched only the comment line and the declaration in `src/cli/styling.ts`).
+Removed the export and the stale "help.ts's own section-header styling composes it directly"
+sentence from the module comment; `CLI_YELLOW`/`CLI_BOLD` untouched. Gates:
+typecheck/lint/test:coverage (100%, 146/146)/e2e (41/41) all green. Moving to `verifying`.
