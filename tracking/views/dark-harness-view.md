@@ -57,6 +57,7 @@ source: tracking/
 | [DH-0245](../DH-0245-tui-header-a2-never-actually-reaches-the-interactive-session-flashes-pre-mount-replaced-by-uncolored-empty-state-text-that-vanishes-on-first-message.md) | TUI: Header A2 never actually reaches the interactive session -- flashes pre-mount, replaced by uncolored empty-state text that vanishes on first message | status: verifying |
 | [DH-0246](../DH-0246-tui-consecutive-tool-calls-should-group-into-a-collapsible-expando-mirroring-dh-0199-s-web-design.md) | TUI: consecutive tool calls should group into a collapsible expando, mirroring DH-0199's Web design | status: verifying |
 | [DH-0248](../DH-0248-web-appheader-is-a-plain-one-line-text-banner-no-equivalent-of-tui-s-reactive-header-a2.md) | Web: AppHeader is a plain one-line text banner, no equivalent of TUI's reactive Header A2 | status: verifying |
+| [DH-0250](../DH-0250-refactoring-round-4-post-dh-0241-sweep-dh-0245-0246-0248-0129-0247-blast-radius-file-dh-0249.md) | Refactoring round 4: post-DH-0241 sweep (DH-0245/0246/0248/0129/0247 blast radius) — file DH-0249 | status: refining |
 
 ## Board
 
@@ -74,6 +75,7 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
+| [DH-0249](../DH-0249-header-b-top-border-is-one-column-too-wide-dh-0247-s-row-padding-fix-missed-the-frame-s-own-border-lines.md) | Header B top border is one column too wide: DH-0247's row() padding fix missed the frame's own border lines | bug | Core |
 
 ### refining
 
@@ -83,6 +85,7 @@ source: tracking/
 | [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | bug | stefan |
 | [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | bug | stefan |
 | [DH-0241](../DH-0241-refactoring-round-3-closing-round-of-3-verify-dh-0240-clean-broadened-full-repo-sweep.md) | Refactoring round 3 (closing round of 3): verify DH-0240 clean, broadened full-repo sweep | feature | Coordinator |
+| [DH-0250](../DH-0250-refactoring-round-4-post-dh-0241-sweep-dh-0245-0246-0248-0129-0247-blast-radius-file-dh-0249.md) | Refactoring round 4: post-DH-0241 sweep (DH-0245/0246/0248/0129/0247 blast radius) — file DH-0249 | feature | Coordinator |
 
 ### implementing
 
