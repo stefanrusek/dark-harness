@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0244
 type: bug
-status: refining
+status: verifying
 owner: TUI
 resolution:
 blocked_by: []
@@ -64,3 +64,25 @@ round 3 (DH-0241).
 ## Notes
 
 Filed by Fable during refactoring round 3 (DH-0241).
+
+### 2026-07-20 — implementation and verification
+
+Extracted the shared `clearCiEnvForInteractiveInkRender()` body into a new
+`src/tui/ink/clear-ci-env.ts`, imported by both existing side-effect entrypoints
+(`render-interactive-in-tests.ts` and `clear-ci-env-for-interactive-render.ts`).
+`clear-ci-env.ts` is inert on import — it only defines the function, no top-level call — so
+each entrypoint still calls it itself, inside its own `Object.freeze(...)` module-load
+trigger, at that entrypoint's own load time. This means the `delete process.env.CI` /
+`CONTINUOUS_INTEGRATION` still executes at exactly the same point in each import graph as
+before the dedup: `render-interactive-in-tests.ts`'s freeze still runs as soon as that module
+loads (still must be imported before `app.ts` in `app.test.ts`), and
+`clear-ci-env-for-interactive-render.ts`'s freeze still runs as soon as that module loads
+(still must be `cli.ts`'s first import). No new indirection was added between "module loads"
+and "delete runs" in either path — the shared module only dedupes the function body, not the
+timing.
+
+Verified with the full gate suite: `bun run typecheck` (clean), `bun run lint` (clean),
+`bun run test:coverage` (146/146 tests, 100% line coverage, including `src/tui/app.test.ts`
+passing under real Ink rendering), and `bun run e2e` (41/41 across 13 files, including the
+real-PTY `e2e/tui.test.ts`, confirming the compiled binary still renders interactively under
+a CI-like environment).
