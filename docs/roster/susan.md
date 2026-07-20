@@ -717,3 +717,54 @@ had one error, confirmed to be Mary's in-progress DH-0246 work, not mine).
 354/354 pass, 100% coverage on every file touched. `bun run e2e` 41/41 pass. Closed the
 ticket with the live numeric evidence above — this is the kind of proof its own history
 demanded and had never gotten before.
+
+### 2026-07-20 — DH-0248: masthead upgrade (Web's brand-launch moment)
+
+Rebuilt `AppHeader.tsx` per Muriel's spec: three zones (brand `<LogoMark>` @28px + gradient
+"Dark Harness" wordmark, build version string, right-aligned config-instrument chip row),
+still mounted in the existing fixed `.app-header-slot` — no new grid slot needed, the row was
+already `auto`-sized. Added `--brand-grad-start`/`--brand-grad-end` `:root` vars (same
+`#9ECE6A`/`#7DCFFF` stops as `LogoMark`'s SVG gradient, unchanged in the light-theme
+override), a `color: var(--text)` fallback declared before the `background-clip: text` clip,
+and a reduced-motion-gated one-shot CSS `@keyframes` entrance on the wordmark (a CSS
+`animation` on the mounted element only ever plays once per mount — no JS state needed to
+keep it one-shot).
+
+**The taste call the ticket left to me: sidebar `.brand` de-dup.** Took the ticket's own
+recommendation — dropped the sidebar's literal "Dark Harness" text now that the masthead
+carries a larger wordmark directly above it, kept the small `<LogoMark>` as the nav's own
+identity anchor, added `role="img" aria-label="Dark Harness"` to the now-icon-only `.brand`
+row so the removed text doesn't become an accessibility regression. Confirmed live (headless
+Chromium screenshot, both themes) that this reads as one wordmark, not two stacked ones.
+
+**Testing note: CSS-level assertions for facts DOM-level tests can't see.** Two of the User
+Stories (gradient sourced from the shared vars, entrance animation gated behind
+`prefers-reduced-motion`) aren't observable through `happy-dom`'s `getComputedStyle` (not
+implemented in this test env, and media queries don't evaluate in jsdom-style harnesses
+anyway) — asserted them by reading `styles.css`'s own source text via `readFileSync` and
+regex-matching the relevant rule/media-block shape instead of trying to fake a real CSS
+engine in the unit test. Real rendering (the actual gradient painting, the actual animation
+firing once) was then confirmed the honest way: a live headless-Chromium run against the real
+compiled binary (below).
+
+**Visual verification, live:** built `dist/dh`, reused the e2e suite's own
+`spawnDh`/`startMockAnthropicProvider`/`createWorkspace`/`resolveChromiumExecutable` helpers
+from a throwaway script (not committed) to boot the real server against a real `dh.json` (2
+models, `security.hostname` set, no token) and loaded the real page in Playwright under both
+`colorScheme: "light"` and `"dark"`. Confirmed via `getComputedStyle`: the wordmark's
+`background-image` is the actual painted gradient
+(`linear-gradient(90deg, rgb(158, 206, 106), rgb(125, 207, 255))`),
+`-webkit-text-fill-color` is transparent (clip active), `--brand-grad-start`/`-end` resolve
+to `#9ece6a`/`#7dcfff` on the live page, the config chip row shows real data (`config
+dh.json · 2 models`, `bind 127.0.0.1`, `⚠ no token`), the sidebar `.brand` row's text content
+is empty (mark only), and the masthead `<svg>` is mounted. Screenshots confirmed legible
+composition in both themes. Full mapping of every User Story to its proving test is in the
+ticket's own Notes entry (2026-07-20) — didn't duplicate it here.
+
+**Gates:** `bun run typecheck` (`src/web` project clean; the pre-existing `src/cli/header.test.ts`
+failure on the root project is unrelated, confirmed via `git log` untouched by this diff),
+`bun run lint` clean, `bun run test:coverage` 147/147 files pass, 100% lines project-wide
+(`AppHeader.tsx`/`App.tsx` both 100%). `bun run e2e` 41/41. One `app.test.ts` SSE-reconnect
+test flaked exactly once under `test:coverage`'s parallel run and passed clean on a `git
+stash` baseline run and every rerun after — not a regression, timing-sensitive test, not
+touched by this diff. Moved the ticket `ready` -> `verifying`.
