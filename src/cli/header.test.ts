@@ -200,8 +200,8 @@ describe("renderHeaderB", () => {
         const framedRows = lines.filter((l) => l.includes("│"));
         expect(framedRows.length).toBeGreaterThan(0);
         const rightEdgeColumns = framedRows.map((l) => stripSgr(l).length);
-        const [first, ...rest] = rightEdgeColumns;
-        for (const col of rest) {
+        const first = rightEdgeColumns[0] as number;
+        for (const col of rightEdgeColumns.slice(1)) {
           expect(col).toBe(first);
         }
       });
