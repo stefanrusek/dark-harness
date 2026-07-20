@@ -249,3 +249,50 @@ this round, but kept the discipline).
 surfaces). Owner may bounce the exact tagline wording on either — specified as
 `Point dh at a repo and an instructions file, and it works the job unattended.` (on-page) /
 `Unattended multi-agent harness in a single binary.` (card) — non-gating.
+
+### 2026-07-20 — round 7: DH-0248, Web brand-launch masthead (the Web counterpart to DH-0245's TUI Header A2)
+
+Owner live-testing: TUI just got DH-0245's real persistent full-color Header A2; the Web
+client still shows only the thin one-line `<AppHeader>` (plain `logoCompact` + version +
+ellipsized config line, no color/monogram). Task: design the Web equivalent — but in Web's
+idiom, not a port of the TUI's ASCII/scroll approach.
+
+**Judgment calls made this round:**
+- **Placement: upgrade the existing `.app-header-slot` full-width grid band in place** (grid
+  area `header`, `grid-template-rows: auto 1fr` so a taller masthead just grows the row — no
+  frame-height math, unlike the TUI's fixed-row budget). Did NOT push the brand moment into
+  `Transcript.tsx`'s scroll region.
+- **Persistence: fixed, non-scrolling masthead — explicitly rejected porting DH-0245's
+  "scroll into the transcript" mechanic.** That was a TUI-specific bug-workaround (Ink's
+  alt-screen clear wipes a fixed banner). Web has no wipe; a pinned masthead is the *better*
+  outcome (glanceable all session vs. TUI's banner hiding on scroll-down). This is the core
+  "don't assume the TUI solution transfers" call the task asked for.
+- **Content: three zones (brand / build / config-instrument), no info regression.** Brand =
+  `<LogoMark>` at ~28px + gradient "Dark Harness" wordmark. Config facts broken out of the one
+  ellipsized `formatConfigStatusLine` string into discrete Header-B-style chips (config+models,
+  bind, auth, tls) — must carry ≥ every fact the old one-liner did. `⚠ no token` chip in
+  `--accent`, matching the cross-surface no-token warning treatment (TUI `authText`/`warnGlyph`).
+- **Color: wordmark gradient reuses the EXACT LogoMark SVG stops** `#9ECE6A → #7DCFFF`
+  (`BRAND.harnessGreen/signalCyan`), mirrored as new `:root` vars `--brand-grad-start/-end`,
+  so mark + wordmark read as one continuous gradient object. Same stops on light theme (kept
+  as an assumption with a bounded escape hatch if contrast proves marginal). Mandated a solid
+  `color: var(--text)` fallback under `background-clip: text` for forced-colors/unsupported.
+- **Delight: one-shot ~400ms fade+rise wordmark entrance, gated behind
+  `prefers-reduced-motion: no-preference`** — the owner's standing "flashy little pops" ask,
+  kept calm/one-time (a CSS `animation` that plays once per mount, not state-driven).
+- **Flagged the two-wordmarks risk:** masthead wordmark stacks directly above the sidebar
+  `.brand` wordmark. Recommended (non-gating, Susan's taste) dropping the sidebar's literal
+  text and keeping only its small `<LogoMark>`, so the wordmark appears once. Bounded it as a
+  recommendation rather than forcing a change into DH-0219's row.
+- **New durable convention → style-guide §6.2:** "brand-launch moment = one shared brand
+  object (mark/wordmark/green→cyan gradient), realized per surface in that surface's native
+  idiom; do not port one surface's *mechanism* to another." Records WHY TUI scrolls its header
+  and Web pins it — same intent, correct per-medium answer, not inconsistency.
+
+**Process:** DH-0248 was already `status: ready` in my authored front matter; the reverter did
+NOT clobber this round (atomic `cp` + transition in sequence held). Owner = implementation is
+Susan's (`src/web/`). No `src/contracts/`/`header-info.ts`/ADR touch — consumes existing
+`HeaderInfo`/`ConfigStatusSummary` as-is.
+
+**Open threads for next round:** none blocking. Susan implements; the two taste latitudes
+(sidebar de-dup, any light-theme gradient-stop tuning) are both bounded in the ticket.

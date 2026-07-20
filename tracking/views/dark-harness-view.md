@@ -73,7 +73,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
-| [DH-0248](../DH-0248-web-appheader-is-a-plain-one-line-text-banner-no-equivalent-of-tui-s-reactive-header-a2.md) | Web: AppHeader is a plain one-line text banner, no equivalent of TUI's reactive Header A2 | feature | stefan |
 
 ### refining
 
@@ -83,6 +82,12 @@ source: tracking/
 | [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | bug | stefan |
 | [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | bug | stefan |
 | [DH-0241](../DH-0241-refactoring-round-3-closing-round-of-3-verify-dh-0240-clean-broadened-full-repo-sweep.md) | Refactoring round 3 (closing round of 3): verify DH-0240 clean, broadened full-repo sweep | feature | Coordinator |
+
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0248](../DH-0248-web-appheader-is-a-plain-one-line-text-banner-no-equivalent-of-tui-s-reactive-header-a2.md) | Web: AppHeader is a plain one-line text banner, no equivalent of TUI's reactive Header A2 | feature | stefan |
 
 ### implementing
 
