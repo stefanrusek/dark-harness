@@ -748,3 +748,45 @@ confirmed via `git stash` (targeted, this-ticket-only stash) that it fails ident
 this change — pre-existing sandbox/tmux-PTY gap, not a regression. Transitioned DH-0231 to
 `verifying` via spile-ops. Commit `dfb861a`, pushed clean (no upstream commits to reconcile at
 push time).
+
+### 2026-07-19 — DH-0230 (rapid-scroll garbage escape sequences), root cause found
+
+Actual root cause (not the ticket's own guess of a render-pipeline/Ink-scheduling race): a raw
+stdin-parsing gap in `app.ts`'s `stdin.on("data", ...)` handler. DH-0126's
+`parseSgrMouseChunk`/`stripSgrMouseSequences` handled a mouse sequence split at the *end* of a
+chunk (trailing partial correctly dropped), but not a continuation fragment arriving as the
+*start* of the *next* chunk (e.g. `;20M` with no `ESC[<` prefix) — that fragment has nothing to
+identify it as a mouse-sequence remnant, so it fell through `parseKeys` into the composer as
+literal garbage, same symptom as DH-0126, just needing a straddled read boundary to trigger.
+Rapid scrolling floods the PTY with back-to-back reports, making that far more likely than at
+normal speed. Fix: `MouseChunkAssembler` (new class, `src/tui/mouse.ts`) carries an unresolved
+trailing partial forward across `data` events and reassembles before parsing; `app.ts` now owns
+one instance per session.
+
+Judgment call worth recording: my first draft widened the "trailing partial" regex to also
+match a bare trailing `ESC` (reasoning: a split could land even earlier than mid-digits). This
+passed every unit test (synthetic, non-PTY stdin) but broke `e2e/tui.test.ts`'s real-PTY boot
+test — a standalone Escape keypress is a legitimate one-byte `data` chunk on a real PTY, and
+buffering it as "might be a mouse sequence" delayed it into the next `data` event. Caught only
+because I ran the real e2e suite before finishing, not just unit coverage — this is a concrete
+instance of why CLAUDE.md's e2e gate (real binary, real PTY) exists as a separate tier from
+`bun test src`: a synthetic-stdin unit test cannot see PTY chunking behavior. Reverted to the
+narrower regex (only buffer once the full `ESC[<` introducer has arrived); documented the
+tradeoff in both the code comment and the ticket's Notes.
+
+Also hit real chaos from working in a *shared* (non-worktree-isolated) checkout: a stray
+`git stash`/`git stash pop` I ran to A/B-test my change against HEAD picked up *other* running
+agents' in-flight uncommitted work and popped it against a version of `src/cli.ts`/
+`src/contracts/index.ts`/`src/prompt/readme-config-sync.test.ts` that had moved on underneath
+it, producing real `<<<<<<< Updated upstream` / `>>>>>>> Stashed changes` conflict markers in
+files I never touched. Resolved by taking the "Updated upstream" (current HEAD) side in all
+three cases — the stashed side was visibly stale (referenced code/behavior superseded by
+already-committed later tickets). Lesson for next time: prefer `git stash push -- <specific
+files>` over a bare `git stash` in this repo's shared-worktree setup, so an A/B comparison
+can't accidentally scoop up unrelated concurrent agents' WIP.
+
+Verified: `bun run typecheck`, `bun run lint`, `bun run test:coverage` (100% overall; one
+unrelated flaky `src/web/client/app.test.ts` failure under full-suite parallel load, passes
+standalone, outside TUI scope), `bun run e2e` (41/41, including the real-PTY boot test that
+caught the Escape-keypress regression). Transitioned DH-0230 to `verifying` via spile-ops with
+a full Notes writeup. Commit `f8594ab`.

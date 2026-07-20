@@ -42,6 +42,7 @@ source: tracking/
 | [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | status: verifying |
 | [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | status: verifying |
 | [DH-0229](../DH-0229-ascii-art-blocks-need-monospace-color-support-in-web-and-system-prompt-guidance.md) | ASCII art blocks need monospace + color support in web and system prompt guidance | status: verifying |
+| [DH-0230](../DH-0230-tui-rapid-scroll-produces-garbage-escape-sequences-race-condition.md) | TUI rapid scroll produces garbage escape sequences (race condition) | status: verifying |
 | [DH-0231](../DH-0231-tui-input-box-does-not-wrap-long-lines.md) | TUI input box does not wrap long lines | status: verifying |
 | [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | status: verifying |
 | [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) | DH-0206 |
@@ -69,12 +70,6 @@ source: tracking/
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
-
-### ready
-
-| ID | Title | Type | Owner |
-| --- | --- | --- | --- |
-| [DH-0230](../DH-0230-tui-rapid-scroll-produces-garbage-escape-sequences-race-condition.md) | TUI rapid scroll produces garbage escape sequences (race condition) | bug | stefan |
 
 ### implementing
 
@@ -106,6 +101,7 @@ source: tracking/
 | [DH-0227](../DH-0227-readme-hero-restructure-hoist-product-screenshot-and-tagline-above-the-fold.md) | README hero restructure: hoist product screenshot and tagline above the fold | feature | Iris |
 | [DH-0228](../DH-0228-github-social-preview-image-1280x640-og-image-checked-into-docs-media.md) | GitHub social-preview image (1280×640 og:image) checked into docs/media | feature | Iris |
 | [DH-0229](../DH-0229-ascii-art-blocks-need-monospace-color-support-in-web-and-system-prompt-guidance.md) | ASCII art blocks need monospace + color support in web and system prompt guidance | feature | stefan |
+| [DH-0230](../DH-0230-tui-rapid-scroll-produces-garbage-escape-sequences-race-condition.md) | TUI rapid scroll produces garbage escape sequences (race condition) | bug | stefan |
 | [DH-0231](../DH-0231-tui-input-box-does-not-wrap-long-lines.md) | TUI input box does not wrap long lines | bug | stefan |
 | [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | bug | stefan |
 | [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) 🔒 | bug | iris |
