@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0234
 type: bug
-status: open
+status: ready
 owner: iris
 resolution:
 blocked_by: [DH-0226]

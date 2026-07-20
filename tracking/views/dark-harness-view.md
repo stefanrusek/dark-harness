@@ -68,6 +68,16 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
 
+### ready
+
+| ID | Title | Type | Owner |
+| --- | --- | --- | --- |
+| [DH-0230](../DH-0230-tui-rapid-scroll-produces-garbage-escape-sequences-race-condition.md) | TUI rapid scroll produces garbage escape sequences (race condition) | bug | stefan |
+| [DH-0231](../DH-0231-tui-input-box-does-not-wrap-long-lines.md) | TUI input box does not wrap long lines | bug | stefan |
+| [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | bug | stefan |
+| [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) 🔒 | bug | iris |
+| [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool 🔒 | bug | iris |
+
 ### implementing
 
 | ID | Title | Type | Owner |

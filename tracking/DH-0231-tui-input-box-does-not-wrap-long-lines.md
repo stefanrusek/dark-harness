@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0231
 type: bug
-status: open
+status: ready
 owner: stefan
 resolution:
 blocked_by: []
