@@ -50,6 +50,7 @@ source: tracking/
 | [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | status: refining |
 | [DH-0237](../DH-0237-required-contract-in-system-prompt-ts-has-accreted-the-whole-output-format-section-doc-comment-is-now-stale-and-override-inheritance-is-undocumented.md) | REQUIRED_CONTRACT in system-prompt.ts has accreted the whole Output-format section; doc comment is now stale and override-inheritance is undocumented | status: verifying |
 | [DH-0238](../DH-0238-adr-number-collision-two-adrs-both-numbered-0009-colored-span-markdown-vs-workflow-scripts-invariant.md) | ADR number collision: two ADRs both numbered 0009 (colored-span markdown vs Workflow-scripts invariant) | status: verifying |
+| [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | status: refining |
 
 ## Board
 
@@ -67,6 +68,7 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
+| [DH-0240](../DH-0240-mcp-oauth-dh-0057-dead-code-unused-resourcemetadataurl-field-and-unreachable-alreadyauthenticated-flag-on-the-client-credentials-return.md) | MCP OAuth (DH-0057) dead code: unused resourceMetadataUrl field and unreachable alreadyAuthenticated flag on the client_credentials return | bug | stefan |
 
 ### refining
 
@@ -74,6 +76,7 @@ source: tracking/
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
 | [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | bug | stefan |
+| [DH-0239](../DH-0239-refactoring-round-2-verify-round-1-fixes-fresh-sweep-dh-0236-0237-0238-follow-up.md) | Refactoring round 2: verify round-1 fixes + fresh sweep (DH-0236/0237/0238 follow-up) | bug | stefan |
 
 ### implementing
 
