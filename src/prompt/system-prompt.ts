@@ -5,11 +5,16 @@
 // through the model's tools parameter, never prose-listed here).
 //
 // The override is NOT a full wholesale replacement of everything below: `REQUIRED_CONTRACT`
-// (the `TASK_FAILED` self-report convention and the automatic-logging notice) is always
-// appended after a custom prompt too. That contract is structurally load-bearing — ADR
+// (the `TASK_FAILED` self-report convention) and `OUTPUT_FORMAT_SECTION` (the Markdown/
+// colored-span/ASCII-art rendering guidance, plus the automatic-logging notice) are always
+// appended after a custom prompt too. `REQUIRED_CONTRACT` is structurally load-bearing — ADR
 // 0006's exit-code contract depends on the model actually emitting `TASK_FAILED` — so an
 // operator supplying a domain-persona prompt for a legitimate reason must not silently lose
-// it. See DH-0018.
+// it. See DH-0018. `OUTPUT_FORMAT_SECTION` is appended alongside it for the same reason: an
+// operator override should not silently lose the client-rendering contract either (see
+// DH-0237, which split this section out of `REQUIRED_CONTRACT` for naming accuracy — the
+// append-after-override behavior itself is unchanged, just made explicit at the
+// `loadSystemPrompt` call site below).
 
 import { BUILD_INFO } from "../config/build-info.ts";
 import type { BuildInfo, DhConfig, ModelConfig } from "../contracts/index.ts";
@@ -92,9 +97,17 @@ yourself to the same discipline:
 /**
  * The part of the prompt that is structurally load-bearing for the harness itself — the
  * `TASK_FAILED` self-report convention (ADR 0006's exit-code contract scans for this exact
- * string) and the automatic-logging notice. Always appended, whether the discipline preamble
- * above came from `DISCIPLINE_PROMPT` or a `config.systemPrompt` override, so a custom prompt
- * can never silently drop the contract the rest of the harness depends on. See DH-0018.
+ * string). Always appended, whether the discipline preamble above came from
+ * `DISCIPLINE_PROMPT` or a `config.systemPrompt` override, so a custom prompt can never
+ * silently drop the contract the rest of the harness depends on. See DH-0018.
+ *
+ * DH-0237: this constant used to also embed the entire "## Output format" and "## Logging"
+ * sections below — accreted here across three separate live-testing edits (DH-0206/0229/
+ * 0233/0234) despite the doc comment never mentioning them, so a `config.systemPrompt`
+ * override silently inherited a large block of formatting guidance with no indication it
+ * would. That guidance now lives in its own `OUTPUT_FORMAT_SECTION` constant immediately
+ * below. Both constants are still appended together after an override (see `loadSystemPrompt`
+ * at the bottom of this file) — this split is naming/structure only, not a behavior change.
  */
 export const REQUIRED_CONTRACT =
   Object.freeze(`- **Report failure with the exact literal text \`TASK_FAILED\` — every time, no exceptions.**
@@ -115,9 +128,18 @@ export const REQUIRED_CONTRACT =
   exist." with no marker is wrong, even though it is an honest, clearly-worded admission of
   failure — the harness cannot tell the difference between that and a genuine success unless
   the marker is present. Only include the marker when you are actually reporting failure;
-  never include it in a successful completion.
+  never include it in a successful completion.`);
 
-## Output format
+/**
+ * DH-0206/0229/0233/0234 (three separate live-testing edits): the client-rendering contract —
+ * how plain-text output is rendered by the TUI/Web clients (Markdown, the one allowlisted
+ * colored-span HTML construct, ASCII art via colored spans) — plus the automatic-logging
+ * notice. Split out of `REQUIRED_CONTRACT` by DH-0237 purely for naming accuracy (that
+ * constant's doc comment never mentioned this content); still always appended alongside
+ * `REQUIRED_CONTRACT`, both in the default prompt (`BASE_PROMPT` below) and after a
+ * `config.systemPrompt` override (`loadSystemPrompt`) — no behavior change from the split.
+ */
+export const OUTPUT_FORMAT_SECTION = Object.freeze(`## Output format
 
 All plain-text output you produce is rendered as Markdown by every Dark Harness client.
 Write normal Markdown: headings, **bold**, *italic*, \`inline code\`, fenced code blocks,
@@ -186,7 +208,9 @@ need to call a logging tool or ask anyone to record what you did: your plain-tex
 *is* how you record your reasoning and status, and it is preserved whether or not anyone is
 watching in real time.`);
 
-const BASE_PROMPT = Object.freeze(`${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}`);
+const BASE_PROMPT = Object.freeze(
+  `${DISCIPLINE_PROMPT}\n${REQUIRED_CONTRACT}\n\n${OUTPUT_FORMAT_SECTION}`,
+);
 
 /**
  * DH-0094 (tracking/DH-0094-*.md): the "self-awareness" section — concrete facts about this
@@ -404,7 +428,8 @@ material, not tools you invoke directly.
   server, when one requires login before its tools become usable.`);
 
 /**
- * Builds the default (non-overridden) system prompt: the base working-discipline text plus
+ * Builds the default (non-overridden) system prompt: the base working-discipline text
+ * (`BASE_PROMPT`, which already bundles `REQUIRED_CONTRACT` and `OUTPUT_FORMAT_SECTION`) plus
  * the "Available tools" section, plus the enumerated skills — the bundled cli-tools skill and
  * anything discovered under the config's `skillPaths`.
  */
@@ -479,11 +504,16 @@ function renderProjectInstructionsSection(claudeMd: string): string {
 
 /**
  * Produces the system prompt Core's agent loop passes to the model. If `config.systemPrompt`
- * is set, the file's contents replace the working-discipline preamble, but
- * `REQUIRED_CONTRACT` (the `TASK_FAILED` convention and logging notice) is always appended
- * after it — this is the one part of the default prompt an operator cannot silently drop by
- * overriding, because the harness's own exit-code contract depends on it (DH-0018).
- * Otherwise builds the default prompt with skill enumeration.
+ * is set, the file's contents replace the working-discipline preamble, but two constants are
+ * always appended after it, unconditionally, in this order: `REQUIRED_CONTRACT` (the
+ * `TASK_FAILED` self-report convention — the harness's own exit-code contract depends on it,
+ * DH-0018) and `OUTPUT_FORMAT_SECTION` (the Markdown/colored-span/ASCII-art rendering contract
+ * plus the automatic-logging notice). This is the part of the default prompt an operator
+ * cannot silently drop by overriding `config.systemPrompt`. DH-0237: these two constants used
+ * to be a single `REQUIRED_CONTRACT` whose doc comment didn't mention the formatting guidance
+ * it had accreted — split apart for naming accuracy, with both still appended here explicitly
+ * so it's obvious at this call site what an override inherits. Otherwise builds the default
+ * prompt with skill enumeration.
  *
  * DH-0055 judgment call: a project's `CLAUDE.md`, if present at `cwd`, is injected as an
  * *additional* section appended after whichever of the two bases above was used — additive
@@ -504,7 +534,7 @@ export async function loadSystemPrompt(
     config.systemPrompt
       ? Bun.file(config.systemPrompt)
           .text()
-          .then((text) => `${text.trim()}\n\n${REQUIRED_CONTRACT}`)
+          .then((text) => `${text.trim()}\n\n${REQUIRED_CONTRACT}\n\n${OUTPUT_FORMAT_SECTION}`)
       : buildDefaultSystemPrompt(config),
     readProjectClaudeMd(cwd),
   ]);

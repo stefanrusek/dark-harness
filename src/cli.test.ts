@@ -35,7 +35,11 @@ import type {
 import { ExitCode } from "./contracts/index.ts";
 import { BRAND, paint } from "./design-tokens.ts";
 import { buildHeaderInfo, formatHeaderLines, formatVersionString } from "./header-info.ts";
-import { buildDefaultSystemPrompt, REQUIRED_CONTRACT } from "./prompt/system-prompt.ts";
+import {
+  buildDefaultSystemPrompt,
+  OUTPUT_FORMAT_SECTION,
+  REQUIRED_CONTRACT,
+} from "./prompt/system-prompt.ts";
 import type { AgentLoopHandle, AgentLoopLogListener } from "./server/index.ts";
 import { DhServer, waitForExitCode } from "./server/index.ts";
 
@@ -2347,7 +2351,9 @@ describe("main — real filesystem-backed default deps", () => {
     } finally {
       process.chdir(originalCwd);
     }
-    expect(received).toBe(`custom system prompt\n\n${REQUIRED_CONTRACT}`);
+    expect(received).toBe(
+      `custom system prompt\n\n${REQUIRED_CONTRACT}\n\n${OUTPUT_FORMAT_SECTION}`,
+    );
   });
 
   test("the real loadSystemPrompt dep reports a clear error when the configured file is missing", async () => {

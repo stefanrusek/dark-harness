@@ -10,6 +10,7 @@ import {
   CLAUDE_MD_MAX_BYTES,
   CLI_TOOLS_SKILL,
   loadSystemPrompt,
+  OUTPUT_FORMAT_SECTION,
   REQUIRED_CONTRACT,
   readProjectClaudeMd,
   renderJobModeSection,
@@ -229,25 +230,27 @@ describe("loadSystemPrompt", () => {
     expect(loaded).toBe(built);
   });
 
-  test("reads and trims an override file, but always appends the TASK_FAILED/logging contract", async () => {
+  test("reads and trims an override file, but always appends the TASK_FAILED contract and the output-format contract", async () => {
     const overridePath = join(root, "custom-prompt.txt");
     await writeFile(overridePath, "\n  You are a custom agent.  \n");
 
     const prompt = await loadSystemPrompt(baseConfig({ systemPrompt: overridePath }), root);
 
-    expect(prompt).toBe(`You are a custom agent.\n\n${REQUIRED_CONTRACT}`);
+    expect(prompt).toBe(
+      `You are a custom agent.\n\n${REQUIRED_CONTRACT}\n\n${OUTPUT_FORMAT_SECTION}`,
+    );
     expect(prompt).not.toContain("Available skills");
   });
 
-  test("REQUIRED_CONTRACT carries the TASK_FAILED marker and the logging notice on its own", () => {
+  test("REQUIRED_CONTRACT carries the TASK_FAILED marker on its own", () => {
     expect(REQUIRED_CONTRACT).toContain("TASK_FAILED");
-    expect(REQUIRED_CONTRACT).toMatch(/logged\s+automatically/);
   });
 
-  test("REQUIRED_CONTRACT carries the Output format Markdown instruction, unconditionally appended", () => {
-    expect(REQUIRED_CONTRACT).toContain("## Output format");
-    expect(REQUIRED_CONTRACT).toMatch(/rendered as Markdown by every Dark Harness client/);
-    expect(REQUIRED_CONTRACT).toContain("stripped before rendering");
+  test("OUTPUT_FORMAT_SECTION carries the Markdown rendering instruction and the logging notice", () => {
+    expect(OUTPUT_FORMAT_SECTION).toContain("## Output format");
+    expect(OUTPUT_FORMAT_SECTION).toMatch(/rendered as Markdown by every Dark Harness client/);
+    expect(OUTPUT_FORMAT_SECTION).toContain("stripped before rendering");
+    expect(OUTPUT_FORMAT_SECTION).toMatch(/logged\s+automatically/);
   });
 
   test("override still gets the Output format contract appended", async () => {

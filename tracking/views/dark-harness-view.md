@@ -48,6 +48,8 @@ source: tracking/
 | [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) | DH-0206 |
 | [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool | DH-0226 |
 | [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | status: refining |
+| [DH-0237](../DH-0237-required-contract-in-system-prompt-ts-has-accreted-the-whole-output-format-section-doc-comment-is-now-stale-and-override-inheritance-is-undocumented.md) | REQUIRED_CONTRACT in system-prompt.ts has accreted the whole Output-format section; doc comment is now stale and override-inheritance is undocumented | status: verifying |
+| [DH-0238](../DH-0238-adr-number-collision-two-adrs-both-numbered-0009-colored-span-markdown-vs-workflow-scripts-invariant.md) | ADR number collision: two ADRs both numbered 0009 (colored-span markdown vs Workflow-scripts invariant) | status: verifying |
 
 ## Board
 
@@ -65,9 +67,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
-| [DH-0236](../DH-0236-dead-code-dh-ascii-logo-dh-ascii-logo-compact-unused-after-dh-0224-migrated-every-surface-to-the-monogram-assets.md) | Dead code: DH_ASCII_LOGO / DH_ASCII_LOGO_COMPACT unused after DH-0224 migrated every surface to the monogram assets | bug | stefan |
-| [DH-0237](../DH-0237-required-contract-in-system-prompt-ts-has-accreted-the-whole-output-format-section-doc-comment-is-now-stale-and-override-inheritance-is-undocumented.md) | REQUIRED_CONTRACT in system-prompt.ts has accreted the whole Output-format section; doc comment is now stale and override-inheritance is undocumented | bug | stefan |
-| [DH-0238](../DH-0238-adr-number-collision-two-adrs-both-numbered-0009-colored-span-markdown-vs-workflow-scripts-invariant.md) | ADR number collision: two ADRs both numbered 0009 (colored-span markdown vs Workflow-scripts invariant) | bug | stefan |
 
 ### refining
 
@@ -111,11 +110,14 @@ source: tracking/
 | [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | bug | stefan |
 | [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) 🔒 | bug | iris |
 | [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool 🔒 | bug | iris |
+| [DH-0237](../DH-0237-required-contract-in-system-prompt-ts-has-accreted-the-whole-output-format-section-doc-comment-is-now-stale-and-override-inheritance-is-undocumented.md) | REQUIRED_CONTRACT in system-prompt.ts has accreted the whole Output-format section; doc comment is now stale and override-inheritance is undocumented | bug | stefan |
+| [DH-0238](../DH-0238-adr-number-collision-two-adrs-both-numbered-0009-colored-span-markdown-vs-workflow-scripts-invariant.md) | ADR number collision: two ADRs both numbered 0009 (colored-span markdown vs Workflow-scripts invariant) | bug | stefan |
 
 ## Recently Closed
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0236](../DH-0236-dead-code-dh-ascii-logo-dh-ascii-logo-compact-unused-after-dh-0224-migrated-every-surface-to-the-monogram-assets.md) | Dead code: DH_ASCII_LOGO / DH_ASCII_LOGO_COMPACT unused after DH-0224 migrated every surface to the monogram assets | done |
 | [DH-0225](../DH-0225-startup-header-health-dot-green-diverges-from-status-tokens-status-dot-green-dh-0221-palette-fragmentation.md) | Startup-header health dot green diverges from STATUS_TOKENS status-dot green (DH-0221 palette fragmentation) | done |
 | [DH-0223](../DH-0223-chooseheadermode-is-exported-and-unit-tested-but-never-called-at-runtime.md) | chooseHeaderMode is exported and unit-tested but never called at runtime | done |
 | [DH-0222](../DH-0222-refactoring-round-dh-0219-0220-0221-logo-header-color-wave-sweep.md) | Refactoring round: DH-0219/0220/0221 logo+header+color wave sweep | done |
@@ -130,4 +132,3 @@ source: tracking/
 | [DH-0209](../DH-0209-sub-agents-may-lack-access-to-reportoutcome-falling-back-to-task-failed-confusion.md) | Sub-agents may lack access to ReportOutcome, falling back to TASK_FAILED confusion | duplicate |
 | [DH-0208](../DH-0208-message-queue-script-hangs-indefinitely-with-no-completion-eof-signal.md) | Message queue: script hangs indefinitely with no completion/EOF signal | done |
 | [DH-0207](../DH-0207-message-queue-queued-messages-need-visual-queued-state-delete-cancel-capability.md) | Message queue: queued messages need visual 'queued' state + delete/cancel capability | done |
-| [DH-0206](../DH-0206-markdown-no-inline-html-support-consider-basic-span-style-color-as-a-safe-subset.md) | Markdown: no inline HTML support -- consider basic <span style=color> as a safe subset | done |
