@@ -2,9 +2,9 @@
 spile: ticket
 id: DH-0249
 type: bug
-status: draft
+status: closed
 owner: Core
-resolution:
+resolution: done
 blocked_by: []
 created: 2026-07-20
 relations:
@@ -88,3 +88,20 @@ None.
 Owner/reviewer: purely a one-column cosmetic drift on a startup banner; low severity, but it's
 a direct regression-adjacent miss from DH-0247 (same file, same week, same class of bug) and the
 fix is a few characters plus a test-coverage widening, so worth closing the loop.
+
+### 2026-07-20 — fixed, closed
+
+`topFill`'s math corrected: was `width + 2 - visibleLen(nameplate) - 2` (net `width -
+visibleLen(nameplate)`), now `width - 1 - visibleLen(nameplate)`, accounting for the extra
+leading `─` the `╭─` corner prefix itself contributes (not previously subtracted). Added the
+Functional Requirement's test widening exactly as specced — a new case asserting every
+`╭╮├┤╰╯│`-bearing line (not just `│`-bearing content rows) shares one visible width; confirmed
+it fails against the pre-fix code (54 vs 53) and passes against the fix.
+
+Visual verification: real PTY (tmux) capture of the compiled binary — every line (top,
+glyph/tagline, separator, all four content rows, bottom) now measures exactly 53 visible
+characters, forming a clean rectangle.
+
+Gates: `bun run typecheck`/`bun run lint` clean; `bun run test:coverage` 147/147, 100% line
+coverage; `bun run e2e` 40/41 with the one failure (a real-PTY streaming test, timing-sensitive
+under full concurrency) confirmed passing standalone, unrelated to this change.

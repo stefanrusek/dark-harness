@@ -172,7 +172,11 @@ export function renderHeaderB(facts: HeaderStatusFacts, level: ColorLevel): stri
   const frame = (text: string) => paint(BRAND.wireGray, text, level);
   const width = 49; // interior width, matches the ticket's mockup budget (<=80 cols total).
   const nameplate = ` dh ${facts.version} ${label("─", level)} ${shortGitSha(facts.gitSha)} `;
-  const topFill = "─".repeat(Math.max(0, width + 2 - visibleLen(nameplate) - 2));
+  // DH-0249: interior visible width must equal `width` exactly, matching every other framed
+  // line. The line is built as `╭─` (a corner plus one leading `─`) + nameplate + topFill +
+  // `╮`, so topFill must absorb `width - 1 - visibleLen(nameplate)` — subtracting that extra
+  // leading `─` the corner prefix contributes, which the previous math didn't account for.
+  const topFill = "─".repeat(Math.max(0, width - 1 - visibleLen(nameplate)));
   const lines: string[] = [];
   // DH-0247: each row's right border must land at the same column as the frame's own
   // corners — pad the content to the interior width (`width - 2`, matching the "  " lead-in

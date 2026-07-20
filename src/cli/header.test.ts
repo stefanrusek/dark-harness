@@ -205,6 +205,21 @@ describe("renderHeaderB", () => {
           expect(col).toBe(first);
         }
       });
+
+      // DH-0249: DH-0247's test above only ever measured `│`-bearing content rows, so it
+      // structurally couldn't see a drift on the frame's own top/separator/bottom border
+      // lines (`╭╮├┤╰╯`) — widen coverage to every framed line, corners included.
+      test(`${level}: the frame's own top/separator/bottom border lines match every content row's width (DH-0249)`, () => {
+        const lines = renderHeaderB(FACTS_NO_TOKEN, level);
+        const isFramedLine = (l: string) => /[╭╮├┤╰╯│]/.test(l);
+        const framedLines = lines.filter(isFramedLine);
+        expect(framedLines.length).toBe(lines.length - 1); // every line but the trailing "✓ ready" line
+        const widths = framedLines.map((l) => stripSgr(l).length);
+        const first = widths[0] as number;
+        for (const w of widths.slice(1)) {
+          expect(w).toBe(first);
+        }
+      });
     }
   }
 });

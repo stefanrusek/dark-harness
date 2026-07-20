@@ -75,7 +75,6 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
-| [DH-0249](../DH-0249-header-b-top-border-is-one-column-too-wide-dh-0247-s-row-padding-fix-missed-the-frame-s-own-border-lines.md) | Header B top border is one column too wide: DH-0247's row() padding fix missed the frame's own border lines | bug | Core |
 
 ### refining
 
@@ -134,6 +133,7 @@ source: tracking/
 
 | ID | Title | Resolution |
 | --- | --- | --- |
+| [DH-0249](../DH-0249-header-b-top-border-is-one-column-too-wide-dh-0247-s-row-padding-fix-missed-the-frame-s-own-border-lines.md) | Header B top border is one column too wide: DH-0247's row() padding fix missed the frame's own border lines | done |
 | [DH-0247](../DH-0247-header-b-framed-panel-s-right-border-drifts-no-padding-to-frame-width-on-dynamic-content-rows.md) | Header B: framed panel's right border drifts, no padding to frame width on dynamic content rows | done |
 | [DH-0240](../DH-0240-mcp-oauth-dh-0057-dead-code-unused-resourcemetadataurl-field-and-unreachable-alreadyauthenticated-flag-on-the-client-credentials-return.md) | MCP OAuth (DH-0057) dead code: unused resourceMetadataUrl field and unreachable alreadyAuthenticated flag on the client_credentials return | done |
 | [DH-0236](../DH-0236-dead-code-dh-ascii-logo-dh-ascii-logo-compact-unused-after-dh-0224-migrated-every-surface-to-the-monogram-assets.md) | Dead code: DH_ASCII_LOGO / DH_ASCII_LOGO_COMPACT unused after DH-0224 migrated every surface to the monogram assets | done |
@@ -148,4 +148,3 @@ source: tracking/
 | [DH-0212](../DH-0212-dh-0060-tui-spike-suite-regressed-from-16-0-to-9-7-pass-fail-needs-real-triage-before-treating-as-regressions.md) | DH-0060 TUI spike suite regressed from 16/0 to 9/7 pass/fail -- needs real triage before treating as regressions | done |
 | [DH-0211](../DH-0211-both-uis-pressing-escape-should-stop-the-currently-running-agent.md) | Both UIs: pressing Escape should stop the currently running agent | done |
 | [DH-0210](../DH-0210-import-resume-chain-toolresult-tooluse-block-count-mismatch-crashes-the-provider-request.md) | --import + resume chain: toolResult/toolUse block count mismatch crashes the provider request | done |
-| [DH-0209](../DH-0209-sub-agents-may-lack-access-to-reportoutcome-falling-back-to-task-failed-confusion.md) | Sub-agents may lack access to ReportOutcome, falling back to TASK_FAILED confusion | duplicate |
