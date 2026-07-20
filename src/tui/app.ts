@@ -12,7 +12,7 @@ import type { InkMount } from "./ink/mount.ts";
 import { mountInk } from "./ink/mount.ts";
 import { createScrollBus } from "./ink/scroll-bus.ts";
 import { parseKeys } from "./keys.ts";
-import { parseSgrMouseChunk, stripSgrMouseSequences } from "./mouse.ts";
+import { MouseChunkAssembler } from "./mouse.ts";
 import { MouseLifecycle } from "./mouse-lifecycle.ts";
 import { initialState, reducer } from "./state.ts";
 import type { Action, Effect, TuiState } from "./types.type.ts";
@@ -341,15 +341,22 @@ export async function startTui(
     // to `parseKeys`, which has no notion of the `[<...M` introducer and would otherwise fall
     // through its "unrecognized CSI" branch and leak the sequence's digits into the composer
     // as literal keystrokes — the exact bug this ticket reports.
+    //
+    // DH-0230: under rapid/aggressive scrolling the PTY can split one SGR sequence across two
+    // `data` events; a per-chunk-only strip left the continuation fragment (no `ESC[<`
+    // prefix) looking like ordinary text and it leaked through to parseKeys as garbage.
+    // MouseChunkAssembler carries an unresolved trailing partial forward across chunks so a
+    // sequence split at any boundary is reassembled before parsing.
+    const mouseAssembler = new MouseChunkAssembler();
     stdin.on("data", (chunk: string) => {
-      for (const event of parseSgrMouseChunk(chunk)) {
+      const { events, rest } = mouseAssembler.process(chunk);
+      for (const event of events) {
         if (event.type === "scrollUp") {
           scrollBus.emit(-SCROLL_LINES_PER_NOTCH);
         } else if (event.type === "scrollDown") {
           scrollBus.emit(SCROLL_LINES_PER_NOTCH);
         }
       }
-      const rest = stripSgrMouseSequences(chunk);
       for (const key of parseKeys(rest)) {
         dispatch({ type: "key", key });
       }

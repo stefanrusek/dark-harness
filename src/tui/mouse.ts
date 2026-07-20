@@ -60,6 +60,14 @@ const SGR_MOUSE_SPLIT_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[<\\d+;\\d
 // splits one report across two stdin reads (the sequence is short, ~9-12 bytes, but nothing
 // guarantees it lands in a single `data` event). Left unstripped, the fragment's digits would
 // fall through to `parseKeys` as literal characters, same bug as an unstripped whole sequence.
+//
+// Deliberately requires the full `ESC[<` introducer, not just a bare trailing ESC or ESC[ —
+// those are ambiguous with a real standalone Escape keypress or an ordinary (non-mouse) CSI
+// sequence a real terminal can deliver as its own single-byte `data` chunk (e.g. pressing Esc
+// alone to cancel something). Buffering those as a "partial mouse sequence" would delay a real
+// Escape keystroke into the next `data` event instead of dispatching it immediately — a
+// regression discovered via the real-PTY e2e suite while fixing DH-0230, see mouse.ts's
+// MouseChunkAssembler doc comment.
 const SGR_MOUSE_PARTIAL_TRAILING_RE = new RegExp(`${String.fromCodePoint(0x1b)}\\[<[\\d;]*$`);
 
 /**
@@ -87,6 +95,60 @@ export function parseSgrMouseChunk(chunk: string): MouseEvent[] {
  */
 export function stripSgrMouseSequences(chunk: string): string {
   return chunk.replace(SGR_MOUSE_SPLIT_RE, "").replace(SGR_MOUSE_PARTIAL_TRAILING_RE, "");
+}
+
+// DH-0230: an SGR sequence is at most ~15 bytes for any coordinate pair a real terminal
+// reports (ESC [ < NNN ; NNNN ; NNNN M). A "partial" carried across chunk boundaries that
+// grows past this is not a split mouse sequence in flight — it's ordinary text that happens
+// to start with the introducer — so the assembler below abandons the carry rather than
+// buffering it forever.
+const MAX_PARTIAL_LEN = 24;
+
+function trailingPartial(text: string): string {
+  const m = SGR_MOUSE_PARTIAL_TRAILING_RE.exec(text);
+  return m !== null ? m[0] : "";
+}
+
+/**
+ * Reassembles SGR mouse sequences that a terminal splits across two stdin `data` events.
+ * Each SGR mouse scroll notch is itself a short ANSI escape sequence (`ESC[<...M`) read off
+ * stdin; under rapid/aggressive scrolling the PTY delivers many of these back-to-back and
+ * the OS-level read buffer can split one mid-sequence — e.g. `ESC[<64;10` in one `data`
+ * event and `;20M` in the next. `parseSgrMouseChunk`/`stripSgrMouseSequences` alone only
+ * recognize a trailing partial *within* a single chunk (and correctly drop it there); the
+ * continuation fragment arriving in the *next* chunk has no `ESC[<` prefix, so on its own it
+ * looks like ordinary text and falls through to `parseKeys` as literal garbage characters
+ * (DH-0230). This class fixes that by carrying an unresolved trailing partial forward and
+ * prepending it to the next chunk before parsing, so a sequence split at any point *after*
+ * the `ESC[<` introducer has already arrived is reassembled and parsed whole. (A split before
+ * that point — e.g. a bare trailing `ESC` — is deliberately left unbuffered: see
+ * `SGR_MOUSE_PARTIAL_TRAILING_RE`'s doc comment for why treating that as a mouse partial
+ * regressed real standalone Escape keypresses.) Pure/stateful but no I/O — app.ts owns one
+ * instance per session and feeds it every stdin chunk in arrival order.
+ */
+export class MouseChunkAssembler {
+  private carry = "";
+
+  /**
+   * Feed the next raw stdin chunk. Returns every complete SGR mouse event found (across the
+   * carried-over partial plus this chunk) and `rest`: the chunk's non-mouse bytes, safe to
+   * hand to `parseKeys` — with all complete mouse sequences and any new trailing partial
+   * removed (the partial is retained internally and re-prepended on the next call).
+   */
+  process(chunk: string): { events: MouseEvent[]; rest: string } {
+    const combined = this.carry + chunk;
+    const events = parseSgrMouseChunk(combined);
+    const withoutComplete = combined.replace(SGR_MOUSE_SPLIT_RE, "");
+    const partial = trailingPartial(withoutComplete);
+    if (partial.length > 0 && partial.length <= MAX_PARTIAL_LEN) {
+      this.carry = partial;
+      return { events, rest: withoutComplete.slice(0, withoutComplete.length - partial.length) };
+    }
+    // No partial, or an implausibly long one (not actually a split mouse sequence) — don't
+    // buffer it; let it fall through to parseKeys like ordinary text.
+    this.carry = "";
+    return { events, rest: withoutComplete };
+  }
 }
 
 /**
