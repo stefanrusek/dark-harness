@@ -1,4 +1,4 @@
-# ADR 0009: Workflow orchestration scripts are compatible with the "ad-hoc sub-agents only" invariant
+# ADR 0010: Workflow orchestration scripts are compatible with the "ad-hoc sub-agents only" invariant
 
 **Status:** Accepted (Fable, architect-on-call, 2026-07-19)
 

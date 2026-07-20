@@ -2,7 +2,7 @@
 // ad-hoc sub-agents with real control flow (agent(), parallel()) instead of turn-by-turn model
 // judgment. Peer of the Agent tool (ALL_TOOLS, tools/index.ts). Execution model: in-process
 // dynamic `import()` of a cwd-relative script file — explicitly NOT `new Function`/`eval` (ADR
-// 0004's trusted in-process execution posture; ADR 0009's invariant-8 scoping). MVP: no
+// 0004's trusted in-process execution posture; ADR 0010's invariant-8 scoping). MVP: no
 // pipeline()/schema/resumability/phase()/SSE/`/workflow` command — see the ticket's Non-goals.
 
 import path from "node:path";

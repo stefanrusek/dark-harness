@@ -189,15 +189,15 @@ command surface.
 
 Decisions on every Open Question below, plus the invariant-8 tension. The concrete MVP is
 spun off as **DH-0222** (a `ready` implementation ticket); this ticket stays as the research
-record. See also **ADR 0009** (`docs/adr/0009-workflow-scripts-vs-ad-hoc-agents.md`).
+record. See also **ADR 0010** (`docs/adr/0010-workflow-scripts-vs-ad-hoc-agents.md`).
 
-**The ad-hoc-only tension is resolved by ADR 0009, not an amendment.** CLAUDE.md §4 invariant
+**The ad-hoc-only tension is resolved by ADR 0010, not an amendment.** CLAUDE.md §4 invariant
 8 governs sub-agent *personas/identities* (predefined agent-definition files with a baked
 system prompt / `subagent_type` selected instead of an ad-hoc `{model, prompt}` spawn), not
 deterministic orchestration *control flow*. A Workflow script is the same category as
 `scripts/build.ts` — checked-in trusted automation — and every sub-agent it spawns still goes
 through the identical `spawnAgent({model, prompt, ...})` primitive with no baked identity. So
-invariant 8 does **not** block a Workflow script, and its wording needs no change. ADR 0009
+invariant 8 does **not** block a Workflow script, and its wording needs no change. ADR 0010
 records the scope note and its guardrails (ad-hoc spawns only; no selectable sub-agent
 personas; same fan-out budget). Reading #1 of "Biggest architectural tension" above is the
 adopted one.
@@ -205,7 +205,7 @@ adopted one.
 ## Open Questions — resolved
 
 1. **Invariant 8 — RESOLVED (does not block).** Governs personas, not control-flow scripts.
-   Recorded as ADR 0009 (a scope clarification, not an amendment). See ruling above.
+   Recorded as ADR 0010 (a scope clarification, not an amendment). See ruling above.
 2. **Execution model — RESOLVED: in-process dynamic `import()` of a trusted script file, no
    subprocess.** ADR 0004's trusted-execution posture (plus the fact that a Bash tool already
    runs arbitrary trusted code) settles this in favor of in-process execution for the MVP.
@@ -262,7 +262,7 @@ before any code is written.
 
 ### 2026-07-19 — architect ruling + MVP spun off (Fable)
 Ruled on all seven Open Questions (see "Open Questions — resolved" above) and the invariant-8
-tension. Wrote **ADR 0009** (`docs/adr/0009-workflow-scripts-vs-ad-hoc-agents.md`): invariant 8
+tension. Wrote **ADR 0010** (`docs/adr/0010-workflow-scripts-vs-ad-hoc-agents.md`): invariant 8
 governs sub-agent personas, not orchestration control-flow scripts, so a Workflow script is
 permitted without amending the invariant (guardrails: ad-hoc spawns only, no selectable
 personas, same fan-out budget). Spun off **DH-0222** as the `ready` MVP implementation ticket
