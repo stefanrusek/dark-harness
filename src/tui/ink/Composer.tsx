@@ -10,11 +10,16 @@ import { CURSOR_MARKER } from "./tokens.ts";
 
 export interface ComposerProps {
   state: TuiState;
+  /** DH-0231: width the input line wraps against. Optional (defaults to a wide value) so
+   * existing callers/tests that don't care about wrapping keep working unmodified; RootView
+   * passes the real `innerCols` it already computes for every other view. */
+  cols?: number;
 }
 
 const DEFAULT_HINT = "[Enter] send   [←] agent tree   [Ctrl+C] quit";
+const DEFAULT_COLS = 80;
 
-export function Composer({ state }: ComposerProps) {
+export function Composer({ state, cols = DEFAULT_COLS }: ComposerProps) {
   const hint = state.statusMessage ?? DEFAULT_HINT;
   // Embedded newlines from a bracketed-paste (DH-0026) are shown as a visible "⏎" glyph
   // on this one-line display only — `state.input` itself keeps the real newline characters.
@@ -30,8 +35,14 @@ export function Composer({ state }: ComposerProps) {
       <Box height={1}>
         <Text>{hint}</Text>
       </Box>
-      <Box height={1}>
-        <Text>{`> ${before}${CURSOR_MARKER}${after}`}</Text>
+      {/* DH-0231: fixed width + wrap="wrap" is what makes long input actually wrap instead of
+       * scrolling off-screen — without an explicit width, Yoga sizes the Box to fit its
+       * content instead of the terminal, so text just grows wider than the pane. No
+       * fixed height here (was `height={1}`): the Box now grows to fit however many wrapped
+       * rows the line needs, the same "footer grows beyond the App.tsx estimate" pattern the
+       * dropdown below already relies on. */}
+      <Box width={cols}>
+        <Text wrap="wrap">{`> ${before}${CURSOR_MARKER}${after}`}</Text>
       </Box>
       {dropdown && dropdown.length > 0 ? (
         <Box flexDirection="column">

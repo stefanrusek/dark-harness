@@ -38,7 +38,7 @@ export function RootView({ state, contentRows, cols, scrollBus }: RootViewProps)
         {...(scrollBus ? { scrollBus } : {})}
       />
       <Box paddingLeft={1}>
-        <Composer state={state} />
+        <Composer state={state} cols={Math.max(1, cols - 1)} />
       </Box>
     </Box>
   );

@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0231
 type: bug
-status: ready
+status: verifying
 owner: stefan
 resolution:
 blocked_by: []
@@ -62,3 +62,38 @@ During comprehensive TUI testing, observed that typing long lines of text causes
 Expected behavior: text should wrap to multiple lines within the input box, with the box expanding vertically.
 
 Related to layout/sizing of the input component, possibly in `src/tui/app.ts` or the input component's Ink/Yoga configuration.
+
+### 2026-07-19 — Fixed: input row now width-constrained and wraps
+
+Root cause confirmed exactly as assumed: `src/tui/ink/Composer.tsx`'s input row was a
+`<Box height={1}><Text>...</Text></Box>` with no `width` and no `wrap` prop. Ink/Yoga sizes an
+unconstrained `<Box>` to fit its content, not the terminal — so a long line just grew wider
+than the pane (rendered as horizontal scroll-off/truncation in a real terminal) instead of
+wrapping. `RootView.tsx` also never passed the pane's known column width down to `<Composer>`
+at all.
+
+Fix: `Composer` now takes an optional `cols` prop (default 80, so existing callers/tests keep
+working); the input row is `<Box width={cols}><Text wrap="wrap">...</Text></Box>` with the
+fixed `height={1}` removed so the box grows to however many wrapped rows are needed.
+`RootView.tsx` passes its already-computed `innerCols` through (minus 1 for the composer's
+existing `paddingLeft={1}`). Confirmed the underlying `state.input`/`inputCursor` model is a
+single logical string with no line breaks inserted by wrapping — only real newlines (e.g. from
+bracketed paste) — so history navigation and submission needed no changes; wrapping is purely
+`Composer`'s visual layer, exactly the simplest-correct option flagged in the ticket's Open
+Questions.
+
+Verified with new `Composer.test.tsx` cases via `ink-testing-library`'s `lastFrame()`: a
+120-char run of `"a"` at `cols={40}` (a) appears in full across the wrapped rows (not
+truncated), (b) no rendered row of the input area exceeds the 40-col width, and (c) the frame
+grows past the old fixed 2-row layout to fit the wrapped rows. A fourth case confirms the
+`cols`-omitted default path still renders correctly for callers/tests that don't care about
+width.
+
+Gates: `bun run typecheck` clean; `bun run lint` clean; `bun run test:coverage` 145/147 passed,
+100% overall line coverage — the 2 failures (`src/tui/mouse.test.ts`, `src/web/client/
+app.test.ts`) are concurrent DH-0230 in-progress work in this shared worktree, unrelated to
+this ticket's files (`src/tui/ink/Composer.tsx`, `Composer.test.tsx`, `RootView.tsx`, all
+passing). `bun run e2e`: `e2e/tui.test.ts`'s PTY boot test times out; confirmed via
+`git stash` that it fails identically with this change reverted — a pre-existing sandbox/
+build-timing gap (consistent with prior rounds' documented tmux/PTY environment issues), not a
+regression from this fix.
