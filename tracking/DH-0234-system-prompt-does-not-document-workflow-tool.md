@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0234
 type: bug
-status: ready
+status: verifying
 owner: iris
 resolution:
 blocked_by: [DH-0226]
@@ -96,3 +96,35 @@ Recommendation: after DH-0233 and DH-0234 land, consider a broader audit: what e
 - This shifts the problem from "maintain the prompt" to "define tools properly" — a better invariant
 
 Consider filing a follow-up ticket (post-DH-0234) to implement auto-generation of tool documentation rather than manual maintenance.
+
+### 2026-07-19 — Iris: implemented
+
+Added a new `AVAILABLE_TOOLS_SECTION` constant and "## Available tools" heading to
+`src/prompt/system-prompt.ts`, appended in `buildDefaultSystemPrompt` between the base
+discipline/contract prompt and the existing "Available skills" section (which stays for
+loaded skill *packages* only — a deliberately separate concept per the ticket's FR-1).
+Documents Bash; Read/Write/Edit/NotebookEdit/Glob/Grep (file I/O); the Todo family; Agent/
+Monitor/TaskOutput/SendMessage/TaskStop/Workflow (sub-agent orchestration); McpAuth — grouped
+by category per the ticket's Risks mitigation, not one flat list. Workflow gets the fuller
+treatment the ticket asked for: a minimal runnable example (`async (wf, input) => any`,
+`wf.agent(...)`, `wf.parallel([...])`, returning a result) plus a pointer to DH-0226 for the
+full design, read from the actual `WorkflowApi` shape in `src/agent/workflow/runner.ts` and
+the tool's real input schema in `src/agent/tools/workflow.ts` so the example matches the real
+API rather than a guess.
+
+**On the auto-generation follow-up (this ticket's own Notes, and the Open Question about
+manual vs. reflected docs):** agreed this is worth doing eventually — the same
+inspect-`ALL_TOOLS`-and-render pattern `renderSkillsSection`/`discoverSkills` already use for
+skills would work for tools too, and it structurally prevents exactly the drift this ticket
+exists to fix. Not building it in this pass: it would mean adding a structured
+usage-guidance/example field to every `Tool` definition across `src/agent/tools/*.ts` (a much
+larger, cross-cutting change to Core's territory, not a Prompt-only edit) and reworking how
+`Tool.description` (today: terse, aimed at the model's tool-call decision, not prose
+documentation) relates to a longer human-readable blurb. Recommend filing a real follow-up
+ticket for it, owned jointly by Core (tool metadata shape) and Prompt (renderer) — leaving
+that filing decision to the coordinator/owner rather than filing it myself, since it's a
+design call about a metadata shape I don't own outright.
+
+Combined into the same edit pass as DH-0229/DH-0233 (same file). `bun test src/prompt
+--coverage`: 100%/100% funcs+lines on `system-prompt.ts` for changed code. `typecheck`/`lint`
+clean. Moving to `verifying`.

@@ -2,7 +2,7 @@
 spile: ticket
 id: DH-0233
 type: bug
-status: ready
+status: verifying
 owner: iris
 resolution:
 blocked_by: [DH-0206]
@@ -84,3 +84,23 @@ This reveals the authorization gap in action:
 - **Visual expressiveness matters:** the difference between "here are 23 tickets" and "🟢 here are 23 tickets in verifying" is the colored span. One is a list; the other is actionable status.
 
 **Recommendation to Iris:** prioritize this as high-value from an agent-UX perspective. Once the system prompt documents colored spans, the visual quality and clarity of agent output improves measurably — without any code changes, just authorization.
+
+### 2026-07-19 — Iris: implemented
+
+Rewrote the "Output format" section of `src/prompt/system-prompt.ts` (`REQUIRED_CONTRACT`).
+Replaced the flat "raw HTML is never interpreted" line with: the one exception
+(`<span style="color: ...">`, hex or named), the full named-color allowlist read directly
+from `NAMED_COLORS` in `src/markdown/index.ts` (black, red, green, yellow, blue, magenta,
+cyan, white, gray/grey, orange, purple), hex format support (`#rgb`/`#rrggbb`), the explicit
+TUI limitation (hex degrades to plain uncolored text — TUI is 16-color ANSI only, named
+colors render everywhere), a citation of ADR 0009/DH-0206, and an explicit restatement that
+every other tag/attribute/malformed span still renders as inert literal text — the security
+boundary is unchanged. Also added a one-line nudge to use colored spans for semantic
+highlighting in prose, not just ASCII art, picking up the "visual expressiveness" point in
+the Notes above.
+
+Combined into the same edit pass as DH-0229 (same section, immediately adjacent) and DH-0234
+(new section right after) to avoid three separate patches to one file. `bun test src/prompt
+--coverage`: 100%/100% funcs+lines on `system-prompt.ts` for changed code (two pre-existing
+uncovered lines in `renderSelfInfoSection`, unrelated, unchanged before/after). `typecheck`/
+`lint` clean. Moving to `verifying`.

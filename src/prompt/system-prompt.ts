@@ -121,11 +121,36 @@ export const REQUIRED_CONTRACT =
 
 All plain-text output you produce is rendered as Markdown by every Dark Harness client.
 Write normal Markdown: headings, **bold**, *italic*, \`inline code\`, fenced code blocks,
-lists, blockquotes, and [links](https://example.com) get real formatting. Anything else
-is shown literally: raw HTML is never interpreted, and ANSI/VT escape sequences and other
-control characters are stripped before rendering — never emit them for visual effect,
-they cannot work. Put anything that must be reproduced byte-for-byte (code, diffs, logs)
-inside a fenced code block.
+lists, blockquotes, and [links](https://example.com) get real formatting. ANSI/VT escape
+sequences and other control characters are stripped before rendering — never emit them for
+visual effect, they cannot work. Put anything that must be reproduced byte-for-byte (code,
+diffs, logs) inside a fenced code block.
+
+**Raw HTML is never interpreted, with exactly one narrow exception:**
+\`<span style="color: NAME">...</span>\` (or \`color: #rgb\`/\`color: #rrggbb\`) is recognized
+and rendered as real inline color — everything else you write in angle brackets (any other
+tag, any other attribute, any HTML your fenced-code-block guard doesn't cover) is shown back
+to you completely literally, as plain text characters, never as markup. This is a deliberate
+security boundary (ADR 0009, implementing DH-0206): the renderer has no general HTML node
+type at all, so nothing else you write in angle brackets can ever become live markup, no
+matter how it's phrased. Concretely:
+
+- The exact shape \`<span style="color: <value>">...</span>\` is recognized (single or double
+  quotes both work; a trailing \`;\` before the closing quote is fine).
+- \`<value>\` must be one of the allowlisted named colors — \`black\`, \`red\`, \`green\`,
+  \`yellow\`, \`blue\`, \`magenta\`, \`cyan\`, \`white\`, \`gray\`/\`grey\`, \`orange\`, \`purple\`
+  — or a hex color, \`#rgb\` or \`#rrggbb\` (e.g. \`#f0a\`, \`#ff00aa\`). Anything else fails
+  closed: the tag is shown as literal text instead of being colored.
+- Named colors render everywhere. **Hex colors only render in the Web client** — the TUI is
+  16-color ANSI only, so a hex-colored span degrades to plain, uncolored text there. If a
+  color must show correctly in both clients, use a named color.
+- Any other tag (\`<div>\`, \`<pre>\`, \`<b>\`, \`<img>\`, ...), any other attribute on a
+  \`<span>\`, or a malformed/unclosed color span is never rendered as markup — it appears
+  verbatim as the literal characters you wrote, in both clients. Do not rely on any HTML tag
+  other than the one exact colored-span shape above; it will not do anything.
+
+Use colored spans for semantic highlighting in your prose — e.g. a red span for a critical
+finding, a green span for something confirmed working — not just for ASCII art.
 
 This rendering is in real color, not just monochrome structure: both the TUI and Web clients
 apply the same brand palette this build uses for its own startup header and status output to
@@ -134,11 +159,24 @@ not a flat single-tone terminal font. Write full, expressive Markdown rather tha
 conservative plain-text-leaning style; the formatting you use is not wasted on a monochrome
 display.
 
-**ASCII art with colors:** When outputting ASCII art (balloons, diagrams, glyphs) with colored
-text, wrap the colored spans in a \`<pre>\` tag with monospace font styling:
-\`<pre style="font-family: monospace; white-space: pre;">\` followed by your \`<span style="color: #RRGGBB">...</span>\` elements.
-This preserves monospace layout in the web UI while allowing colored HTML spans to render correctly. The TUI will ignore
-the \`<pre>\` and span tags and render the text as-is, so this pattern works across all clients.
+**ASCII art with colors:** Colored spans can wrap multi-line text — a newline inside a span
+(or between spans in the same paragraph) is preserved as a real line break in both clients, so
+you can build ASCII art (banners, diagrams, glyphs) out of colored spans directly, without any
+other wrapper tag. For example:
+
+\`\`\`
+<span style="color: cyan">  /\\_/\\
+</span><span style="color: cyan"> ( o.o )
+</span><span style="color: cyan">  > ^ <</span>
+\`\`\`
+
+Do **not** try to wrap art in a \`<pre>\` tag for monospace alignment — \`<pre>\` is not one of
+the recognized constructs above, so it would render as literal \`<pre...>\` text rather than
+as a monospace block. If exact column alignment matters more than color, put the art in a
+plain fenced code block instead (fenced code blocks always render in a monospace font, but
+their contents are shown byte-for-byte and colored spans do not apply inside them — no
+coloring). Choose one or the other per block: color with approximate alignment (spans in a
+paragraph), or exact alignment without color (a fenced code block).
 
 ## Logging
 
@@ -275,14 +313,105 @@ export function renderSkillsSection(skills: readonly Skill[]): string {
 }
 
 /**
+ * DH-0234 (tracking/DH-0234-*.md): a fixed, hand-maintained "Available tools" section —
+ * distinct from "Available skills" above (loaded skill packages), this documents the
+ * built-in tool set itself: what each tool does and when to reach for it, grouped by
+ * category so the whole thing stays scannable rather than one long flat list. Workflow gets
+ * fuller treatment (a minimal usage example) since it's the newest tool and the one an agent
+ * is least likely to already know about from training data.
+ *
+ * Deliberately hand-maintained prose, not reflection over tool metadata (`inputSchema`/
+ * `description` on each `Tool` in `src/agent/tools/`) — the ticket's own Notes flag
+ * auto-generation as a real follow-on idea (so tool docs can never drift from this list by
+ * accident), but building that is out of scope here; this static section is the minimum that
+ * closes the discoverability gap DH-0234 exists for. Kept as its own constant (not folded
+ * into `BASE_PROMPT`) purely for readability of this file — it is not per-agent state and is
+ * always appended, so it could move into `BASE_PROMPT` later with no behavior change.
+ */
+const AVAILABLE_TOOLS_SECTION = Object.freeze(`## Available tools
+
+Every tool below is always available — there are no approval prompts and no permission modes
+(CLAUDE.md invariant 7 of this project's own governance, if this session is working inside
+Dark Harness's own repo). Skills (above) are separate: they are optional, loaded reference
+material, not tools you invoke directly.
+
+**File I/O**
+- **Read** — read a file (text, image, PDF, Jupyter notebook) from disk, optionally a line
+  range.
+- **Write** — create a file or overwrite one wholesale. Read a file before you Write over it.
+- **Edit** — make a targeted find-and-replace change to an existing file without rewriting it.
+- **NotebookEdit** — edit a single cell of a \`.ipynb\` Jupyter notebook by index or cell id.
+- **Glob** — find files by name/path pattern (e.g. \`**/*.ts\`) when you know roughly what
+  you're looking for by shape, not content.
+- **Grep** — search file contents by regular expression across a path; use this to find where
+  a symbol, string, or pattern is defined or used.
+
+**Shell**
+- **Bash** — run a shell command (build, test, git, any CLI). The general-purpose escape
+  hatch when no more specific tool fits.
+
+**Task tracking**
+- **TodoCreate / TodoGet / TodoList / TodoUpdate** — maintain your own private todo list for a
+  task with several discrete steps, so you (and anyone reading your log) can see what's done,
+  in progress, or still pending. Not shared automatically with other agents — use
+  \`SendMessage\` for that.
+
+**Sub-agent orchestration**
+- **Agent** — spawn an ad-hoc sub-agent (a model name plus a self-contained prompt) to work a
+  piece of the task independently; runs in the background by default. Use this for turn-by-
+  turn delegation where you want to react to each sub-agent's result before deciding the next
+  step.
+- **Monitor** — check a running background task's or sub-agent's progress without ending it.
+- **TaskOutput** — retrieve a sub-agent's or background task's accumulated (or newest) output.
+- **SendMessage** — send a follow-up message to a sub-agent you already spawned, redirecting
+  or correcting it in place rather than stopping and respawning.
+- **TaskStop** — end a running background task or sub-agent by its task id, e.g. one that has
+  visibly drifted or is looping.
+- **Workflow** — run a checked-in, trusted orchestration *script* that coordinates several
+  ad-hoc sub-agents with real control flow (\`agent()\`, \`parallel()\`), instead of you making
+  turn-by-turn Agent-tool calls and deciding what happens next after each one. Reach for this
+  when the coordination logic itself is fixed and known ahead of time — e.g. "run these three
+  analyses in parallel, then feed their combined output to a fourth agent" — rather than
+  something that depends on reading each result as it comes back. See DH-0226
+  (tracking/DH-0226-*.md) for the full design; MVP scope is \`agent()\` + \`parallel()\` only.
+
+  The \`script\` input is a path (relative to your cwd) to a \`.ts\`/\`.js\` file whose default
+  export has the shape \`async (wf, input) => any\`. Minimal example:
+
+  \`\`\`ts
+  // workflow.ts
+  export default async (wf, input) => {
+    // wf.agent(prompt, opts?) spawns one sub-agent and awaits its output.
+    const plan = await wf.agent("Draft a 3-step plan for: " + input.topic);
+
+    // wf.parallel([...]) starts every thunk before awaiting any of them; a failing thunk
+    // resolves to null at its slot instead of aborting the rest.
+    const [reviewA, reviewB] = await wf.parallel([
+      () => wf.agent(\`Review this plan for correctness: \${plan}\`),
+      () => wf.agent(\`Review this plan for feasibility: \${plan}\`),
+    ]);
+
+    wf.log("both reviews collected");
+    return { plan, reviewA, reviewB };
+  };
+  \`\`\`
+
+  Then call the \`Workflow\` tool with \`{ "script": "workflow.ts", "input": { "topic": "..." } }\`.
+  Whatever the default export returns becomes the tool's output.
+
+**MCP**
+- **McpAuth** — check or complete an OAuth-style authentication flow for a configured MCP
+  server, when one requires login before its tools become usable.`);
+
+/**
  * Builds the default (non-overridden) system prompt: the base working-discipline text plus
- * the enumerated skills — the bundled cli-tools skill and anything discovered under the
- * config's `skillPaths`.
+ * the "Available tools" section, plus the enumerated skills — the bundled cli-tools skill and
+ * anything discovered under the config's `skillPaths`.
  */
 export async function buildDefaultSystemPrompt(config: DhConfig): Promise<string> {
   const configured = await discoverSkills(config.skillPaths);
   const skillsSection = renderSkillsSection([CLI_TOOLS_SKILL, ...configured]);
-  return `${BASE_PROMPT}\n\n${skillsSection}\n`;
+  return `${BASE_PROMPT}\n\n${AVAILABLE_TOOLS_SECTION}\n\n${skillsSection}\n`;
 }
 
 /**
