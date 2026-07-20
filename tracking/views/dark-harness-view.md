@@ -47,6 +47,7 @@ source: tracking/
 | [DH-0232](../DH-0232-markdown-link-underlines-don-t-terminate-at-link-end.md) | Markdown link underlines don't terminate at link end (TUI + Web rendering bug) | status: verifying |
 | [DH-0233](../DH-0233-system-prompt-does-not-document-colored-span-feature.md) | System prompt does not document colored-span feature (DH-0206 implementation gap) | DH-0206 |
 | [DH-0234](../DH-0234-system-prompt-does-not-document-workflow-tool.md) | System prompt does not document Workflow tool | DH-0226 |
+| [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | status: refining |
 
 ## Board
 
@@ -64,12 +65,16 @@ source: tracking/
 | [DH-0053](../DH-0053-no-model-provider-fallback-chains.md) | No model/provider fallback chains — a down or rate-limited primary model has no automatic substitute 🔒 | feature | stefan |
 | [DH-0075](../DH-0075-no-askuserquestion-equivalent-tool-for-human-in-the-loop-clarification-in-interactive-tui-web-sessions.md) | No AskUserQuestion-equivalent tool for human-in-the-loop clarification in interactive TUI/Web sessions 🔒 | feature | stefan |
 | [DH-0213](../DH-0213-research-dh-native-workflow-tool-workflow-command-modeled-on-claude-code-s-workflow-tool.md) | Research: dh-native Workflow tool + /workflow command, modeled on Claude Code's Workflow tool | feature | stefan |
+| [DH-0236](../DH-0236-dead-code-dh-ascii-logo-dh-ascii-logo-compact-unused-after-dh-0224-migrated-every-surface-to-the-monogram-assets.md) | Dead code: DH_ASCII_LOGO / DH_ASCII_LOGO_COMPACT unused after DH-0224 migrated every surface to the monogram assets | bug | stefan |
+| [DH-0237](../DH-0237-required-contract-in-system-prompt-ts-has-accreted-the-whole-output-format-section-doc-comment-is-now-stale-and-override-inheritance-is-undocumented.md) | REQUIRED_CONTRACT in system-prompt.ts has accreted the whole Output-format section; doc comment is now stale and override-inheritance is undocumented | bug | stefan |
+| [DH-0238](../DH-0238-adr-number-collision-two-adrs-both-numbered-0009-colored-span-markdown-vs-workflow-scripts-invariant.md) | ADR number collision: two ADRs both numbered 0009 (colored-span markdown vs Workflow-scripts invariant) | bug | stefan |
 
 ### refining
 
 | ID | Title | Type | Owner |
 | --- | --- | --- | --- |
 | [DH-0175](../DH-0175-remove-or-formally-sunset-the-deprecated-task-failed-text-marker-self-report-path.md) | Remove or formally sunset the deprecated TASK_FAILED text-marker self-report path | bug | stefan |
+| [DH-0235](../DH-0235-refactoring-round-pr-10-wave-sweep-monogram-header-palette-mcp-oauth-workflow-colored-span-markdown.md) | Refactoring round: PR#10 wave sweep (monogram/header/palette, MCP OAuth, Workflow, colored-span markdown) | bug | stefan |
 
 ### implementing
 
