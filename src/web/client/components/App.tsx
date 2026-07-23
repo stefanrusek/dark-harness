@@ -56,9 +56,12 @@ export function App({
         <AppHeader {...(headerInfo ? { headerInfo } : {})} />
       </div>
       <nav className="sidebar">
-        <div className="brand">
+        {/* DH-0248: the masthead above now carries the "Dark Harness" wordmark at larger
+            scale directly above the sidebar — keeping the literal text here too would stack
+            two wordmarks. Keep the small mark as the nav's own identity anchor, drop the
+            redundant text (Susan's non-gating taste call per the ticket). */}
+        <div className="brand" role="img" aria-label="Dark Harness">
           <LogoMark className="brand-mark" />
-          Dark Harness
         </div>
         <ConnectionPill status={state.connectionStatus} />
         <Sidebar state={state} onSelect={onSelectAgent} now={now} />

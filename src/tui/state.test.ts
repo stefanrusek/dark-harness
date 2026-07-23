@@ -355,7 +355,7 @@ describe("reducer: sse_event tool_call / tool_result (DH-0089)", () => {
 
     ({ state } = reducer(state, { type: "sse_event", event: toolResult({ isError: false }) }));
     agent = state.agents.get("root");
-    expect(agent?.transcript).toEqual([{ role: "tool", text: "Bash: echo hi" }]);
+    expect(agent?.transcript).toEqual([{ role: "tool", text: "Bash: echo hi", durationMs: 12 }]);
     expect(agent?.pendingToolCall).toBeNull();
   });
 
@@ -365,7 +365,9 @@ describe("reducer: sse_event tool_call / tool_result (DH-0089)", () => {
     ({ state } = reducer(state, { type: "sse_event", event: toolCall() }));
     ({ state } = reducer(state, { type: "sse_event", event: toolResult({ isError: true }) }));
     const agent = state.agents.get("root");
-    expect(agent?.transcript).toEqual([{ role: "tool", text: "Bash: echo hi", toolError: true }]);
+    expect(agent?.transcript).toEqual([
+      { role: "tool", text: "Bash: echo hi", toolError: true, durationMs: 12 },
+    ]);
     expect(agent?.pendingToolCall).toBeNull();
   });
 

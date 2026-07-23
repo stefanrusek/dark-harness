@@ -1,5 +1,5 @@
 // Workflow tool's injected API (DH-0226) — deterministic sub-agent orchestration primitives
-// built directly on top of the existing ctx.spawnAgent/ctx.tasks primitives (ADR 0009: a
+// built directly on top of the existing ctx.spawnAgent/ctx.tasks primitives (ADR 0010: a
 // Workflow script is trusted control-flow, not a named sub-agent persona; every spawn it makes
 // still goes through the exact same ad-hoc `spawnAgent({model, prompt})` path as the `Agent`
 // tool, with the same fan-out budget backstop). MVP scope only: agent() + parallel(); no

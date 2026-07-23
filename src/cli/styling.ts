@@ -14,23 +14,20 @@
 //
 // DH-0191: the bare "\x1b[<code>m...\x1b[0m" wrapping is now the shared `wrapSgr` primitive
 // (src/design-tokens.ts) rather than an independent copy of the same splicing logic — every
-// helper below is now a thin call into it. `CLI_RESET` is re-exported (rather than folded
-// away) since help.ts's own section-header styling composes it directly with a bespoke
-// cyan+bold code that has no single named helper here. The status→SGR map that used to be
+// helper below is now a thin call into it. The status→SGR map that used to be
 // this module's own `CLI_STATUS_COLOR` copy is gone too — `cliStatusDot` now reads the
 // canonical `STATUS_TOKENS[status].sgr` (design-tokens.ts, DH-0137) directly, same table Web
 // and TUI already read, so a status color can never drift between surfaces (a regression-guard
 // test in design-tokens.test.ts enforces that no other file independently re-declares that
 // same shaped status-color table).
 import type { AgentStatus } from "../contracts/index.ts";
-import { SGR_RESET, STATUS_TOKENS, wrapSgr } from "../design-tokens.ts";
+import { STATUS_TOKENS, wrapSgr } from "../design-tokens.ts";
 
 export const CLI_GREEN = "32";
 export const CLI_RED = "31";
 export const CLI_YELLOW = "33";
 export const CLI_DIM = "2";
 export const CLI_BOLD = "1";
-export const CLI_RESET = Object.freeze(SGR_RESET);
 
 export function cliColorize(text: string, code: string, tty: boolean): string {
   return tty ? wrapSgr(code, text) : text;

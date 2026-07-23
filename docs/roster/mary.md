@@ -790,3 +790,146 @@ unrelated flaky `src/web/client/app.test.ts` failure under full-suite parallel l
 standalone, outside TUI scope), `bun run e2e` (41/41, including the real-PTY boot test that
 caught the Escape-keypress regression). Transitioned DH-0230 to `verifying` via spile-ops with
 a full Notes writeup. Commit `f8594ab`.
+
+### 2026-07-20 — DH-0245: Header A2 was never actually reaching the interactive session
+
+Owner-reported, coordinator-diagnosed bug: the real gradient Header A2 banner
+(`renderHeaderA2`, `run.ts`'s pre-mount print) got wiped by Ink's alt-screen clear before an
+operator ever saw it — what they mistook for "the header" was `RootView.buildRootEmptyText`'s
+plain, uncolored `formatEmptyStateLines` content, shown only pre-first-message and gone for
+good the instant the first turn landed. Coordinator's own root-cause read was precise; I
+verified it against the code (confirmed via grep that none of `TitleBar`/`Header`/
+`RootView`'s empty-state path touched `paint()`/`BRAND`) rather than taking it fully on faith,
+same "verify, don't just implement" instinct as Round 3's deadlock fix.
+
+**Structural call: synthetic leading rows in `TranscriptPane`'s own flat `lines: string[]`
+array**, not a separate always-rendered `<Box>` (the ticket's two offered shapes). This fell
+out naturally once I actually read `TranscriptPane.tsx`: it already worked entirely in a
+"pre-rendered ANSI row list" domain — `renderTranscript` returns raw styled strings,
+`emptyText` was already just a `\n`-joined string prepended ahead of `scroll-viewport.ts`'s
+windowing. A new optional `headerLines?: string[]`, unconditionally prepended
+(`[...headerLines, "", ...bodyLines]`), needed *zero* changes to `scroll-viewport.ts` itself —
+confirming the ticket's own stated Assumption — and got persistence-past-first-message and
+scroll-to-top-reveals-it for free, since it's just more rows in the same array everything else
+already scrolls through. A fixed `<Box>` above `TranscriptPane` would have needed new
+frame-height math in `App.tsx` (`HEADER_ROWS` etc.) and *wouldn't* have satisfied "scrolls
+with content" at all — the ticket's own Risk note called this out correctly in advance.
+
+**Threading the real `ColorLevel`/`HeaderStatusFacts` required a genuinely new plumbing
+path**, since nothing before this ticket carried anything except `TuiState` from `app.ts`'s
+`startTui` down into the Ink tree. Deliberately did *not* fold this into `TuiState`/the
+reducer (which would mean touching every test that constructs `initialState` and dispatches
+actions, for a value that's static for the whole session and never changes via user action) —
+instead added it as a second, sibling closed-over value alongside `scrollBus` at the
+`mountInk` layer: `StartTuiOptions.header` -> `mountInk`'s new 5th param (captured once,
+included in every `rerender`, since — unlike `state` — it never changes mid-session) ->
+`App`'s new optional prop -> `RootView` only. `src/cli/run.ts`'s two `deps.startTui` call
+sites (connect-without-web and local-mode) now pass `{ header: { facts: a2Facts, level } }` —
+literally the same `a2Facts`/`level` values each branch already built for its own pre-mount
+`renderHeaderA2` print two lines above, so there's no new fact-gathering, just reuse.
+
+**`buildRootEmptyText` shrank on purpose**, from `[logo, version, "", hint]` down to just the
+hint (`"Type a message below to get started."`) — the app-identity banner it used to carry
+moved to `headerLines` (via a direct `renderHeaderA2` call, which is *also* where the plain-
+terminal/no-color fallback now comes from, automatically, satisfying User Story 4's "same
+fallback, not a third string" requirement with zero new fallback code). Leaving the old logo
+content in `buildRootEmptyText` too would have double-printed the wordmark once `header` was
+supplied. Cross-domain note for whoever touches `src/cli/header.ts`/`src/design-tokens.ts`
+next: `RootView.tsx` and `App.test.tsx`/`app.test.ts` now import `HeaderStatusFacts`/
+`renderHeaderA2`/`ColorLevel` directly from Core's `src/cli/header.ts`/`src/design-tokens.ts`
+— an explicit ticket-mandated reuse, not an accidental ownership-line crossing (this ticket's
+own Functional Requirements said to reuse those primitives directly, not refork them).
+
+**Verified in a real PTY, not just `ink-testing-library`**, per the ticket's own Risk note —
+built `dist/dh` (`bun run build`), ran it in a real `tmux` 100x35 session with
+`COLORTERM=truecolor` against this repo's real `dh.json`/`secrets.env` (real Anthropic/Bedrock
+credentials, real model reply, not a mock). Confirmed by reading the raw `tmux capture-pane
+-e` output (real per-character `\x1b[38;2;R;G;Bm` truecolor escapes, not just plain glyphs):
+banner visible pre-first-message in real color; banner's tail still visible above a real
+model's real reply after sending "hello there"; and — driving 15 synthetic SGR wheel-up mouse
+events (`\x1b[<64;10;10M`, the exact wire shape `mouse.ts` parses) since there's no keyboard
+scroll binding — the full wordmark reappeared at the very top after scrolling up through 20
+turns. All three match what the unit tests already asserted structurally; this is the "trust
+the real render, not just unit coverage" lesson from the DH-0065/DH-0230 rounds applied again.
+
+Gates: typecheck/lint clean; `test:coverage` 100.0% line coverage (15668/15668), 145/146 files
+— the one failure (`src/web/client/app.test.ts`, Susan's domain, a DH-0135 composer-focus
+test) is the same flaky-under-full-parallel-load test already documented in this file's
+DH-0230 entry; reproduced-vs-standalone-checked again this round (fails only under the full
+isolated-process run, 43/43 clean standalone) and touches nothing this ticket changed.
+Transitioned DH-0245 to `verifying` via spile-ops with a full Story→test mapping in its Notes.
+
+Open thread for a future round: none blocking. If a later ticket ever wants the in-session
+banner to also reflect a *live* resize (e.g. shrinking below the 30-row gate mid-session
+should flip it to the plain fallback), that already works for free — `RootView` re-derives
+`headerLines` from `state.size` on every render, so a `resize` action naturally re-evaluates
+`sizeGateOk` — worth a quick note if anyone doubts it, but I didn't add a dedicated live-resize
+test this round (out of the ticket's four User Stories as written).
+
+### 2026-07-20 — DH-0246: tool-call grouping/expando (port of DH-0199 to the TUI)
+
+Ported Web's collapsed-by-default tool-call grouping to `TranscriptPane.tsx`. Full Story→test
+mapping is in the ticket's Notes; durable judgment calls worth keeping here:
+
+- **Lifted the shared algorithm cleanly** — `groupTranscript`/`isGroupableToolTurn` moved
+  verbatim into a new `src/transcript-grouping.ts`, generic over a structural `GroupableTurn`
+  shape (`{role, terminalStatus?}`) so neither client's own `Turn` type needs an adapter.
+  `Transcript.tsx` was not disruptively coupled to DOM/React for this specific function — it
+  was already a pure function operating on plain arrays, just defined in the wrong file. This
+  is a useful signal for a future "should I lift this" call: if the function you're eyeing
+  takes/returns plain data with no JSX/DOM/hook inside it, even if it lives inside a `.tsx`
+  file, it's probably liftable without touching its callers' behavior.
+
+- **New event-bus, not a `TuiState` field, for tool-row focus/navigation** — this was the
+  hard design call. `AgentTree`/`PickerView`'s convention (up/down/enter routed through the
+  reducer's `selectedIndex`) doesn't fit here because the ticket requires expand/collapse
+  state to stay local to `TranscriptPane` (matching DH-0199's Web `useState`), and the
+  reducer has no way to know how many focusable rows currently exist without also knowing
+  about local expand state it isn't supposed to own. Resolved by adding `ToolFocusBus`
+  (`src/tui/ink/tool-focus-bus.ts`) — the exact same pattern `scrollBus` already uses for
+  wheel-scroll (DH-0126): `app.ts`'s stdin handler decides *when* a keystroke means "move
+  transcript focus" (based on `state.view.kind`/`state.input`, both already reducer-visible),
+  emits a raw up/down/activate intent, and `TranscriptPane` resolves it against its own local
+  state. No reducer or `TuiState` change was needed for interaction at all — only the
+  `Turn.durationMs` field (data, not interaction) touched `state.ts`.
+
+- **Real bug the real-PTY spike caught that no unit test had**: the "clamp focusIndex during
+  render" pattern (mirrors the existing scroll-offset clamp) had a permanent-stuck-at--1 bug
+  — an empty transcript clamps focus to -1 (nothing to focus), and without a `Math.max(idx,
+  0)` floor before the `Math.min`, `Math.min(-1, laterLength-1)` never recovers once real
+  tool rows appear later. My own component-level unit tests (which all seeded a non-empty
+  transcript from the start) never exercised the empty→non-empty transition, so they all
+  passed while the bug was live. Only caught it because `e2e/spikes/tui/
+  spike-tool-call-grouping.ts` drives the real flow from a genuinely empty session (spawn
+  event arrives before any tool call), same "trust the real render, not just unit coverage"
+  lesson as DH-0065/DH-0230/DH-0245 before it. Added a dedicated regression test
+  ("focus recovers to the first tool row once one appears, after starting on an empty
+  transcript") once I understood the mechanism, rather than leaving the fix to the spike
+  alone.
+
+- **Reused AgentTree/PickerView's literal `"> "` marker for focus**, applied by replacing the
+  row's normal gutter glyph (e.g. `"⚙ "` → `"> "`) rather than adding a prefix column — keeps
+  the existing `TRANSCRIPT_GUTTER_COLS`/wrap-width math untouched, so no frame-height/wrapping
+  side effects from this ticket (the Risks section's frame-height concern turned out to be a
+  non-issue: an expanded group/detail is just more rows in the same flat `lines: string[]`
+  array `scroll-viewport.ts` already windows — same structural pattern DH-0245's header-lines
+  addition used, confirmed by inspection before writing any code).
+
+- **Coordinating on a shared worktree**: Susan was concurrently fixing DH-0129 in
+  `src/web/client/components/Transcript.tsx` (the same file I needed to edit for the
+  shared-module import swap). Her commit `86c1e87` landed while I was mid-round and picked up
+  my uncommitted `transcript-grouping.ts` + `Transcript.tsx` edits cleanly (same working
+  tree) — confirmed after the fact via `git show 86c1e87 --stat` and re-reading the merged
+  file rather than assuming it survived intact.
+
+Gates: typecheck/lint/test:coverage (100% overall line coverage, 2668+ tests)/e2e (41/41) all
+green. Real-PTY verification via `e2e/spikes/tui/spike-tool-call-grouping.ts` (real compiled
+binary, real tmux PTY, scripted mock provider): 7/7 checks passed — collapse-by-default,
+Down+Enter expand, member-row detail (input+result+duration), re-collapse. Transitioned
+DH-0246 to `verifying` via spile-ops with a full Story→test mapping in its Notes.
+
+Open thread for a future round: none blocking. The spike's final captured pane shows the
+closing assistant reply text tripled ("Both commands ran." x3) — looked like a benign tmux
+capture/redraw artifact unrelated to this ticket's scope (assistant-turn rendering, not
+tool-call grouping), didn't chase further under this ticket's budget; worth a glance if a
+future round touches assistant-turn redraw/dedup logic.

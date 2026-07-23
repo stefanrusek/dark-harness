@@ -323,6 +323,36 @@ conventions apply to both trees going forward:
 
 ---
 
+## 6.2 The brand-launch moment — one brand object, per-surface idiom (added 2026-07-20, DH-0245/DH-0248)
+
+Every interactive surface earns a real branded launch moment (the wordmark + status the
+operator sees on start), but it is realized **in that surface's own native idiom** — do not
+port one surface's *mechanism* to another. What is shared is the brand *object*, never the
+delivery mechanism:
+
+- **Shared across surfaces:** one mark (the DH monogram, `logo.svg`/`<LogoMark>`), one
+  "Dark Harness" wordmark, one green→cyan gradient — `BRAND.harnessGreen #9ECE6A` →
+  `BRAND.signalCyan #7DCFFF` (`src/design-tokens.ts`; the exact stops `LogoMark`'s SVG
+  `linearGradient` uses; Web mirrors them as `--brand-grad-start`/`--brand-grad-end`). A user
+  moving between the TUI and the Web UI must see the *same* brand object, not two lookalikes
+  with different greens.
+- **Per-surface mechanism, chosen for that surface's constraints, NOT copied:**
+  - **TUI (DH-0245):** a *synthetic scrollable leading transcript entry*, forced by a
+    TUI-specific bug — Ink's alt-screen clear wipes any fixed pre-mount banner, so the only
+    way to make Header A2 persist and reappear on scroll-to-top was to make it real transcript
+    content.
+  - **Web (DH-0248):** a *fixed, non-scrolling masthead* in the top grid band. The Web has no
+    alt-screen wipe to work around, and a persistent masthead is the better outcome (stays
+    glanceable all session, vs. the TUI's banner hiding once you scroll down). Web must **not**
+    push the brand moment into the transcript scroll region to mimic the TUI — that would be
+    porting a bug-workaround as if it were the design.
+- **Rule:** when a "brand moment" ticket exists for a new surface, share the palette/mark/
+  wordmark; decide placement + persistence from *that* surface's real constraints. The reason
+  one surface scrolls its header and another pins it is not inconsistency — it's each surface
+  answering the same intent (a persistent brand moment) correctly for its own medium.
+
+---
+
 ## 8. README / repo-front conventions (added 2026-07-19, DH-0227/DH-0228)
 
 The repo's front door — the README hero and the external social-preview card — is a designed

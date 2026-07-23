@@ -52,6 +52,15 @@
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /* DH-0248: masthead wordmark gradient — the exact same two stops as LogoMark.tsx's SVG
+     `linearGradient` (BRAND.harnessGreen -> BRAND.signalCyan, per style-guide §6.2), so the
+     monogram and the wordmark next to it read as one continuous gradient object. Kept as
+     `:root` vars so the value lives in exactly one place; the light-theme override below
+     intentionally reuses the same two values (mid-luminance, legible on both backgrounds —
+     see the ticket's Assumptions section). */
+  --brand-grad-start: #9ece6a;
+  --brand-grad-end: #7dcfff;
 }
 
 @media (prefers-color-scheme: light) {
@@ -125,22 +134,104 @@ button {
   min-width: 0;
 }
 
+/* DH-0248: the masthead — the Web's own brand-launch moment (style-guide §6.2), replacing the
+   old thin plain-text one-liner. Three zones: brand (mark + gradient wordmark) · build
+   (version/build identity) · a right-aligned config-instrument chip row. Lives in the fixed
+   `.app-header-slot` grid area (`auto`-sized row, App.tsx) — never scrolls with the
+   transcript. `min-width: 0` + `flex-wrap` let the chip row wrap onto a second line on narrow
+   viewports instead of forcing horizontal page scroll. */
 .app-header {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-4);
-  padding: var(--space-2) var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.app-header-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.app-header-mark {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+/* Gradient text fill, sourced from the shared `--brand-grad-start`/`--brand-grad-end` vars
+   (same stops as LogoMark's SVG gradient). The solid `color: var(--text)` fallback is
+   declared first so any browser/context that doesn't paint `background-clip: text` (or
+   forced-colors mode) still shows a legible wordmark instead of invisible transparent text —
+   see the ticket's Risks section and User Story on light/dark legibility. */
+.app-header-wordmark {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  background: linear-gradient(90deg, var(--brand-grad-start), var(--brand-grad-end));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* One-shot fade+rise entrance on mount (~400ms), gated behind reduced-motion — a CSS
+   `animation` on the mounted element only ever plays once per mount and never re-fires on
+   subsequent re-renders, satisfying the "one-shot, never loops" requirement without any JS
+   state. */
+@media (prefers-reduced-motion: no-preference) {
+  .app-header-wordmark {
+    animation: app-header-wordmark-in 400ms var(--ease) both;
+  }
+}
+
+@keyframes app-header-wordmark-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.app-header-version {
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-dim);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.app-header-logo {
-  font-weight: 700;
-  color: var(--text);
+.header-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  min-width: 0;
+}
+
+.header-chip {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* DH-0248: the "no token" auth-warning chip — matches the cross-surface "no token" warning
+   treatment (TUI header.ts's authText/warnGlyph) via the shared --accent color, never
+   color-only (the chip also carries the literal "⚠ no token" text/glyph). */
+.header-chip-warn {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .sidebar {

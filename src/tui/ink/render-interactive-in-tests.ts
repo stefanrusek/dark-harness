@@ -25,13 +25,10 @@
 // env cannot affect any other test file, and the real CI env of the job is untouched for every
 // non-TUI file.
 
-function clearCiEnvForInteractiveInkRender(): true {
-  // `delete`, not `= undefined` — assigning `undefined` to a `process.env` key coerces to the
-  // string "undefined", which `is-in-ci` still counts as CI-present via `'CI' in env`.
-  delete process.env.CI;
-  delete process.env.CONTINUOUS_INTEGRATION;
-  return true;
-}
+// DH-0244: the shared clearing body lives in `./clear-ci-env.ts`. Importing it here has no
+// side effect by itself — the `delete` only runs when the function is called below, at this
+// module's own load time, which is what preserves this module's load-order guarantee.
+import { clearCiEnvForInteractiveInkRender } from "./clear-ci-env.ts";
 
 // The env-clearing runs as this initializer evaluates on import. Wrapped in `Object.freeze` per
 // the repo's no-module-scope-side-effects lint rule's sanctioned escape hatch — the actual work

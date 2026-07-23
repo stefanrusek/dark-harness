@@ -10,7 +10,10 @@ import { runSseTransport } from "../client-core/sse-transport.ts";
 import { sendCommand } from "./http-client.ts";
 import type { InkMount } from "./ink/mount.ts";
 import { mountInk } from "./ink/mount.ts";
+import type { RootViewHeader } from "./ink/RootView.tsx";
 import { createScrollBus } from "./ink/scroll-bus.ts";
+import { createToolFocusBus } from "./ink/tool-focus-bus.ts";
+import type { KeyEvent } from "./keys.ts";
 import { parseKeys } from "./keys.ts";
 import { MouseChunkAssembler } from "./mouse.ts";
 import { MouseLifecycle } from "./mouse-lifecycle.ts";
@@ -21,6 +24,15 @@ import type { Action, Effect, TuiState } from "./types.type.ts";
 // GET /api/events) — see docs/handoffs/tui.md status log. DH-0185: relocated here from the
 // now-deleted sse-client.ts when the TUI moved onto the shared client-core transport.
 export const EVENTS_PATH = "/api/events";
+
+/** DH-0246: maps a raw up/down/enter `KeyEvent` to the `ToolFocusBus` event it means — a
+ * 3-way switch rather than a lookup table since `KeyEvent` is a discriminated union without a
+ * shared "up"/"down"/"enter" string field to key a `Record` off directly. */
+function toolFocusEventFor(key: Extract<KeyEvent, { kind: "up" | "down" | "enter" }>) {
+  if (key.kind === "up") return "up" as const;
+  if (key.kind === "down") return "down" as const;
+  return "activate" as const;
+}
 
 /** DH-0126: lines the transcript scrolls per wheel notch — no per-notch line-count is
  * reported by SGR 1006 (one event = one notch), so this is a fixed, editor-typical step. */
@@ -127,6 +139,12 @@ export interface StartTuiOptions {
    * at the production cap sits behind minutes of jittered backoff). Production callers omit
    * it. */
   maxSseFailures?: number;
+  /** DH-0245: Header A2's facts + the real `ColorLevel` `run.ts` already resolved (via
+   * `detectColorLevel`) for its own pre-mount stdout print — passed through unchanged so the
+   * in-session root-view banner renders the same content, in the same color, through the same
+   * `renderHeaderA2` pipeline, rather than defaulting to `"none"`/re-deriving it. Omitted by
+   * every existing test that doesn't exercise this feature. */
+  header?: RootViewHeader;
 }
 
 /**
@@ -207,6 +225,7 @@ export async function startTui(
     // unconditionally from `cleanup()` below even if `enable()` was never reached.
     const mouseLifecycle = new MouseLifecycle((s) => stdout.write(s));
     const scrollBus = createScrollBus();
+    const toolFocusBus = createToolFocusBus();
 
     function draw(): void {
       inkInstance.rerender(state);
@@ -330,7 +349,7 @@ export async function startTui(
 
     stdout.write(ALT_SCREEN_ENTER + HIDE_CURSOR + BRACKETED_PASTE_ENABLE);
     mouseLifecycle.enable();
-    inkInstance = mountInk(state, stdout, stdin, scrollBus);
+    inkInstance = mountInk(state, stdout, stdin, scrollBus, opts.header, toolFocusBus);
     stdin.setRawMode?.(true);
     stdin.setEncoding?.("utf8");
     stdin.resume?.();
@@ -358,6 +377,25 @@ export async function startTui(
         }
       }
       for (const key of parseKeys(rest)) {
+        // DH-0246: up/down/enter mean "move/activate the transcript's tool-call row focus"
+        // instead of their normal reducer meaning exactly when that normal meaning is
+        // otherwise a no-op — see `tool-focus-bus.ts`'s header comment for why this lives here
+        // rather than in the reducer. In the "agent" view (read-only detail pane) all three
+        // keys are unhandled by `handleAgentKey` today; in the "root" view, up/down/enter are
+        // only ever meaningful once the operator has typed something (autocomplete nav, or
+        // sending the composer's text) — with `input === ""` they already no-op in the
+        // reducer (confirmed: `visibleAutocomplete` never shows for an empty query, and
+        // `handleRootKey`'s "enter" branch returns unchanged state for blank input), so
+        // reclaiming them here for tool-row focus takes nothing away from existing behavior.
+        // "tree"/"picker" views keep their own up/down/enter (agent tree nav, model picker)
+        // untouched.
+        const wantsToolFocus =
+          (key.kind === "up" || key.kind === "down" || key.kind === "enter") &&
+          (state.view.kind === "agent" || (state.view.kind === "root" && state.input === ""));
+        if (wantsToolFocus) {
+          toolFocusBus.emit(toolFocusEventFor(key));
+          continue;
+        }
         dispatch({ type: "key", key });
       }
     });

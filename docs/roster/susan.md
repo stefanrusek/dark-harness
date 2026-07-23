@@ -658,3 +658,113 @@ via `resolveChromiumExecutable()`) — that fix landed already via this shared w
 known cross-round file-sweep pattern (folded into DH-0110's commit before I could commit it
 myself; confirmed present at HEAD). The full `e2e` gate remains red for the unrelated Core
 regression above, not from anything in this round's diff.
+
+### 2026-07-20 — DH-0129 closed: real root-caused the autoscroll undershoot
+
+The ticket had sat at `verifying` since 07-19 because two prior rounds fixed real bugs (the
+07-17 stale-`isNearBottom()`-read race, then DH-0200's jump-button visibility) but never
+actually root-caused the "partially follows, stops short" undershoot the owner kept hitting
+live. Unit tests alone were explicitly *not* good enough evidence for this ticket (its own
+history says so) — passing tests had shipped broken live behavior twice already.
+
+Root cause, found only by driving the real compiled binary with headless Chromium and
+reading real `scrollTop`/`scrollHeight` numbers: `.output-scroll` has `scroll-behavior:
+smooth` in `styles.css`. `scrollToBottom()`'s plain `region.scrollTop = region.scrollHeight`
+assignment therefore animates over several frames instead of landing instantly. While
+animating, the browser fires real native `scroll` events every frame, and DH-0200's
+`onScroll` handler treats every one as user-driven — it recomputes `isNearBottom()` against
+the *already-grown* `scrollHeight` vs the *not-yet-arrived* mid-animation `scrollTop`, reads
+"not near bottom," and clears `stickToBottomRef`, stranding the animation wherever it
+happened to be. Hit hardest on operator sends because the local echo (`addUserTurn`) and the
+following `agent_status: running` render (mounting `ThinkingIndicator`) are two separate
+renders close together, each restarting an animation the other's scroll events could cancel.
+
+Fix (`Transcript.tsx`): `scrollToBottom()` now toggles `element.style.scrollBehavior =
+"auto"` for the duration of its own write, so every programmatic "chase the bottom" jump is
+synchronous and can't be second-guessed by its own in-flight animation. Also added `thinking`
+to the content-update effect's dependency array, since `ThinkingIndicator` grows the region
+outside what the effect previously watched (transcript length / last-turn text length).
+
+**Judgment call worth remembering: don't trust "no scrollTop change between polls" as
+"animation settled."** My first live-verification attempt used a break-early poll loop
+(stop once two consecutive 150ms samples showed the same `scrollTop`) and got fooled — the
+smooth-scroll animation can visibly plateau for a couple of samples mid-flight before
+continuing. Switching to a flat, unconditional wait (3s) before reading the final value gave
+the real, reproducible numbers: pre-fix `scrollTop=970` vs true bottom `2824` (delta 1854px);
+post-fix `scrollTop=2824` exactly (delta 0), for both operator sends and streamed agent
+replies. I also briefly instrumented the DOM's `scrollTop` setter via
+`Object.defineProperty` to log every write — don't do this again, it crashed React (some
+internal DOM assumption broke) and produced misleading silent-effect-failure symptoms that
+cost real time to distinguish from the actual bug.
+
+**Shared-worktree hazard, for whoever reads this next round:** while I worked, Mary (TUI)
+was live-editing files in the same checkout for DH-0246 (extracting the tool-call-grouping
+logic Transcript.tsx already had into a new shared `src/transcript-grouping.ts`, for TUI
+reuse). Her in-progress edits kept landing mid-task (a `git stash` of what looked like
+unrelated TUI files turned out to be stale — the working tree had already re-converged to
+identical content by the time I checked). I ended up depending on her still-unlanded shared
+module (`Transcript.tsx` now imports `groupTranscript` from it) since it was already fully
+correct and 100%-covered from the web side; I committed only `src/transcript-grouping.ts`
+plus my own web files, leaving her still-failing TUI files (2 failing tests, 1 typecheck
+error at the time) uncommitted for her to finish and commit herself. If you hit a "why does
+`git status` keep changing under me" moment in a shared round, that's most likely another
+domain lead's live edits, not corruption — diff against HEAD before assuming your own tree is
+broken.
+
+Gates: `bun run typecheck` clean for the web project (root/`src/web` — the `src/tui` project
+had one error, confirmed to be Mary's in-progress DH-0246 work, not mine).
+`bun x biome check src/transcript-grouping.ts src/web/` clean. `bun test src/web --coverage`
+354/354 pass, 100% coverage on every file touched. `bun run e2e` 41/41 pass. Closed the
+ticket with the live numeric evidence above — this is the kind of proof its own history
+demanded and had never gotten before.
+
+### 2026-07-20 — DH-0248: masthead upgrade (Web's brand-launch moment)
+
+Rebuilt `AppHeader.tsx` per Muriel's spec: three zones (brand `<LogoMark>` @28px + gradient
+"Dark Harness" wordmark, build version string, right-aligned config-instrument chip row),
+still mounted in the existing fixed `.app-header-slot` — no new grid slot needed, the row was
+already `auto`-sized. Added `--brand-grad-start`/`--brand-grad-end` `:root` vars (same
+`#9ECE6A`/`#7DCFFF` stops as `LogoMark`'s SVG gradient, unchanged in the light-theme
+override), a `color: var(--text)` fallback declared before the `background-clip: text` clip,
+and a reduced-motion-gated one-shot CSS `@keyframes` entrance on the wordmark (a CSS
+`animation` on the mounted element only ever plays once per mount — no JS state needed to
+keep it one-shot).
+
+**The taste call the ticket left to me: sidebar `.brand` de-dup.** Took the ticket's own
+recommendation — dropped the sidebar's literal "Dark Harness" text now that the masthead
+carries a larger wordmark directly above it, kept the small `<LogoMark>` as the nav's own
+identity anchor, added `role="img" aria-label="Dark Harness"` to the now-icon-only `.brand`
+row so the removed text doesn't become an accessibility regression. Confirmed live (headless
+Chromium screenshot, both themes) that this reads as one wordmark, not two stacked ones.
+
+**Testing note: CSS-level assertions for facts DOM-level tests can't see.** Two of the User
+Stories (gradient sourced from the shared vars, entrance animation gated behind
+`prefers-reduced-motion`) aren't observable through `happy-dom`'s `getComputedStyle` (not
+implemented in this test env, and media queries don't evaluate in jsdom-style harnesses
+anyway) — asserted them by reading `styles.css`'s own source text via `readFileSync` and
+regex-matching the relevant rule/media-block shape instead of trying to fake a real CSS
+engine in the unit test. Real rendering (the actual gradient painting, the actual animation
+firing once) was then confirmed the honest way: a live headless-Chromium run against the real
+compiled binary (below).
+
+**Visual verification, live:** built `dist/dh`, reused the e2e suite's own
+`spawnDh`/`startMockAnthropicProvider`/`createWorkspace`/`resolveChromiumExecutable` helpers
+from a throwaway script (not committed) to boot the real server against a real `dh.json` (2
+models, `security.hostname` set, no token) and loaded the real page in Playwright under both
+`colorScheme: "light"` and `"dark"`. Confirmed via `getComputedStyle`: the wordmark's
+`background-image` is the actual painted gradient
+(`linear-gradient(90deg, rgb(158, 206, 106), rgb(125, 207, 255))`),
+`-webkit-text-fill-color` is transparent (clip active), `--brand-grad-start`/`-end` resolve
+to `#9ece6a`/`#7dcfff` on the live page, the config chip row shows real data (`config
+dh.json · 2 models`, `bind 127.0.0.1`, `⚠ no token`), the sidebar `.brand` row's text content
+is empty (mark only), and the masthead `<svg>` is mounted. Screenshots confirmed legible
+composition in both themes. Full mapping of every User Story to its proving test is in the
+ticket's own Notes entry (2026-07-20) — didn't duplicate it here.
+
+**Gates:** `bun run typecheck` (`src/web` project clean; the pre-existing `src/cli/header.test.ts`
+failure on the root project is unrelated, confirmed via `git log` untouched by this diff),
+`bun run lint` clean, `bun run test:coverage` 147/147 files pass, 100% lines project-wide
+(`AppHeader.tsx`/`App.tsx` both 100%). `bun run e2e` 41/41. One `app.test.ts` SSE-reconnect
+test flaked exactly once under `test:coverage`'s parallel run and passed clean on a `git
+stash` baseline run and every rerun after — not a regression, timing-sensitive test, not
+touched by this diff. Moved the ticket `ready` -> `verifying`.

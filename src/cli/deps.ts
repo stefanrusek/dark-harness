@@ -25,6 +25,7 @@ import {
   type ImportClaudeSessionSource,
   importClaudeSession,
 } from "../server/index.ts";
+import type { StartTuiOptions } from "../tui/index.ts";
 import { startTui as startTuiClient } from "../tui/index.ts";
 import { serveWebUi as serveWebUiClient } from "../web/server.ts";
 import { AgentRuntimeLoopAdapter, createStandaloneRuntime } from "./agent-loop-adapter.ts";
@@ -131,7 +132,7 @@ export interface CliDeps {
   startTui: (
     baseUrl: string,
     token?: string,
-    opts?: { ownsServer?: boolean },
+    opts?: Pick<StartTuiOptions, "ownsServer" | "header">,
   ) => Promise<{ fatalError?: string }>;
   serveWebUi: (options: {
     port: number;

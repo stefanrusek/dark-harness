@@ -21,13 +21,11 @@
 // next sibling import, so this being `cli.ts`'s first import line is what actually matters,
 // not anything about `await import(...)` timing inside a function.
 
-function clearCiEnvForInteractiveInkRender(): true {
-  // `delete`, not `= undefined` — assigning `undefined` to a `process.env` key coerces to the
-  // string "undefined", which `is-in-ci` still counts as CI-present via `'CI' in env`.
-  delete process.env.CI;
-  delete process.env.CONTINUOUS_INTEGRATION;
-  return true;
-}
+// DH-0244: the shared clearing body lives in `./clear-ci-env.ts`. Importing that module has
+// no side effect by itself (it only defines a function) — the `delete` still runs at exactly
+// this module's own load time, when the call below executes, which is what preserves this
+// module's "must be `cli.ts`'s first import" guarantee described above.
+import { clearCiEnvForInteractiveInkRender } from "./clear-ci-env.ts";
 
 // The env-clearing runs as this initializer evaluates on import. Wrapped in `Object.freeze` per
 // the repo's no-module-scope-side-effects lint rule's sanctioned escape hatch — the actual work

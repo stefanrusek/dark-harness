@@ -19,12 +19,12 @@ implementation:
 
 ## Summary
 
-First Workflow tool: a new Core Tool (peer of Agent) that dynamic-imports a trusted cwd-relative script and runs it with agent()/parallel() orchestration primitives built on the existing spawnAgent/TaskRegistry. MVP scope per DH-0213 architect ruling + ADR 0009.
+First Workflow tool: a new Core Tool (peer of Agent) that dynamic-imports a trusted cwd-relative script and runs it with agent()/parallel() orchestration primitives built on the existing spawnAgent/TaskRegistry. MVP scope per DH-0213 architect ruling + ADR 0010.
 
 ## Context
 
 Implementation ticket spun off from the DH-0213 research doc (read it for the full landscape).
-The invariant-8 tension is resolved by **ADR 0009** — a Workflow script is trusted control-flow
+The invariant-8 tension is resolved by **ADR 0010** — a Workflow script is trusted control-flow
 automation (like `scripts/build.ts`), not a named sub-agent persona, so it is permitted
 provided every spawn stays ad hoc through `spawnAgent`. This ticket is the smallest genuinely
 useful slice: `agent()` + `parallel()` only, in-process execution, tool-only surface.
@@ -160,7 +160,7 @@ export function buildWorkflowApi(ctx: ToolContext): { api: WorkflowApi; drainLog
 - Import `workflowTool` and add it to `ALL_TOOLS` (uniform across root and every sub-agent,
   same as `agentTool`). No `composeTools`/config gating — it is always present, like `Agent`.
 
-### Non-goals reaffirmed (guardrails from ADR 0009)
+### Non-goals reaffirmed (guardrails from ADR 0010)
 
 - `agent()` must only ever ad-hoc-spawn `{model, prompt}`; do **not** add a `subagent_type` /
   named-persona / script-registry concept.
@@ -169,10 +169,10 @@ export function buildWorkflowApi(ctx: ToolContext): { api: WorkflowApi; drainLog
 
 ## Assumptions
 
-- ADR 0009 (invariant 8 governs personas, not control-flow scripts) and ADR 0004 (trusted
+- ADR 0010 (invariant 8 governs personas, not control-flow scripts) and ADR 0004 (trusted
   in-process execution posture) are settled; this ticket does not relitigate them.
 - The `Workflow` tool lives in Core (`src/agent/`) as a peer of `Agent`, per CLAUDE.md §3.
-  No `src/contracts/` change (no wire-schema surface), so no architect gate beyond ADR 0009.
+  No `src/contracts/` change (no wire-schema surface), so no architect gate beyond ADR 0010.
 
 ## Risks
 
@@ -184,7 +184,7 @@ export function buildWorkflowApi(ctx: ToolContext): { api: WorkflowApi; drainLog
   `t()` directly) for the throw to collapse to `null` instead of aborting the fan-out. Covered
   by a dedicated test (fan-out budget exceeded mid-`parallel()` -> that slot null, others fine).
 - **In-process import blast radius.** A script infinite-loop can hang the host (accepted MVP
-  risk per ADR 0009, identical to a `Bash` `while true`). Unbounded fan-out is contained by the
+  risk per ADR 0010, identical to a `Bash` `while true`). Unbounded fan-out is contained by the
   existing budget. A script *throw* must be caught in `execute` and never crash the loop.
 
 ## Open Questions
@@ -196,7 +196,7 @@ subprocess isolation.
 
 ## Notes
 
-Spun off from DH-0213 (research) per the 2026-07-19 architect ruling (Fable). See ADR 0009 for
+Spun off from DH-0213 (research) per the 2026-07-19 architect ruling (Fable). See ADR 0010 for
 the invariant-8 resolution and DH-0213's "Open Questions — resolved" for the full rationale
 behind each scoping decision. Per CLAUDE.md §9, closing this ticket requires each User Story
 bullet above to name the specific `bun test src` case that proves it.

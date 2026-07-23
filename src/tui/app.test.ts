@@ -294,6 +294,33 @@ describe("startTui", () => {
     await done;
   });
 
+  test("DH-0245: an `opts.header` reaches the mounted Ink tree — the in-session Header A2 banner is written to the real stdout", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout(); // 80x24: below the 30-row size gate, so this exercises
+    // the plain-fallback content deterministically, matching renderHeaderA2's own gate.
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+      header: {
+        facts: {
+          version: "0.1.0",
+          gitSha: "abc1234",
+          configLine: "dh.json — 2 models",
+          bindHost: "127.0.0.1:4096",
+          hasToken: false,
+        },
+        level: "truecolor",
+      },
+    });
+    await flush(5, stdout);
+
+    expect(stdout.allWrites()).toContain("dh.json — 2 models");
+
+    stdin.type("\x03");
+    await done;
+  });
+
   test("typing and pressing enter sends a send_message command for the root agent", async () => {
     const stdin = new FakeStdin();
     const stdout = new FakeStdout();
@@ -973,5 +1000,115 @@ describe("startTui: DH-0093 slash-command wiring", () => {
     stdin.type("\x03");
     const result = await done;
     expect(result.fatalError).toBeUndefined();
+  });
+});
+
+describe("DH-0246: transcript tool-call row focus (root view, empty composer)", () => {
+  function toolCallEvent(id: string, toolUseId: string): ServerSentEvent {
+    return {
+      version: 1,
+      id,
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "tool_call",
+      agentId: "root",
+      toolUseId,
+      toolName: "Bash",
+      inputSummary: `echo ${toolUseId}`,
+    };
+  }
+
+  function toolResultEvent(id: string, toolUseId: string): ServerSentEvent {
+    return {
+      version: 1,
+      id,
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "tool_result",
+      agentId: "root",
+      toolUseId,
+      toolName: "Bash",
+      isError: false,
+      durationMs: 7,
+    };
+  }
+
+  test("down + enter expands a collapsed tool-call group into its member rows", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush(5, stdout);
+
+    enqueueSse(server, {
+      version: 1,
+      id: "1",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "agent_spawned",
+      agentId: "root",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    // Two consecutive tool calls with no other turn between them — a groupable run of 2.
+    enqueueSse(server, toolCallEvent("2", "tu_1"));
+    enqueueSse(server, toolResultEvent("3", "tu_1"));
+    enqueueSse(server, toolCallEvent("4", "tu_2"));
+    enqueueSse(server, toolResultEvent("5", "tu_2"));
+    await flush(5, stdout);
+
+    // Collapsed by default: the summary row, not either call's own input text.
+    expect(stdout.allWrites()).toContain("2 tool calls");
+    expect(stdout.lastWrite()).not.toContain("echo tu_1");
+
+    // Composer input is empty, so down/enter are reclaimed for tool-row focus (see app.ts's
+    // stdin handler) rather than their normal (here, no-op) root-view meaning.
+    stdin.type("\x1b[B"); // down: focus the (only) group header row
+    await flush(3, stdout);
+    stdin.type("\r"); // enter: activate — expands the group
+    await flush(3, stdout);
+
+    expect(stdout.lastWrite()).toContain("echo tu_1");
+    expect(stdout.lastWrite()).toContain("echo tu_2");
+
+    stdin.type("\x03");
+    await done;
+  });
+
+  test("a lone tool call (not part of a run of 2+) is individually focusable and its detail expands on activate", async () => {
+    const stdin = new FakeStdin();
+    const stdout = new FakeStdout();
+    const server = makeFakeServer();
+
+    const done = startTui("http://x", undefined, {
+      io: { stdin, stdout, fetchImpl: server.fetchImpl },
+    });
+    await flush(5, stdout);
+
+    enqueueSse(server, {
+      version: 1,
+      id: "1",
+      timestamp: "2026-07-15T00:00:00.000Z",
+      type: "agent_spawned",
+      agentId: "root",
+      parentAgentId: null,
+      model: "sonnet",
+    });
+    enqueueSse(server, toolCallEvent("2", "tu_1"));
+    enqueueSse(server, toolResultEvent("3", "tu_1"));
+    await flush(5, stdout);
+
+    expect(stdout.allWrites()).not.toContain("tool calls");
+    expect(stdout.lastWrite()).toContain("echo tu_1");
+    expect(stdout.lastWrite()).not.toContain("Result:");
+
+    stdin.type("\r"); // enter: activates the lone tool row (focusIndex defaults to 0)
+    await flush(3, stdout);
+
+    expect(stdout.lastWrite()).toContain("Input: Bash: echo tu_1");
+    expect(stdout.lastWrite()).toContain("Result: ✓ ok · 7ms");
+
+    stdin.type("\x03");
+    await done;
   });
 });
